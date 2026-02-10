@@ -4,8 +4,21 @@ import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { AlertCircle, CheckCircle2, LoaderCircle } from "lucide-react";
 import MarkdownIt from "markdown-it";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import {
+  Children,
+  isValidElement,
+  type CSSProperties,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
 import { ConflictError, getDataGateway, type TreeNode } from "./data-access";
 
@@ -62,6 +75,77 @@ const BLOCK_NODE_TYPES = new Set([
 
 // 预览区锚点节点选择器。
 const BLOCK_ANCHOR_SELECTOR = "[data-source-line], [data-source-offset]";
+
+// 代码块行内样式：复制到第三方平台时可保留视觉表现。
+const INLINE_CODE_BLOCK_STYLE: CSSProperties = {
+  margin: "16px 0",
+  padding: "14px 16px",
+  borderRadius: "10px",
+  border: "1px solid #dbe2ea",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
+  overflowX: "auto",
+  fontSize: "13px",
+  lineHeight: 1.65,
+  background: "#f8fafc"
+};
+
+// 代码块 code 标签样式：统一字体并提升可读性。
+const INLINE_CODE_BLOCK_CODE_STYLE: CSSProperties = {
+  fontFamily: "\"SFMono-Regular\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+};
+
+// 行内代码样式：确保没有 fenced block 时也有可视化区分。
+const INLINE_CODE_STYLE: CSSProperties = {
+  padding: "1px 6px",
+  borderRadius: "5px",
+  border: "1px solid #dbe2ea",
+  background: "#f1f5f9",
+  color: "#0f172a",
+  fontSize: "0.92em",
+  fontFamily: "\"SFMono-Regular\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+};
+
+// 提取代码语言名（language-xxx）。
+function resolveCodeLanguage(className: string | undefined): string {
+  if (!className) {
+    return "text";
+  }
+  const matched = /language-([\w-]+)/.exec(className);
+  return matched?.[1] ?? "text";
+}
+
+// 将 ReactNode 递归还原成纯文本代码。
+function extractCodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => extractCodeText(item)).join("");
+  }
+  if (isValidElement(node)) {
+    const elementChildren = (node.props as { children?: ReactNode }).children;
+    return extractCodeText(elementChildren);
+  }
+  return "";
+}
+
+// 从代码节点 props 中抽取锚点属性，供同步滚动映射继续使用。
+function pickAnchorDataAttributes(props: Record<string, unknown>): Record<string, string> {
+  const anchors: Record<string, string> = {};
+  const sourceLine = props["data-source-line"];
+  const sourceOffset = props["data-source-offset"];
+  const anchorIndex = props["data-anchor-index"];
+  if (typeof sourceLine === "string") {
+    anchors["data-source-line"] = sourceLine;
+  }
+  if (typeof sourceOffset === "string") {
+    anchors["data-source-offset"] = sourceOffset;
+  }
+  if (typeof anchorIndex === "string") {
+    anchors["data-anchor-index"] = anchorIndex;
+  }
+  return anchors;
+}
 
 // 为 block 节点注入 source offset，供同步滚动映射使用。
 function remarkBlockAnchorPlugin() {
@@ -263,6 +347,12 @@ export default function App() {
   const syncingRef = useRef(false);
   // 记录最近一次主动滚动来源，用于重算后回对齐。
   const lastScrollSourceRef = useRef<ScrollSource>("editor");
+
+  // 预览区 ref 采用稳定回调，避免每次渲染都触发 null -> node 抖动。
+  const handlePreviewScrollerRef = useCallback((node: HTMLElement | null) => {
+    previewScrollerRef.current = node;
+    setPreviewScrollerElement((previous) => (previous === node ? previous : node));
+  }, []);
 
   // 将当前滚动位置转换为滚动比例，用于锚点不足时兜底。
   const getRatio = (element: HTMLElement): number => {
@@ -504,6 +594,86 @@ export default function App() {
   );
   // remark 插件顺序：先 GFM，再注入锚点属性。
   const remarkPlugins = useMemo(() => [remarkGfm, remarkBlockAnchorPlugin], []);
+  // 自定义 Markdown 渲染器：代码块走高亮组件，行内代码走轻量内联样式。
+  const markdownComponents = useMemo<Components>(
+    () => ({
+      pre: ({ node: _node, children, ...props }) => {
+        const childNodes = Children.toArray(children);
+        const codeElement = childNodes[0];
+        if (!isValidElement(codeElement)) {
+          return <pre {...props}>{children}</pre>;
+        }
+
+        const codeElementProps = codeElement.props as Record<string, unknown>;
+        const codeClassName =
+          typeof codeElementProps.className === "string" ? codeElementProps.className : undefined;
+        const language = resolveCodeLanguage(codeClassName);
+        const anchorDataAttributes = pickAnchorDataAttributes(codeElementProps);
+        const codeText = extractCodeText(codeElementProps.children as ReactNode).replace(/\n$/, "");
+
+        // 自定义 PreTag：把 source 锚点挂回代码块根节点，保证滚动映射不丢失。
+        const PreTag = ({
+          children: preChildren,
+          style: preStyle,
+          ...preTagProps
+        }: ComponentPropsWithoutRef<"pre">) => (
+          <pre
+            {...preTagProps}
+            {...anchorDataAttributes}
+            style={{
+              ...(preStyle ?? {}),
+              ...INLINE_CODE_BLOCK_STYLE
+            }}
+          >
+            {preChildren}
+          </pre>
+        );
+
+        return (
+          <SyntaxHighlighter
+            language={language}
+            style={oneLight}
+            PreTag={PreTag}
+            useInlineStyles
+            wrapLongLines
+            codeTagProps={{
+              className: codeClassName,
+              style: INLINE_CODE_BLOCK_CODE_STYLE
+            }}
+          >
+            {codeText}
+          </SyntaxHighlighter>
+        );
+      },
+      code: ({ node: _node, className, style, children, ...props }) => {
+        const dataSourceLine = (props as Record<string, unknown>)["data-source-line"];
+        const dataSourceOffset = (props as Record<string, unknown>)["data-source-offset"];
+        const isBlockCode = typeof dataSourceLine === "string" || typeof dataSourceOffset === "string";
+        // block code 由 pre 渲染器统一处理，code 节点只做透传，避免重复包裹。
+        if (isBlockCode) {
+          return (
+            <code className={className} style={style} {...props}>
+              {children}
+            </code>
+          );
+        }
+
+        return (
+          <code
+            className={className}
+            style={{
+              ...INLINE_CODE_STYLE,
+              ...(style ?? {})
+            }}
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+    }),
+    []
+  );
   // markdown-it 仅用于“去语法后的文字统计”。
   const markdownTextParser = useMemo(
     () =>
@@ -804,7 +974,9 @@ export default function App() {
               // 保存编辑器实例与滚动容器引用，供映射计算使用。
               editorViewRef.current = view;
               editorScrollerRef.current = view.scrollDOM;
-              setEditorScrollerElement(view.scrollDOM);
+              setEditorScrollerElement((previous) =>
+                previous === view.scrollDOM ? previous : view.scrollDOM
+              );
               scheduleRebuildScrollAnchors();
             }}
             onChange={(value) => {
@@ -822,15 +994,14 @@ export default function App() {
         </section>
         <section
           className="pane preview-pane"
-          ref={(node) => {
-            // 保存预览容器引用，供滚动与锚点计算使用。
-            previewScrollerRef.current = node;
-            setPreviewScrollerElement(node);
-          }}
+          // 使用稳定 ref 回调，保证滚动监听不会被重复拆装。
+          ref={handlePreviewScrollerRef}
         >
           <article className="markdown-body">
             {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
-            <ReactMarkdown remarkPlugins={remarkPlugins}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+              {content}
+            </ReactMarkdown>
           </article>
         </section>
       </main>
