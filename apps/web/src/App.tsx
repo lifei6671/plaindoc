@@ -1654,8 +1654,8 @@ export default function App() {
               <AlertCircle className="status-save-icon" size={14} />
             ) : null}
           </span>
-          <span>最后保存时间：{lastSavedTimeLabel}</span>
-          <span>字数：{plainTextCount}</span>
+          <span><span style={{ fontWeight: 600 }}>最后保存时间：</span>{lastSavedTimeLabel}</span>
+          <span><span style={{ fontWeight: 600 }}>字数统计：</span>{plainTextCount}</span>
         </div>
       </footer>
     </div>
