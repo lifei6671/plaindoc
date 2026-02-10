@@ -22,6 +22,13 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
 import { ConflictError, getDataGateway, type TreeNode } from "./data-access";
 
+// 扩展 window 类型，支持外部注入预览样式字符串。
+declare global {
+  interface Window {
+    __PLAINDOC_PREVIEW_STYLE__?: string;
+  }
+}
+
 // 编辑器初始化时使用的兜底内容。
 const fallbackContent = `# PlainDoc
 
@@ -62,6 +69,14 @@ interface MarkdownNode {
   children?: MarkdownNode[];
 }
 
+// 内置主题模板定义：用于管理可切换的预览风格。
+interface PreviewThemeTemplate {
+  id: string;
+  name: string;
+  description: string;
+  variables: Record<string, string>;
+}
+
 // 参与锚点映射的 block 级节点类型。
 const BLOCK_NODE_TYPES = new Set([
   "paragraph",
@@ -75,6 +90,128 @@ const BLOCK_NODE_TYPES = new Set([
 
 // 预览区锚点节点选择器。
 const BLOCK_ANCHOR_SELECTOR = "[data-source-line], [data-source-offset]";
+
+// 预览区固定根节点 ID，供外部样式覆盖时稳定选择。
+const PREVIEW_PANE_ID = "plaindoc-preview-pane";
+// 预览区固定根节点类名，便于 class 级样式覆盖。
+const PREVIEW_PANE_CLASS = "plaindoc-preview-pane";
+// 预览区主题类名前缀，实际类名为 `plaindoc-preview-pane--{themeId}`。
+const PREVIEW_PANE_THEME_CLASS_PREFIX = "plaindoc-preview-pane--";
+// 默认主题 ID。
+const DEFAULT_PREVIEW_THEME_ID = "default";
+// 预览内容容器类名，外部样式可直接作用于该容器。
+const PREVIEW_BODY_CLASS = "plaindoc-preview-body";
+// 预览内容容器查询选择器（DOM 观测使用）。
+const PREVIEW_BODY_SELECTOR = `.${PREVIEW_BODY_CLASS}`;
+// 本地持久化自定义样式的键名。
+const PREVIEW_CUSTOM_STYLE_STORAGE_KEY = "plaindoc.preview.custom-style";
+// 本地持久化主题模板的键名。
+const PREVIEW_THEME_STORAGE_KEY = "plaindoc.preview.theme-template";
+// 外部通知预览样式变更的自定义事件名。
+const PREVIEW_CUSTOM_STYLE_EVENT = "plaindoc:preview-style-change";
+
+// 内置主题模板列表：支持从菜单直接切换。
+const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
+  {
+    id: "default",
+    name: "内置默认",
+    description: "通用文档风格",
+    variables: {
+      "--pd-preview-padding": "30px",
+      "--pd-preview-font-family":
+        "Optima-Regular, Optima, PingFangSC-light, PingFangTC-light, \"PingFang SC\", Cambria, Cochin, Georgia, Times, \"Times New Roman\", serif",
+      "--pd-preview-text-color": "rgb(89, 89, 89)",
+      "--pd-preview-link-color": "rgb(71, 193, 168)",
+      "--pd-preview-inline-code-color": "rgb(71, 193, 168)",
+      "--pd-preview-font-size": "16px",
+      "--pd-preview-line-height": "26px",
+      "--pd-preview-word-spacing": "3px",
+      "--pd-preview-letter-spacing": "0.02em",
+      "--pd-preview-paragraph-margin-top": "5px",
+      "--pd-preview-paragraph-margin-bottom": "5px",
+      "--pd-preview-paragraph-indent": "2em",
+      "--pd-preview-title-color": "rgb(89, 89, 89)",
+      "--pd-preview-h2-border-color": "rgb(89, 89, 89)",
+      "--pd-preview-blockquote-text-color": "#666666",
+      "--pd-preview-blockquote-mark-color": "#555555",
+      "--pd-preview-blockquote-background": "#f8fafc",
+      "--pd-preview-blockquote-border-color": "#cbd5e1",
+      "--pd-preview-strong-color": "rgb(71, 193, 168)",
+      "--pd-preview-em-color": "rgb(71, 193, 168)",
+      "--pd-preview-hr-color": "#cbd5e1",
+      "--pd-preview-image-width": "100%",
+      "--pd-preview-table-font-size": "14px",
+      "--pd-preview-table-border-color": "#dbe2ea",
+      "--pd-preview-table-cell-padding": "10px 12px"
+    }
+  },
+  {
+    id: "newspaper",
+    name: "报刊主题",
+    description: "更适合长文阅读",
+    variables: {
+      "--pd-preview-padding": "34px",
+      "--pd-preview-font-family":
+        "\"Noto Serif SC\", \"Source Han Serif SC\", Songti SC, SimSun, Georgia, serif",
+      "--pd-preview-text-color": "#334155",
+      "--pd-preview-link-color": "#0f766e",
+      "--pd-preview-inline-code-color": "#0f766e",
+      "--pd-preview-font-size": "16px",
+      "--pd-preview-line-height": "30px",
+      "--pd-preview-word-spacing": "1px",
+      "--pd-preview-letter-spacing": "0.01em",
+      "--pd-preview-paragraph-margin-top": "8px",
+      "--pd-preview-paragraph-margin-bottom": "8px",
+      "--pd-preview-paragraph-indent": "2em",
+      "--pd-preview-title-color": "#0f172a",
+      "--pd-preview-h2-border-color": "#334155",
+      "--pd-preview-blockquote-text-color": "#475569",
+      "--pd-preview-blockquote-mark-color": "#334155",
+      "--pd-preview-blockquote-background": "#f8fafc",
+      "--pd-preview-blockquote-border-color": "#94a3b8",
+      "--pd-preview-strong-color": "#0f766e",
+      "--pd-preview-em-color": "#0f766e",
+      "--pd-preview-hr-color": "#94a3b8",
+      "--pd-preview-image-width": "100%",
+      "--pd-preview-table-font-size": "14px",
+      "--pd-preview-table-border-color": "#cbd5e1",
+      "--pd-preview-table-cell-padding": "10px 12px"
+    }
+  },
+  {
+    id: "clean-tech",
+    name: "清爽技术",
+    description: "偏开发文档排版",
+    variables: {
+      "--pd-preview-padding": "26px",
+      "--pd-preview-font-family":
+        "\"JetBrains Mono\", \"SFMono-Regular\", Menlo, Monaco, Consolas, \"Courier New\", monospace",
+      "--pd-preview-text-color": "#334155",
+      "--pd-preview-link-color": "#0ea5e9",
+      "--pd-preview-inline-code-color": "#0284c7",
+      "--pd-preview-font-size": "14px",
+      "--pd-preview-line-height": "24px",
+      "--pd-preview-word-spacing": "0",
+      "--pd-preview-letter-spacing": "0",
+      "--pd-preview-paragraph-margin-top": "6px",
+      "--pd-preview-paragraph-margin-bottom": "6px",
+      "--pd-preview-paragraph-indent": "0",
+      "--pd-preview-title-color": "#0f172a",
+      "--pd-preview-h2-border-color": "#475569",
+      "--pd-preview-blockquote-text-color": "#475569",
+      "--pd-preview-blockquote-mark-color": "#64748b",
+      "--pd-preview-blockquote-background": "#f1f5f9",
+      "--pd-preview-blockquote-border-color": "#cbd5e1",
+      "--pd-preview-strong-color": "#0369a1",
+      "--pd-preview-em-color": "#0284c7",
+      "--pd-preview-hr-color": "#cbd5e1",
+      "--pd-preview-image-width": "100%",
+      "--pd-preview-table-font-size": "13px",
+      "--pd-preview-table-border-color": "#cbd5e1",
+      "--pd-preview-table-cell-padding": "8px 10px"
+    }
+  }
+];
 
 // 代码块行内样式：复制到第三方平台时可保留视觉表现。
 const INLINE_CODE_BLOCK_STYLE: CSSProperties = {
@@ -145,6 +282,37 @@ function pickAnchorDataAttributes(props: Record<string, unknown>): Record<string
     anchors["data-anchor-index"] = anchorIndex;
   }
   return anchors;
+}
+
+// 规范化外部传入的样式文本，统一裁剪空白并兜底为空字符串。
+function normalizePreviewStyleText(styleText: unknown): string {
+  if (typeof styleText !== "string") {
+    return "";
+  }
+  return styleText.trim();
+}
+
+// 按主题 ID 返回主题模板；找不到时回退默认主题。
+function resolvePreviewTheme(themeId: string): PreviewThemeTemplate {
+  const foundTheme = PREVIEW_THEME_TEMPLATES.find((theme) => theme.id === themeId);
+  return foundTheme ?? PREVIEW_THEME_TEMPLATES[0];
+}
+
+// 根据主题 ID 生成预览容器类名。
+function getPreviewThemeClassName(themeId: string): string {
+  return `${PREVIEW_PANE_THEME_CLASS_PREFIX}${themeId}`;
+}
+
+// 将主题变量序列化为 style 标签文本，便于动态注入。
+function buildPreviewThemeStyleText(theme: PreviewThemeTemplate): string {
+  const declarations = Object.entries(theme.variables)
+    .map(([variableName, variableValue]) => `  ${variableName}: ${variableValue};`)
+    .join("\n");
+  if (!declarations) {
+    return "";
+  }
+  const themeSelector = `#${PREVIEW_PANE_ID}.${getPreviewThemeClassName(theme.id)}`;
+  return `${themeSelector} {\n${declarations}\n}`;
 }
 
 // 为 block 节点注入 source offset，供同步滚动映射使用。
@@ -327,6 +495,12 @@ export default function App() {
   const [activeDocumentTitle, setActiveDocumentTitle] = useState("未命名文档");
   // 最近一次成功保存时间。
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // 当前生效的预览主题 ID。
+  const [activePreviewThemeId, setActivePreviewThemeId] = useState(DEFAULT_PREVIEW_THEME_ID);
+  // 主题菜单开关状态。
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  // 外部注入的预览样式文本；为空时仅使用内置主题。
+  const [customPreviewStyleText, setCustomPreviewStyleText] = useState("");
   // 编辑器面板根节点，用于在 StrictMode 下追踪滚动容器的重建。
   const [editorPaneElement, setEditorPaneElement] = useState<HTMLElement | null>(null);
   // 编辑区滚动容器（state 版本），用于保证监听器绑定时机稳定。
@@ -349,6 +523,8 @@ export default function App() {
   const syncingRef = useRef(false);
   // 记录最近一次主动滚动来源，用于重算后回对齐。
   const lastScrollSourceRef = useRef<ScrollSource>("editor");
+  // 主题菜单根节点，用于点击外部关闭下拉层。
+  const themeMenuRef = useRef<HTMLDivElement | null>(null);
 
   // 统一更新编辑区滚动容器引用，避免重复 setState 触发不必要重渲染。
   const setEditorScrollerNode = useCallback((node: HTMLElement | null) => {
@@ -373,6 +549,70 @@ export default function App() {
     previewScrollerRef.current = node;
     setPreviewScrollerElement((previous) => (previous === node ? previous : node));
   }, []);
+
+  // 加载并监听外部自定义样式：支持 window 变量、localStorage 与自定义事件三种入口。
+  useEffect(() => {
+    // 读取初始样式：window 注入优先，其次回退到 localStorage。
+    const readInitialCustomStyleText = (): string => {
+      const styleFromWindow = normalizePreviewStyleText(window.__PLAINDOC_PREVIEW_STYLE__);
+      if (styleFromWindow) {
+        return styleFromWindow;
+      }
+      try {
+        return normalizePreviewStyleText(
+          window.localStorage.getItem(PREVIEW_CUSTOM_STYLE_STORAGE_KEY)
+        );
+      } catch {
+        return "";
+      }
+    };
+
+    setCustomPreviewStyleText(readInitialCustomStyleText());
+
+    // 响应外部样式更新事件，并同步持久化到 localStorage。
+    const onCustomStyleChanged = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      const normalizedStyleText = normalizePreviewStyleText(detail);
+      setCustomPreviewStyleText(normalizedStyleText);
+      try {
+        if (normalizedStyleText) {
+          window.localStorage.setItem(PREVIEW_CUSTOM_STYLE_STORAGE_KEY, normalizedStyleText);
+        } else {
+          window.localStorage.removeItem(PREVIEW_CUSTOM_STYLE_STORAGE_KEY);
+        }
+      } catch {
+        // localStorage 失败时仅忽略持久化，不影响当前会话样式。
+      }
+    };
+
+    window.addEventListener(PREVIEW_CUSTOM_STYLE_EVENT, onCustomStyleChanged);
+    return () => {
+      window.removeEventListener(PREVIEW_CUSTOM_STYLE_EVENT, onCustomStyleChanged);
+    };
+  }, []);
+
+  // 首次加载时恢复上次选择的主题模板。
+  useEffect(() => {
+    try {
+      const storedThemeId = window.localStorage.getItem(PREVIEW_THEME_STORAGE_KEY);
+      if (!storedThemeId) {
+        return;
+      }
+      const restoredTheme = resolvePreviewTheme(storedThemeId);
+      setActivePreviewThemeId(restoredTheme.id);
+    } catch {
+      // localStorage 不可用时保持默认主题。
+    }
+  }, []);
+
+  // 主题变化时写入本地缓存，便于下次启动直接恢复。
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PREVIEW_THEME_STORAGE_KEY, activePreviewThemeId);
+    } catch {
+      // localStorage 失败时忽略持久化，不影响当前显示。
+    }
+  }, [activePreviewThemeId]);
 
   // 将当前滚动位置转换为滚动比例，用于锚点不足时兜底。
   const getRatio = (element: HTMLElement): number => {
@@ -722,6 +962,21 @@ export default function App() {
     () => resolveSaveIndicatorVariant(saveStatus),
     [saveStatus]
   );
+  // 当前生效主题对象，用于渲染菜单高亮和生成样式。
+  const activePreviewTheme = useMemo(
+    () => resolvePreviewTheme(activePreviewThemeId),
+    [activePreviewThemeId]
+  );
+  // 预览区主题类名：挂到预览容器上参与选择器匹配。
+  const activePreviewThemeClassName = useMemo(
+    () => getPreviewThemeClassName(activePreviewTheme.id),
+    [activePreviewTheme.id]
+  );
+  // 当前主题对应的变量样式文本：通过 style 标签注入。
+  const activePreviewThemeStyleText = useMemo(
+    () => buildPreviewThemeStyleText(activePreviewTheme),
+    [activePreviewTheme]
+  );
 
   // 首次启动：加载空间、文档树与默认文档内容。
   useEffect(() => {
@@ -898,6 +1153,42 @@ export default function App() {
     scheduleRebuildScrollAnchors();
   }, [content, scheduleRebuildScrollAnchors]);
 
+  // 主题样式或外部覆盖样式变化后，主动重建锚点映射，避免滚动同步漂移。
+  useEffect(() => {
+    scheduleRebuildScrollAnchors();
+  }, [activePreviewThemeClassName, customPreviewStyleText, scheduleRebuildScrollAnchors]);
+
+  // 主题菜单弹出时监听外部点击与 ESC，提升交互可控性。
+  useEffect(() => {
+    if (!isThemeMenuOpen) {
+      return;
+    }
+
+    const onWindowMouseDown = (event: MouseEvent) => {
+      const menuRootElement = themeMenuRef.current;
+      if (!menuRootElement) {
+        return;
+      }
+      if (event.target instanceof Node && menuRootElement.contains(event.target)) {
+        return;
+      }
+      setIsThemeMenuOpen(false);
+    };
+
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsThemeMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", onWindowMouseDown);
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onWindowMouseDown);
+      window.removeEventListener("keydown", onWindowKeyDown);
+    };
+  }, [isThemeMenuOpen]);
+
   // 监听图片异步加载与容器尺寸变化，保障长图场景下映射实时更新。
   useEffect(() => {
     const previewElement = previewScrollerElement;
@@ -953,7 +1244,7 @@ export default function App() {
       resizeObserver.observe(editorElement);
       // 直接观察预览滚动容器尺寸变化。
       resizeObserver.observe(previewElement);
-      const markdownBody = previewElement.querySelector<HTMLElement>(".markdown-body");
+      const markdownBody = previewElement.querySelector<HTMLElement>(PREVIEW_BODY_SELECTOR);
       if (markdownBody) {
         resizeObserver.observe(markdownBody);
       }
@@ -991,6 +1282,18 @@ export default function App() {
     };
   }, []);
 
+  // 切换主题菜单显示状态。
+  const toggleThemeMenu = () => {
+    setIsThemeMenuOpen((previous) => !previous);
+  };
+
+  // 应用选中的主题并关闭菜单。
+  const applyPreviewTheme = (themeId: string) => {
+    const targetTheme = resolvePreviewTheme(themeId);
+    setActivePreviewThemeId(targetTheme.id);
+    setIsThemeMenuOpen(false);
+  };
+
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
     if (!activeDocId) {
@@ -1014,9 +1317,54 @@ export default function App() {
   return (
     // 主页面容器。
     <div className="page">
+      {/* 当前主题样式：先注入内置模板变量，后续允许外部样式继续覆盖。 */}
+      {activePreviewThemeStyleText ? (
+        <style id="plaindoc-preview-theme-style">{activePreviewThemeStyleText}</style>
+      ) : null}
+      {/* 外部自定义预览样式：存在时插入到页面末端，确保覆盖内置主题。 */}
+      {customPreviewStyleText ? (
+        <style id="plaindoc-preview-custom-style">{customPreviewStyleText}</style>
+      ) : null}
       {/* 顶部状态栏。 */}
       <header className="header">
         <h1>PlainDoc</h1>
+        <div className="header-actions">
+          {/* 主题菜单：点击按钮弹出列表，选择后即时生效。 */}
+          <div className="theme-menu" ref={themeMenuRef}>
+            <button
+              type="button"
+              className="theme-menu__trigger"
+              aria-label="选择预览主题"
+              aria-haspopup="listbox"
+              aria-expanded={isThemeMenuOpen}
+              onClick={toggleThemeMenu}
+            >
+              <span className="theme-menu__trigger-label">主题</span>
+              <span className="theme-menu__trigger-value">{activePreviewTheme.name}</span>
+            </button>
+            {isThemeMenuOpen ? (
+              <ul className="theme-menu__dropdown" role="listbox" aria-label="预览主题列表">
+                {PREVIEW_THEME_TEMPLATES.map((themeTemplate) => {
+                  const isActiveTheme = themeTemplate.id === activePreviewTheme.id;
+                  return (
+                    <li key={themeTemplate.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={isActiveTheme}
+                        className={`theme-menu__item ${isActiveTheme ? "theme-menu__item--active" : ""}`}
+                        onClick={() => applyPreviewTheme(themeTemplate.id)}
+                      >
+                        <span className="theme-menu__item-name">{themeTemplate.name}</span>
+                        <span className="theme-menu__item-description">{themeTemplate.description}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        </div>
       </header>
       {/* 双栏工作区：左编辑、右预览。 */}
       <main className="workspace">
@@ -1045,11 +1393,12 @@ export default function App() {
           />
         </section>
         <section
-          className="pane preview-pane"
+          id={PREVIEW_PANE_ID}
+          className={`pane preview-pane ${PREVIEW_PANE_CLASS} ${activePreviewThemeClassName}`}
           // 使用稳定 ref 回调，保证滚动监听不会被重复拆装。
           ref={handlePreviewScrollerRef}
         >
-          <article className="markdown-body">
+          <article className={`markdown-body ${PREVIEW_BODY_CLASS}`}>
             {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
               {content}

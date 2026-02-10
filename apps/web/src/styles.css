@@ -27,12 +27,124 @@ body {
   background: #ffffff;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+  position: relative;
+  z-index: 5;
 }
 
 .header h1 {
   font-size: 18px;
   margin: 0;
+}
+
+/* 顶栏操作区：用于承载主题菜单等扩展能力。 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 主题菜单根节点：提供下拉定位上下文。 */
+.theme-menu {
+  position: relative;
+}
+
+/* 主题触发按钮：显示“主题 + 当前主题名称”。 */
+.theme-menu__trigger {
+  min-width: 168px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.theme-menu__trigger:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.theme-menu__trigger:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* 主题按钮前缀文案。 */
+.theme-menu__trigger-label {
+  color: #64748b;
+}
+
+/* 当前主题名称。 */
+.theme-menu__trigger-value {
+  color: #0f172a;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 主题下拉列表。 */
+.theme-menu__dropdown {
+  margin: 0;
+  padding: 6px;
+  width: 260px;
+  list-style: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+}
+
+/* 主题项按钮。 */
+.theme-menu__item {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-menu__item:hover {
+  background: #f1f5f9;
+}
+
+.theme-menu__item:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: -1px;
+}
+
+/* 当前激活的主题项。 */
+.theme-menu__item--active {
+  background: #eff6ff;
+}
+
+/* 主题项标题。 */
+.theme-menu__item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* 主题项描述。 */
+.theme-menu__item-description {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .workspace {
@@ -96,33 +208,76 @@ body {
   height: 100%;
   overflow-y: scroll;
   overflow-x: hidden;
-  font-family: Optima-Regular, Optima, PingFangSC-light, PingFangTC-light, 'PingFang SC', Cambria, Cochin, Georgia, Times, 'Times New Roman', serif;
+  font-family: var(
+    --pd-preview-font-family,
+    Optima-Regular,
+    Optima,
+    PingFangSC-light,
+    PingFangTC-light,
+    "PingFang SC",
+    Cambria,
+    Cochin,
+    Georgia,
+    Times,
+    "Times New Roman",
+    serif
+  );
+}
+
+/* 预览区默认主题变量：外部可用同一选择器覆写这些变量。 */
+#plaindoc-preview-pane.plaindoc-preview-pane--default {
+  --pd-preview-padding: 30px;
+  --pd-preview-font-family: Optima-Regular, Optima, PingFangSC-light, PingFangTC-light,
+    "PingFang SC", Cambria, Cochin, Georgia, Times, "Times New Roman", serif;
+  --pd-preview-text-color: rgb(89, 89, 89);
+  --pd-preview-link-color: rgb(71, 193, 168);
+  --pd-preview-inline-code-color: rgb(71, 193, 168);
+  --pd-preview-font-size: 16px;
+  --pd-preview-line-height: 26px;
+  --pd-preview-word-spacing: 3px;
+  --pd-preview-letter-spacing: 0.02em;
+  --pd-preview-paragraph-margin-top: 5px;
+  --pd-preview-paragraph-margin-bottom: 5px;
+  --pd-preview-paragraph-indent: 2em;
+  --pd-preview-title-color: rgb(89, 89, 89);
+  --pd-preview-h2-border-color: rgb(89, 89, 89);
+  --pd-preview-blockquote-text-color: #666666;
+  --pd-preview-blockquote-mark-color: #555555;
+  --pd-preview-blockquote-background: #f8fafc;
+  --pd-preview-blockquote-border-color: #cbd5e1;
+  --pd-preview-strong-color: rgb(71, 193, 168);
+  --pd-preview-em-color: rgb(71, 193, 168);
+  --pd-preview-hr-color: #cbd5e1;
+  --pd-preview-image-width: 100%;
+  --pd-preview-table-font-size: 14px;
+  --pd-preview-table-border-color: #dbe2ea;
+  --pd-preview-table-cell-padding: 10px 12px;
 }
 
 /* 统一收窄滚动条，并增强滚动反馈可见性。 */
 .editor-pane .cm-scroller,
 .preview-pane,
-.markdown-body pre {
+#plaindoc-preview-pane .plaindoc-preview-body pre {
   scrollbar-width: thin;
   scrollbar-color: #94a3b8 transparent;
 }
 
 .editor-pane .cm-scroller::-webkit-scrollbar,
 .preview-pane::-webkit-scrollbar,
-.markdown-body pre::-webkit-scrollbar {
+#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar {
   width: 7px;
   height: 7px;
 }
 
 .editor-pane .cm-scroller::-webkit-scrollbar-track,
 .preview-pane::-webkit-scrollbar-track,
-.markdown-body pre::-webkit-scrollbar-track {
+#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .editor-pane .cm-scroller::-webkit-scrollbar-thumb,
 .preview-pane::-webkit-scrollbar-thumb,
-.markdown-body pre::-webkit-scrollbar-thumb {
+#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar-thumb {
   border-radius: 999px;
   border: 2px solid transparent;
   background: #94a3b8;
@@ -131,7 +286,7 @@ body {
 
 .editor-pane .cm-scroller::-webkit-scrollbar-thumb:hover,
 .preview-pane::-webkit-scrollbar-thumb:hover,
-.markdown-body pre::-webkit-scrollbar-thumb:hover {
+#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar-thumb:hover {
   background: #64748b;
   background-clip: content-box;
 }
@@ -149,18 +304,96 @@ body {
   overflow-wrap: anywhere;
 }
 
-.markdown-body {
-  padding: 20px;
+#plaindoc-preview-pane .plaindoc-preview-body {
+  padding: var(--pd-preview-padding);
   min-height: 100%;
+  color: var(--pd-preview-text-color);
+  font-size: var(--pd-preview-font-size);
+  line-height: var(--pd-preview-line-height);
+  word-spacing: var(--pd-preview-word-spacing);
+  letter-spacing: var(--pd-preview-letter-spacing);
+  text-align: left;
+  font-family: var(--pd-preview-font-family);
+  word-break: break-all;
 }
 
-.markdown-body h1,
-.markdown-body h2,
-.markdown-body h3 {
+#plaindoc-preview-pane .plaindoc-preview-body p {
+  margin-top: var(--pd-preview-paragraph-margin-top);
+  margin-bottom: var(--pd-preview-paragraph-margin-bottom);
+  text-indent: var(--pd-preview-paragraph-indent);
+  color: var(--pd-preview-text-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body li > p,
+#plaindoc-preview-pane .plaindoc-preview-body blockquote p,
+#plaindoc-preview-pane .plaindoc-preview-body td p,
+#plaindoc-preview-pane .plaindoc-preview-body th p {
+  text-indent: 0;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body h1,
+#plaindoc-preview-pane .plaindoc-preview-body h2,
+#plaindoc-preview-pane .plaindoc-preview-body h3 {
   margin-top: 0;
+  color: var(--pd-preview-title-color);
 }
 
-.markdown-body pre {
+#plaindoc-preview-pane .plaindoc-preview-body h2 {
+  margin-bottom: 24px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--pd-preview-h2-border-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body ul {
+  list-style-type: disc;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body ol {
+  list-style-type: decimal;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body a {
+  color: var(--pd-preview-link-color);
+  text-decoration: none;
+  border-bottom: 1px solid var(--pd-preview-link-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body strong {
+  color: var(--pd-preview-strong-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body em,
+#plaindoc-preview-pane .plaindoc-preview-body em strong {
+  color: var(--pd-preview-em-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body hr {
+  border: 0;
+  border-top: 1px solid var(--pd-preview-hr-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body blockquote {
+  margin: 10px 0;
+  padding: 10px 12px;
+  line-height: 1.8;
+  text-indent: 0;
+  border-left: 4px solid var(--pd-preview-blockquote-border-color);
+  background: var(--pd-preview-blockquote-background);
+  color: var(--pd-preview-blockquote-text-color);
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body blockquote::before {
+  content: "“";
+  color: var(--pd-preview-blockquote-mark-color);
+  font-size: 2.8em;
+  line-height: 1em;
+  margin-right: 6px;
+  font-family: Arial, serif;
+  font-weight: 700;
+  vertical-align: -0.3em;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body pre {
   background: #0f172a;
   color: #f8fafc;
   border-radius: 8px;
@@ -169,35 +402,37 @@ body {
   overflow: auto;
 }
 
-.markdown-body pre code {
+#plaindoc-preview-pane .plaindoc-preview-body pre code {
   display: block;
   white-space: pre;
 }
 
-.markdown-body img {
+#plaindoc-preview-pane .plaindoc-preview-body img {
   display: block;
+  width: var(--pd-preview-image-width);
   max-width: 100%;
   height: auto;
+  margin: 8px auto;
 }
 
 /* Markdown 表格基础排版。 */
-.markdown-body table {
+#plaindoc-preview-pane .plaindoc-preview-body table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   margin: 16px 0;
-  border: 1px solid #dbe2ea;
+  border: 1px solid var(--pd-preview-table-border-color);
   border-radius: 10px;
   overflow: hidden;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  font-size: 14px;
+  font-size: var(--pd-preview-table-font-size);
   line-height: 1.6;
   color: #1f2937;
 }
 
 /* Markdown 表头样式。 */
-.markdown-body thead th {
+#plaindoc-preview-pane .plaindoc-preview-body thead th {
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   color: #0f172a;
   font-weight: 600;
@@ -205,9 +440,9 @@ body {
 }
 
 /* Markdown 单元格样式。 */
-.markdown-body th,
-.markdown-body td {
-  padding: 10px 12px;
+#plaindoc-preview-pane .plaindoc-preview-body th,
+#plaindoc-preview-pane .plaindoc-preview-body td {
+  padding: var(--pd-preview-table-cell-padding);
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
   vertical-align: top;
@@ -216,29 +451,31 @@ body {
 }
 
 /* 斑马纹提升长表格可读性。 */
-.markdown-body tbody tr:nth-child(even) td {
+#plaindoc-preview-pane .plaindoc-preview-body tbody tr:nth-child(even) td {
   background: #f8fafc;
 }
 
 /* 鼠标悬停反馈，便于阅读定位。 */
-.markdown-body tbody tr:hover td {
+#plaindoc-preview-pane .plaindoc-preview-body tbody tr:hover td {
   background: #eef6ff;
 }
 
 /* 清理右侧与底部边界线，避免重线。 */
-.markdown-body th:last-child,
-.markdown-body td:last-child {
+#plaindoc-preview-pane .plaindoc-preview-body th:last-child,
+#plaindoc-preview-pane .plaindoc-preview-body td:last-child {
   border-right: 0;
 }
 
-.markdown-body tbody tr:last-child td {
+#plaindoc-preview-pane .plaindoc-preview-body tbody tr:last-child td {
   border-bottom: 0;
 }
 
 /* 表格内代码片段使用轻量底色，避免与单元格边界冲突。 */
-.markdown-body table code {
+#plaindoc-preview-pane .plaindoc-preview-body table code,
+#plaindoc-preview-pane .plaindoc-preview-body p code,
+#plaindoc-preview-pane .plaindoc-preview-body li code {
   background: #eef2ff;
-  color: #1d4ed8;
+  color: var(--pd-preview-inline-code-color);
   border-radius: 4px;
   padding: 1px 4px;
   font-size: 0.92em;
@@ -345,6 +582,25 @@ body {
 }
 
 @media (max-width: 980px) {
+  /* 小屏下顶部改为换行布局，保证主题菜单可点击。 */
+  .header {
+    height: auto;
+    min-height: 56px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .theme-menu__trigger {
+    min-width: 148px;
+  }
+
+  .theme-menu__dropdown {
+    width: min(260px, calc(100vw - 24px));
+    right: 0;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }
