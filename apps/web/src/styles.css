@@ -469,7 +469,7 @@ body {
   --pd-preview-strong-color: rgb(71, 193, 168);
   --pd-preview-em-color: rgb(71, 193, 168);
   --pd-preview-hr-color: #cbd5e1;
-  --pd-preview-image-width: 100%;
+  --pd-preview-image-width: auto;
   --pd-preview-table-font-size: 14px;
   --pd-preview-table-border-color: #dbe2ea;
   --pd-preview-table-cell-padding: 10px 12px;
@@ -605,6 +605,26 @@ body {
   color: var(--pd-preview-h6-color, var(--pd-preview-title-color));
   border-bottom-width: var(--pd-preview-h6-border-width, 0);
   border-bottom-color: var(--pd-preview-h6-border-color, transparent);
+}
+
+/* 行内公式：保持在文本流中显示，避免被全局 word-break 打断。 */
+#plaindoc-preview-pane .plaindoc-preview-body .katex {
+  word-break: normal;
+}
+
+/* 块级公式：允许横向滚动，避免长公式截断。 */
+#plaindoc-preview-pane .plaindoc-preview-body .katex-display {
+  margin: 14px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+/* 块级公式内容：保持单行渲染并确保最小可见宽度。 */
+#plaindoc-preview-pane .plaindoc-preview-body .katex-display > .katex {
+  display: inline-block;
+  min-width: 100%;
+  white-space: nowrap;
 }
 
 #plaindoc-preview-pane .plaindoc-preview-body ul {

@@ -4,6 +4,10 @@ import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { AlertCircle, CheckCircle2, LoaderCircle } from "lucide-react";
 import MarkdownIt from "markdown-it";
+// KaTeX 样式：用于行内/块级公式排版。
+import "katex/dist/katex.min.css";
+// KaTeX mhchem 扩展：支持 `\\ce{}` 化学公式语法。
+import "katex/contrib/mhchem";
 import {
   Children,
   isValidElement,
@@ -18,8 +22,10 @@ import {
   type ReactNode
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { ConflictError, getDataGateway, type TreeNode } from "./data-access";
 import {
   PREVIEW_SYNTAX_THEMES,
@@ -81,6 +87,8 @@ const BLOCK_NODE_TYPES = new Set([
   "heading",
   "blockquote",
   "code",
+  // 块级公式同样需要参与锚点映射，避免长公式场景同步漂移。
+  "math",
   "table",
   "thematicBreak",
   "html"
@@ -729,6 +737,8 @@ export default function App() {
   const [previewScrollerElement, setPreviewScrollerElement] = useState<HTMLElement | null>(null);
   // CodeMirror 滚动容器。
   const editorScrollerRef = useRef<HTMLElement | null>(null);
+  // 编辑器面板节点（ref 版本），用于在回调里兜底查询最新滚动容器。
+  const editorPaneRef = useRef<HTMLElement | null>(null);
   // CodeMirror 实例，用于文档偏移 -> 像素位置换算。
   const editorViewRef = useRef<EditorView | null>(null);
   // 预览区滚动容器。
@@ -739,6 +749,10 @@ export default function App() {
   const previewToEditorAnchorsRef = useRef<DirectionAnchor[]>([]);
   // 映射重建调度句柄（rAF）。
   const rebuildMapRafRef = useRef<number | null>(null);
+  // 延迟重建定时器集合：用于处理粘贴/批量改动后的异步布局收敛。
+  const delayedRebuildTimersRef = useRef<number[]>([]);
+  // 上一次内容快照：用于判断本次改动是否属于“大幅变更”（如整段粘贴）。
+  const previousContentSnapshotRef = useRef(fallbackContent);
   // 防止双向同步引发循环滚动。
   const syncingRef = useRef(false);
   // 记录最近一次主动滚动来源，用于重算后回对齐。
@@ -753,6 +767,8 @@ export default function App() {
   // 编辑器面板 ref：用于感知 CodeMirror 在 StrictMode/HMR 下的重挂载。
   const handleEditorPaneRef = useCallback(
     (node: HTMLElement | null) => {
+      // 维护 ref 版本，便于在 useCallback 闭包中读取最新面板节点。
+      editorPaneRef.current = node;
       setEditorPaneElement((previous) => (previous === node ? previous : node));
       // 面板卸载时清空滚动容器引用，防止监听器挂在旧节点上。
       if (!node) {
@@ -766,6 +782,36 @@ export default function App() {
   const handlePreviewScrollerRef = useCallback((node: HTMLElement | null) => {
     previewScrollerRef.current = node;
     setPreviewScrollerElement((previous) => (previous === node ? previous : node));
+  }, []);
+
+  // 获取“当前仍可用”的编辑区滚动容器：优先用 ref，其次回退到编辑器面板查询。
+  const resolveLiveEditorScroller = useCallback((): HTMLElement | null => {
+    const currentScroller = editorScrollerRef.current;
+    if (currentScroller && currentScroller.isConnected) {
+      return currentScroller;
+    }
+    const fallbackScroller = editorPaneRef.current?.querySelector<HTMLElement>(".cm-scroller") ?? null;
+    if (fallbackScroller && fallbackScroller.isConnected) {
+      // 回写最新节点，避免后续逻辑继续使用过期引用。
+      setEditorScrollerNode(fallbackScroller);
+      return fallbackScroller;
+    }
+    return null;
+  }, [setEditorScrollerNode]);
+
+  // 获取“当前仍可用”的 EditorView：优先使用已有实例，失效时从 DOM 反查恢复。
+  const resolveLiveEditorView = useCallback((editorScroller: HTMLElement): EditorView | null => {
+    const currentEditorView = editorViewRef.current;
+    if (currentEditorView && currentEditorView.dom.isConnected) {
+      return currentEditorView;
+    }
+    const recoveredEditorView = EditorView.findFromDOM(editorScroller);
+    if (recoveredEditorView && recoveredEditorView.dom.isConnected) {
+      // 回写当前实例，避免映射重建持续失败。
+      editorViewRef.current = recoveredEditorView;
+      return recoveredEditorView;
+    }
+    return null;
   }, []);
 
   // 加载并监听外部自定义样式：支持 window 变量、localStorage 与自定义事件三种入口。
@@ -891,7 +937,7 @@ export default function App() {
   // 根据当前来源区域，计算目标区域应设置的 scrollTop。
   const getMappedTargetScrollTop = useCallback(
     (sourceName: ScrollSource): number => {
-      const editorElement = editorScrollerRef.current;
+      const editorElement = resolveLiveEditorScroller();
       const previewElement = previewScrollerRef.current;
       if (!editorElement || !previewElement) {
         return 0;
@@ -916,7 +962,7 @@ export default function App() {
       }
       return clamp(getRatio(previewElement) * editorMaxScrollable, 0, editorMaxScrollable);
     },
-    []
+    [resolveLiveEditorScroller]
   );
 
   // 执行一次单向同步，并用锁避免对端 scroll 反向触发。
@@ -925,7 +971,7 @@ export default function App() {
       if (syncingRef.current) {
         return;
       }
-      const editorElement = editorScrollerRef.current;
+      const editorElement = resolveLiveEditorScroller();
       const previewElement = previewScrollerRef.current;
       if (!editorElement || !previewElement) {
         return;
@@ -943,7 +989,7 @@ export default function App() {
         syncingRef.current = false;
       });
     },
-    [getMappedTargetScrollTop]
+    [getMappedTargetScrollTop, resolveLiveEditorScroller]
   );
 
   // 映射表重建后，按最近来源做一次回对齐。
@@ -951,7 +997,7 @@ export default function App() {
     if (syncingRef.current) {
       return;
     }
-    const editorElement = editorScrollerRef.current;
+    const editorElement = resolveLiveEditorScroller();
     const previewElement = previewScrollerRef.current;
     if (!editorElement || !previewElement) {
       return;
@@ -966,13 +1012,13 @@ export default function App() {
     window.requestAnimationFrame(() => {
       syncingRef.current = false;
     });
-  }, [getMappedTargetScrollTop]);
+  }, [getMappedTargetScrollTop, resolveLiveEditorScroller]);
 
   // 重建 block 级锚点映射表：source offset -> editorY 与 previewY。
   const rebuildScrollAnchors = useCallback(() => {
-    const editorElement = editorScrollerRef.current;
+    const editorElement = resolveLiveEditorScroller();
     const previewElement = previewScrollerRef.current;
-    const editorView = editorViewRef.current;
+    const editorView = editorElement ? resolveLiveEditorView(editorElement) : null;
     // editorView 可能在 StrictMode 旧实例卸载后短暂失效，需等待新实例就绪。
     if (!editorElement || !previewElement || !editorView || !editorView.dom.isConnected) {
       editorToPreviewAnchorsRef.current = [];
@@ -1044,7 +1090,7 @@ export default function App() {
       previewMaxScrollable,
       editorMaxScrollable
     );
-  }, []);
+  }, [resolveLiveEditorScroller, resolveLiveEditorView]);
 
   // 用 requestAnimationFrame 合并多次重建请求，降低重排频率。
   const scheduleRebuildScrollAnchors = useCallback(() => {
@@ -1059,6 +1105,32 @@ export default function App() {
     });
   }, [rebuildScrollAnchors, resyncFromLastSource]);
 
+  // 清理所有延迟重建任务，避免重复排队造成无效重建。
+  const clearDelayedRebuildTimers = useCallback(() => {
+    for (const timerId of delayedRebuildTimersRef.current) {
+      window.clearTimeout(timerId);
+    }
+    delayedRebuildTimersRef.current = [];
+  }, []);
+
+  // 追加多次延迟重建：覆盖粘贴后编辑器/预览异步布局更新窗口。
+  const scheduleDelayedRebuilds = useCallback(
+    (delays: number[]) => {
+      clearDelayedRebuildTimers();
+      delayedRebuildTimersRef.current = delays.map((delay) => {
+        const scheduledTimerId = window.setTimeout(() => {
+          scheduleRebuildScrollAnchors();
+          // 执行后移出记录，避免数组持续增长。
+          delayedRebuildTimersRef.current = delayedRebuildTimersRef.current.filter(
+            (timerId) => timerId !== scheduledTimerId
+          );
+        }, delay);
+        return scheduledTimerId;
+      });
+    },
+    [clearDelayedRebuildTimers, scheduleRebuildScrollAnchors]
+  );
+
   const extensions = useMemo(
     () => [
       // 编辑器软换行，避免横向滚动影响同步体验。
@@ -1071,8 +1143,10 @@ export default function App() {
     ],
     []
   );
-  // remark 插件顺序：先 GFM，再注入锚点属性。
-  const remarkPlugins = useMemo(() => [remarkGfm, remarkBlockAnchorPlugin], []);
+  // remark 插件顺序：先 GFM，再解析数学公式，最后注入锚点属性。
+  const remarkPlugins = useMemo(() => [remarkGfm, remarkMath, remarkBlockAnchorPlugin], []);
+  // rehype 插件：将 Math AST 渲染为 KaTeX HTML。
+  const rehypePlugins = useMemo(() => [rehypeKatex], []);
   // 自定义 Markdown 渲染器：代码块走高亮组件，行内代码走轻量内联样式。
   const markdownComponents = useMemo<Components>(
     () => {
@@ -1423,8 +1497,57 @@ export default function App() {
 
   // 内容变更后需要重建锚点映射。
   useEffect(() => {
+    // 判断是否为批量变更（例如一次性粘贴长文）；批量变更时增加延迟重建兜底。
+    const previousContent = previousContentSnapshotRef.current;
+    const currentContent = content;
+    const characterDelta = Math.abs(currentContent.length - previousContent.length);
+    const isBulkContentChange = characterDelta >= 120;
+    previousContentSnapshotRef.current = currentContent;
+
     scheduleRebuildScrollAnchors();
-  }, [content, scheduleRebuildScrollAnchors]);
+    if (isBulkContentChange) {
+      // 多轮重建用于覆盖 CodeMirror 重排、图片加载与高亮渲染的延迟窗口。
+      scheduleDelayedRebuilds([80, 240, 520]);
+    }
+  }, [content, scheduleDelayedRebuilds, scheduleRebuildScrollAnchors]);
+
+  // 处理“大段粘贴”场景：粘贴后追加延迟重建，覆盖图片与布局异步更新窗口。
+  useEffect(() => {
+    const editorElement = editorScrollerElement;
+    if (!editorElement) {
+      return;
+    }
+
+    // 记录本次粘贴触发的延迟任务，组件卸载或重复粘贴时统一清理。
+    const pendingTimers = new Set<number>();
+
+    const onPaste = () => {
+      // 第一次重建：尽快刷新映射，保证初次滚动就可同步。
+      scheduleRebuildScrollAnchors();
+      // 第二次重建：等待 CodeMirror 完成一轮布局更新。
+      const timerAfterLayout = window.setTimeout(() => {
+        pendingTimers.delete(timerAfterLayout);
+        scheduleRebuildScrollAnchors();
+      }, 60);
+      pendingTimers.add(timerAfterLayout);
+      // 第三次重建：兜底等待图片尺寸与高亮等异步渲染完成。
+      const timerAfterAsyncRender = window.setTimeout(() => {
+        pendingTimers.delete(timerAfterAsyncRender);
+        scheduleRebuildScrollAnchors();
+      }, 220);
+      pendingTimers.add(timerAfterAsyncRender);
+    };
+
+    // 使用捕获阶段监听 paste，规避 CodeMirror 在冒泡阶段拦截事件导致监听不到。
+    editorElement.addEventListener("paste", onPaste, true);
+    return () => {
+      editorElement.removeEventListener("paste", onPaste, true);
+      for (const timerId of pendingTimers) {
+        window.clearTimeout(timerId);
+      }
+      pendingTimers.clear();
+    };
+  }, [editorScrollerElement, scheduleRebuildScrollAnchors]);
 
   // 主题样式或外部覆盖样式变化后，主动重建锚点映射，避免滚动同步漂移。
   useEffect(() => {
@@ -1521,8 +1644,9 @@ export default function App() {
       if (rebuildMapRafRef.current !== null) {
         window.cancelAnimationFrame(rebuildMapRafRef.current);
       }
+      clearDelayedRebuildTimers();
     };
-  }, []);
+  }, [clearDelayedRebuildTimers]);
 
   // 应用选中的主题：仅在主题真正变化时更新父组件状态。
   const handleThemeChange = useCallback((themeId: string) => {
@@ -1610,7 +1734,11 @@ export default function App() {
         >
           <article className={`markdown-body ${PREVIEW_BODY_CLASS}`}>
             {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+            <ReactMarkdown
+              remarkPlugins={remarkPlugins}
+              rehypePlugins={rehypePlugins}
+              components={markdownComponents}
+            >
               {content}
             </ReactMarkdown>
           </article>

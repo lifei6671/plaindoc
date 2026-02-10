@@ -107,7 +107,7 @@ export const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
       "--pd-preview-strong-color": "rgb(71, 193, 168)",
       "--pd-preview-em-color": "rgb(71, 193, 168)",
       "--pd-preview-hr-color": "#cbd5e1",
-      "--pd-preview-image-width": "100%",
+      "--pd-preview-image-width": "auto",
       "--pd-preview-table-font-size": "14px",
       "--pd-preview-table-border-color": "#dbe2ea",
       "--pd-preview-table-cell-padding": "10px 12px"
@@ -171,7 +171,7 @@ export const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
       "--pd-preview-strong-color": "#0f766e",
       "--pd-preview-em-color": "#0f766e",
       "--pd-preview-hr-color": "#94a3b8",
-      "--pd-preview-image-width": "100%",
+      "--pd-preview-image-width": "auto",
       "--pd-preview-table-font-size": "14px",
       "--pd-preview-table-border-color": "#cbd5e1",
       "--pd-preview-table-cell-padding": "10px 12px"
@@ -248,7 +248,7 @@ export const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
       "--pd-preview-strong-color": "#0369a1",
       "--pd-preview-em-color": "#0284c7",
       "--pd-preview-hr-color": "#cbd5e1",
-      "--pd-preview-image-width": "100%",
+      "--pd-preview-image-width": "auto",
       "--pd-preview-table-font-size": "13px",
       "--pd-preview-table-border-color": "#cbd5e1",
       "--pd-preview-table-cell-padding": "8px 10px"
