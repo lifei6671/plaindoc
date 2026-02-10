@@ -1,250 +1,252 @@
-# 基于 React + Vite + CodeMirror 的 Markdown 编辑器开发排期
+# Markdown 编辑器全栈路线图（React + Vite + CodeMirror + Gin）
 
-> 目标：按里程碑分阶段实现一个类似语雀体验的 Markdown 编辑器，支持流程图、甘特图、公式渲染与代码高亮。
+> 目标：实现类似语雀的双栏实时预览 Markdown 编辑器，支持 Mermaid、公式、代码高亮；后端支持登录注册、空间与目录组织、版本冲突检测；数据库先支持 SQLite / PostgreSQL / MySQL。
 
-## 1. 项目节奏与周期建议
+## 1. 范围定义（按你当前需求）
 
-- 总周期：6 周（可压缩为 4 周，或扩展为 8 周）
-- 交付方式：每周一个主要里程碑，周中联调，周末验收
-- 节奏建议：
-  - 周一：需求确认与任务拆分
-  - 周二~周四：开发与联调
-  - 周五：测试、修复与里程碑验收
-
----
-
-## 2. 里程碑开发排期（按周）
-
-## 第 1 周：里程碑 1（项目初始化 + 双栏布局）
-
-### 本周目标
-
-- 初始化 React + Vite + TypeScript 项目
-- 接入 CodeMirror 6 作为 Markdown 编辑器
-- 实现基础双栏布局（左编辑 / 右预览占位）
-
-### 任务拆解
-
-- Day 1
-  - 初始化工程、统一目录结构
-  - 配置 ESLint / Prettier（如你计划使用）
-- Day 2
-  - 封装 `MarkdownEditor` 组件（CodeMirror 基础配置）
-  - 绑定文本状态（受控或半受控）
-- Day 3
-  - 完成双栏布局与响应式适配（桌面优先）
-  - 增加预览占位区域
-- Day 4
-  - 编辑器主题与基础快捷键（Tab、撤销重做）
-  - 处理最小可用错误边界
-- Day 5
-  - 里程碑验收与文档补充
-
-### 验收标准
-
-- 能输入 Markdown
-- 页面具备稳定的双栏编辑界面
-- 基础状态更新链路可用
+- 前端：双栏实时预览（左编辑 / 右预览）
+- 渲染能力：GFM、代码高亮、Mermaid（流程图/甘特图）、公式（KaTeX）
+- 内容模型：空间（Space） + 目录树（Folder） + 文档（Doc）
+- 用户体系：注册、登录、会话鉴权
+- 权限模型：
+  - 角色：`owner`（拥有者）/ `collaborator`（协作者）/ `reader`（阅读者）
+  - 目录授权：目录权限自动继承到所有子目录与文档
+  - 文档授权：支持对单篇文档单独授权（优先于目录继承）
+- 版本策略：
+  - 服务端：保存时做版本冲突检测（乐观锁）
+  - 本地：多版本历史缓存与查看（无需多人协同）
+- 后端：Golang + Gin，支持 SQLite / PostgreSQL / MySQL
 
 ---
 
-## 第 2 周：里程碑 2（Markdown 渲染管线）
+## 2. 总体架构
 
-### 本周目标
+### 前端（React）
 
-- 打通 unified 渲染链路
-- 支持 GFM（表格、任务列表、删除线）
-- 增加基础安全策略（sanitize）
+- `editor`：CodeMirror 6 编辑区
+- `preview`：Markdown 渲染管线 + Mermaid 渲染
+- `workspace`：空间/目录树/文档列表
+- `history`：本地版本历史与 Diff 查看
+- `sync`：自动保存、冲突提示、版本恢复
 
-### 任务拆解
+### 后端（Gin）
 
-- Day 1
-  - 接入 `unified + remark-parse + remark-gfm`
-- Day 2
-  - 接入 `remark-rehype + rehype-stringify`
-- Day 3
-  - 接入 `rehype-sanitize`，确定白名单策略
-- Day 4
-  - 完成预览组件与样式（标题、列表、表格）
-- Day 5
-  - 测试常见 Markdown 样例并修复问题
-
-### 验收标准
-
-- 常见 Markdown 语法渲染正确
-- 非法 HTML 不会直接执行
+- `auth`：注册、登录、JWT 鉴权、刷新
+- `space`：空间 CRUD、成员管理
+- `tree`：目录节点（folder/doc）维护
+- `acl`：目录级授权继承、文档级单独授权、权限计算
+- `doc`：文档内容 CRUD
+- `revision`：服务端文档版本记录
+- `storage`：多数据库适配层（SQLite / PostgreSQL / MySQL）
 
 ---
 
-## 第 3 周：里程碑 3（代码块高亮）
+## 3. 数据模型（核心表）
 
-### 本周目标
+### 用户与空间
 
-- 支持 fenced code block 语言识别
-- 接入代码高亮（建议 MVP 用 `highlight.js`）
+- `users(id, email, password_hash, created_at, updated_at)`
+- `spaces(id, name, owner_id, created_at, updated_at)`
+- `space_members(id, space_id, user_id, role, created_at)`
+  - `role`: `owner` | `collaborator` | `reader`
 
-### 任务拆解
+### 目录与文档
 
-- Day 1
-  - 设计代码块渲染策略（语言识别、兜底）
-- Day 2
-  - 集成 `highlight.js` 并接入预览链路
-- Day 3
-  - 增加代码主题、行内代码样式统一
-- Day 4
-  - 处理未知语言与空代码块边界
-- Day 5
-  - 回归测试与性能小优化（避免重复高亮）
+- `nodes(id, space_id, parent_id, type, title, sort, created_at, updated_at)`
+  - `type`: `folder` | `doc`
+- `documents(id, node_id, title, content_md, version, updated_by, created_at, updated_at)`
+- `document_revisions(id, document_id, version, content_md, base_version, editor_id, created_at)`
+- `node_permissions(id, node_id, user_id, role, granted_by, created_at)`
+  - 目录授权，天然继承到子节点
+- `document_permissions(id, document_id, user_id, role, granted_by, created_at)`
+  - 文档单独授权，覆盖目录继承结果
 
-### 验收标准
-
-- ` ```lang ` 代码块按语言高亮
-- 未识别语言时优雅降级
+> 建议 `documents.version` 从 1 开始，每次成功保存 +1，作为冲突检测基准。
 
 ---
 
-## 第 4 周：里程碑 4（公式 + 流程图/甘特图）
+## 4. 权限与冲突策略
 
-### 本周目标
+### 角色能力矩阵（MVP）
 
-- 支持公式（KaTeX）
-- 支持 Mermaid（流程图、甘特图）
+- `owner`：空间内所有资源的查看/编辑/删除/权限管理
+- `collaborator`：可查看/编辑/删除已授权目录与文档，不可做权限管理
+- `reader`：仅查看已授权目录/文档，不可编辑
 
-### 任务拆解
+### 权限计算规则（建议固定）
 
-- Day 1
-  - 集成 `remark-math + rehype-katex + katex`
-- Day 2
-  - 验证 `$...$` 与 `$$...$$` 渲染效果
-- Day 3
-  - 集成 Mermaid 渲染流程（code block -> SVG）
-- Day 4
-  - 支持 `flowchart`、`gantt` 示例并补齐样式
-- Day 5
-  - 增加 Mermaid 渲染失败兜底与错误提示
+- 同时命中文档授权与目录继承时，文档授权优先（可提权或降权覆盖）
+- 无文档授权时，使用最近祖先目录的授权结果
+- 同一资源命中多条授权时，按最高角色生效：`owner > collaborator > reader`
+- 空间 `owner` 默认拥有全量权限，不受单条授权限制
 
-### 验收标准
+### 服务端冲突检测（必做）
 
-- 公式可稳定渲染
-- 流程图与甘特图可稳定渲染
-- 渲染失败不影响整体页面可用性
+- 前端保存请求携带 `base_version`
+- 后端更新语句采用条件更新：
+  - `WHERE id = ? AND version = base_version`
+- 若 `RowsAffected = 0` 返回 `409 Conflict`，并返回最新文档与版本号
+- 前端弹窗提供 3 个动作：
+  - 打开差异对比（本地版本 vs 最新服务端版本）
+  - 手动合并后再保存
+  - 放弃本次修改
 
----
+### 本地多版本历史（必做）
 
-## 第 5 周：里程碑 5（编辑体验增强）
-
-### 本周目标
-
-- 接近语雀基础写作体验
-- 增强可用性：工具栏、滚动同步、自动保存
-
-### 任务拆解
-
-- Day 1
-  - 工具栏（标题/加粗/斜体/代码块/引用）
-- Day 2
-  - 快捷键与命令系统整合
-- Day 3
-  - 编辑区与预览区滚动同步
-- Day 4
-  - 本地草稿保存（`localforage`）
-- Day 5
-  - 大纲导航（按标题提取）与可用性修正
-
-### 验收标准
-
-- 写作链路完整顺滑
-- 关闭页面后可恢复草稿
-- 大纲可点击跳转
+- 使用 `IndexedDB`（建议 `Dexie`）存储本地快照
+- 快照建议字段：
+  - `id, doc_id, local_version, remote_version, content_md, created_at, source(auto|manual)`
+- 策略建议：
+  - 自动保存每 30~60 秒一版
+  - 保留最近 100 版（可配置）
+  - 提供历史列表 + Diff 预览 + 恢复为当前草稿
 
 ---
 
-## 第 6 周：里程碑 6（工程化 + 质量保障）
+## 5. API 设计（MVP）
 
-### 本周目标
+### 认证
 
-- 完成模块化重构与基础测试
-- 补齐性能优化与发布准备
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `GET /api/auth/me`
 
-### 任务拆解
+### 空间与目录
 
-- Day 1
-  - 目录重构（editor/parser/renderers/features）
-- Day 2
-  - 增加 parser 单元测试（关键语法覆盖）
-- Day 3
-  - 增加预览组件行为测试
-- Day 4
-  - 性能优化（防抖、节流、必要时懒渲染）
-- Day 5
-  - 发布前检查与最终验收
+- `GET /api/spaces`
+- `POST /api/spaces`
+- `GET /api/spaces/:spaceId/tree`
+- `POST /api/spaces/:spaceId/nodes`
+- `PATCH /api/nodes/:nodeId`
+- `DELETE /api/nodes/:nodeId`
 
-### 验收标准
+### 权限管理
 
-- 关键模块结构清晰，便于扩展
-- 核心渲染能力具备测试覆盖
-- 具备上线/内部试用条件
+- `GET /api/nodes/:nodeId/permissions`
+- `PUT /api/nodes/:nodeId/permissions`
+- `GET /api/docs/:docId/permissions`
+- `PUT /api/docs/:docId/permissions`
 
----
+### 文档
 
-## 3. 依赖包建议（分阶段安装）
-
-### 第 1~2 周（基础能力）
-
-- `react react-dom`
-- `vite @vitejs/plugin-react typescript`
-- `codemirror @codemirror/state @codemirror/view @codemirror/commands @codemirror/language @codemirror/lang-markdown @codemirror/search @codemirror/history @codemirror/autocomplete`
-- `unified remark-parse remark-gfm remark-rehype rehype-stringify rehype-sanitize`
-
-### 第 3 周（代码高亮）
-
-- `highlight.js`
-
-### 第 4 周（公式与图表）
-
-- `remark-math rehype-katex katex`
-- `mermaid`
-
-### 第 5~6 周（体验增强）
-
-- `localforage`
-- `clsx`（可选）
-- `react-use`（可选）
+- `GET /api/docs/:docId`
+- `PUT /api/docs/:docId`（含 `base_version`）
+- `GET /api/docs/:docId/revisions`
+- `GET /api/docs/:docId/revisions/:revisionId`
 
 ---
 
-## 4. 风险与预案
+## 6. 里程碑排期（8 周建议）
 
-- Mermaid 与 React 生命周期冲突
-  - 预案：在预览 HTML 更新后统一触发渲染，做好销毁与重绘控制
-- 预览渲染性能抖动
-  - 预案：输入防抖（如 150~300ms）、大文档分段渲染
-- XSS 风险
-  - 预案：严格 `rehype-sanitize` 白名单；必要时叠加 `DOMPurify`
-- 样式冲突（KaTeX / Markdown / 代码主题）
-  - 预案：为预览容器加作用域 class，统一样式层级
+### 第 1 周：工程初始化
+
+- 前端：Vite + React + TS + 双栏布局骨架
+- 后端：Gin 项目分层（handler/service/repo）
+- 验收：项目能同时跑起，基础健康检查可用
+
+### 第 2 周：认证与基础权限
+
+- 注册/登录/JWT
+- 基础鉴权中间件
+- 空间角色（owner/collaborator/reader）落表
+- 验收：受保护接口需登录访问，角色可鉴别
+
+### 第 3 周：空间与目录树
+
+- 空间 CRUD
+- 目录树（folder/doc）增删改查
+- 目录授权继承 + 文档单独授权
+- 验收：目录授权可覆盖整棵子树，文档可单独授权
+
+### 第 4 周：编辑器与实时预览
+
+- CodeMirror + Markdown 渲染链
+- GFM + 代码高亮 + Mermaid + KaTeX
+- 验收：编辑与预览实时联动稳定
+
+### 第 5 周：文档保存与冲突检测
+
+- 文档保存接口（乐观锁）
+- 409 冲突返回与前端差异对比交互
+- 手动合并后再保存
+- 验收：并发编辑冲突可被发现，并通过对比界面手动合并
+
+### 第 6 周：本地多版本历史
+
+- IndexedDB 历史快照
+- 历史查看与恢复
+- 验收：断网/误操作后可从本地历史恢复内容
+
+### 第 7 周：多数据库支持
+
+- SQLite / PostgreSQL / MySQL 统一仓储实现
+- 验收：通过配置切换数据库后核心 API 正常
+
+### 第 8 周：质量与发布准备
+
+- 单元测试 + API 集成测试
+- 性能与安全加固
+- 验收：达到 MVP 上线标准
 
 ---
 
-## 5. 每周评审清单（建议）
+## 7. 推荐依赖清单
 
-- 功能完成度：是否达到里程碑验收标准
-- 稳定性：是否存在阻断型缺陷
-- 性能：输入延迟、渲染耗时是否可接受
-- 可维护性：模块边界是否清晰、命名是否一致
-- 下周风险：是否有依赖阻塞、是否需提前预研
+### 前端
+
+- 基础：`react react-dom vite typescript`
+- 编辑器：`@uiw/react-codemirror codemirror @codemirror/lang-markdown @codemirror/language-data`
+- 渲染：`react-markdown remark-gfm remark-math rehype-katex katex rehype-sanitize`
+- Mermaid：`mermaid`
+- 代码高亮：`rehype-highlight`（后续可升级 `shiki`）
+- 状态与数据：`zustand @tanstack/react-query`
+- 本地历史：`dexie`
+- Diff（建议）：`diff react-diff-viewer-continued`
+
+### 后端（Go）
+
+- Web：`github.com/gin-gonic/gin`
+- 鉴权：`github.com/golang-jwt/jwt/v5`
+- 密码：`golang.org/x/crypto/bcrypt`
+- ORM：`gorm.io/gorm`
+- DB 驱动：
+  - SQLite：`gorm.io/driver/sqlite`
+  - PostgreSQL：`gorm.io/driver/postgres`
+  - MySQL：`gorm.io/driver/mysql`
+- 迁移：`github.com/golang-migrate/migrate/v4`
+- 配置：`github.com/caarlos0/env/v11`（或 `viper`）
+- 日志：`go.uber.org/zap`（或 `slog`）
 
 ---
 
-## 6. 最小可交付版本（MVP）定义
+## 8. 风险与规避
 
-满足以下条件即可进入试用：
+- 授权继承与单文档授权叠加复杂
+  - 方案：固定优先级（文档授权 > 目录继承），并做权限计算单测
+- Mermaid 渲染与预览性能
+  - 方案：输入防抖 + 仅在代码块变化时重渲染 Mermaid
+- 安全风险（XSS）
+  - 方案：`rehype-sanitize` 严格白名单，后端存储前后都做必要校验
+- 冲突对比体验复杂
+  - 方案：先实现双栏 Diff + 手动复制合并，不做自动三方合并
 
-- Markdown 基础语法 + GFM 可用
-- 代码块高亮可用
-- 公式可用（行内 + 块级）
-- Mermaid 流程图 + 甘特图可用
-- 工具栏 + 自动保存 + 滚动同步可用
+---
 
-> 建议在第 5 周结束时发布 MVP 内测版，第 6 周做工程化和质量加固。
+## 9. MVP 验收标准
+
+- 注册/登录可用，接口鉴权有效
+- 可创建多个空间，并在空间内按目录组织文档
+- 支持目录级授权继承与文档级单独授权
+- 双栏实时预览稳定，支持 Mermaid、公式、代码高亮
+- 保存具备版本冲突检测（返回 409 + 差异对比 + 手动合并）
+- 本地历史可查看和恢复
+- 同一业务逻辑可运行在 SQLite / PostgreSQL / MySQL
+
+---
+
+## 10. 已确认决策
+
+1. `collaborator` 允许删除目录与文档（仍不具备权限管理能力）。
+2. 单独授权权限高于继承权限（支持提权/降权覆盖）。
 

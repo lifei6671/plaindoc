@@ -1,0 +1,13 @@
+{
+  "name": "plaindoc",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "web:dev": "npm run dev -w @plaindoc/web",
+    "web:build": "npm run build -w @plaindoc/web",
+    "web:preview": "npm run preview -w @plaindoc/web"
+  }
+}

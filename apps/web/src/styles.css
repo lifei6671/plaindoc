@@ -1,0 +1,111 @@
+:root {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #111827;
+  background-color: #f3f4f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.header span {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+
+.pane {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-title {
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 14px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-pane {
+  padding: 10px;
+}
+
+.editor-pane .cm-editor {
+  height: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.editor-pane .cm-scroller {
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+.markdown-body {
+  padding: 20px;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin-top: 0;
+}
+
+.markdown-body pre {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+}
+
+@media (max-width: 980px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
