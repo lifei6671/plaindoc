@@ -8,14 +8,14 @@ import {
   Children,
   isValidElement,
   memo,
-  type CSSProperties,
-  type ComponentPropsWithoutRef,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  type CSSProperties,
+  type ComponentPropsWithoutRef,
+  type ReactNode
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -265,6 +265,35 @@ function buildDirectionAnchors(
   }
 
   // target 轴做前缀最大化，确保单调，防止插值反向。
+  for (let anchorIndex = 1; anchorIndex < groupedAnchors.length; anchorIndex += 1) {
+    if (groupedAnchors[anchorIndex].targetY < groupedAnchors[anchorIndex - 1].targetY) {
+      groupedAnchors[anchorIndex].targetY = groupedAnchors[anchorIndex - 1].targetY;
+    }
+  }
+
+  // 固定顶部边界：source=0 必须严格映射到 target=0，避免首屏出现“还能再向上滚一点”的错位。
+  const topBoundaryAnchor = groupedAnchors.find((anchor) => anchor.sourceY === 0);
+  if (topBoundaryAnchor) {
+    topBoundaryAnchor.targetY = 0;
+  } else {
+    groupedAnchors.unshift({ sourceY: 0, targetY: 0 });
+  }
+
+  // 固定底部边界：source=max 必须映射到 target=max，避免尾部无法对齐到底部。
+  const bottomBoundaryAnchor = groupedAnchors.find(
+    (anchor) => anchor.sourceY === sourceMaxScrollable
+  );
+  if (bottomBoundaryAnchor) {
+    bottomBoundaryAnchor.targetY = targetMaxScrollable;
+  } else {
+    groupedAnchors.push({
+      sourceY: sourceMaxScrollable,
+      targetY: targetMaxScrollable
+    });
+  }
+
+  // 重新按 source 排序并再做一次单调修正，保证插值阶段始终可用。
+  groupedAnchors.sort((left, right) => left.sourceY - right.sourceY || left.targetY - right.targetY);
   for (let anchorIndex = 1; anchorIndex < groupedAnchors.length; anchorIndex += 1) {
     if (groupedAnchors[anchorIndex].targetY < groupedAnchors[anchorIndex - 1].targetY) {
       groupedAnchors[anchorIndex].targetY = groupedAnchors[anchorIndex - 1].targetY;
@@ -1053,6 +1082,54 @@ export default function App() {
         PREVIEW_SYNTAX_THEMES[activeTheme.syntaxTheme] ?? PREVIEW_SYNTAX_THEMES["one-light"];
 
       return {
+        // 标题统一渲染为 prefix/content/suffix 结构，便于主题做伪元素以外的装饰扩展。
+        h1: ({ node: _node, children, ...props }) => (
+          <h1 {...props}>
+            <span className="prefix" aria-hidden="true" />
+            <span className="content">{children}</span>
+            <span className="suffix" aria-hidden="true" />
+          </h1>
+        ),
+        // 二级标题同样输出固定结构，兼容用户自定义 CSS 选择器。
+        h2: ({ node: _node, children, ...props }) => (
+          <h2 {...props}>
+            <span className="prefix" aria-hidden="true" />
+            <span className="content">{children}</span>
+            <span className="suffix" aria-hidden="true" />
+          </h2>
+        ),
+        // 三级标题同样支持前后缀装饰节点。
+        h3: ({ node: _node, children, ...props }) => (
+          <h3 {...props}>
+            <span className="prefix" aria-hidden="true" />
+            <span className="content">{children}</span>
+            <span className="suffix" aria-hidden="true" />
+          </h3>
+        ),
+        // 四级标题保持一致结构，避免不同层级样式能力不一致。
+        h4: ({ node: _node, children, ...props }) => (
+          <h4 {...props}>
+            <span className="prefix" aria-hidden="true" />
+            <span className="content">{children}</span>
+            <span className="suffix" aria-hidden="true" />
+          </h4>
+        ),
+        // 五级标题保持一致结构，便于主题批量复用样式规则。
+        h5: ({ node: _node, children, ...props }) => (
+          <h5 {...props}>
+            <span className="prefix" aria-hidden="true" />
+            <span className="content">{children}</span>
+            <span className="suffix" aria-hidden="true" />
+          </h5>
+        ),
+        // 六级标题保持一致结构，确保所有标题层级都可被统一定制。
+        h6: ({ node: _node, children, ...props }) => (
+          <h6 {...props}>
+            <span className="prefix" aria-hidden="true" />
+            <span className="content">{children}</span>
+            <span className="suffix" aria-hidden="true" />
+          </h6>
+        ),
         pre: ({ node: _node, children, ...props }) => {
           const childNodes = Children.toArray(children);
           const codeElement = childNodes[0];
@@ -1551,6 +1628,7 @@ export default function App() {
       {/* 固定底部状态栏：左侧空间/文件，右侧保存时间/字数。 */}
       <footer className="status-bar">
         <div className="status-bar__side status-bar__side--left">
+          <span style={{ fontWeight: 600 }}>文档位置：</span>
           <span className="status-pill" title={activeSpaceName}>
             {activeSpaceName}
           </span>
