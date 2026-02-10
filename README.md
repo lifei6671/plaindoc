@@ -16,10 +16,14 @@
 
 ```bash
 npm install
+cp apps/web/.env.example apps/web/.env
 npm run web:dev
 ```
 
 默认地址：`http://localhost:5173`
+
+- `VITE_DATA_DRIVER=local`：纯前端本地模式（默认）
+- `VITE_DATA_DRIVER=http`：切换到后端 API 模式
 
 ## 后端初始化（Go + Gin）
 
