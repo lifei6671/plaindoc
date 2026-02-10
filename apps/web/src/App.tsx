@@ -243,6 +243,10 @@ export default function App() {
   const [activeDocumentTitle, setActiveDocumentTitle] = useState("未命名文档");
   // 最近一次成功保存时间。
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // 编辑区滚动容器（state 版本），用于保证监听器绑定时机稳定。
+  const [editorScrollerElement, setEditorScrollerElement] = useState<HTMLElement | null>(null);
+  // 预览区滚动容器（state 版本），用于保证监听器绑定时机稳定。
+  const [previewScrollerElement, setPreviewScrollerElement] = useState<HTMLElement | null>(null);
   // CodeMirror 滚动容器。
   const editorScrollerRef = useRef<HTMLElement | null>(null);
   // CodeMirror 实例，用于文档偏移 -> 像素位置换算。
@@ -633,11 +637,17 @@ export default function App() {
     };
   }, [activeDocId, baseVersion, content, dataGateway, lastSavedContent, saveStatus]);
 
+  // 当滚动容器就绪后重建一次映射，避免首屏阶段因时序问题拿到空锚点。
+  useEffect(() => {
+    if (!editorScrollerElement || !previewScrollerElement) {
+      return;
+    }
+    scheduleRebuildScrollAnchors();
+  }, [editorScrollerElement, previewScrollerElement, scheduleRebuildScrollAnchors]);
+
   // 绑定编辑区与预览区滚动事件，触发单向同步。
   useEffect(() => {
-    const editorElement = editorScrollerRef.current;
-    const previewElement = previewScrollerRef.current;
-    if (!editorElement || !previewElement) {
+    if (!editorScrollerElement || !previewScrollerElement) {
       return;
     }
 
@@ -649,14 +659,14 @@ export default function App() {
       syncFromSource("preview");
     };
 
-    editorElement.addEventListener("scroll", onEditorScroll, { passive: true });
-    previewElement.addEventListener("scroll", onPreviewScroll, { passive: true });
+    editorScrollerElement.addEventListener("scroll", onEditorScroll, { passive: true });
+    previewScrollerElement.addEventListener("scroll", onPreviewScroll, { passive: true });
 
     return () => {
-      editorElement.removeEventListener("scroll", onEditorScroll);
-      previewElement.removeEventListener("scroll", onPreviewScroll);
+      editorScrollerElement.removeEventListener("scroll", onEditorScroll);
+      previewScrollerElement.removeEventListener("scroll", onPreviewScroll);
     };
-  }, [activeDocId, syncFromSource]);
+  }, [editorScrollerElement, previewScrollerElement, syncFromSource]);
 
   // 内容变更后需要重建锚点映射。
   useEffect(() => {
@@ -665,8 +675,8 @@ export default function App() {
 
   // 监听图片异步加载与容器尺寸变化，保障长图场景下映射实时更新。
   useEffect(() => {
-    const previewElement = previewScrollerRef.current;
-    const editorElement = editorScrollerRef.current;
+    const previewElement = previewScrollerElement;
+    const editorElement = editorScrollerElement;
     if (!previewElement || !editorElement) {
       return;
     }
@@ -745,7 +755,7 @@ export default function App() {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     };
-  }, [activeDocId, scheduleRebuildScrollAnchors]);
+  }, [editorScrollerElement, previewScrollerElement, scheduleRebuildScrollAnchors]);
 
   // 卸载时取消未执行的重建任务，避免悬挂回调。
   useEffect(() => {
@@ -794,6 +804,7 @@ export default function App() {
               // 保存编辑器实例与滚动容器引用，供映射计算使用。
               editorViewRef.current = view;
               editorScrollerRef.current = view.scrollDOM;
+              setEditorScrollerElement(view.scrollDOM);
               scheduleRebuildScrollAnchors();
             }}
             onChange={(value) => {
@@ -814,6 +825,7 @@ export default function App() {
           ref={(node) => {
             // 保存预览容器引用，供滚动与锚点计算使用。
             previewScrollerRef.current = node;
+            setPreviewScrollerElement(node);
           }}
         >
           <article className="markdown-body">

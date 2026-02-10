@@ -177,6 +177,70 @@ body {
   height: auto;
 }
 
+/* Markdown 表格基础排版。 */
+.markdown-body table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 16px 0;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1f2937;
+}
+
+/* Markdown 表头样式。 */
+.markdown-body thead th {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  color: #0f172a;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Markdown 单元格样式。 */
+.markdown-body th,
+.markdown-body td {
+  padding: 10px 12px;
+  border-right: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+  text-align: left;
+  word-break: break-word;
+}
+
+/* 斑马纹提升长表格可读性。 */
+.markdown-body tbody tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+/* 鼠标悬停反馈，便于阅读定位。 */
+.markdown-body tbody tr:hover td {
+  background: #eef6ff;
+}
+
+/* 清理右侧与底部边界线，避免重线。 */
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  border-right: 0;
+}
+
+.markdown-body tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* 表格内代码片段使用轻量底色，避免与单元格边界冲突。 */
+.markdown-body table code {
+  background: #eef2ff;
+  color: #1d4ed8;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+}
+
 .conflict-footer {
   display: flex;
   align-items: center;
