@@ -27,22 +27,12 @@ body {
   background: #ffffff;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .header h1 {
   font-size: 18px;
   margin: 0;
-}
-
-.header span {
-  color: #6b7280;
-  font-size: 14px;
-  max-width: 60%;
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .workspace {
@@ -103,6 +93,44 @@ body {
   height: 100%;
   overflow-y: scroll;
   overflow-x: hidden;
+  font-family: Optima-Regular, Optima, PingFangSC-light, PingFangTC-light, 'PingFang SC', Cambria, Cochin, Georgia, Times, 'Times New Roman', serif;
+}
+
+/* 统一收窄滚动条，并增强滚动反馈可见性。 */
+.editor-pane .cm-scroller,
+.preview-pane,
+.markdown-body pre {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+
+.editor-pane .cm-scroller::-webkit-scrollbar,
+.preview-pane::-webkit-scrollbar,
+.markdown-body pre::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.editor-pane .cm-scroller::-webkit-scrollbar-track,
+.preview-pane::-webkit-scrollbar-track,
+.markdown-body pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-pane .cm-scroller::-webkit-scrollbar-thumb,
+.preview-pane::-webkit-scrollbar-thumb,
+.markdown-body pre::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background: #94a3b8;
+  background-clip: content-box;
+}
+
+.editor-pane .cm-scroller::-webkit-scrollbar-thumb:hover,
+.preview-pane::-webkit-scrollbar-thumb:hover,
+.markdown-body pre::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+  background-clip: content-box;
 }
 
 .editor-pane .cm-content {
@@ -173,8 +201,102 @@ body {
   background: #ffe4e6;
 }
 
+/* 底部状态栏用于展示空间、文件、保存时间和字数信息。 */
+.status-bar {
+  min-height: 32px;
+  padding: 8px 16px;
+  border-top: 1px solid #dbe2ea;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.status-bar__side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.status-bar__side--left {
+  overflow: hidden;
+}
+
+.status-bar__side--right {
+  gap: 14px;
+  color: #64748b;
+}
+
+/* 保存状态图标容器。 */
+.status-save-indicator {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 图标颜色：未保存=黄色。 */
+.status-save-indicator--unsaved {
+  color: #ca8a04;
+}
+
+/* 图标颜色：保存中=蓝色。 */
+.status-save-indicator--saving {
+  color: #2563eb;
+}
+
+/* 图标颜色：已保存=绿色。 */
+.status-save-indicator--saved {
+  color: #16a34a;
+}
+
+/* 保存状态图标基础样式。 */
+.status-save-icon {
+  display: block;
+}
+
+/* 保存中旋转动画。 */
+.status-save-icon--spin {
+  animation: status-save-spin 0.9s linear infinite;
+}
+
+.status-pill {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-separator {
+  color: #94a3b8;
+}
+
 @media (max-width: 980px) {
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  /* 小屏下将底栏改为两行，避免信息拥挤。 */
+  .status-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+/* 旋转关键帧定义。 */
+@keyframes status-save-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }
