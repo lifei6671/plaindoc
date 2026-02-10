@@ -327,6 +327,8 @@ export default function App() {
   const [activeDocumentTitle, setActiveDocumentTitle] = useState("未命名文档");
   // 最近一次成功保存时间。
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // 编辑器面板根节点，用于在 StrictMode 下追踪滚动容器的重建。
+  const [editorPaneElement, setEditorPaneElement] = useState<HTMLElement | null>(null);
   // 编辑区滚动容器（state 版本），用于保证监听器绑定时机稳定。
   const [editorScrollerElement, setEditorScrollerElement] = useState<HTMLElement | null>(null);
   // 预览区滚动容器（state 版本），用于保证监听器绑定时机稳定。
@@ -347,6 +349,24 @@ export default function App() {
   const syncingRef = useRef(false);
   // 记录最近一次主动滚动来源，用于重算后回对齐。
   const lastScrollSourceRef = useRef<ScrollSource>("editor");
+
+  // 统一更新编辑区滚动容器引用，避免重复 setState 触发不必要重渲染。
+  const setEditorScrollerNode = useCallback((node: HTMLElement | null) => {
+    editorScrollerRef.current = node;
+    setEditorScrollerElement((previous) => (previous === node ? previous : node));
+  }, []);
+
+  // 编辑器面板 ref：用于感知 CodeMirror 在 StrictMode/HMR 下的重挂载。
+  const handleEditorPaneRef = useCallback(
+    (node: HTMLElement | null) => {
+      setEditorPaneElement((previous) => (previous === node ? previous : node));
+      // 面板卸载时清空滚动容器引用，防止监听器挂在旧节点上。
+      if (!node) {
+        setEditorScrollerNode(null);
+      }
+    },
+    [setEditorScrollerNode]
+  );
 
   // 预览区 ref 采用稳定回调，避免每次渲染都触发 null -> node 抖动。
   const handlePreviewScrollerRef = useCallback((node: HTMLElement | null) => {
@@ -495,7 +515,8 @@ export default function App() {
     const editorElement = editorScrollerRef.current;
     const previewElement = previewScrollerRef.current;
     const editorView = editorViewRef.current;
-    if (!editorElement || !previewElement || !editorView) {
+    // editorView 可能在 StrictMode 旧实例卸载后短暂失效，需等待新实例就绪。
+    if (!editorElement || !previewElement || !editorView || !editorView.dom.isConnected) {
       editorToPreviewAnchorsRef.current = [];
       previewToEditorAnchorsRef.current = [];
       return;
@@ -815,6 +836,40 @@ export default function App() {
     scheduleRebuildScrollAnchors();
   }, [editorScrollerElement, previewScrollerElement, scheduleRebuildScrollAnchors]);
 
+  // 监听编辑器面板中的 DOM 变化，确保滚动容器引用始终指向“当前活跃实例”。
+  useEffect(() => {
+    if (!editorPaneElement) {
+      return;
+    }
+
+    const refreshEditorScroller = () => {
+      const currentScroller = editorPaneElement.querySelector<HTMLElement>(".cm-scroller");
+      // 仅接受仍在文档中的节点，避免绑定到已销毁实例。
+      if (currentScroller && currentScroller.isConnected) {
+        setEditorScrollerNode(currentScroller);
+        return;
+      }
+      setEditorScrollerNode(null);
+    };
+
+    refreshEditorScroller();
+
+    let mutationObserver: MutationObserver | null = null;
+    if (typeof MutationObserver !== "undefined") {
+      mutationObserver = new MutationObserver(() => {
+        refreshEditorScroller();
+      });
+      mutationObserver.observe(editorPaneElement, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    return () => {
+      mutationObserver?.disconnect();
+    };
+  }, [editorPaneElement, setEditorScrollerNode]);
+
   // 绑定编辑区与预览区滚动事件，触发单向同步。
   useEffect(() => {
     if (!editorScrollerElement || !previewScrollerElement) {
@@ -965,7 +1020,7 @@ export default function App() {
       </header>
       {/* 双栏工作区：左编辑、右预览。 */}
       <main className="workspace">
-        <section className="pane editor-pane">
+        <section className="pane editor-pane" ref={handleEditorPaneRef}>
           <CodeMirror
             value={content}
             extensions={extensions}
@@ -973,10 +1028,7 @@ export default function App() {
             onCreateEditor={(view) => {
               // 保存编辑器实例与滚动容器引用，供映射计算使用。
               editorViewRef.current = view;
-              editorScrollerRef.current = view.scrollDOM;
-              setEditorScrollerElement((previous) =>
-                previous === view.scrollDOM ? previous : view.scrollDOM
-              );
+              setEditorScrollerNode(view.scrollDOM);
               scheduleRebuildScrollAnchors();
             }}
             onChange={(value) => {
