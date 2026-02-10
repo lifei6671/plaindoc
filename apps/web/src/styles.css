@@ -35,6 +35,7 @@ body {
 .header h1 {
   font-size: 18px;
   margin: 0;
+  font-family: Optima-Regular, Optima, PingFangSC-light, PingFangTC-light, PingFang SC, Cambria, Cochin, Georgia, Times, Times New Roman, serif;
 }
 
 /* 顶栏操作区：用于承载主题菜单等扩展能力。 */
@@ -107,7 +108,8 @@ body {
 
 /* 主题项按钮。 */
 .theme-menu__item {
-  width: 100%;
+  width: auto;
+  flex: 1;
   border: 0;
   border-radius: 8px;
   padding: 8px 10px;
@@ -122,6 +124,17 @@ body {
 
 .theme-menu__item:hover {
   background: #f1f5f9;
+}
+
+/* 单个主题选项行：左侧选择，右侧查看详情按钮。 */
+.theme-menu__item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.theme-menu__item-row + .theme-menu__item-row {
+  margin-top: 6px;
 }
 
 .theme-menu__item:focus-visible {
@@ -143,6 +156,192 @@ body {
 
 /* 主题项描述。 */
 .theme-menu__item-description {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* 主题详情按钮：放在每个主题项右侧。 */
+.theme-menu__details-button {
+  width: 52px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.theme-menu__details-button:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.theme-menu__details-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
+/* 样式详情抽屉层：固定在页面顶层。 */
+.style-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 抽屉遮罩层：点击后关闭抽屉。 */
+.style-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.42);
+  cursor: pointer;
+}
+
+/* 右侧抽屉主体。 */
+.style-drawer {
+  position: relative;
+  width: min(560px, 92vw);
+  height: 100%;
+  border-left: 1px solid #dbe2ea;
+  background: #ffffff;
+  box-shadow: -18px 0 32px rgba(15, 23, 42, 0.16);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 抽屉头部。 */
+.style-drawer__header {
+  padding: 16px 18px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.style-drawer__header-copy h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.style-drawer__header-copy p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* 抽屉关闭按钮。 */
+.style-drawer__close {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.style-drawer__close:hover {
+  background: #f8fafc;
+}
+
+/* 抽屉滚动内容区域。 */
+.style-drawer__body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 18px 20px;
+}
+
+/* 抽屉内分段。 */
+.style-drawer-section + .style-drawer-section {
+  margin-top: 18px;
+}
+
+.style-drawer-section h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+/* 简洁键值布局。 */
+.style-drawer-kv {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px 10px;
+}
+
+.style-drawer-kv dt {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.style-drawer-kv dd {
+  margin: 0;
+  font-size: 12px;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+/* 样式明细表格。 */
+.style-drawer-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.style-drawer-table th,
+.style-drawer-table td {
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.style-drawer-table th {
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 600;
+}
+
+.style-drawer-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.style-drawer-table th:last-child,
+.style-drawer-table td:last-child {
+  border-right: 0;
+}
+
+/* 外部样式代码展示块。 */
+.style-drawer-code {
+  margin: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.style-drawer-empty {
+  margin: 0;
   font-size: 12px;
   color: #64748b;
 }
@@ -208,20 +407,18 @@ body {
   height: 100%;
   overflow-y: scroll;
   overflow-x: hidden;
-  font-family: var(
-    --pd-preview-font-family,
-    Optima-Regular,
-    Optima,
-    PingFangSC-light,
-    PingFangTC-light,
-    "PingFang SC",
-    Cambria,
-    Cochin,
-    Georgia,
-    Times,
-    "Times New Roman",
-    serif
-  );
+  font-family: var(--pd-preview-font-family,
+      Optima-Regular,
+      Optima,
+      PingFangSC-light,
+      PingFangTC-light,
+      "PingFang SC",
+      Cambria,
+      Cochin,
+      Georgia,
+      Times,
+      "Times New Roman",
+      serif);
 }
 
 /* 预览区默认主题变量：外部可用同一选择器覆写这些变量。 */
@@ -324,7 +521,7 @@ body {
   color: var(--pd-preview-text-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body li > p,
+#plaindoc-preview-pane .plaindoc-preview-body li>p,
 #plaindoc-preview-pane .plaindoc-preview-body blockquote p,
 #plaindoc-preview-pane .plaindoc-preview-body td p,
 #plaindoc-preview-pane .plaindoc-preview-body th p {
@@ -582,6 +779,7 @@ body {
 }
 
 @media (max-width: 980px) {
+
   /* 小屏下顶部改为换行布局，保证主题菜单可点击。 */
   .header {
     height: auto;
@@ -599,6 +797,10 @@ body {
   .theme-menu__dropdown {
     width: min(260px, calc(100vw - 24px));
     right: 0;
+  }
+
+  .style-drawer {
+    width: min(100vw, 100%);
   }
 
   .workspace {

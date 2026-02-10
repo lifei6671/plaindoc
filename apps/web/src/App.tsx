@@ -19,7 +19,7 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
 import { ConflictError, getDataGateway, type TreeNode } from "./data-access";
 
@@ -76,7 +76,14 @@ interface PreviewThemeTemplate {
   name: string;
   description: string;
   variables: Record<string, string>;
+  syntaxTheme: PreviewSyntaxThemeId;
+  codeBlockStyle: CSSProperties;
+  codeBlockCodeStyle: CSSProperties;
+  inlineCodeStyle: CSSProperties;
 }
+
+// 语法高亮主题标识。
+type PreviewSyntaxThemeId = "one-light" | "one-dark";
 
 // 参与锚点映射的 block 级节点类型。
 const BLOCK_NODE_TYPES = new Set([
@@ -111,6 +118,41 @@ const PREVIEW_THEME_STORAGE_KEY = "plaindoc.preview.theme-template";
 // 外部通知预览样式变更的自定义事件名。
 const PREVIEW_CUSTOM_STYLE_EVENT = "plaindoc:preview-style-change";
 
+// 代码高亮主题映射表：用于在主题模板里切换高亮配色。
+const PREVIEW_SYNTAX_THEMES: Record<PreviewSyntaxThemeId, Record<string, CSSProperties>> = {
+  "one-light": oneLight as Record<string, CSSProperties>,
+  "one-dark": oneDark as Record<string, CSSProperties>
+};
+
+// 默认代码块容器样式：复制到第三方平台时可保留视觉表现。
+const DEFAULT_CODE_BLOCK_STYLE: CSSProperties = {
+  margin: "16px 0",
+  padding: "14px 16px",
+  borderRadius: "10px",
+  border: "1px solid #dbe2ea",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
+  overflowX: "auto",
+  fontSize: "13px",
+  lineHeight: 1.65,
+  background: "#f8fafc"
+};
+
+// 默认代码块 code 标签样式：统一字体并提升可读性。
+const DEFAULT_CODE_BLOCK_CODE_STYLE: CSSProperties = {
+  fontFamily: "\"SFMono-Regular\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+};
+
+// 默认行内代码样式：确保没有 fenced block 时也有可视化区分。
+const DEFAULT_INLINE_CODE_STYLE: CSSProperties = {
+  padding: "1px 6px",
+  borderRadius: "5px",
+  border: "1px solid #dbe2ea",
+  background: "#f1f5f9",
+  color: "#0f172a",
+  fontSize: "0.92em",
+  fontFamily: "\"SFMono-Regular\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+};
+
 // 内置主题模板列表：支持从菜单直接切换。
 const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
   {
@@ -144,7 +186,11 @@ const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
       "--pd-preview-table-font-size": "14px",
       "--pd-preview-table-border-color": "#dbe2ea",
       "--pd-preview-table-cell-padding": "10px 12px"
-    }
+    },
+    syntaxTheme: "one-light",
+    codeBlockStyle: { ...DEFAULT_CODE_BLOCK_STYLE },
+    codeBlockCodeStyle: { ...DEFAULT_CODE_BLOCK_CODE_STYLE },
+    inlineCodeStyle: { ...DEFAULT_INLINE_CODE_STYLE }
   },
   {
     id: "newspaper",
@@ -177,6 +223,23 @@ const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
       "--pd-preview-table-font-size": "14px",
       "--pd-preview-table-border-color": "#cbd5e1",
       "--pd-preview-table-cell-padding": "10px 12px"
+    },
+    syntaxTheme: "one-light",
+    codeBlockStyle: {
+      ...DEFAULT_CODE_BLOCK_STYLE,
+      borderRadius: "8px",
+      border: "1px solid #cbd5e1",
+      background: "#f8fafc"
+    },
+    codeBlockCodeStyle: {
+      ...DEFAULT_CODE_BLOCK_CODE_STYLE,
+      fontFamily: "\"Source Code Pro\", \"SFMono-Regular\", Menlo, Monaco, Consolas, monospace"
+    },
+    inlineCodeStyle: {
+      ...DEFAULT_INLINE_CODE_STYLE,
+      background: "#ecfeff",
+      border: "1px solid #99f6e4",
+      color: "#115e59"
     }
   },
   {
@@ -210,38 +273,27 @@ const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
       "--pd-preview-table-font-size": "13px",
       "--pd-preview-table-border-color": "#cbd5e1",
       "--pd-preview-table-cell-padding": "8px 10px"
+    },
+    syntaxTheme: "one-dark",
+    codeBlockStyle: {
+      ...DEFAULT_CODE_BLOCK_STYLE,
+      borderRadius: "12px",
+      border: "1px solid #1e293b",
+      boxShadow: "0 8px 18px rgba(2, 6, 23, 0.2)",
+      background: "#0f172a"
+    },
+    codeBlockCodeStyle: {
+      ...DEFAULT_CODE_BLOCK_CODE_STYLE,
+      color: "#dbeafe"
+    },
+    inlineCodeStyle: {
+      ...DEFAULT_INLINE_CODE_STYLE,
+      background: "#0f172a",
+      border: "1px solid #334155",
+      color: "#7dd3fc"
     }
   }
 ];
-
-// 代码块行内样式：复制到第三方平台时可保留视觉表现。
-const INLINE_CODE_BLOCK_STYLE: CSSProperties = {
-  margin: "16px 0",
-  padding: "14px 16px",
-  borderRadius: "10px",
-  border: "1px solid #dbe2ea",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
-  overflowX: "auto",
-  fontSize: "13px",
-  lineHeight: 1.65,
-  background: "#f8fafc"
-};
-
-// 代码块 code 标签样式：统一字体并提升可读性。
-const INLINE_CODE_BLOCK_CODE_STYLE: CSSProperties = {
-  fontFamily: "\"SFMono-Regular\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-};
-
-// 行内代码样式：确保没有 fenced block 时也有可视化区分。
-const INLINE_CODE_STYLE: CSSProperties = {
-  padding: "1px 6px",
-  borderRadius: "5px",
-  border: "1px solid #dbe2ea",
-  background: "#f1f5f9",
-  color: "#0f172a",
-  fontSize: "0.92em",
-  fontFamily: "\"SFMono-Regular\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
-};
 
 // 提取代码语言名（language-xxx）。
 function resolveCodeLanguage(className: string | undefined): string {
@@ -475,21 +527,125 @@ function resolveSaveIndicatorVariant(saveStatus: SaveStatus): SaveIndicatorVaria
   return "unsaved";
 }
 
+// 抽屉样式键值对：用于统一展示当前生效样式。
+interface StyleDetailEntry {
+  property: string;
+  value: string;
+}
+
+// 样式详情抽屉入参：由父组件传入当前主题与外部覆盖样式。
+interface StyleDetailsDrawerProps {
+  theme: PreviewThemeTemplate | null;
+  customPreviewStyleText: string;
+  onClose: () => void;
+}
+
+// 将驼峰样式键转换为 kebab-case，便于用户直观查看 CSS 属性名。
+function toKebabCaseStyleProperty(styleProperty: string): string {
+  if (!styleProperty) {
+    return styleProperty;
+  }
+  if (styleProperty.startsWith("--")) {
+    return styleProperty;
+  }
+  return styleProperty.replace(/[A-Z]/g, (matched) => `-${matched.toLowerCase()}`);
+}
+
+// 统一格式化 CSSProperties 的值，便于在抽屉中输出。
+function formatStyleDetailValue(styleValue: unknown): string {
+  if (typeof styleValue === "string" || typeof styleValue === "number") {
+    return String(styleValue);
+  }
+  if (styleValue === null || styleValue === undefined) {
+    return "";
+  }
+  return String(styleValue);
+}
+
+// 将 CSSProperties 转成可展示的键值数组，并过滤空值。
+function buildStyleDetailEntries(styleObject: CSSProperties): StyleDetailEntry[] {
+  return Object.entries(styleObject as Record<string, unknown>)
+    .map(([property, value]) => ({
+      property: toKebabCaseStyleProperty(property),
+      value: formatStyleDetailValue(value)
+    }))
+    .filter((entry) => entry.property && entry.value)
+    .sort((left, right) => left.property.localeCompare(right.property));
+}
+
+// 将样式条目序列化为 CSS declaration 文本。
+function buildCssDeclarationsSource(entries: StyleDetailEntry[]): string {
+  if (!entries.length) {
+    return "  /* 无样式声明 */";
+  }
+  return entries.map((entry) => `  ${entry.property}: ${entry.value};`).join("\n");
+}
+
+// 生成当前主题可复制的 CSS 模板（包含注释说明）。
+function buildThemeCssTemplate(theme: PreviewThemeTemplate): string {
+  const previewPaneSelector = `#${PREVIEW_PANE_ID}.${getPreviewThemeClassName(theme.id)}`;
+  const previewBodySelector = `${previewPaneSelector} .${PREVIEW_BODY_CLASS}`;
+  const sortedVariables = Object.entries(theme.variables).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  const variableSource =
+    sortedVariables.length > 0
+      ? sortedVariables.map(([name, value]) => `  ${name}: ${value};`).join("\n")
+      : "  /* 无变量声明 */";
+  const codeBlockSource = buildCssDeclarationsSource(buildStyleDetailEntries(theme.codeBlockStyle));
+  const codeBlockCodeSource = buildCssDeclarationsSource(
+    buildStyleDetailEntries(theme.codeBlockCodeStyle)
+  );
+  const inlineCodeSource = buildCssDeclarationsSource(buildStyleDetailEntries(theme.inlineCodeStyle));
+
+  return `/* PlainDoc 主题样式模板（可复制后直接修改） 
+ * 主题名称：${theme.name}
+ * 主题 ID：${theme.id}
+ * 语法高亮：${theme.syntaxTheme}
+ */
+
+/* 预览区基础变量 */
+${previewPaneSelector} {
+${variableSource}
+}
+
+/* 代码块容器（fenced code -> pre） */
+${previewBodySelector} pre {
+${codeBlockSource}
+}
+
+/* 代码块文本（pre > code） */
+${previewBodySelector} pre code {
+${codeBlockCodeSource}
+}
+
+/* 行内代码（p/li/table 内 code） */
+${previewBodySelector} p code,
+${previewBodySelector} li code,
+${previewBodySelector} table code {
+${inlineCodeSource}
+}`;
+}
+
 // 主题菜单组件入参：由父组件提供当前主题和切换回调。
 interface ThemeMenuProps {
   themes: PreviewThemeTemplate[];
   activeThemeId: string;
   onSelectTheme: (themeId: string) => void;
+  customPreviewStyleText: string;
 }
 
 // 独立主题菜单：开关状态内聚在子组件中，避免影响整页渲染。
 const ThemeMenu = memo(function ThemeMenu({
   themes,
   activeThemeId,
-  onSelectTheme
+  onSelectTheme,
+  customPreviewStyleText
 }: ThemeMenuProps) {
   // 菜单展开状态仅影响当前子树，不触发父组件重渲染。
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  // 样式详情抽屉对应的主题 ID；为空表示抽屉关闭。
+  const [detailsThemeId, setDetailsThemeId] = useState<string | null>(null);
   // 菜单根节点引用：用于判断点击是否发生在菜单外部。
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -512,6 +668,27 @@ const ThemeMenu = memo(function ThemeMenu({
     },
     [onSelectTheme]
   );
+
+  // 当前抽屉展示的主题对象。
+  const detailsTheme = useMemo(
+    () => (detailsThemeId ? resolvePreviewTheme(detailsThemeId) : null),
+    [detailsThemeId]
+  );
+
+  // 打开指定主题的样式详情抽屉。
+  const openThemeDetails = useCallback(
+    (themeId: string) => {
+      const targetTheme = resolvePreviewTheme(themeId);
+      setDetailsThemeId(targetTheme.id);
+      setIsThemeMenuOpen(false);
+    },
+    []
+  );
+
+  // 关闭样式详情抽屉。
+  const closeStyleDetailsDrawer = useCallback(() => {
+    setDetailsThemeId(null);
+  }, []);
 
   // 主题菜单弹出时监听外部点击与 ESC，提升交互可控性。
   useEffect(() => {
@@ -545,39 +722,140 @@ const ThemeMenu = memo(function ThemeMenu({
   }, [isThemeMenuOpen]);
 
   return (
-    <div className="theme-menu" ref={themeMenuRef}>
+    <>
+      <div className="theme-menu" ref={themeMenuRef}>
+        <button
+          type="button"
+          className="theme-menu__trigger"
+          aria-label="选择预览主题"
+          aria-haspopup="listbox"
+          aria-expanded={isThemeMenuOpen}
+          onClick={toggleThemeMenu}
+        >
+          <span className="theme-menu__trigger-label">主题</span>
+          <span className="theme-menu__trigger-value">{activeTheme.name}</span>
+        </button>
+        {isThemeMenuOpen ? (
+          <ul className="theme-menu__dropdown" role="listbox" aria-label="预览主题列表">
+            {themes.map((themeTemplate) => {
+              const isActiveTheme = themeTemplate.id === activeTheme.id;
+              return (
+                <li key={themeTemplate.id} className="theme-menu__item-row">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isActiveTheme}
+                    className={`theme-menu__item ${isActiveTheme ? "theme-menu__item--active" : ""}`}
+                    onClick={() => applyTheme(themeTemplate.id)}
+                  >
+                    <span className="theme-menu__item-name">{themeTemplate.name}</span>
+                    <span className="theme-menu__item-description">{themeTemplate.description}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="theme-menu__details-button"
+                    aria-label={`查看 ${themeTemplate.name} 样式详情`}
+                    onClick={() => openThemeDetails(themeTemplate.id)}
+                  >
+                    查看
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </div>
+      <StyleDetailsDrawer
+        theme={detailsTheme}
+        customPreviewStyleText={customPreviewStyleText}
+        onClose={closeStyleDetailsDrawer}
+      />
+    </>
+  );
+});
+
+// 右侧样式详情抽屉：用于查看当前主题与覆盖样式细节。
+const StyleDetailsDrawer = memo(function StyleDetailsDrawer({
+  theme,
+  customPreviewStyleText,
+  onClose
+}: StyleDetailsDrawerProps) {
+  // 仅当存在主题时才展示抽屉。
+  const isOpen = Boolean(theme);
+  // 当前主题 CSS 模板：用于复制后快速二次修改。
+  const themeCssTemplate = useMemo(
+    () => (theme ? buildThemeCssTemplate(theme) : ""),
+    [theme]
+  );
+
+  // 抽屉打开时支持 ESC 快捷关闭。
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  if (!theme) {
+    return null;
+  }
+
+  return (
+    <div className="style-drawer-layer" role="dialog" aria-modal="true" aria-label="当前样式详情">
       <button
         type="button"
-        className="theme-menu__trigger"
-        aria-label="选择预览主题"
-        aria-haspopup="listbox"
-        aria-expanded={isThemeMenuOpen}
-        onClick={toggleThemeMenu}
-      >
-        <span className="theme-menu__trigger-label">主题</span>
-        <span className="theme-menu__trigger-value">{activeTheme.name}</span>
-      </button>
-      {isThemeMenuOpen ? (
-        <ul className="theme-menu__dropdown" role="listbox" aria-label="预览主题列表">
-          {themes.map((themeTemplate) => {
-            const isActiveTheme = themeTemplate.id === activeTheme.id;
-            return (
-              <li key={themeTemplate.id}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={isActiveTheme}
-                  className={`theme-menu__item ${isActiveTheme ? "theme-menu__item--active" : ""}`}
-                  onClick={() => applyTheme(themeTemplate.id)}
-                >
-                  <span className="theme-menu__item-name">{themeTemplate.name}</span>
-                  <span className="theme-menu__item-description">{themeTemplate.description}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+        className="style-drawer-backdrop"
+        aria-label="关闭样式详情抽屉"
+        onClick={onClose}
+      />
+      <aside className="style-drawer">
+        <header className="style-drawer__header">
+          <div className="style-drawer__header-copy">
+            <h2>当前生效样式</h2>
+            <p>已生成带注释 CSS 模板，可直接复制后修改。</p>
+          </div>
+          <button type="button" className="style-drawer__close" onClick={onClose}>
+            关闭
+          </button>
+        </header>
+        <div className="style-drawer__body">
+          <section className="style-drawer-section">
+            <h3>主题信息</h3>
+            <dl className="style-drawer-kv">
+              <dt>主题 ID</dt>
+              <dd>{theme.id}</dd>
+              <dt>主题名称</dt>
+              <dd>{theme.name}</dd>
+              <dt>主题描述</dt>
+              <dd>{theme.description}</dd>
+              <dt>高亮主题</dt>
+              <dd>{theme.syntaxTheme}</dd>
+            </dl>
+          </section>
+
+          <section className="style-drawer-section">
+            <h3>主题 CSS 源码（含注释，可复制）</h3>
+            <pre className="style-drawer-code">{themeCssTemplate}</pre>
+          </section>
+
+          <section className="style-drawer-section">
+            <h3>外部覆盖样式</h3>
+            {customPreviewStyleText ? (
+              <pre className="style-drawer-code">{customPreviewStyleText}</pre>
+            ) : (
+              <p className="style-drawer-empty">当前没有外部覆盖样式。</p>
+            )}
+          </section>
+        </div>
+      </aside>
     </div>
   );
 });
@@ -961,83 +1239,90 @@ export default function App() {
   const remarkPlugins = useMemo(() => [remarkGfm, remarkBlockAnchorPlugin], []);
   // 自定义 Markdown 渲染器：代码块走高亮组件，行内代码走轻量内联样式。
   const markdownComponents = useMemo<Components>(
-    () => ({
-      pre: ({ node: _node, children, ...props }) => {
-        const childNodes = Children.toArray(children);
-        const codeElement = childNodes[0];
-        if (!isValidElement(codeElement)) {
-          return <pre {...props}>{children}</pre>;
-        }
+    () => {
+      // 读取当前主题下的代码渲染配置。
+      const activeTheme = resolvePreviewTheme(activePreviewThemeId);
+      const syntaxTheme =
+        PREVIEW_SYNTAX_THEMES[activeTheme.syntaxTheme] ?? PREVIEW_SYNTAX_THEMES["one-light"];
 
-        const codeElementProps = codeElement.props as Record<string, unknown>;
-        const codeClassName =
-          typeof codeElementProps.className === "string" ? codeElementProps.className : undefined;
-        const language = resolveCodeLanguage(codeClassName);
-        const anchorDataAttributes = pickAnchorDataAttributes(codeElementProps);
-        const codeText = extractCodeText(codeElementProps.children as ReactNode).replace(/\n$/, "");
+      return {
+        pre: ({ node: _node, children, ...props }) => {
+          const childNodes = Children.toArray(children);
+          const codeElement = childNodes[0];
+          if (!isValidElement(codeElement)) {
+            return <pre {...props}>{children}</pre>;
+          }
 
-        // 自定义 PreTag：把 source 锚点挂回代码块根节点，保证滚动映射不丢失。
-        const PreTag = ({
-          children: preChildren,
-          style: preStyle,
-          ...preTagProps
-        }: ComponentPropsWithoutRef<"pre">) => (
-          <pre
-            {...preTagProps}
-            {...anchorDataAttributes}
-            style={{
-              ...(preStyle ?? {}),
-              ...INLINE_CODE_BLOCK_STYLE
-            }}
-          >
-            {preChildren}
-          </pre>
-        );
+          const codeElementProps = codeElement.props as Record<string, unknown>;
+          const codeClassName =
+            typeof codeElementProps.className === "string" ? codeElementProps.className : undefined;
+          const language = resolveCodeLanguage(codeClassName);
+          const anchorDataAttributes = pickAnchorDataAttributes(codeElementProps);
+          const codeText = extractCodeText(codeElementProps.children as ReactNode).replace(/\n$/, "");
 
-        return (
-          <SyntaxHighlighter
-            language={language}
-            style={oneLight}
-            PreTag={PreTag}
-            useInlineStyles
-            wrapLongLines
-            codeTagProps={{
-              className: codeClassName,
-              style: INLINE_CODE_BLOCK_CODE_STYLE
-            }}
-          >
-            {codeText}
-          </SyntaxHighlighter>
-        );
-      },
-      code: ({ node: _node, className, style, children, ...props }) => {
-        const dataSourceLine = (props as Record<string, unknown>)["data-source-line"];
-        const dataSourceOffset = (props as Record<string, unknown>)["data-source-offset"];
-        const isBlockCode = typeof dataSourceLine === "string" || typeof dataSourceOffset === "string";
-        // block code 由 pre 渲染器统一处理，code 节点只做透传，避免重复包裹。
-        if (isBlockCode) {
+          // 自定义 PreTag：把 source 锚点挂回代码块根节点，保证滚动映射不丢失。
+          const PreTag = ({
+            children: preChildren,
+            style: preStyle,
+            ...preTagProps
+          }: ComponentPropsWithoutRef<"pre">) => (
+            <pre
+              {...preTagProps}
+              {...anchorDataAttributes}
+              style={{
+                ...(preStyle ?? {}),
+                ...activeTheme.codeBlockStyle
+              }}
+            >
+              {preChildren}
+            </pre>
+          );
+
           return (
-            <code className={className} style={style} {...props}>
+            <SyntaxHighlighter
+              language={language}
+              style={syntaxTheme}
+              PreTag={PreTag}
+              useInlineStyles
+              wrapLongLines
+              codeTagProps={{
+                className: codeClassName,
+                style: activeTheme.codeBlockCodeStyle
+              }}
+            >
+              {codeText}
+            </SyntaxHighlighter>
+          );
+        },
+        code: ({ node: _node, className, style, children, ...props }) => {
+          const dataSourceLine = (props as Record<string, unknown>)["data-source-line"];
+          const dataSourceOffset = (props as Record<string, unknown>)["data-source-offset"];
+          const isBlockCode = typeof dataSourceLine === "string" || typeof dataSourceOffset === "string";
+          // block code 由 pre 渲染器统一处理，code 节点只做透传，避免重复包裹。
+          if (isBlockCode) {
+            return (
+              <code className={className} style={style} {...props}>
+                {children}
+              </code>
+            );
+          }
+
+          return (
+            <code
+              className={className}
+              style={{
+                ...activeTheme.inlineCodeStyle,
+                ...(style ?? {})
+              }}
+              {...props}
+            >
               {children}
             </code>
           );
         }
-
-        return (
-          <code
-            className={className}
-            style={{
-              ...INLINE_CODE_STYLE,
-              ...(style ?? {})
-            }}
-            {...props}
-          >
-            {children}
-          </code>
-        );
-      }
-    }),
-    []
+      };
+    },
+    [activePreviewThemeId]
   );
   // markdown-it 仅用于“去语法后的文字统计”。
   const markdownTextParser = useMemo(
@@ -1403,6 +1688,7 @@ export default function App() {
             themes={PREVIEW_THEME_TEMPLATES}
             activeThemeId={activePreviewTheme.id}
             onSelectTheme={handleThemeChange}
+            customPreviewStyleText={customPreviewStyleText}
           />
         </div>
       </header>
