@@ -7,6 +7,7 @@ import MarkdownIt from "markdown-it";
 import {
   Children,
   isValidElement,
+  memo,
   type CSSProperties,
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -474,6 +475,113 @@ function resolveSaveIndicatorVariant(saveStatus: SaveStatus): SaveIndicatorVaria
   return "unsaved";
 }
 
+// 主题菜单组件入参：由父组件提供当前主题和切换回调。
+interface ThemeMenuProps {
+  themes: PreviewThemeTemplate[];
+  activeThemeId: string;
+  onSelectTheme: (themeId: string) => void;
+}
+
+// 独立主题菜单：开关状态内聚在子组件中，避免影响整页渲染。
+const ThemeMenu = memo(function ThemeMenu({
+  themes,
+  activeThemeId,
+  onSelectTheme
+}: ThemeMenuProps) {
+  // 菜单展开状态仅影响当前子树，不触发父组件重渲染。
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  // 菜单根节点引用：用于判断点击是否发生在菜单外部。
+  const themeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // 当前主题文案显示。
+  const activeTheme = useMemo(() => {
+    const foundTheme = themes.find((theme) => theme.id === activeThemeId);
+    return foundTheme ?? themes[0];
+  }, [themes, activeThemeId]);
+
+  // 切换主题菜单显示状态。
+  const toggleThemeMenu = useCallback(() => {
+    setIsThemeMenuOpen((previous) => !previous);
+  }, []);
+
+  // 应用选中的主题并关闭菜单。
+  const applyTheme = useCallback(
+    (themeId: string) => {
+      onSelectTheme(themeId);
+      setIsThemeMenuOpen(false);
+    },
+    [onSelectTheme]
+  );
+
+  // 主题菜单弹出时监听外部点击与 ESC，提升交互可控性。
+  useEffect(() => {
+    if (!isThemeMenuOpen) {
+      return;
+    }
+
+    const onWindowMouseDown = (event: MouseEvent) => {
+      const menuRootElement = themeMenuRef.current;
+      if (!menuRootElement) {
+        return;
+      }
+      if (event.target instanceof Node && menuRootElement.contains(event.target)) {
+        return;
+      }
+      setIsThemeMenuOpen(false);
+    };
+
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsThemeMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", onWindowMouseDown);
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onWindowMouseDown);
+      window.removeEventListener("keydown", onWindowKeyDown);
+    };
+  }, [isThemeMenuOpen]);
+
+  return (
+    <div className="theme-menu" ref={themeMenuRef}>
+      <button
+        type="button"
+        className="theme-menu__trigger"
+        aria-label="选择预览主题"
+        aria-haspopup="listbox"
+        aria-expanded={isThemeMenuOpen}
+        onClick={toggleThemeMenu}
+      >
+        <span className="theme-menu__trigger-label">主题</span>
+        <span className="theme-menu__trigger-value">{activeTheme.name}</span>
+      </button>
+      {isThemeMenuOpen ? (
+        <ul className="theme-menu__dropdown" role="listbox" aria-label="预览主题列表">
+          {themes.map((themeTemplate) => {
+            const isActiveTheme = themeTemplate.id === activeTheme.id;
+            return (
+              <li key={themeTemplate.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isActiveTheme}
+                  className={`theme-menu__item ${isActiveTheme ? "theme-menu__item--active" : ""}`}
+                  onClick={() => applyTheme(themeTemplate.id)}
+                >
+                  <span className="theme-menu__item-name">{themeTemplate.name}</span>
+                  <span className="theme-menu__item-description">{themeTemplate.description}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+});
+
 export default function App() {
   // 数据网关单例。
   const dataGateway = useMemo(() => getDataGateway(), []);
@@ -497,8 +605,6 @@ export default function App() {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   // 当前生效的预览主题 ID。
   const [activePreviewThemeId, setActivePreviewThemeId] = useState(DEFAULT_PREVIEW_THEME_ID);
-  // 主题菜单开关状态。
-  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   // 外部注入的预览样式文本；为空时仅使用内置主题。
   const [customPreviewStyleText, setCustomPreviewStyleText] = useState("");
   // 编辑器面板根节点，用于在 StrictMode 下追踪滚动容器的重建。
@@ -523,8 +629,6 @@ export default function App() {
   const syncingRef = useRef(false);
   // 记录最近一次主动滚动来源，用于重算后回对齐。
   const lastScrollSourceRef = useRef<ScrollSource>("editor");
-  // 主题菜单根节点，用于点击外部关闭下拉层。
-  const themeMenuRef = useRef<HTMLDivElement | null>(null);
 
   // 统一更新编辑区滚动容器引用，避免重复 setState 触发不必要重渲染。
   const setEditorScrollerNode = useCallback((node: HTMLElement | null) => {
@@ -1158,37 +1262,6 @@ export default function App() {
     scheduleRebuildScrollAnchors();
   }, [activePreviewThemeClassName, customPreviewStyleText, scheduleRebuildScrollAnchors]);
 
-  // 主题菜单弹出时监听外部点击与 ESC，提升交互可控性。
-  useEffect(() => {
-    if (!isThemeMenuOpen) {
-      return;
-    }
-
-    const onWindowMouseDown = (event: MouseEvent) => {
-      const menuRootElement = themeMenuRef.current;
-      if (!menuRootElement) {
-        return;
-      }
-      if (event.target instanceof Node && menuRootElement.contains(event.target)) {
-        return;
-      }
-      setIsThemeMenuOpen(false);
-    };
-
-    const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsThemeMenuOpen(false);
-      }
-    };
-
-    window.addEventListener("mousedown", onWindowMouseDown);
-    window.addEventListener("keydown", onWindowKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onWindowMouseDown);
-      window.removeEventListener("keydown", onWindowKeyDown);
-    };
-  }, [isThemeMenuOpen]);
-
   // 监听图片异步加载与容器尺寸变化，保障长图场景下映射实时更新。
   useEffect(() => {
     const previewElement = previewScrollerElement;
@@ -1282,17 +1355,13 @@ export default function App() {
     };
   }, []);
 
-  // 切换主题菜单显示状态。
-  const toggleThemeMenu = () => {
-    setIsThemeMenuOpen((previous) => !previous);
-  };
-
-  // 应用选中的主题并关闭菜单。
-  const applyPreviewTheme = (themeId: string) => {
+  // 应用选中的主题：仅在主题真正变化时更新父组件状态。
+  const handleThemeChange = useCallback((themeId: string) => {
     const targetTheme = resolvePreviewTheme(themeId);
-    setActivePreviewThemeId(targetTheme.id);
-    setIsThemeMenuOpen(false);
-  };
+    setActivePreviewThemeId((previousThemeId) =>
+      previousThemeId === targetTheme.id ? previousThemeId : targetTheme.id
+    );
+  }, []);
 
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
@@ -1329,41 +1398,12 @@ export default function App() {
       <header className="header">
         <h1>PlainDoc</h1>
         <div className="header-actions">
-          {/* 主题菜单：点击按钮弹出列表，选择后即时生效。 */}
-          <div className="theme-menu" ref={themeMenuRef}>
-            <button
-              type="button"
-              className="theme-menu__trigger"
-              aria-label="选择预览主题"
-              aria-haspopup="listbox"
-              aria-expanded={isThemeMenuOpen}
-              onClick={toggleThemeMenu}
-            >
-              <span className="theme-menu__trigger-label">主题</span>
-              <span className="theme-menu__trigger-value">{activePreviewTheme.name}</span>
-            </button>
-            {isThemeMenuOpen ? (
-              <ul className="theme-menu__dropdown" role="listbox" aria-label="预览主题列表">
-                {PREVIEW_THEME_TEMPLATES.map((themeTemplate) => {
-                  const isActiveTheme = themeTemplate.id === activePreviewTheme.id;
-                  return (
-                    <li key={themeTemplate.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={isActiveTheme}
-                        className={`theme-menu__item ${isActiveTheme ? "theme-menu__item--active" : ""}`}
-                        onClick={() => applyPreviewTheme(themeTemplate.id)}
-                      >
-                        <span className="theme-menu__item-name">{themeTemplate.name}</span>
-                        <span className="theme-menu__item-description">{themeTemplate.description}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </div>
+          {/* 主题菜单：展开/收起只更新菜单组件自身。 */}
+          <ThemeMenu
+            themes={PREVIEW_THEME_TEMPLATES}
+            activeThemeId={activePreviewTheme.id}
+            onSelectTheme={handleThemeChange}
+          />
         </div>
       </header>
       {/* 双栏工作区：左编辑、右预览。 */}
