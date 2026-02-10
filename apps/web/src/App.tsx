@@ -66,6 +66,19 @@ interface DirectionAnchor {
   targetY: number;
 }
 
+// TOC 单条目录项信息。
+interface TocItem {
+  level: number;
+  text: string;
+  sourceLine: number;
+}
+
+// TOC 解析结果：同时返回标题目录与是否存在 [TOC] 语法标记。
+interface TocParseResult {
+  items: TocItem[];
+  hasMarker: boolean;
+}
+
 // 仅包含本模块需要访问的 Markdown AST 字段。
 interface MarkdownNode {
   type: string;
@@ -74,11 +87,24 @@ interface MarkdownNode {
       line?: number;
       offset?: number;
     };
+    end?: {
+      line?: number;
+      offset?: number;
+    };
   };
   data?: {
     hProperties?: Record<string, unknown>;
   };
   children?: MarkdownNode[];
+}
+
+// 仅包含 TOC 解析所需的 markdown-it token 字段。
+interface MarkdownToken {
+  type: string;
+  tag?: string;
+  map?: number[] | null;
+  content?: string;
+  children?: MarkdownToken[] | null;
 }
 
 // 参与锚点映射的 block 级节点类型。
@@ -94,8 +120,16 @@ const BLOCK_NODE_TYPES = new Set([
   "html"
 ]);
 
-// 预览区锚点节点选择器。
-const BLOCK_ANCHOR_SELECTOR = "[data-source-line], [data-source-offset]";
+// 预览区锚点节点选择器：仅采集 remark 注入的 block 级锚点，避免子节点噪声干扰。
+const BLOCK_ANCHOR_SELECTOR = "[data-anchor-index]";
+// TOC 最大显示层级，默认覆盖 h1~h6 标题。
+const TOC_MAX_DEPTH = 6;
+// TOC 语法标记匹配规则，仅匹配完整段落的 [TOC]。
+const TOC_MARKER_PATTERN = /^\[toc\]$/i;
+// 同步滚动单帧最大步进，避免 TOC 高度失配时出现“瞬移”。
+const MAX_SYNC_STEP_PER_FRAME = 120;
+// 同步收敛阈值，小于该值直接视为对齐完成。
+const SYNC_SETTLE_THRESHOLD = 0.5;
 
 // 预览区固定根节点 ID，供外部样式覆盖时稳定选择。
 const PREVIEW_PANE_ID = "plaindoc-preview-pane";
@@ -145,12 +179,20 @@ function pickAnchorDataAttributes(props: Record<string, unknown>): Record<string
   const anchors: Record<string, string> = {};
   const sourceLine = props["data-source-line"];
   const sourceOffset = props["data-source-offset"];
+  const sourceEndLine = props["data-source-end-line"];
+  const sourceEndOffset = props["data-source-end-offset"];
   const anchorIndex = props["data-anchor-index"];
   if (typeof sourceLine === "string") {
     anchors["data-source-line"] = sourceLine;
   }
   if (typeof sourceOffset === "string") {
     anchors["data-source-offset"] = sourceOffset;
+  }
+  if (typeof sourceEndLine === "string") {
+    anchors["data-source-end-line"] = sourceEndLine;
+  }
+  if (typeof sourceEndOffset === "string") {
+    anchors["data-source-end-offset"] = sourceEndOffset;
   }
   if (typeof anchorIndex === "string") {
     anchors["data-anchor-index"] = anchorIndex;
@@ -194,8 +236,13 @@ function remarkBlockAnchorPlugin() {
       if (BLOCK_NODE_TYPES.has(node.type)) {
         const sourceLine = node.position?.start?.line;
         const sourceOffset = node.position?.start?.offset;
+        const sourceEndLine = node.position?.end?.line;
+        const sourceEndOffset = node.position?.end?.offset;
         const hasSourceLine = typeof sourceLine === "number" && Number.isFinite(sourceLine);
         const hasSourceOffset = typeof sourceOffset === "number" && Number.isFinite(sourceOffset);
+        const hasSourceEndLine = typeof sourceEndLine === "number" && Number.isFinite(sourceEndLine);
+        const hasSourceEndOffset =
+          typeof sourceEndOffset === "number" && Number.isFinite(sourceEndOffset);
         if (hasSourceLine || hasSourceOffset) {
           if (!node.data) {
             node.data = {};
@@ -206,6 +253,13 @@ function remarkBlockAnchorPlugin() {
           }
           if (hasSourceOffset) {
             hProperties["data-source-offset"] = String(Math.max(0, Math.floor(sourceOffset)));
+          }
+          // 同步记录 block 结束位置信息，便于长公式/长代码块生成区间锚点。
+          if (hasSourceEndLine) {
+            hProperties["data-source-end-line"] = String(Math.max(1, Math.floor(sourceEndLine)));
+          }
+          if (hasSourceEndOffset) {
+            hProperties["data-source-end-offset"] = String(Math.max(0, Math.floor(sourceEndOffset)));
           }
           hProperties["data-anchor-index"] = String(anchorIndex);
           anchorIndex += 1;
@@ -335,12 +389,114 @@ function formatError(error: unknown): string {
 
 // 将 Markdown 渲染为 HTML 后提取纯文本，去除语法标记影响。
 function extractPlainTextFromMarkdown(markdownContent: string, parser: MarkdownIt): string {
-  const renderedHtml = parser.render(markdownContent);
+  // 统计字数时忽略 [TOC] 标记，避免语法指令被计入正文。
+  const sanitizedMarkdown = markdownContent.replace(/^\s*\[toc\]\s*$/gim, "");
+  const renderedHtml = parser.render(sanitizedMarkdown);
   if (typeof DOMParser === "undefined") {
-    return markdownContent;
+    return sanitizedMarkdown;
   }
   const htmlDocument = new DOMParser().parseFromString(renderedHtml, "text/html");
   return htmlDocument.body.textContent ?? "";
+}
+
+// 判断文本是否为 [TOC] 语法标记（大小写不敏感）。
+function isTocMarkerText(rawText: string): boolean {
+  return TOC_MARKER_PATTERN.test(rawText.trim());
+}
+
+// 从 markdown-it inline token 中提取纯文本，避免目录显示 Markdown 标记。
+function extractInlineTextFromToken(token: MarkdownToken): string {
+  if (!token.children?.length) {
+    return token.content?.trim() ?? "";
+  }
+  return token.children
+    .map((child) => {
+      if (child.type === "text" || child.type === "code_inline" || child.type === "emoji") {
+        return child.content ?? "";
+      }
+      if (child.type === "image") {
+        return child.content ?? "";
+      }
+      return "";
+    })
+    .join("")
+    .trim();
+}
+
+// 基于 markdown-it token 解析 TOC：提取标题目录并识别 [TOC] 标记。
+function parseTocFromMarkdown(markdownContent: string, parser: MarkdownIt): TocParseResult {
+  if (!markdownContent) {
+    return {
+      items: [],
+      hasMarker: false
+    };
+  }
+  const tokens = parser.parse(markdownContent, {}) as MarkdownToken[];
+  const items: TocItem[] = [];
+  let hasMarker = false;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    // 仅在段落上下文中识别 [TOC]，避免误伤代码块和普通文本。
+    if (token.type === "inline") {
+      const previousToken = tokens[index - 1];
+      const nextToken = tokens[index + 1];
+      if (
+        previousToken?.type === "paragraph_open" &&
+        nextToken?.type === "paragraph_close" &&
+        isTocMarkerText(token.content ?? "")
+      ) {
+        hasMarker = true;
+      }
+    }
+
+    if (token.type !== "heading_open") {
+      continue;
+    }
+    const tag = token.tag ?? "";
+    if (!tag.startsWith("h")) {
+      continue;
+    }
+    const level = Number(tag.slice(1));
+    if (!Number.isFinite(level) || level < 1 || level > TOC_MAX_DEPTH) {
+      continue;
+    }
+    const inlineToken = tokens[index + 1];
+    if (!inlineToken || inlineToken.type !== "inline") {
+      continue;
+    }
+    const text = extractInlineTextFromToken(inlineToken);
+    if (!text) {
+      continue;
+    }
+    const sourceLine = Array.isArray(token.map) ? token.map[0] + 1 : null;
+    if (!sourceLine || !Number.isFinite(sourceLine)) {
+      continue;
+    }
+    items.push({
+      level,
+      text,
+      sourceLine
+    });
+  }
+
+  return {
+    items,
+    hasMarker
+  };
+}
+
+// 将 TOC 条目滚动定位到预览区目标标题。
+function scrollPreviewToTocItem(previewElement: HTMLElement, item: TocItem): void {
+  const selector = `${PREVIEW_BODY_SELECTOR} h${item.level}[data-source-line="${item.sourceLine}"]`;
+  const targetHeading = previewElement.querySelector<HTMLElement>(selector);
+  if (!targetHeading) {
+    return;
+  }
+  const previewRect = previewElement.getBoundingClientRect();
+  const targetTop =
+    targetHeading.getBoundingClientRect().top - previewRect.top + previewElement.scrollTop;
+  previewElement.scrollTo({ top: targetTop, behavior: "smooth" });
 }
 
 // 将 ISO 时间格式化为“时:分:秒”。
@@ -477,6 +633,12 @@ interface ThemeMenuProps {
   activeThemeId: string;
   onSelectTheme: (themeId: string) => void;
   customPreviewStyleText: string;
+}
+
+// 目录菜单组件入参：由父组件提供 TOC 数据和跳转行为。
+interface TocMenuProps {
+  items: TocItem[];
+  onSelectItem: (item: TocItem) => void;
 }
 
 // 独立主题菜单：开关状态内聚在子组件中，避免影响整页渲染。
@@ -618,6 +780,102 @@ const ThemeMenu = memo(function ThemeMenu({
   );
 });
 
+// 目录菜单：仅控制自身开关状态，目录点击后导航到对应标题。
+const TocMenu = memo(function TocMenu({ items, onSelectItem }: TocMenuProps) {
+  // 目录菜单展开状态独立维护，避免影响主视图。
+  const [isTocMenuOpen, setIsTocMenuOpen] = useState(false);
+  // 菜单根节点引用：用于判断是否点击了菜单外部。
+  const tocMenuRef = useRef<HTMLDivElement | null>(null);
+  // 目录是否为空。
+  const hasItems = items.length > 0;
+
+  // 切换目录菜单显示状态。
+  const toggleTocMenu = useCallback(() => {
+    setIsTocMenuOpen((previous) => !previous);
+  }, []);
+
+  // 选择目录条目并关闭菜单。
+  const handleSelectItem = useCallback(
+    (item: TocItem) => {
+      onSelectItem(item);
+      setIsTocMenuOpen(false);
+    },
+    [onSelectItem]
+  );
+
+  // 目录菜单弹出时监听外部点击与 ESC，保证交互一致性。
+  useEffect(() => {
+    if (!isTocMenuOpen) {
+      return;
+    }
+
+    const onWindowMouseDown = (event: MouseEvent) => {
+      const menuRootElement = tocMenuRef.current;
+      if (!menuRootElement) {
+        return;
+      }
+      if (event.target instanceof Node && menuRootElement.contains(event.target)) {
+        return;
+      }
+      setIsTocMenuOpen(false);
+    };
+
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsTocMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", onWindowMouseDown);
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onWindowMouseDown);
+      window.removeEventListener("keydown", onWindowKeyDown);
+    };
+  }, [isTocMenuOpen]);
+
+  return (
+    <div className="toc-menu" ref={tocMenuRef}>
+      <button
+        type="button"
+        className="toc-menu__trigger"
+        aria-label="打开目录"
+        aria-haspopup="listbox"
+        aria-expanded={isTocMenuOpen}
+        onClick={toggleTocMenu}
+      >
+        <span className="toc-menu__trigger-label">目录</span>
+        <span className="toc-menu__trigger-value">{hasItems ? `${items.length} 项` : "暂无"}</span>
+      </button>
+      {isTocMenuOpen ? (
+        <div className="toc-menu__dropdown">
+          {hasItems ? (
+            <ul className="toc-menu__list" role="listbox" aria-label="目录列表">
+              {items.map((item) => (
+                <li key={`${item.sourceLine}-${item.level}`} className="toc-menu__item-row">
+                  <button
+                    type="button"
+                    role="option"
+                    className="toc-menu__item"
+                    title={item.text}
+                    // 根据标题层级做视觉缩进，强化目录结构层次。
+                    style={{ paddingLeft: `${10 + (item.level - 1) * 14}px` }}
+                    onClick={() => handleSelectItem(item)}
+                  >
+                    {item.text}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="toc-menu__empty">当前文档暂无标题。</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
 // 右侧样式详情抽屉：用于查看当前主题与覆盖样式细节。
 const StyleDetailsDrawer = memo(function StyleDetailsDrawer({
   theme,
@@ -749,6 +1007,8 @@ export default function App() {
   const previewToEditorAnchorsRef = useRef<DirectionAnchor[]>([]);
   // 映射重建调度句柄（rAF）。
   const rebuildMapRafRef = useRef<number | null>(null);
+  // 同步滚动补帧句柄：用于分帧追平大跨度映射。
+  const syncFollowRafRef = useRef<number | null>(null);
   // 延迟重建定时器集合：用于处理粘贴/批量改动后的异步布局收敛。
   const delayedRebuildTimersRef = useRef<number[]>([]);
   // 上一次内容快照：用于判断本次改动是否属于“大幅变更”（如整段粘贴）。
@@ -965,6 +1225,77 @@ export default function App() {
     [resolveLiveEditorScroller]
   );
 
+  // 清理同步补帧任务，避免旧来源任务持续写入滚动位置。
+  const clearSyncFollowRaf = useCallback(() => {
+    if (syncFollowRafRef.current !== null) {
+      window.cancelAnimationFrame(syncFollowRafRef.current);
+      syncFollowRafRef.current = null;
+    }
+  }, []);
+
+  // 单帧同步：限制最大步进，避免高斜率区间（如展开 TOC）瞬间跨越。
+  const applySyncStep = useCallback(
+    (sourceName: ScrollSource): boolean => {
+      const editorElement = resolveLiveEditorScroller();
+      const previewElement = previewScrollerRef.current;
+      if (!editorElement || !previewElement) {
+        return false;
+      }
+
+      const targetElement = sourceName === "editor" ? previewElement : editorElement;
+      const mappedTarget = getMappedTargetScrollTop(sourceName);
+      const delta = mappedTarget - targetElement.scrollTop;
+      if (Math.abs(delta) <= SYNC_SETTLE_THRESHOLD) {
+        // 误差足够小时直接吸附到目标，避免小数误差抖动。
+        targetElement.scrollTop = mappedTarget;
+        return false;
+      }
+
+      const limitedStep = clamp(delta, -MAX_SYNC_STEP_PER_FRAME, MAX_SYNC_STEP_PER_FRAME);
+      const nextTop = clamp(
+        targetElement.scrollTop + limitedStep,
+        0,
+        getMaxScrollable(targetElement)
+      );
+      targetElement.scrollTop = nextTop;
+      return Math.abs(delta) > MAX_SYNC_STEP_PER_FRAME;
+    },
+    [getMappedTargetScrollTop, resolveLiveEditorScroller]
+  );
+
+  // 若目标位移过大，继续按帧追平，保证视觉连续而不是一次跳跃。
+  const scheduleFollowSync = useCallback(
+    (sourceName: ScrollSource) => {
+      if (syncFollowRafRef.current !== null) {
+        return;
+      }
+
+      const follow = () => {
+        syncFollowRafRef.current = null;
+        if (syncingRef.current) {
+          syncFollowRafRef.current = window.requestAnimationFrame(follow);
+          return;
+        }
+        // 来源已变化时停止旧任务，避免跟当前用户输入“打架”。
+        if (lastScrollSourceRef.current !== sourceName) {
+          return;
+        }
+
+        syncingRef.current = true;
+        const shouldContinue = applySyncStep(sourceName);
+        window.requestAnimationFrame(() => {
+          syncingRef.current = false;
+          if (shouldContinue && lastScrollSourceRef.current === sourceName) {
+            syncFollowRafRef.current = window.requestAnimationFrame(follow);
+          }
+        });
+      };
+
+      syncFollowRafRef.current = window.requestAnimationFrame(follow);
+    },
+    [applySyncStep]
+  );
+
   // 执行一次单向同步，并用锁避免对端 scroll 反向触发。
   const syncFromSource = useCallback(
     (sourceName: ScrollSource) => {
@@ -977,19 +1308,20 @@ export default function App() {
         return;
       }
 
+      // 新输入到来时取消旧补帧任务，优先响应当前滚动来源。
+      clearSyncFollowRaf();
       // 同步阶段写入锁并记录来源。
       syncingRef.current = true;
       lastScrollSourceRef.current = sourceName;
-      if (sourceName === "editor") {
-        previewElement.scrollTop = getMappedTargetScrollTop("editor");
-      } else {
-        editorElement.scrollTop = getMappedTargetScrollTop("preview");
-      }
+      const shouldFollow = applySyncStep(sourceName);
       window.requestAnimationFrame(() => {
         syncingRef.current = false;
+        if (shouldFollow) {
+          scheduleFollowSync(sourceName);
+        }
       });
     },
-    [getMappedTargetScrollTop, resolveLiveEditorScroller]
+    [applySyncStep, clearSyncFollowRaf, resolveLiveEditorScroller, scheduleFollowSync]
   );
 
   // 映射表重建后，按最近来源做一次回对齐。
@@ -1003,16 +1335,15 @@ export default function App() {
       return;
     }
     syncingRef.current = true;
-    // 回对齐时不改 lastScrollSourceRef，保持最近来源语义不变。
-    if (lastScrollSourceRef.current === "editor") {
-      previewElement.scrollTop = getMappedTargetScrollTop("editor");
-    } else {
-      editorElement.scrollTop = getMappedTargetScrollTop("preview");
-    }
+    const sourceName = lastScrollSourceRef.current;
+    const shouldFollow = applySyncStep(sourceName);
     window.requestAnimationFrame(() => {
       syncingRef.current = false;
+      if (shouldFollow) {
+        scheduleFollowSync(sourceName);
+      }
     });
-  }, [getMappedTargetScrollTop, resolveLiveEditorScroller]);
+  }, [applySyncStep, resolveLiveEditorScroller, scheduleFollowSync]);
 
   // 重建 block 级锚点映射表：source offset -> editorY 与 previewY。
   const rebuildScrollAnchors = useCallback(() => {
@@ -1034,41 +1365,99 @@ export default function App() {
     const anchorNodes = previewElement.querySelectorAll<HTMLElement>(BLOCK_ANCHOR_SELECTOR);
     // 先收集原始锚点，再分别构建双向映射表。
     const rawAnchors: ScrollAnchor[] = [];
+    // 已处理锚点序号集合：用于去重被渲染器复制到子节点的重复锚点。
+    const seenAnchorIndices = new Set<string>();
 
-    for (const node of anchorNodes) {
-      const rawLine = node.dataset.sourceLine;
-      const rawOffset = node.dataset.sourceOffset;
-      let editorY: number | null = null;
+    // 统一解析 block 的起止源码位置，映射为编辑区像素坐标。
+    const resolveEditorAnchorY = (
+      rawLine: string | undefined,
+      rawOffset: string | undefined,
+      anchorEdge: "start" | "end"
+    ): number | null => {
       if (rawLine) {
         const parsedLine = Number(rawLine);
         if (Number.isFinite(parsedLine)) {
           const lineNumber = clamp(Math.floor(parsedLine), 1, editorView.state.doc.lines);
           const lineFrom = editorView.state.doc.line(lineNumber).from;
-          // 优先按源码行号映射，避免 offset 误差导致锚点错位。
-          editorY = clamp(editorView.lineBlockAt(lineFrom).top, 0, editorMaxScrollable);
+          const lineBlock = editorView.lineBlockAt(lineFrom);
+          return clamp(
+            anchorEdge === "end" ? lineBlock.bottom : lineBlock.top,
+            0,
+            editorMaxScrollable
+          );
         }
       }
-      if (editorY === null) {
-        if (!rawOffset) {
-          continue;
-        }
-        const parsedOffset = Number(rawOffset);
-        if (!Number.isFinite(parsedOffset)) {
-          continue;
-        }
-        const sourceOffset = clamp(Math.floor(parsedOffset), 0, docLength);
-        // 无行号时退回 offset 映射。
-        editorY = clamp(editorView.lineBlockAt(sourceOffset).top, 0, editorMaxScrollable);
+      if (!rawOffset) {
+        return null;
       }
+      const parsedOffset = Number(rawOffset);
+      if (!Number.isFinite(parsedOffset)) {
+        return null;
+      }
+      const normalizedOffset = clamp(Math.floor(parsedOffset), 0, docLength);
+      // end offset 在 AST 语义上通常指向“块后一个字符”，这里回退 1 以命中块末尾行。
+      const anchorOffset =
+        anchorEdge === "end" ? clamp(normalizedOffset - 1, 0, docLength) : normalizedOffset;
+      const lineBlock = editorView.lineBlockAt(anchorOffset);
+      return clamp(
+        anchorEdge === "end" ? lineBlock.bottom : lineBlock.top,
+        0,
+        editorMaxScrollable
+      );
+    };
 
-      // 将节点视口坐标转换为容器内容坐标。
-      const previewY = clamp(
-        node.getBoundingClientRect().top - previewRect.top + previewElement.scrollTop,
+    for (const node of anchorNodes) {
+      const anchorIndex = node.dataset.anchorIndex;
+      // 仅使用插件生成的锚点，避免误采集到渲染库内部节点。
+      if (!anchorIndex) {
+        continue;
+      }
+      if (seenAnchorIndices.has(anchorIndex)) {
+        continue;
+      }
+      seenAnchorIndices.add(anchorIndex);
+
+      const rawStartLine = node.dataset.sourceLine;
+      const rawStartOffset = node.dataset.sourceOffset;
+      const rawEndLine = node.dataset.sourceEndLine;
+      const rawEndOffset = node.dataset.sourceEndOffset;
+
+      const editorStartY = resolveEditorAnchorY(rawStartLine, rawStartOffset, "start");
+      if (editorStartY === null) {
+        continue;
+      }
+      const editorEndYCandidate = resolveEditorAnchorY(rawEndLine, rawEndOffset, "end");
+      const editorEndY =
+        editorEndYCandidate === null ? editorStartY : Math.max(editorStartY, editorEndYCandidate);
+
+      // 将节点视口坐标转换为容器内容坐标，并为块底部补一组锚点。
+      const nodeRect = node.getBoundingClientRect();
+      const previewStartY = clamp(
+        nodeRect.top - previewRect.top + previewElement.scrollTop,
+        0,
+        previewMaxScrollable
+      );
+      const previewEndY = clamp(
+        nodeRect.bottom - previewRect.top + previewElement.scrollTop,
         0,
         previewMaxScrollable
       );
 
-      rawAnchors.push({ editorY, previewY });
+      rawAnchors.push({
+        editorY: editorStartY,
+        previewY: previewStartY
+      });
+      // 对可见高度大于一行的 block（如块状公式）补充底部锚点，避免滚动跨越。
+      if (
+        editorEndYCandidate !== null &&
+        editorEndY > editorStartY &&
+        previewEndY > previewStartY
+      ) {
+        rawAnchors.push({
+          editorY: editorEndY,
+          previewY: Math.max(previewStartY, previewEndY)
+        });
+      }
     }
 
     // 构建编辑区 -> 预览区映射：同 editorY 聚合到最远 previewY。
@@ -1147,6 +1536,35 @@ export default function App() {
   const remarkPlugins = useMemo(() => [remarkGfm, remarkMath, remarkBlockAnchorPlugin], []);
   // rehype 插件：将 Math AST 渲染为 KaTeX HTML。
   const rehypePlugins = useMemo(() => [rehypeKatex], []);
+  // markdown-it 仅用于“去语法后的文字统计”和 TOC 语法解析。
+  const markdownTextParser = useMemo(
+    () =>
+      new MarkdownIt({
+        html: false,
+        linkify: true,
+        typographer: false
+      }),
+    []
+  );
+  // 解析文档标题与 [TOC] 标记，供目录菜单与语法渲染共用。
+  const tocParseResult = useMemo(
+    () => parseTocFromMarkdown(content, markdownTextParser),
+    [content, markdownTextParser]
+  );
+  // TOC 标题列表。
+  const tocItems = tocParseResult.items;
+  // 当前文档是否声明了 [TOC] 语法标记。
+  const hasTocMarker = tocParseResult.hasMarker;
+
+  // 根据目录条目滚动预览区，让同步滚动机制继续驱动编辑区对齐。
+  const handleTocNavigate = useCallback((item: TocItem) => {
+    const previewElement = previewScrollerRef.current;
+    if (!previewElement) {
+      return;
+    }
+    scrollPreviewToTocItem(previewElement, item);
+  }, []);
+
   // 自定义 Markdown 渲染器：代码块走高亮组件，行内代码走轻量内联样式。
   const markdownComponents = useMemo<Components>(
     () => {
@@ -1204,6 +1622,54 @@ export default function App() {
             <span className="suffix" aria-hidden="true" />
           </h6>
         ),
+        // 识别独占段落 [TOC] 标记，并在文档内渲染可点击目录菜单。
+        p: ({ node: _node, className, children, ...props }) => {
+          const paragraphText = extractCodeText(children).trim();
+          if (!isTocMarkerText(paragraphText)) {
+            return (
+              <p className={className} {...props}>
+                {children}
+              </p>
+            );
+          }
+          // TOC 标记块只透传锚点属性，避免段落 ref 类型与 details 冲突。
+          const tocAnchorDataAttributes = pickAnchorDataAttributes(props as Record<string, unknown>);
+
+          return (
+            <details
+              className={["toc-inline", className].filter(Boolean).join(" ")}
+              aria-label="文档目录"
+              open
+              {...tocAnchorDataAttributes}
+            >
+              <summary className="toc-inline__summary">
+                <span className="toc-inline__title">文档目录</span>
+                <span className="toc-inline__meta">{tocItems.length} 项</span>
+              </summary>
+              {tocItems.length ? (
+                <div className="toc-inline__body">
+                  <ol className="toc-inline__list">
+                    {tocItems.map((item) => (
+                      <li key={`${item.sourceLine}-${item.level}`} className="toc-inline__item">
+                        <button
+                          type="button"
+                          className="toc-inline__button"
+                          // 根据标题层级做视觉缩进，强化文档结构层次。
+                          style={{ paddingLeft: `${10 + (item.level - 1) * 14}px` }}
+                          onClick={() => handleTocNavigate(item)}
+                        >
+                          {item.text}
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : (
+                <p className="toc-inline__empty">当前文档暂无可用标题。</p>
+              )}
+            </details>
+          );
+        },
         pre: ({ node: _node, children, ...props }) => {
           const childNodes = Children.toArray(children);
           const codeElement = childNodes[0];
@@ -1280,17 +1746,7 @@ export default function App() {
         }
       };
     },
-    [activePreviewThemeId]
-  );
-  // markdown-it 仅用于“去语法后的文字统计”。
-  const markdownTextParser = useMemo(
-    () =>
-      new MarkdownIt({
-        html: false,
-        linkify: true,
-        typographer: false
-      }),
-    []
+    [activePreviewThemeId, handleTocNavigate, tocItems]
   );
   // 提取 Markdown 对应的纯文本内容。
   const plainTextContent = useMemo(
@@ -1644,9 +2100,10 @@ export default function App() {
       if (rebuildMapRafRef.current !== null) {
         window.cancelAnimationFrame(rebuildMapRafRef.current);
       }
+      clearSyncFollowRaf();
       clearDelayedRebuildTimers();
     };
-  }, [clearDelayedRebuildTimers]);
+  }, [clearDelayedRebuildTimers, clearSyncFollowRaf]);
 
   // 应用选中的主题：仅在主题真正变化时更新父组件状态。
   const handleThemeChange = useCallback((themeId: string) => {
@@ -1691,6 +2148,8 @@ export default function App() {
       <header className="header">
         <h1>PlainDoc</h1>
         <div className="header-actions">
+          {/* 目录菜单：展示标题结构并支持快速跳转。 */}
+          {hasTocMarker ? <TocMenu items={tocItems} onSelectItem={handleTocNavigate} /> : null}
           {/* 主题菜单：展开/收起只更新菜单组件自身。 */}
           <ThemeMenu
             themes={PREVIEW_THEME_TEMPLATES}

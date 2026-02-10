@@ -6,6 +6,14 @@
   background-color: #f3f4f6;
 }
 
+/* 锁定根节点高度并禁止整页滚动，避免滚轮穿透把整页推离可视区域。 */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -15,7 +23,9 @@ body {
 }
 
 .page {
+  /* 使用动态视口高度兜底浏览器工具栏变化场景。 */
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -180,6 +190,107 @@ body {
 .theme-menu__details-button:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 1px;
+}
+
+/* 目录菜单根节点：提供下拉定位上下文。 */
+.toc-menu {
+  position: relative;
+}
+
+/* 目录触发按钮：显示“目录 + 条目数”。 */
+.toc-menu__trigger {
+  min-width: 130px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toc-menu__trigger:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.toc-menu__trigger:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* 目录按钮前缀文案。 */
+.toc-menu__trigger-label {
+  color: #64748b;
+}
+
+/* 目录条目数量。 */
+.toc-menu__trigger-value {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+/* 目录下拉列表容器。 */
+.toc-menu__dropdown {
+  margin: 0;
+  padding: 6px;
+  width: 280px;
+  list-style: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+}
+
+/* 目录列表主体：允许滚动以容纳长文档。 */
+.toc-menu__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* 单条目录项。 */
+.toc-menu__item {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.toc-menu__item-row+.toc-menu__item-row {
+  margin-top: 4px;
+}
+
+.toc-menu__item:hover {
+  background: #f1f5f9;
+}
+
+.toc-menu__item:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: -1px;
+}
+
+/* 目录为空时的提示文案。 */
+.toc-menu__empty {
+  margin: 0;
+  padding: 10px;
+  font-size: 12px;
+  color: #64748b;
 }
 
 /* 样式详情抽屉层：固定在页面顶层。 */
@@ -397,6 +508,7 @@ body {
   height: 100%;
   overflow-y: scroll;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   align-items: stretch;
   background-color: #f5f5f5;
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
@@ -408,6 +520,7 @@ body {
   height: 100%;
   overflow-y: scroll;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   font-family: var(--pd-preview-font-family,
       Optima-Regular,
       Optima,
@@ -625,6 +738,99 @@ body {
   display: inline-block;
   min-width: 100%;
   white-space: nowrap;
+}
+
+/* [TOC] 语法渲染结果：文档内目录容器。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline {
+  margin: 14px 0;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+/* 折叠态目录头：默认只占一行高度，降低同步滚动失配。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__summary::-webkit-details-marker {
+  display: none;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline[open] .toc-inline__summary {
+  border-bottom: 1px solid #dbe2ea;
+}
+
+/* 文档目录标题。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* 目录项数量提示。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* 展开内容区：限制最大高度，避免目录过高破坏同步体验。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__body {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 8px 10px;
+}
+
+/* 文档目录列表。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__item + .toc-inline__item {
+  margin-top: 4px;
+}
+
+/* 文档目录条目按钮。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__button {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__button:hover {
+  background: #e2e8f0;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
+/* 文档目录为空状态。 */
+#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__empty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #64748b;
+  text-indent: 0;
 }
 
 #plaindoc-preview-pane .plaindoc-preview-body ul {
@@ -885,6 +1091,11 @@ body {
 
   .theme-menu__dropdown {
     width: min(260px, calc(100vw - 24px));
+    right: 0;
+  }
+
+  .toc-menu__dropdown {
+    width: min(280px, calc(100vw - 24px));
     right: 0;
   }
 
