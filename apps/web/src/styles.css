@@ -1,9 +1,12 @@
 :root {
+  --pd-latin-mono-font-family: "Google Sans Code", "Google Sans Flex", "Google Sans", "Helvetica Neue", sans-serif;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #111827;
+  color: #1f1f1f;
   background-color: #ffffff;
+  font-variation-settings: "wdth" 95, "slnt" 0, "ROND" 0;
+  font-size: 1rem;
 }
 
 /* 锁定根节点高度并禁止整页滚动，避免滚轮穿透把整页推离可视区域。 */
@@ -627,7 +630,7 @@ body {
   overscroll-behavior: contain;
   align-items: stretch;
   background-color: #f5f5f5;
-  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
+  font-family: var(--pd-latin-mono-font-family), "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
   padding-top: 15px;
 }
@@ -658,7 +661,7 @@ body {
 }
 
 /* Mermaid 图块基础变量：可被主题类覆写。 */
-#plaindoc-preview-pane {
+#plaindoc-preview-body {
   --pd-mermaid-card-bg: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   --pd-mermaid-card-border: #dbe2ea;
   --pd-mermaid-card-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
@@ -689,7 +692,7 @@ body {
   --pd-preview-letter-spacing: 0.02em;
   --pd-preview-paragraph-margin-top: 8px;
   --pd-preview-paragraph-margin-bottom: 8px;
-  --pd-preview-paragraph-indent: 2em;
+  --pd-preview-paragraph-indent: 1em;
   --pd-preview-title-color: rgb(89, 89, 89);
   --pd-preview-h1-font-size: 2em;
   --pd-preview-h2-font-size: 1.5em;
@@ -787,7 +790,7 @@ body {
   word-spacing: var(--pd-preview-word-spacing);
   letter-spacing: var(--pd-preview-letter-spacing);
   text-align: left;
-  font-family: var(--pd-preview-font-family);
+  font-family: var(--pd-latin-mono-font-family), var(--pd-preview-font-family);
   word-break: break-all;
 }
 
@@ -994,6 +997,251 @@ body {
   font-size: 12px;
   color: #64748b;
   text-indent: 0;
+}
+
+/* 微信风格主题覆盖：对齐第三方模板里的标题、引用和脚注细节。 */
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal p {
+  line-height: 1.6;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal h2 {
+  margin: 80px 10px 40px;
+  padding-bottom: 0;
+  border-bottom: 0;
+  text-align: center;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal h3 {
+  margin: 40px 0 20px;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal blockquote {
+  color: rgb(91, 91, 91);
+  border-left-width: 3px;
+  border-left-color: rgb(158, 158, 158);
+  background: rgba(158, 158, 158, 0.1);
+  padding: 1px 0 1px 10px;
+  margin: 20px 0;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal blockquote::before {
+  display: none;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal blockquote p {
+  color: #3f3f3f;
+  line-height: 1.5;
+  font-size: 16px;
+  margin: 10px;
+  padding: 0;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal .footnote-word,
+#plaindoc-preview-body.plaindoc-preview-body--wechat-minimal .footnote-ref {
+  color: #ff3502;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* 绿衣清新主题覆盖：对齐第三方模板中的标题、段落和引用细节。 */
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh p {
+  margin: 1em 4px;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh h1 {
+  margin: 1.2em 0 1em;
+  padding: 0;
+  font-weight: 700;
+  color: #35b378;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh h2 {
+  min-height: 32px;
+  line-height: 32px;
+  display: inline-block;
+  border-bottom: 0;
+  border-color: #35b378;
+  padding: 0.5em 0;
+  font-size: 23px;
+  margin: 1em 0 0;
+  text-align: left;
+  font-weight: 700;
+  color: #35b378;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh h3 {
+  margin: 1.2em 0 1em;
+  padding: 0;
+  font-weight: 700;
+  color: #35b378;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh li section {
+  margin: 10px 0;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh blockquote {
+  margin: 10px 5px;
+  border-left-width: 3px;
+  border-left-color: #35b378;
+  color: #616161;
+  background: #fbf9fd;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh blockquote::before {
+  display: none;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh hr {
+  border: 1px solid #35b378;
+  height: 0;
+  margin: 1.5em auto;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh .footnote-word,
+#plaindoc-preview-body.plaindoc-preview-body--green-fresh .footnote-ref {
+  color: #35b378;
+}
+
+/* 兰青主题覆盖：还原蓝青色线框标题、引用和表格风格。 */
+#plaindoc-preview-body.plaindoc-preview-body--lanqing p {
+  text-align: justify;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing h1 {
+  font-size: 1.8em;
+  color: #009688;
+  margin: 1.2em auto;
+  text-align: center;
+  border-bottom: 1px solid #009688;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing h2 {
+  color: #009688;
+  padding-left: 10px;
+  margin: 1em auto;
+  border-left: 3px solid #009688;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing h3 {
+  margin: 0.6em auto;
+  padding-left: 10px;
+  border-left: 2px solid #009688;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing h4 {
+  margin: 0.6em auto;
+  font-size: 1.2em;
+  padding-left: 10px;
+  border-left: 2px dashed #009688;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing h5 {
+  margin: 0.6em auto;
+  font-size: 1.1em;
+  padding-left: 10px;
+  border-left: 1px dashed #009688;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing h6 {
+  margin: 0.6em auto;
+  font-size: 1em;
+  padding-left: 10px;
+  border-left: 1px dotted #009688;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing blockquote {
+  border-left: 2px solid #888;
+  border-right: 2px solid #888;
+  padding-left: 1em;
+  color: #777;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing blockquote::before {
+  display: none;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing hr {
+  margin: 20px 0;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing table tr th {
+  border: 1px solid #009688;
+  background-color: #009688;
+  color: #f8f8f8;
+  border-bottom: 0;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing table tr td {
+  border: 1px solid #009688;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing table tr:nth-child(2n) {
+  background-color: #f8f8f8;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--lanqing .footnote-word,
+#plaindoc-preview-body.plaindoc-preview-body--lanqing .footnote-ref {
+  color: #009688;
+}
+
+/* 橙心主题覆盖：还原橙色 h2 标签条与引文高亮。 */
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart h2 {
+  border-bottom: 2px solid rgb(239, 112, 96);
+  font-size: 1.3em;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0;
+  padding-bottom: 0;
+  margin-bottom: 12px;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart h2 .prefix,
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart h2 .suffix {
+  display: none;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart h2 .content {
+  display: inline-block;
+  font-weight: 700;
+  background: rgb(239, 112, 96);
+  color: #ffffff;
+  padding: 3px 10px 1px;
+  border-top-right-radius: 3px;
+  border-top-left-radius: 3px;
+  margin-right: 3px;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart h2::after {
+  display: inline-block;
+  content: " ";
+  vertical-align: bottom;
+  border-bottom: 36px solid #efebe9;
+  border-right: 20px solid transparent;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart blockquote {
+  border-left-color: rgb(239, 112, 96);
+  background: #fff9f9;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart blockquote::before {
+  display: none;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart .footnote-word {
+  color: #ff3502;
+}
+
+#plaindoc-preview-body.plaindoc-preview-body--orange-heart .footnote-ref {
+  color: rgb(239, 112, 96);
 }
 
 #plaindoc-preview-body ul {
