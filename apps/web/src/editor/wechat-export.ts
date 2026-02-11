@@ -112,10 +112,235 @@ function resolveCssVariables(
   return resolveVariableReference(cssText, 0);
 }
 
+interface MathJaxSvgRenderer {
+  renderFormulaToSvgMarkup: (texSource: string, displayMode: boolean) => string;
+}
+
+let mathJaxSvgRendererPromise: Promise<MathJaxSvgRenderer | null> | null = null;
+
+// 惰性初始化 MathJax SVG 渲染器：仅在“复制到公众号”时加载，避免影响首屏体积。
+async function getMathJaxSvgRenderer(): Promise<MathJaxSvgRenderer | null> {
+  if (mathJaxSvgRendererPromise) {
+    return mathJaxSvgRendererPromise;
+  }
+
+  mathJaxSvgRendererPromise = (async () => {
+    try {
+      const [{ mathjax }, { TeX }, { SVG }, { liteAdaptor }, { RegisterHTMLHandler }, { AllPackages }] =
+        await Promise.all([
+          import("mathjax-full/js/mathjax.js"),
+          import("mathjax-full/js/input/tex.js"),
+          import("mathjax-full/js/output/svg.js"),
+          import("mathjax-full/js/adaptors/liteAdaptor.js"),
+          import("mathjax-full/js/handlers/html.js"),
+          import("mathjax-full/js/input/tex/AllPackages.js")
+        ]);
+
+      const adaptor = liteAdaptor();
+      RegisterHTMLHandler(adaptor);
+      const texInput = new TeX({
+        packages: AllPackages
+      });
+      const svgOutput = new SVG({
+        fontCache: "none"
+      });
+      const mathDocument = mathjax.document("", {
+        InputJax: texInput,
+        OutputJax: svgOutput
+      });
+
+      return {
+        renderFormulaToSvgMarkup: (texSource: string, displayMode: boolean): string => {
+          const mathNode = mathDocument.convert(texSource, {
+            display: displayMode,
+            em: 16,
+            ex: 8,
+            containerWidth: 80 * 16
+          });
+          return adaptor.outerHTML(mathNode);
+        }
+      };
+    } catch (error) {
+      console.log("MathJax 初始化失败，公式将保留 KaTeX HTML：", error);
+      return null;
+    }
+  })();
+
+  return mathJaxSvgRendererPromise;
+}
+
+// 从 KaTeX 渲染节点中提取原始 TeX 源码，优先使用 annotation 编码字段。
+function extractKatexTexSource(katexElement: Element): string {
+  const annotationElement = katexElement.querySelector(
+    "annotation[encoding='application/x-tex']"
+  );
+  return annotationElement?.textContent?.trim() ?? "";
+}
+
+interface KatexFormulaDescriptor {
+  texSource: string;
+  displayMode: boolean;
+  replaceTargetElement: Element;
+}
+
+// 收集公式节点描述：区分行内与块级，并产出后续替换目标元素。
+function collectKatexFormulaDescriptors(rootElement: HTMLElement): KatexFormulaDescriptor[] {
+  const descriptors: KatexFormulaDescriptor[] = [];
+  const candidates = rootElement.querySelectorAll(".katex-display, .katex");
+  candidates.forEach((candidateElement) => {
+    const isDisplayWrapper = candidateElement.classList.contains("katex-display");
+    if (!isDisplayWrapper && candidateElement.closest(".katex-display")) {
+      // 块级公式内部的 .katex 由外层 .katex-display 统一处理，避免重复转换。
+      return;
+    }
+
+    const katexElement = isDisplayWrapper
+      ? candidateElement.querySelector(".katex")
+      : candidateElement;
+    if (!katexElement) {
+      return;
+    }
+
+    const texSource = extractKatexTexSource(katexElement);
+    if (!texSource) {
+      return;
+    }
+
+    descriptors.push({
+      texSource,
+      displayMode: isDisplayWrapper,
+      replaceTargetElement: candidateElement
+    });
+  });
+  return descriptors;
+}
+
+// 将 MathJax 渲染结果提炼为纯 SVG，避免公众号环境对 mjx-container 的兼容性差异。
+function extractPureSvgMarkupFromMathJax(
+  mathJaxMarkup: string,
+  texSource: string,
+  displayMode: boolean
+): string | null {
+  const wrapperElement = document.createElement("div");
+  wrapperElement.innerHTML = mathJaxMarkup;
+  const svgElement = wrapperElement.querySelector("svg");
+  if (!svgElement) {
+    return null;
+  }
+
+  svgElement.removeAttribute("focusable");
+  svgElement.setAttribute("role", "img");
+  svgElement.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+
+  const width = svgElement.getAttribute("width");
+  const height = svgElement.getAttribute("height");
+  if (width) {
+    svgElement.style.width = width;
+    svgElement.removeAttribute("width");
+  }
+  if (height) {
+    svgElement.style.height = height;
+    svgElement.removeAttribute("height");
+  }
+  svgElement.style.maxWidth = "100%";
+  svgElement.style.overflow = "visible";
+  svgElement.style.display = displayMode ? "block" : "inline-block";
+  if (displayMode) {
+    svgElement.style.margin = "0 auto";
+  }
+
+  if (!svgElement.querySelector("title")) {
+    const titleElement = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    titleElement.textContent = texSource;
+    svgElement.insertBefore(titleElement, svgElement.firstChild);
+  }
+
+  return svgElement.outerHTML;
+}
+
+// 构造公式替换节点：内联公式使用 span，块级公式使用 div。
+function createMathSvgReplacementElement(
+  svgMarkup: string,
+  texSource: string,
+  displayMode: boolean
+): HTMLElement {
+  const replacementElement = document.createElement(displayMode ? "div" : "span");
+  replacementElement.className = displayMode
+    ? "plaindoc-export-formula plaindoc-export-formula--display"
+    : "plaindoc-export-formula plaindoc-export-formula--inline";
+  replacementElement.setAttribute("data-formula", texSource);
+  replacementElement.innerHTML = svgMarkup;
+
+  if (displayMode) {
+    replacementElement.style.display = "block";
+    replacementElement.style.margin = "14px 0";
+    replacementElement.style.textAlign = "center";
+    replacementElement.style.overflowX = "auto";
+  } else {
+    replacementElement.style.display = "inline-block";
+    replacementElement.style.verticalAlign = "middle";
+    replacementElement.style.maxWidth = "100%";
+  }
+
+  return replacementElement;
+}
+
+// 导出阶段将 KaTeX 公式动态转换为 SVG，避免公众号端对 KaTeX DOM/CSS 支持不完整。
+async function convertKatexFormulasToSvg(
+  sourceRoot: HTMLElement | null,
+  clonedRoot: HTMLElement | null
+): Promise<void> {
+  if (!sourceRoot || !clonedRoot) {
+    return;
+  }
+
+  const mathJaxSvgRenderer = await getMathJaxSvgRenderer();
+  if (!mathJaxSvgRenderer) {
+    return;
+  }
+
+  const sourceFormulaDescriptors = collectKatexFormulaDescriptors(sourceRoot);
+  const clonedFormulaDescriptors = collectKatexFormulaDescriptors(clonedRoot);
+  const formulaCount = Math.min(sourceFormulaDescriptors.length, clonedFormulaDescriptors.length);
+  let convertedCount = 0;
+  const formulaSvgCache = new Map<string, string>();
+
+  for (let formulaIndex = 0; formulaIndex < formulaCount; formulaIndex += 1) {
+    const sourceDescriptor = sourceFormulaDescriptors[formulaIndex];
+    const clonedDescriptor = clonedFormulaDescriptors[formulaIndex];
+    const texSource = sourceDescriptor.texSource;
+    const displayMode = sourceDescriptor.displayMode;
+    const cacheKey = `${displayMode ? "display" : "inline"}:${texSource}`;
+
+    let svgMarkup = formulaSvgCache.get(cacheKey);
+    if (!svgMarkup) {
+      try {
+        const rawMathJaxMarkup = mathJaxSvgRenderer.renderFormulaToSvgMarkup(texSource, displayMode);
+        const pureSvgMarkup = extractPureSvgMarkupFromMathJax(rawMathJaxMarkup, texSource, displayMode);
+        if (!pureSvgMarkup) {
+          continue;
+        }
+        svgMarkup = pureSvgMarkup;
+      } catch (error) {
+        console.log("MathJax 公式转 SVG 失败，保留原 KaTeX 结果：", error);
+        continue;
+      }
+      formulaSvgCache.set(cacheKey, svgMarkup);
+    }
+
+    clonedDescriptor.replaceTargetElement.replaceWith(
+      createMathSvgReplacementElement(svgMarkup, texSource, displayMode)
+    );
+    convertedCount += 1;
+  }
+
+  console.log(`公式 SVG 转换完成：${convertedCount}/${formulaCount}`);
+}
+
 // 构建公众号可粘贴内容：读取当前预览区并转换为内联样式 HTML。
-function buildWechatClipboardPayload(
+async function buildWechatClipboardPayload(
   options: CopyPreviewToWechatOptions = {}
-): WechatClipboardPayload {
+): Promise<WechatClipboardPayload> {
   const previewBodyId = options.previewPaneId ?? PREVIEW_BODY_ID;
 
   const previewBody = document.getElementById(previewBodyId);
@@ -128,6 +353,7 @@ function buildWechatClipboardPayload(
     throw new Error("导出失败：预览内容克隆异常");
   }
 
+  await convertKatexFormulasToSvg(previewBody, clonedPreviewBody);
   // Mermaid 的 SVG 样式依赖渲染时注入的 class 规则，需要从真实预览节点读取计算样式。
   inlineMermaidSvgStyles(previewBody, clonedPreviewBody);
 
@@ -222,7 +448,7 @@ function copyWithExecCommand(payload: WechatClipboardPayload): void {
 export async function copyPreviewToWechat(
   options: CopyPreviewToWechatOptions = {}
 ): Promise<WechatClipboardPayload> {
-  const payload = buildWechatClipboardPayload(options);
+  const payload = await buildWechatClipboardPayload(options);
   try {
     await copyWithClipboardApi(payload);
   } catch {

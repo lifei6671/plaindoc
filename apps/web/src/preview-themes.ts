@@ -267,9 +267,12 @@ export const PREVIEW_THEME_TEMPLATES: PreviewThemeTemplate[] = [
     },
     inlineCodeStyle: {
       ...DEFAULT_INLINE_CODE_STYLE,
-      background: "rgba(27,31,35,.05)",
+      background: "#e9eef6",
       border: "none",
-      color: "rgb(71, 193, 168)"
+      borderRadius: "6px",
+      padding: "1px 6px",
+      color: "#444746",
+      fontFamily: "Google Sans Mono,monospace"
     }
   }
 ];
