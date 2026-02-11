@@ -19,97 +19,138 @@ export async function uploadImageToDefaultHosting(
   config: ImageHostingConfig,
   file: File
 ): Promise<UploadImageResult> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("仅支持上传图片类型文件");
+  try {
+    if (!file.type.startsWith("image/")) {
+      throw new Error("仅支持上传图片类型文件");
+    }
+
+    const objectKey = buildObjectKey(file);
+    const context: UploadContext = {
+      config,
+      file,
+      objectKey
+    };
+
+    if (config.defaultProvider === "cloudflare-r2") {
+      return uploadToCloudflareR2(context);
+    }
+
+    return uploadToAliyunOss(context);
+  } catch (error) {
+    console.error("[image-upload] 默认图床上传失败", {
+      provider: config.defaultProvider,
+      fileName: file.name || "未命名图片",
+      fileType: file.type,
+      error
+    });
+    throw error;
   }
-
-  const objectKey = buildObjectKey(file);
-  const context: UploadContext = {
-    config,
-    file,
-    objectKey
-  };
-
-  if (config.defaultProvider === "cloudflare-r2") {
-    return uploadToCloudflareR2(context);
-  }
-
-  return uploadToAliyunOss(context);
 }
 
 // Cloudflare R2 上传：使用 S3 兼容 API 进行 PUT Object。
 async function uploadToCloudflareR2(context: UploadContext): Promise<UploadImageResult> {
-  const { cloudflareR2 } = context.config;
-  if (!cloudflareR2.accountId || !cloudflareR2.accessKeyId || !cloudflareR2.secretAccessKey || !cloudflareR2.bucket) {
-    throw new Error("Cloudflare R2 配置不完整，请检查 Account ID、Access Key、Secret 与 Bucket");
-  }
-
-  const endpoint = `https://${cloudflareR2.accountId}.r2.cloudflarestorage.com`;
-  const s3Client = new S3Client({
-    region: "auto",
-    endpoint,
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: cloudflareR2.accessKeyId,
-      secretAccessKey: cloudflareR2.secretAccessKey
+  try {
+    const { cloudflareR2 } = context.config;
+    if (
+      !cloudflareR2.accountId ||
+      !cloudflareR2.accessKeyId ||
+      !cloudflareR2.secretAccessKey ||
+      !cloudflareR2.bucket
+    ) {
+      throw new Error("Cloudflare R2 配置不完整，请检查 Account ID、Access Key、Secret 与 Bucket");
     }
-  });
 
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: cloudflareR2.bucket,
-      Key: context.objectKey,
-      Body: context.file,
-      ContentType: context.file.type || "application/octet-stream"
-    })
-  );
+    const endpoint = `https://${cloudflareR2.accountId}.r2.cloudflarestorage.com`;
+    const s3Client = new S3Client({
+      region: "auto",
+      endpoint,
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: cloudflareR2.accessKeyId,
+        secretAccessKey: cloudflareR2.secretAccessKey
+      }
+    });
 
-  return {
-    provider: "cloudflare-r2",
-    key: context.objectKey,
-    // 自定义公网域名通常已绑定到 bucket 根路径，此时只拼接 object key。
-    url: cloudflareR2.publicBaseUrl.trim()
-      ? resolvePublicUrl(cloudflareR2.publicBaseUrl, context.objectKey, endpoint)
-      : resolvePublicUrl("", `${cloudflareR2.bucket}/${context.objectKey}`, endpoint)
-  };
+    // 浏览器端直接传 File/Blob 会被 SDK 判定为流式 body，
+    // 从而触发 aws-chunked 编码分支；部分环境下该分支会出现
+    // readableStream.getReader 兼容异常，因此这里转成 Uint8Array
+    // 强制走非流式上传路径。
+    const fileBytes = new Uint8Array(await context.file.arrayBuffer());
+
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: cloudflareR2.bucket,
+        Key: context.objectKey,
+        Body: fileBytes,
+        ContentType: context.file.type || "application/octet-stream"
+      })
+    );
+
+    return {
+      provider: "cloudflare-r2",
+      key: context.objectKey,
+      // 自定义公网域名通常已绑定到 bucket 根路径，此时只拼接 object key。
+      url: cloudflareR2.publicBaseUrl.trim()
+        ? resolvePublicUrl(cloudflareR2.publicBaseUrl, context.objectKey, endpoint)
+        : resolvePublicUrl("", `${cloudflareR2.bucket}/${context.objectKey}`, endpoint)
+    };
+  } catch (error) {
+    console.error("[image-upload][cloudflare-r2] 上传失败", {
+      key: context.objectKey,
+      bucket: context.config.cloudflareR2.bucket,
+      error
+    });
+    throw error;
+  }
 }
 
 // 阿里云 OSS 上传：浏览器端生成签名并发起 PUT 请求。
 async function uploadToAliyunOss(context: UploadContext): Promise<UploadImageResult> {
-  const { aliyunOss } = context.config;
-  if (!aliyunOss.accessKeyId || !aliyunOss.accessKeySecret || !aliyunOss.bucket) {
-    throw new Error("阿里云 OSS 配置不完整，请检查 Access Key、Secret 与 Bucket");
+  try {
+    const { aliyunOss } = context.config;
+    if (!aliyunOss.accessKeyId || !aliyunOss.accessKeySecret || !aliyunOss.bucket) {
+      throw new Error("阿里云 OSS 配置不完整，请检查 Access Key、Secret 与 Bucket");
+    }
+
+    const endpointUrl = resolveAliyunEndpointUrl(aliyunOss.endpoint, aliyunOss.region);
+    const uploadBaseUrl = resolveAliyunUploadBaseUrl(endpointUrl, aliyunOss.bucket);
+    const encodedObjectKey = encodeObjectKey(context.objectKey);
+    const uploadUrl = `${uploadBaseUrl}/${encodedObjectKey}`;
+    const date = new Date().toUTCString();
+    const contentType = context.file.type || "application/octet-stream";
+    const stringToSign = `PUT\n\n${contentType}\n${date}\n/${aliyunOss.bucket}/${context.objectKey}`;
+    const signature = await signWithHmacSha1(aliyunOss.accessKeySecret, stringToSign);
+
+    const response = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": contentType,
+        Date: date,
+        Authorization: `OSS ${aliyunOss.accessKeyId}:${signature}`
+      },
+      body: context.file
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`阿里云 OSS 上传失败（${response.status}）：${responseText || "未知错误"}`);
+    }
+
+    return {
+      provider: "aliyun-oss",
+      key: context.objectKey,
+      url: resolvePublicUrl(aliyunOss.publicBaseUrl, context.objectKey, uploadBaseUrl)
+    };
+  } catch (error) {
+    console.error("[image-upload][aliyun-oss] 上传失败", {
+      key: context.objectKey,
+      bucket: context.config.aliyunOss.bucket,
+      endpoint: context.config.aliyunOss.endpoint,
+      region: context.config.aliyunOss.region,
+      error
+    });
+    throw error;
   }
-
-  const endpointUrl = resolveAliyunEndpointUrl(aliyunOss.endpoint, aliyunOss.region);
-  const uploadBaseUrl = resolveAliyunUploadBaseUrl(endpointUrl, aliyunOss.bucket);
-  const encodedObjectKey = encodeObjectKey(context.objectKey);
-  const uploadUrl = `${uploadBaseUrl}/${encodedObjectKey}`;
-  const date = new Date().toUTCString();
-  const contentType = context.file.type || "application/octet-stream";
-  const stringToSign = `PUT\n\n${contentType}\n${date}\n/${aliyunOss.bucket}/${context.objectKey}`;
-  const signature = await signWithHmacSha1(aliyunOss.accessKeySecret, stringToSign);
-
-  const response = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": contentType,
-      Date: date,
-      Authorization: `OSS ${aliyunOss.accessKeyId}:${signature}`
-    },
-    body: context.file
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    throw new Error(`阿里云 OSS 上传失败（${response.status}）：${responseText || "未知错误"}`);
-  }
-
-  return {
-    provider: "aliyun-oss",
-    key: context.objectKey,
-    url: resolvePublicUrl(aliyunOss.publicBaseUrl, context.objectKey, uploadBaseUrl)
-  };
 }
 
 // 生成对象 key：按日期分层，避免单目录对象过多。

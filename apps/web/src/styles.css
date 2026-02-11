@@ -98,6 +98,11 @@ body {
   flex-shrink: 0;
 }
 
+/* 上传提示图标：复用状态栏旋转动画表达进行中。 */
+.top-toast__loader {
+  animation: status-save-spin 0.9s linear infinite;
+}
+
 .top-toast__message {
   font-size: 13px;
   font-weight: 600;

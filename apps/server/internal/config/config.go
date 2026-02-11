@@ -12,7 +12,7 @@ func Load() Config {
 	return Config{
 		Env:       getenv("APP_ENV", "development"),
 		Addr:      getenv("APP_ADDR", ":8080"),
-		WebOrigin: getenv("WEB_ORIGIN", "http://localhost:5173"),
+		WebOrigin: getenv("WEB_ORIGIN", "http://localhost:3000"),
 	}
 }
 

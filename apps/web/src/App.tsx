@@ -13,9 +13,9 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { SettingsLayer } from "./components/SettingsLayer";
+import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { TopToast, type TopToastVariant } from "./components/TopToast";
-import { ThemeMenu } from "./components/ThemeMenu";
 import { ConflictError, getDataGateway } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
@@ -46,17 +46,17 @@ import {
   formatSavedTime,
   resolveSaveIndicatorVariant
 } from "./editor/status-utils";
-import { copyPreviewToWechat } from "./editor/wechat-export";
 import type { PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
+import { copyPreviewToWechat } from "./editor/wechat-export";
 import { PREVIEW_THEME_TEMPLATES, resolvePreviewTheme } from "./preview-themes";
-import { uploadImageToDefaultHosting } from "./settings/image-hosting-upload";
 import {
   DEFAULT_IMAGE_HOSTING_CONFIG,
   cloneImageHostingConfig,
   normalizeImageHostingConfig,
   type ImageHostingConfig
 } from "./settings/image-hosting";
+import { uploadImageToDefaultHosting } from "./settings/image-hosting-upload";
 
 // 扩展 window 类型，支持外部注入预览样式字符串。
 declare global {
@@ -105,18 +105,22 @@ function insertImageMarkdown(view: EditorView, markdownLines: string[]): void {
   const selectedRange = view.state.selection.main;
   const markdownBlock = markdownLines.join("\n");
   const docLength = view.state.doc.length;
-  const charBeforeSelection =
-    selectedRange.from > 0 ? view.state.doc.sliceString(selectedRange.from - 1, selectedRange.from) : "";
-  const charAfterSelection =
-    selectedRange.to < docLength ? view.state.doc.sliceString(selectedRange.to, selectedRange.to + 1) : "";
+  // 保证图片块前后都至少保留一个空行（即两侧至少有两个换行符）。
+  const beforeContext = view.state.doc.sliceString(Math.max(0, selectedRange.from - 2), selectedRange.from);
+  const afterContext = view.state.doc.sliceString(selectedRange.to, Math.min(docLength, selectedRange.to + 2));
 
-  let insertText = markdownBlock;
-  if (charBeforeSelection && charBeforeSelection !== "\n") {
-    insertText = `\n${insertText}`;
-  }
-  if (charAfterSelection && charAfterSelection !== "\n") {
-    insertText = `${insertText}\n`;
-  }
+  const prefix =
+    selectedRange.from === 0 ? "" : beforeContext.endsWith("\n\n") ? "" : beforeContext.endsWith("\n") ? "\n" : "\n\n";
+  const suffix =
+    selectedRange.to === docLength
+      ? ""
+      : afterContext.startsWith("\n\n")
+        ? ""
+        : afterContext.startsWith("\n")
+          ? "\n"
+          : "\n\n";
+
+  const insertText = `${prefix}${markdownBlock}${suffix}`;
 
   const cursor = selectedRange.from + insertText.length;
   view.dispatch({
@@ -161,6 +165,9 @@ export default function App() {
   const [isWechatCopying, setIsWechatCopying] = useState(false);
   // 粘贴图片上传状态：用于防止重复触发并展示状态文案。
   const [isImageUploading, setIsImageUploading] = useState(false);
+  // 当前上传任务总数与已处理数量：用于展示实时上传进度。
+  const [imageUploadTotalCount, setImageUploadTotalCount] = useState(0);
+  const [imageUploadCompletedCount, setImageUploadCompletedCount] = useState(0);
   // 顶部提示状态：用于复制成功等短时反馈。
   const [appToast, setAppToast] = useState<AppToastState>({
     isOpen: false,
@@ -324,6 +331,7 @@ export default function App() {
         if (cancelled) {
           return;
         }
+        console.error("[settings][image-hosting] 读取图床配置失败", error);
         setImageHostingConfigError(`读取图床配置失败：${formatError(error)}`);
       } finally {
         if (!cancelled) {
@@ -360,6 +368,8 @@ export default function App() {
 
             isImageUploadingRef.current = true;
             setIsImageUploading(true);
+            setImageUploadTotalCount(imageFiles.length);
+            setImageUploadCompletedCount(0);
             setStatusMessage(`正在上传 ${imageFiles.length} 张图片...`);
             const successMarkdownLines: string[] = [];
             const failedMessages: string[] = [];
@@ -373,7 +383,14 @@ export default function App() {
                   );
                   successMarkdownLines.push(buildImageMarkdownLine(imageFile, uploadedImage.url, index));
                 } catch (error) {
+                  console.error("[editor][paste-image] 单张图片上传失败", {
+                    fileName: imageFile.name || "未命名图片",
+                    provider: imageHostingConfigRef.current.defaultProvider,
+                    error
+                  });
                   failedMessages.push(`${imageFile.name || "未命名图片"}：${formatError(error)}`);
+                } finally {
+                  setImageUploadCompletedCount((previousCount) => previousCount + 1);
                 }
               }
 
@@ -390,6 +407,10 @@ export default function App() {
 
               if (failedMessages.length) {
                 const firstError = failedMessages[0];
+                console.error("[editor][paste-image] 部分图片上传失败", {
+                  failedCount: failedMessages.length,
+                  errors: failedMessages
+                });
                 setStatusMessage(`图片上传失败：${firstError}`);
                 setAppToast((previousToast) => ({
                   isOpen: true,
@@ -398,9 +419,20 @@ export default function App() {
                   triggerKey: previousToast.triggerKey + 1
                 }));
               }
+            } catch (error) {
+              console.error("[editor][paste-image] 粘贴图片上传流程异常", error);
+              setStatusMessage(`图片上传异常：${formatError(error)}`);
+              setAppToast((previousToast) => ({
+                isOpen: true,
+                message: `图片上传异常：${formatError(error)}`,
+                variant: "error",
+                triggerKey: previousToast.triggerKey + 1
+              }));
             } finally {
               isImageUploadingRef.current = false;
               setIsImageUploading(false);
+              setImageUploadTotalCount(0);
+              setImageUploadCompletedCount(0);
             }
           })();
           return true;
@@ -464,6 +496,16 @@ export default function App() {
     () => buildPreviewThemeStyleText(activePreviewTheme),
     [activePreviewTheme]
   );
+  // 图片上传中的顶部提示文案：展示 x/y 进度以降低等待焦虑。
+  const imageUploadLoadingMessage = useMemo(() => {
+    if (!isImageUploading) {
+      return "";
+    }
+    if (imageUploadTotalCount <= 0) {
+      return "图片上传中...";
+    }
+    return `图片上传中（${Math.min(imageUploadCompletedCount, imageUploadTotalCount)}/${imageUploadTotalCount}）...`;
+  }, [imageUploadCompletedCount, imageUploadTotalCount, isImageUploading]);
 
   // 首次启动：加载空间、文档树与默认文档内容。
   useEffect(() => {
@@ -652,6 +694,7 @@ export default function App() {
         }));
         setIsSettingsLayerOpen(false);
       } catch (error) {
+        console.error("[settings][image-hosting] 保存图床配置失败", error);
         setImageHostingConfigError(`保存图床配置失败：${formatError(error)}`);
       } finally {
         setIsImageHostingConfigSaving(false);
@@ -691,6 +734,12 @@ export default function App() {
         durationMs={2600}
         onClose={closeAppToast}
         icon={<CheckCircle2 size={16} />}
+      />
+      <TopToast
+        open={isImageUploading}
+        message={imageUploadLoadingMessage}
+        variant="info"
+        icon={<LoaderCircle className="top-toast__loader" size={16} />}
       />
       {/* 当前主题样式：先注入内置模板变量，后续允许外部样式继续覆盖。 */}
       {activePreviewThemeStyleText ? (
