@@ -81,6 +81,20 @@ export interface SaveDocumentResult {
   document: Document;
 }
 
+// 用户配置键值读写参数：用于 user_config 表抽象。
+export type UserConfigUserId = string | number;
+
+export interface UserConfigGetInput {
+  userId: UserConfigUserId;
+  key: string;
+}
+
+export interface UserConfigSetInput {
+  userId: UserConfigUserId;
+  key: string;
+  value: unknown;
+}
+
 export class ConflictError extends Error {
   readonly latestDocument: Document;
 
@@ -113,8 +127,16 @@ export interface DocumentGateway {
   listRevisions(docId: string): Promise<DocumentRevision[]>;
 }
 
+export interface UserConfigGateway {
+  // 读取配置：不存在时返回 null。
+  getValue<T = unknown>(input: UserConfigGetInput): Promise<T | null>;
+  // 写入配置：按 userId + key 覆盖或新增。
+  setValue<T = unknown>(input: UserConfigSetInput & { value: T }): Promise<void>;
+}
+
 export interface DataGateway {
   auth: AuthGateway;
   workspace: WorkspaceGateway;
   document: DocumentGateway;
+  userConfig: UserConfigGateway;
 }

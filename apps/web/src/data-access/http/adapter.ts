@@ -15,6 +15,7 @@ import {
   type UpdateNodeInput,
   type WorkspaceGateway
 } from "../types";
+import { createIndexedDbUserConfigGateway } from "../user-config/indexeddb-gateway";
 
 interface HttpAdapterOptions {
   baseUrl: string;
@@ -117,9 +118,13 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     }
   };
 
+  // 远端驱动下仍复用本地 user_config：用于保存本机偏好配置（如图床参数）。
+  const userConfig = createIndexedDbUserConfigGateway();
+
   return {
     auth,
     workspace,
-    document
+    document,
+    userConfig
   };
 }

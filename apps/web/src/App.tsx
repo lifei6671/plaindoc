@@ -1,16 +1,18 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
+import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { AlertCircle, CheckCircle2, LoaderCircle, Monitor, Smartphone } from "lucide-react";
+import { AlertCircle, CheckCircle2, LoaderCircle, Monitor, Settings2, Smartphone } from "lucide-react";
 import MarkdownIt from "markdown-it";
 // KaTeX mhchem 扩展：支持 `\\ce{}` 化学公式语法。
 import "katex/contrib/mhchem";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { SettingsLayer } from "./components/SettingsLayer";
 import { TocMenu } from "./components/TocMenu";
 import { TopToast, type TopToastVariant } from "./components/TopToast";
 import { ThemeMenu } from "./components/ThemeMenu";
@@ -48,6 +50,13 @@ import { copyPreviewToWechat } from "./editor/wechat-export";
 import type { PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
 import { PREVIEW_THEME_TEMPLATES, resolvePreviewTheme } from "./preview-themes";
+import { uploadImageToDefaultHosting } from "./settings/image-hosting-upload";
+import {
+  DEFAULT_IMAGE_HOSTING_CONFIG,
+  cloneImageHostingConfig,
+  normalizeImageHostingConfig,
+  type ImageHostingConfig
+} from "./settings/image-hosting";
 
 // 扩展 window 类型，支持外部注入预览样式字符串。
 declare global {
@@ -61,6 +70,64 @@ interface AppToastState {
   message: string;
   variant: TopToastVariant;
   triggerKey: number;
+}
+
+const TEMP_USER_ID = 1;
+const IMAGE_HOSTING_CONFIG_KEY = "image_hosting";
+
+// 从剪贴板事件中提取图片文件列表：优先 items，兜底 files。
+function extractImageFilesFromClipboard(event: ClipboardEvent): File[] {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) {
+    return [];
+  }
+
+  const imageFilesFromItems = Array.from(clipboardData.items)
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file instanceof File);
+  if (imageFilesFromItems.length) {
+    return imageFilesFromItems;
+  }
+
+  return Array.from(clipboardData.files).filter((file) => file.type.startsWith("image/"));
+}
+
+// 生成 Markdown 图片文案：优先复用文件名，缺失时回退到 image-x。
+function buildImageMarkdownLine(file: File, url: string, index: number): string {
+  const rawName = file.name.replace(/\.[^.]+$/, "").trim();
+  const altText = rawName || `image-${index + 1}`;
+  return `![${altText}](${url})`;
+}
+
+// 在当前选区插入图片 Markdown，自动补齐前后换行避免粘连原文本。
+function insertImageMarkdown(view: EditorView, markdownLines: string[]): void {
+  const selectedRange = view.state.selection.main;
+  const markdownBlock = markdownLines.join("\n");
+  const docLength = view.state.doc.length;
+  const charBeforeSelection =
+    selectedRange.from > 0 ? view.state.doc.sliceString(selectedRange.from - 1, selectedRange.from) : "";
+  const charAfterSelection =
+    selectedRange.to < docLength ? view.state.doc.sliceString(selectedRange.to, selectedRange.to + 1) : "";
+
+  let insertText = markdownBlock;
+  if (charBeforeSelection && charBeforeSelection !== "\n") {
+    insertText = `\n${insertText}`;
+  }
+  if (charAfterSelection && charAfterSelection !== "\n") {
+    insertText = `${insertText}\n`;
+  }
+
+  const cursor = selectedRange.from + insertText.length;
+  view.dispatch({
+    changes: {
+      from: selectedRange.from,
+      to: selectedRange.to,
+      insert: insertText
+    },
+    selection: EditorSelection.cursor(cursor),
+    scrollIntoView: true
+  });
 }
 
 export default function App() {
@@ -92,6 +159,8 @@ export default function App() {
   const [previewViewportMode, setPreviewViewportMode] = useState<PreviewViewportMode>("desktop");
   // 复制到公众号时的进行中状态：防止重复点击触发并发复制。
   const [isWechatCopying, setIsWechatCopying] = useState(false);
+  // 粘贴图片上传状态：用于防止重复触发并展示状态文案。
+  const [isImageUploading, setIsImageUploading] = useState(false);
   // 顶部提示状态：用于复制成功等短时反馈。
   const [appToast, setAppToast] = useState<AppToastState>({
     isOpen: false,
@@ -99,6 +168,22 @@ export default function App() {
     variant: "success",
     triggerKey: 0
   });
+  // 设置面板开关状态。
+  const [isSettingsLayerOpen, setIsSettingsLayerOpen] = useState(false);
+  // 图床配置读取状态。
+  const [isImageHostingConfigLoading, setIsImageHostingConfigLoading] = useState(true);
+  // 图床配置保存状态。
+  const [isImageHostingConfigSaving, setIsImageHostingConfigSaving] = useState(false);
+  // 图床配置错误文案。
+  const [imageHostingConfigError, setImageHostingConfigError] = useState<string | null>(null);
+  // 图床配置数据。
+  const [imageHostingConfig, setImageHostingConfig] = useState<ImageHostingConfig>(
+    DEFAULT_IMAGE_HOSTING_CONFIG
+  );
+  // 图床配置引用：供异步粘贴上传逻辑读取最新值，避免闭包拿到旧配置。
+  const imageHostingConfigRef = useRef(imageHostingConfig);
+  // 上传中引用：用于 paste 事件同步分支判断，避免并发上传。
+  const isImageUploadingRef = useRef(isImageUploading);
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
@@ -205,10 +290,122 @@ export default function App() {
     }
   }, [previewViewportMode]);
 
+  // 同步配置引用，确保粘贴上传始终使用最新“默认图床 + 凭据”。
+  useEffect(() => {
+    imageHostingConfigRef.current = imageHostingConfig;
+  }, [imageHostingConfig]);
+
+  // 同步上传状态引用，避免在 paste 事件中读取到过期状态。
+  useEffect(() => {
+    isImageUploadingRef.current = isImageUploading;
+  }, [isImageUploading]);
+
+  // 首次加载图床配置：默认从 IndexedDB 的 user_config 表读取。
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadImageHostingConfig = async () => {
+      setIsImageHostingConfigLoading(true);
+      setImageHostingConfigError(null);
+      try {
+        const storedConfig = await dataGateway.userConfig.getValue<unknown>({
+          userId: TEMP_USER_ID,
+          key: IMAGE_HOSTING_CONFIG_KEY
+        });
+        if (cancelled) {
+          return;
+        }
+        if (!storedConfig) {
+          setImageHostingConfig(cloneImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG));
+          return;
+        }
+        setImageHostingConfig(normalizeImageHostingConfig(storedConfig));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setImageHostingConfigError(`读取图床配置失败：${formatError(error)}`);
+      } finally {
+        if (!cancelled) {
+          setIsImageHostingConfigLoading(false);
+        }
+      }
+    };
+
+    void loadImageHostingConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataGateway]);
+
   const extensions = useMemo(
     () => [
       // 编辑器软换行，避免横向滚动影响同步体验。
       EditorView.lineWrapping,
+      // 拦截粘贴图片：自动上传到默认图床并回填 Markdown 图片链接。
+      EditorView.domEventHandlers({
+        paste: (event, view) => {
+          const imageFiles = extractImageFilesFromClipboard(event);
+          if (!imageFiles.length) {
+            return false;
+          }
+
+          event.preventDefault();
+          void (async () => {
+            if (isImageUploadingRef.current) {
+              setStatusMessage("图片上传中，请稍候...");
+              return;
+            }
+
+            isImageUploadingRef.current = true;
+            setIsImageUploading(true);
+            setStatusMessage(`正在上传 ${imageFiles.length} 张图片...`);
+            const successMarkdownLines: string[] = [];
+            const failedMessages: string[] = [];
+
+            try {
+              for (const [index, imageFile] of imageFiles.entries()) {
+                try {
+                  const uploadedImage = await uploadImageToDefaultHosting(
+                    imageHostingConfigRef.current,
+                    imageFile
+                  );
+                  successMarkdownLines.push(buildImageMarkdownLine(imageFile, uploadedImage.url, index));
+                } catch (error) {
+                  failedMessages.push(`${imageFile.name || "未命名图片"}：${formatError(error)}`);
+                }
+              }
+
+              if (successMarkdownLines.length) {
+                insertImageMarkdown(view, successMarkdownLines);
+                setStatusMessage(`已上传 ${successMarkdownLines.length} 张图片并插入链接`);
+                setAppToast((previousToast) => ({
+                  isOpen: true,
+                  message: `图片上传成功（${successMarkdownLines.length}/${imageFiles.length}）`,
+                  variant: "success",
+                  triggerKey: previousToast.triggerKey + 1
+                }));
+              }
+
+              if (failedMessages.length) {
+                const firstError = failedMessages[0];
+                setStatusMessage(`图片上传失败：${firstError}`);
+                setAppToast((previousToast) => ({
+                  isOpen: true,
+                  message: `部分图片上传失败：${firstError}`,
+                  variant: "error",
+                  triggerKey: previousToast.triggerKey + 1
+                }));
+              }
+            } finally {
+              isImageUploadingRef.current = false;
+              setIsImageUploading(false);
+            }
+          })();
+          return true;
+        }
+      }),
       markdown({
         // 启用 Markdown 语言与代码块语言支持。
         base: markdownLanguage,
@@ -423,6 +620,46 @@ export default function App() {
     });
   }, []);
 
+  // 打开设置浮层。
+  const openSettingsLayer = useCallback(() => {
+    setIsSettingsLayerOpen(true);
+  }, []);
+
+  // 关闭设置浮层。
+  const closeSettingsLayer = useCallback(() => {
+    setIsSettingsLayerOpen(false);
+  }, []);
+
+  // 保存图床配置到数据抽象层。
+  const saveImageHostingConfig = useCallback(
+    async (nextConfig: ImageHostingConfig) => {
+      setIsImageHostingConfigSaving(true);
+      setImageHostingConfigError(null);
+      try {
+        const normalizedConfig = normalizeImageHostingConfig(nextConfig);
+        await dataGateway.userConfig.setValue({
+          userId: TEMP_USER_ID,
+          key: IMAGE_HOSTING_CONFIG_KEY,
+          value: normalizedConfig
+        });
+        setImageHostingConfig(normalizedConfig);
+        setStatusMessage("图床配置已保存");
+        setAppToast((previousToast) => ({
+          isOpen: true,
+          message: "图床配置已保存",
+          variant: "success",
+          triggerKey: previousToast.triggerKey + 1
+        }));
+        setIsSettingsLayerOpen(false);
+      } catch (error) {
+        setImageHostingConfigError(`保存图床配置失败：${formatError(error)}`);
+      } finally {
+        setIsImageHostingConfigSaving(false);
+      }
+    },
+    [dataGateway]
+  );
+
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
     if (!activeDocId) {
@@ -463,6 +700,15 @@ export default function App() {
       {customPreviewStyleText ? (
         <style id="plaindoc-preview-custom-style">{customPreviewStyleText}</style>
       ) : null}
+      <SettingsLayer
+        open={isSettingsLayerOpen}
+        initialImageHostingConfig={imageHostingConfig}
+        isLoading={isImageHostingConfigLoading}
+        isSaving={isImageHostingConfigSaving}
+        errorMessage={imageHostingConfigError}
+        onClose={closeSettingsLayer}
+        onSaveImageHostingConfig={saveImageHostingConfig}
+      />
       {/* 顶部状态栏。 */}
       <header className="header">
         <h1>PlainDoc</h1>
@@ -500,6 +746,16 @@ export default function App() {
             onSelectTheme={handleThemeChange}
             customPreviewStyleText={customPreviewStyleText}
           />
+          <button
+            type="button"
+            className="settings-trigger"
+            onClick={openSettingsLayer}
+            title="打开设置面板"
+            aria-label="打开设置面板"
+          >
+            <Settings2 size={14} />
+            <span>设置</span>
+          </button>
         </div>
       </header>
       {/* 双栏工作区：左编辑、右预览。 */}

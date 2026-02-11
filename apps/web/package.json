@@ -9,10 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.987.0",
     "@codemirror/lang-markdown": "^6.3.3",
     "@codemirror/language-data": "^6.5.1",
     "@fontsource/google-sans-code": "^5.2.3",
     "@uiw/react-codemirror": "^4.24.1",
+    "dexie": "^4.3.0",
     "juice": "^11.1.1",
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",

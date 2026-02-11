@@ -15,6 +15,7 @@ import {
   type UpdateNodeInput,
   type WorkspaceGateway
 } from "../types";
+import { createIndexedDbUserConfigGateway } from "../user-config/indexeddb-gateway";
 import { buildTree, createLocalId, useDatabase } from "./store";
 
 function nowIso(): string {
@@ -269,10 +270,14 @@ const documentGateway: DocumentGateway = {
   }
 };
 
+// 本地模式下，用户配置统一使用 IndexedDB user_config 表。
+const userConfigGateway = createIndexedDbUserConfigGateway();
+
 export function createLocalAdapter(): DataGateway {
   return {
     auth: authGateway,
     workspace: workspaceGateway,
-    document: documentGateway
+    document: documentGateway,
+    userConfig: userConfigGateway
   };
 }
