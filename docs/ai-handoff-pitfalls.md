@@ -1,14 +1,15 @@
 # PlainDoc AI 接手与避坑指南
 
-> 更新时间：2026-02-10  
+> 更新时间：2026-02-11  
 > 目的：让后续 AI 会话快速理解项目现状，并避免重复踩坑。
 
 ## 1. 项目速览（前端重点）
 
 - 仓库结构：Monorepo，前端在 `apps/web`，后端在 `apps/server`。
-- 前端技术栈：React + Vite + TypeScript + CodeMirror + ReactMarkdown + react-syntax-highlighter。
+- 前端技术栈：React + Vite + TypeScript + CodeMirror + ReactMarkdown + react-syntax-highlighter + rehype-raw + rehype-sanitize。
 - 当前核心文件：
   - `apps/web/src/App.tsx`：主业务逻辑（编辑、预览、同步滚动、主题、样式详情等）。
+  - `apps/web/src/editor/markdown-sanitize.ts`：内嵌 HTML 白名单清洗配置（XSS 防护 + 锚点保留）。
   - `apps/web/src/styles.css`：整体样式与预览区主题样式。
   - `apps/web/src/main.tsx`：应用挂载与 StrictMode 策略。
   - `apps/web/src/data-access/*`：数据访问抽象（本地/HTTP）。
@@ -53,6 +54,21 @@
 - 主题菜单与样式详情抽屉状态在 `ThemeMenu` 子组件内维护。
 - 目的：避免菜单/抽屉开关触发 `App` 根组件重渲染，影响编辑器和预览性能。
 - 下拉中每个主题项右侧有“查看”按钮，可打开对应主题的样式详情抽屉。
+
+### 2.5 Markdown 内嵌 HTML（含安全清洗）
+
+- 已支持 Markdown 中内嵌 HTML 渲染，渲染链路为：
+  - `remark`（GFM / Math / 锚点）
+  - `rehype-raw`（解析原始 HTML）
+  - `rehype-sanitize`（白名单清洗）
+  - `rehype-katex`（公式渲染）
+- 关键配置：
+  - `PREVIEW_MARKDOWN_REHYPE_OPTIONS.allowDangerousHtml = true`
+  - `PREVIEW_HTML_SANITIZE_SCHEMA`
+- 安全策略（当前）：
+  - `href` 仅允许 `http / https / mailto / tel`
+  - `src` 仅允许 `http / https`
+  - 保留 `className` 与 `data*`（避免滚动锚点属性被清洗）
 
 ## 3. 本轮高频坑（问题 -> 根因 -> 正确做法）
 
@@ -111,13 +127,27 @@
   - 开发模式禁用 `StrictMode` 双挂载（见 `apps/web/src/main.tsx`）。
   - 在 `App.tsx` 中持续检测编辑器容器和滚动节点变化，节点变更后重新绑定监听并重建锚点映射。
 
+### 坑 8：支持内嵌 HTML 后实时滚动突然失效
+
+- 根因：
+  - `rehype-sanitize` 白名单配置不当，清洗时移除了 `remarkBlockAnchorPlugin` 注入的 `data-*` 锚点属性；
+  - `use-scroll-sync` 依赖 `data-anchor-index` 聚合锚点，属性丢失后映射退化，表现为同步滚动失效/明显漂移。
+- 正确做法：
+  - 在 sanitize schema 的 `attributes["*"]` 中使用 `data*` 放行自定义 `data-*` 属性；
+  - 保持插件顺序为 `rehype-raw -> rehype-sanitize -> rehype-katex`；
+  - 每次改 sanitize 规则后，必须手工验证长文档双向滚动。
+
 ## 4. 高风险改动区（请谨慎）
 
 - `apps/web/src/App.tsx` 中以下区域：
   - `remarkBlockAnchorPlugin`
+  - `remarkRehypeOptions` / `rehypePlugins`
   - `rebuildScrollAnchors` / `scheduleRebuildScrollAnchors`
   - `markdownComponents`（`pre/code` 自定义渲染）
   - `ThemeMenu`（菜单和抽屉局部状态）
+- `apps/web/src/editor/markdown-sanitize.ts`：
+  - `PREVIEW_HTML_SANITIZE_SCHEMA`（白名单 + 协议限制）
+  - `PREVIEW_MARKDOWN_REHYPE_OPTIONS`
 - `apps/web/src/styles.css` 中以下区域：
   - 预览区选择器（`#plaindoc-preview-pane ...`）
   - 主题菜单下拉布局
@@ -132,6 +162,7 @@
 - 原则 5：每次改动后至少执行一次构建和一次手工长图滚动验证。
 - 原则 6（强制规范）：所有 AI 生成或修改的代码必须包含中文注释，至少覆盖模块职责、关键函数和复杂分支；不满足该规范的改动视为不合格。
 - 原则 7：每一块功能的引入需要考虑是否可以抽离成独立模块，方便后续迭代。
+- 原则 8：涉及 `rehype-sanitize` 的改动必须验证“锚点属性保留 + XSS 拦截 + 公式渲染”三件事同时成立。
 
 ## 6. 新会话最小验证清单
 
@@ -146,6 +177,8 @@ npm run build -w @plaindoc/web
 3. 下拉菜单展开/收起、样式抽屉打开/关闭时，编辑体验无明显卡顿。
 4. 代码块和行内代码主题切换后样式明显变化。
 5. 样式详情抽屉里能看到“带注释 CSS 模板”，可直接复制。
+6. 编写包含内嵌 HTML 的 Markdown（如 `<div class="note">`）可正确渲染，且无脚本执行。
+7. 包含恶意链接（如 `javascript:`）时被 sanitize 阻断，不可执行。
 
 ## 7. 关键常量速查（便于快速定位）
 
@@ -159,6 +192,9 @@ npm run build -w @plaindoc/web
 - 主题：
   - `PREVIEW_THEME_TEMPLATES`
   - `PREVIEW_THEME_STORAGE_KEY`
+- HTML 安全渲染：
+  - `PREVIEW_HTML_SANITIZE_SCHEMA`
+  - `PREVIEW_MARKDOWN_REHYPE_OPTIONS`
 - 滚动同步：
   - `BLOCK_ANCHOR_SELECTOR`
   - `rebuildScrollAnchors`

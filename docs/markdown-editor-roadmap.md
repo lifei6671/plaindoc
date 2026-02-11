@@ -5,7 +5,7 @@
 ## 1. 范围定义（按你当前需求）
 
 - 前端：双栏实时预览（左编辑 / 右预览）
-- 渲染能力：GFM、代码高亮、Mermaid（流程图/甘特图）、公式（KaTeX）
+- 渲染能力：GFM、代码高亮、Mermaid（流程图/甘特图）、公式（KaTeX）、内嵌 HTML（经白名单清洗）
 - 内容模型：空间（Space） + 目录树（Folder） + 文档（Doc）
 - 用户体系：注册、登录、会话鉴权
 - 权限模型：
@@ -163,7 +163,7 @@
 
 ### 第 2 周：渲染能力完善
 
-- Markdown 渲染链：GFM + 代码高亮 + Mermaid + KaTeX
+- Markdown 渲染链：GFM + 代码高亮 + Mermaid + KaTeX + 内嵌 HTML（`rehype-raw + rehype-sanitize`）
 - Mermaid 错误兜底与重渲染优化
 - 验收：长文档下实时预览稳定，渲染能力完整
 
@@ -214,7 +214,7 @@
 
 - 基础：`react react-dom vite typescript`
 - 编辑器：`@uiw/react-codemirror codemirror @codemirror/lang-markdown @codemirror/language-data`
-- 渲染：`react-markdown remark-gfm remark-math rehype-katex katex rehype-sanitize`
+- 渲染：`react-markdown remark-gfm remark-math rehype-raw rehype-katex katex rehype-sanitize`
 - Mermaid：`mermaid`
 - 代码高亮：`rehype-highlight`（后续可升级 `shiki`）
 - 状态与数据：`zustand @tanstack/react-query`
@@ -247,6 +247,7 @@
   - 方案：输入防抖 + 仅在代码块变化时重渲染 Mermaid
 - 安全风险（XSS）
   - 方案：`rehype-sanitize` 严格白名单，后端存储前后都做必要校验
+  - 备注：白名单需保留 `data*`，否则可能误删滚动同步锚点（`data-anchor-index` 等）导致同步失效
 - 冲突对比体验复杂
   - 方案：先实现双栏 Diff + 手动复制合并，不做自动三方合并
 
@@ -257,6 +258,7 @@
 ### 阶段 A（前端优先 MVP，无后端）
 
 - 双栏实时预览稳定，支持 Mermaid、公式、代码高亮
+- 双栏实时预览稳定，支持内嵌 HTML 且具备白名单清洗
 - 本地空间/目录/文档可完整管理
 - 本地历史可查看和恢复
 - 本地冲突模拟 + 差异对比 + 手动合并可用
@@ -275,4 +277,3 @@
 
 1. `collaborator` 允许删除目录与文档（仍不具备权限管理能力）。
 2. 单独授权权限高于继承权限（支持提权/降权覆盖）。
-

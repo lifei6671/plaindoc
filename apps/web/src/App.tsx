@@ -10,6 +10,8 @@ import "katex/contrib/mhchem";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { SettingsLayer } from "./components/SettingsLayer";
@@ -35,6 +37,10 @@ import {
   parseTocFromMarkdown,
   remarkBlockAnchorPlugin
 } from "./editor/markdown-utils";
+import {
+  PREVIEW_HTML_SANITIZE_SCHEMA,
+  PREVIEW_MARKDOWN_REHYPE_OPTIONS
+} from "./editor/markdown-sanitize";
 import {
   buildPreviewThemeStyleText,
   getPreviewThemeClassName,
@@ -448,8 +454,14 @@ export default function App() {
   );
   // remark 插件顺序：先 GFM，再解析数学公式，最后注入锚点属性。
   const remarkPlugins = useMemo(() => [remarkGfm, remarkMath, remarkBlockAnchorPlugin], []);
-  // rehype 插件：将 Math AST 渲染为 KaTeX HTML。
-  const rehypePlugins = useMemo(() => [rehypeKatex], []);
+  // rehype 插件顺序：先解析内嵌 HTML，再做白名单清洗，最后渲染 KaTeX。
+  const rehypePlugins = useMemo(() => {
+    const sanitizePlugin: [typeof rehypeSanitize, typeof PREVIEW_HTML_SANITIZE_SCHEMA] = [
+      rehypeSanitize,
+      PREVIEW_HTML_SANITIZE_SCHEMA
+    ];
+    return [rehypeRaw, sanitizePlugin, rehypeKatex];
+  }, []);
   // markdown-it 仅用于“去语法后的文字统计”和 TOC 语法解析。
   const markdownTextParser = useMemo(
     () =>
@@ -842,6 +854,8 @@ export default function App() {
               {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
               <ReactMarkdown
                 remarkPlugins={remarkPlugins}
+                // 开启 Markdown 内嵌 HTML 解析，安全边界由 rehype-sanitize 白名单控制。
+                remarkRehypeOptions={PREVIEW_MARKDOWN_REHYPE_OPTIONS}
                 rehypePlugins={rehypePlugins}
                 components={markdownComponents}
               >

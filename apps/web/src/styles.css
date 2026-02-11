@@ -1144,8 +1144,14 @@ body {
 #plaindoc-preview-body li>p,
 #plaindoc-preview-body blockquote p,
 #plaindoc-preview-body td p,
-#plaindoc-preview-body th p {
-  text-indent: 0;
+#plaindoc-preview-body th p,
+#plaindoc-preview-body g p{
+  text-indent: 0 !important;
+  word-spacing: normal;
+  letter-spacing:normal;
+}
+#plaindoc-preview-body g p{
+  margin: 0 !important;
 }
 
 #plaindoc-preview-body h1,
