@@ -55,6 +55,44 @@ body {
   gap: 10px;
 }
 
+/* 预览模式切换按钮：用于 PC / 移动端预览快速切换。 */
+.preview-mode-toggle {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preview-mode-toggle:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.preview-mode-toggle:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.preview-mode-toggle--mobile {
+  border-color: #7dd3fc;
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.preview-mode-toggle__label {
+  line-height: 1;
+}
+
 /* 主题菜单根节点：提供下拉定位上下文。 */
 .theme-menu {
   position: relative;
@@ -535,6 +573,12 @@ body {
       serif);
 }
 
+/* 预览视口容器：PC 全宽，移动端可在其上做窄屏模拟。 */
+.preview-viewport {
+  width: 100%;
+  min-height: 100%;
+}
+
 /* Mermaid 图块基础变量：可被主题类覆写。 */
 #plaindoc-preview-pane {
   --pd-mermaid-card-bg: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
@@ -667,6 +711,29 @@ body {
   text-align: left;
   font-family: var(--pd-preview-font-family);
   word-break: break-all;
+}
+
+/* 移动端预览模式：模拟窄屏设备排版并保持独立滚动容器。 */
+#plaindoc-preview-pane.preview-pane--mobile {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+#plaindoc-preview-pane.preview-pane--mobile .preview-viewport {
+  width: min(100%, 440px);
+  margin: 0 auto;
+  min-height: 100%;
+  padding: 14px 0 20px;
+}
+
+#plaindoc-preview-pane.preview-pane--mobile .plaindoc-preview-body {
+  width: min(100%, 390px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: min(var(--pd-preview-padding), 24px);
+  border: 1px solid #dbe2ea;
+  border-radius: 24px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.12);
+  background: #ffffff;
 }
 
 #plaindoc-preview-pane .plaindoc-preview-body p {
@@ -1169,6 +1236,14 @@ body {
     min-width: 148px;
   }
 
+  .preview-mode-toggle {
+    padding: 0 9px;
+  }
+
+  .preview-mode-toggle__label {
+    display: none;
+  }
+
   .theme-menu__dropdown {
     width: min(260px, calc(100vw - 24px));
     right: 0;
@@ -1185,6 +1260,16 @@ body {
 
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  #plaindoc-preview-pane.preview-pane--mobile .preview-viewport {
+    width: 100%;
+    padding: 10px 0 16px;
+  }
+
+  #plaindoc-preview-pane.preview-pane--mobile .plaindoc-preview-body {
+    width: min(100%, 420px);
+    border-radius: 20px;
   }
 
   /* 小屏下将底栏改为两行，避免信息拥挤。 */

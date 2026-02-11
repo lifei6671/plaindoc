@@ -8,12 +8,19 @@ import {
 } from "./constants";
 import { scrollPreviewToTocItem } from "./markdown-utils";
 import { buildDirectionAnchors, clamp, getMaxScrollable } from "./scroll-sync";
-import type { DirectionAnchor, ScrollAnchor, ScrollSource, TocItem } from "./types";
+import type {
+  DirectionAnchor,
+  PreviewViewportMode,
+  ScrollAnchor,
+  ScrollSource,
+  TocItem
+} from "./types";
 
 interface UseScrollSyncOptions {
   content: string;
   previewThemeClassName: string;
   customPreviewStyleText: string;
+  previewViewportMode: PreviewViewportMode;
 }
 
 interface UseScrollSyncResult {
@@ -27,7 +34,8 @@ interface UseScrollSyncResult {
 export function useScrollSync({
   content,
   previewThemeClassName,
-  customPreviewStyleText
+  customPreviewStyleText,
+  previewViewportMode
 }: UseScrollSyncOptions): UseScrollSyncResult {
   // 编辑器面板根节点，用于在 StrictMode 下追踪滚动容器的重建。
   const [editorPaneElement, setEditorPaneElement] = useState<HTMLElement | null>(null);
@@ -624,7 +632,12 @@ export function useScrollSync({
   // 主题样式或外部覆盖样式变化后，主动重建锚点映射，避免滚动同步漂移。
   useEffect(() => {
     scheduleRebuildScrollAnchors();
-  }, [previewThemeClassName, customPreviewStyleText, scheduleRebuildScrollAnchors]);
+  }, [
+    previewThemeClassName,
+    customPreviewStyleText,
+    previewViewportMode,
+    scheduleRebuildScrollAnchors
+  ]);
 
   // 监听图片异步加载与容器尺寸变化，保障长图场景下映射实时更新。
   useEffect(() => {

@@ -2,7 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { AlertCircle, CheckCircle2, LoaderCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, LoaderCircle, Monitor, Smartphone } from "lucide-react";
 import MarkdownIt from "markdown-it";
 // KaTeX 样式：用于行内/块级公式排版。
 import "katex/dist/katex.min.css";
@@ -24,7 +24,8 @@ import {
   PREVIEW_CUSTOM_STYLE_STORAGE_KEY,
   PREVIEW_PANE_CLASS,
   PREVIEW_PANE_ID,
-  PREVIEW_THEME_STORAGE_KEY
+  PREVIEW_THEME_STORAGE_KEY,
+  PREVIEW_VIEWPORT_MODE_STORAGE_KEY
 } from "./editor/constants";
 import { buildMarkdownComponents } from "./editor/markdown-components";
 import {
@@ -43,7 +44,7 @@ import {
   formatSavedTime,
   resolveSaveIndicatorVariant
 } from "./editor/status-utils";
-import type { SaveStatus } from "./editor/types";
+import type { PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
 import { PREVIEW_THEME_TEMPLATES, resolvePreviewTheme } from "./preview-themes";
 
@@ -79,6 +80,8 @@ export default function App() {
   const [activePreviewThemeId, setActivePreviewThemeId] = useState(DEFAULT_PREVIEW_THEME_ID);
   // 外部注入的预览样式文本；为空时仅使用内置主题。
   const [customPreviewStyleText, setCustomPreviewStyleText] = useState("");
+  // 预览视口模式：desktop 保持现状，mobile 模拟窄屏阅读。
+  const [previewViewportMode, setPreviewViewportMode] = useState<PreviewViewportMode>("desktop");
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
@@ -96,7 +99,8 @@ export default function App() {
     useScrollSync({
       content,
       previewThemeClassName: activePreviewThemeClassName,
-      customPreviewStyleText
+      customPreviewStyleText,
+      previewViewportMode
     });
 
   // 加载并监听外部自定义样式：支持 window 变量、localStorage 与自定义事件三种入口。
@@ -154,6 +158,18 @@ export default function App() {
     }
   }, []);
 
+  // 首次加载时恢复上次选择的预览视口模式（PC / 移动端）。
+  useEffect(() => {
+    try {
+      const storedPreviewViewportMode = window.localStorage.getItem(PREVIEW_VIEWPORT_MODE_STORAGE_KEY);
+      if (storedPreviewViewportMode === "desktop" || storedPreviewViewportMode === "mobile") {
+        setPreviewViewportMode(storedPreviewViewportMode);
+      }
+    } catch {
+      // localStorage 不可用时保持默认 PC 预览模式。
+    }
+  }, []);
+
   // 主题变化时写入本地缓存，便于下次启动直接恢复。
   useEffect(() => {
     try {
@@ -162,6 +178,15 @@ export default function App() {
       // localStorage 失败时忽略持久化，不影响当前显示。
     }
   }, [activePreviewThemeId]);
+
+  // 预览模式变化时写入本地缓存，便于下次启动直接恢复。
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PREVIEW_VIEWPORT_MODE_STORAGE_KEY, previewViewportMode);
+    } catch {
+      // localStorage 失败时忽略持久化，不影响当前显示。
+    }
+  }, [previewViewportMode]);
 
   const extensions = useMemo(
     () => [
@@ -339,6 +364,13 @@ export default function App() {
     );
   }, []);
 
+  // 切换预览视口：desktop <-> mobile。
+  const togglePreviewViewportMode = useCallback(() => {
+    setPreviewViewportMode((previousMode) =>
+      previousMode === "desktop" ? "mobile" : "desktop"
+    );
+  }, []);
+
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
     if (!activeDocId) {
@@ -376,6 +408,19 @@ export default function App() {
         <div className="header-actions">
           {/* 目录菜单：展示标题结构并支持快速跳转。 */}
           {hasTocMarker ? <TocMenu items={tocItems} onSelectItem={handleTocNavigate} /> : null}
+          {/* 预览模式切换：在 PC 与移动端窄屏模拟之间切换。 */}
+          <button
+            type="button"
+            className={`preview-mode-toggle preview-mode-toggle--${previewViewportMode}`}
+            onClick={togglePreviewViewportMode}
+            title={previewViewportMode === "desktop" ? "切换到移动端预览" : "切换到 PC 预览"}
+            aria-label={previewViewportMode === "desktop" ? "切换到移动端预览" : "切换到 PC 预览"}
+          >
+            {previewViewportMode === "desktop" ? <Monitor size={14} /> : <Smartphone size={14} />}
+            <span className="preview-mode-toggle__label">
+              {previewViewportMode === "desktop" ? "PC 预览" : "移动预览"}
+            </span>
+          </button>
           {/* 主题菜单：展开/收起只更新菜单组件自身。 */}
           <ThemeMenu
             themes={PREVIEW_THEME_TEMPLATES}
@@ -408,20 +453,22 @@ export default function App() {
         </section>
         <section
           id={PREVIEW_PANE_ID}
-          className={`pane preview-pane ${PREVIEW_PANE_CLASS} ${activePreviewThemeClassName}`}
+          className={`pane preview-pane preview-pane--${previewViewportMode} ${PREVIEW_PANE_CLASS} ${activePreviewThemeClassName}`}
           // 使用稳定 ref 回调，保证滚动监听不会被重复拆装。
           ref={handlePreviewScrollerRef}
         >
-          <article className={`markdown-body ${PREVIEW_BODY_CLASS}`}>
-            {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
-            <ReactMarkdown
-              remarkPlugins={remarkPlugins}
-              rehypePlugins={rehypePlugins}
-              components={markdownComponents}
-            >
-              {content}
-            </ReactMarkdown>
-          </article>
+          <div className={`preview-viewport preview-viewport--${previewViewportMode}`}>
+            <article className={`markdown-body ${PREVIEW_BODY_CLASS}`}>
+              {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
+                components={markdownComponents}
+              >
+                {content}
+              </ReactMarkdown>
+            </article>
+          </div>
         </section>
       </main>
       {/* 冲突提示与手动同步入口。 */}

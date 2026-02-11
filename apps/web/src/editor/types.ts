@@ -4,6 +4,9 @@ export type SaveStatus = "loading" | "ready" | "saving" | "saved" | "conflict" |
 // 状态栏保存图标类型。
 export type SaveIndicatorVariant = "unsaved" | "saving" | "saved";
 
+// 预览区视口模式：PC 全宽 / 移动端窄屏。
+export type PreviewViewportMode = "desktop" | "mobile";
+
 // 当前滚动事件的来源。
 export type ScrollSource = "editor" | "preview";
 

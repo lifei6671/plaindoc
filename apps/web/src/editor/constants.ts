@@ -56,5 +56,8 @@ export const PREVIEW_CUSTOM_STYLE_STORAGE_KEY = "plaindoc.preview.custom-style";
 // 本地持久化主题模板的键名。
 export const PREVIEW_THEME_STORAGE_KEY = "plaindoc.preview.theme-template";
 
+// 本地持久化预览视口模式（PC / 移动端）的键名。
+export const PREVIEW_VIEWPORT_MODE_STORAGE_KEY = "plaindoc.preview.viewport-mode";
+
 // 外部通知预览样式变更的自定义事件名。
 export const PREVIEW_CUSTOM_STYLE_EVENT = "plaindoc:preview-style-change";
