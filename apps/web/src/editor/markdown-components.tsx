@@ -1,6 +1,10 @@
 import {
   Children,
   isValidElement,
+  useEffect,
+  useId,
+  useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type ReactNode
 } from "react";
@@ -22,6 +26,90 @@ interface BuildMarkdownComponentsOptions {
   activePreviewThemeId: string;
   tocItems: TocItem[];
   onTocNavigate: (item: TocItem) => void;
+}
+
+interface MermaidBlockProps {
+  code: string;
+  anchorDataAttributes: Record<string, string>;
+}
+
+// Mermaid 代码块渲染器：将 fenced mermaid 文本编译为 SVG，并保留锚点属性。
+function MermaidBlock({ code, anchorDataAttributes }: MermaidBlockProps) {
+  const [renderedSvg, setRenderedSvg] = useState("");
+  const [renderError, setRenderError] = useState<string | null>(null);
+  const blockId = useId();
+  const renderTicketRef = useRef(0);
+
+  useEffect(() => {
+    const source = code.trim();
+    if (!source) {
+      setRenderedSvg("");
+      setRenderError("Mermaid 代码块为空，无法渲染图表。");
+      return;
+    }
+
+    renderTicketRef.current += 1;
+    const renderTicket = renderTicketRef.current;
+    const normalizedBlockId = blockId.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+    const renderMermaid = async () => {
+      try {
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          suppressErrorRendering: true
+        });
+        const renderResult = await mermaid.render(
+          `plaindoc-mermaid-${normalizedBlockId}-${renderTicket}`,
+          source
+        );
+        if (renderTicketRef.current !== renderTicket) {
+          return;
+        }
+        setRenderedSvg(renderResult.svg);
+        setRenderError(null);
+      } catch (error) {
+        if (renderTicketRef.current !== renderTicket) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        setRenderedSvg("");
+        setRenderError(`Mermaid 渲染失败：${message}`);
+      }
+    };
+
+    void renderMermaid();
+  }, [blockId, code]);
+
+  if (renderError) {
+    return (
+      <div className="mermaid-block mermaid-block--error" {...anchorDataAttributes}>
+        <p className="mermaid-block__error-message">{renderError}</p>
+        <pre className="mermaid-block__fallback">
+          <code>{code}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  if (!renderedSvg) {
+    return (
+      <div className="mermaid-block mermaid-block--loading" {...anchorDataAttributes}>
+        Mermaid 图渲染中...
+      </div>
+    );
+  }
+
+  return (
+    <div className="mermaid-block" {...anchorDataAttributes}>
+      <div
+        className="mermaid-block__diagram"
+        // Mermaid 官方渲染结果为可信 SVG 字符串；此处按需注入到预览 DOM。
+        dangerouslySetInnerHTML={{ __html: renderedSvg }}
+      />
+    </div>
+  );
 }
 
 // 统一渲染标题结构，便于主题使用 prefix/content/suffix 三段式样式。
@@ -119,6 +207,10 @@ export function buildMarkdownComponents({
       const language = resolveCodeLanguage(codeClassName);
       const anchorDataAttributes = pickAnchorDataAttributes(codeElementProps);
       const codeText = extractCodeText(codeElementProps.children as ReactNode).replace(/\n$/, "");
+
+      if (language.toLowerCase() === "mermaid") {
+        return <MermaidBlock code={codeText} anchorDataAttributes={anchorDataAttributes} />;
+      }
 
       // 自定义 PreTag：把 source 锚点挂回代码块根节点，保证滚动映射不丢失。
       const PreTag = ({

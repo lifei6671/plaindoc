@@ -535,6 +535,24 @@ body {
       serif);
 }
 
+/* Mermaid 图块基础变量：可被主题类覆写。 */
+#plaindoc-preview-pane {
+  --pd-mermaid-card-bg: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  --pd-mermaid-card-border: #dbe2ea;
+  --pd-mermaid-card-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  --pd-mermaid-grid-color: rgba(148, 163, 184, 0.16);
+  --pd-mermaid-loading-color: #64748b;
+}
+
+/* 清爽技术主题下提高 Mermaid 图可读性与层次感。 */
+#plaindoc-preview-pane.plaindoc-preview-pane--clean-tech {
+  --pd-mermaid-card-bg: linear-gradient(180deg, #ffffff 0%, #eef6ff 100%);
+  --pd-mermaid-card-border: #bfdbfe;
+  --pd-mermaid-card-shadow: 0 10px 22px rgba(14, 116, 144, 0.12);
+  --pd-mermaid-grid-color: rgba(56, 189, 248, 0.15);
+  --pd-mermaid-loading-color: #0f4c81;
+}
+
 /* 预览区默认主题变量：外部可用同一选择器覆写这些变量。 */
 #plaindoc-preview-pane.plaindoc-preview-pane--default {
   --pd-preview-padding: 30px;
@@ -897,6 +915,68 @@ body {
 #plaindoc-preview-pane .plaindoc-preview-body pre code {
   display: block;
   white-space: pre;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block {
+  margin: 16px 0;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--pd-mermaid-card-border);
+  box-shadow: var(--pd-mermaid-card-shadow);
+  background: var(--pd-mermaid-card-bg);
+  overflow-x: auto;
+  text-indent: 0;
+  position: relative;
+  isolation: isolate;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: radial-gradient(var(--pd-mermaid-grid-color) 0.8px, transparent 0.8px);
+  background-size: 14px 14px;
+  opacity: 0.6;
+  z-index: 0;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__diagram {
+  position: relative;
+  z-index: 1;
+  min-width: max-content;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: transparent;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block--loading {
+  color: var(--pd-mermaid-loading-color);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block--error {
+  color: #dc2626;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__error-message {
+  margin: 0 0 8px;
+  text-indent: 0;
+  font-size: 13px;
+}
+
+#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__fallback {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
 }
 
 #plaindoc-preview-pane .plaindoc-preview-body img {
