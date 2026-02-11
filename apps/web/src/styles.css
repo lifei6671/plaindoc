@@ -55,6 +55,55 @@ body {
   gap: 10px;
 }
 
+/* 顶部居中 Toast：用于复制成功等短时反馈，几秒后自动关闭。 */
+.top-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  min-height: 42px;
+  max-width: min(92vw, 520px);
+  padding: 10px 14px;
+  border: 1px solid #86efac;
+  border-radius: 999px;
+  background: rgba(22, 163, 74, 0.96);
+  color: #f8fafc;
+  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+  animation: top-toast-enter 0.2s ease-out;
+}
+
+.top-toast--info {
+  border-color: #7dd3fc;
+  background: rgba(3, 105, 161, 0.96);
+}
+
+.top-toast--error {
+  border-color: #fda4af;
+  background: rgba(190, 24, 93, 0.96);
+}
+
+.top-toast__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.top-toast__message {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 顶栏“复制到公众号”按钮：触发预览内容内联导出并写入剪贴板。 */
 .wechat-copy-button {
   height: 34px;
@@ -1317,5 +1366,18 @@ body {
 
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* 顶部提示进入动效：轻微下落并淡入。 */
+@keyframes top-toast-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }

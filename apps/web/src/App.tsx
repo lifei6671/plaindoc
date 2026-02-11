@@ -12,6 +12,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { TocMenu } from "./components/TocMenu";
+import { TopToast, type TopToastVariant } from "./components/TopToast";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { ConflictError, getDataGateway } from "./data-access";
 import {
@@ -55,6 +56,13 @@ declare global {
   }
 }
 
+interface AppToastState {
+  isOpen: boolean;
+  message: string;
+  variant: TopToastVariant;
+  triggerKey: number;
+}
+
 export default function App() {
   // 数据网关单例。
   const dataGateway = useMemo(() => getDataGateway(), []);
@@ -84,6 +92,13 @@ export default function App() {
   const [previewViewportMode, setPreviewViewportMode] = useState<PreviewViewportMode>("desktop");
   // 复制到公众号时的进行中状态：防止重复点击触发并发复制。
   const [isWechatCopying, setIsWechatCopying] = useState(false);
+  // 顶部提示状态：用于复制成功等短时反馈。
+  const [appToast, setAppToast] = useState<AppToastState>({
+    isOpen: false,
+    message: "",
+    variant: "success",
+    triggerKey: 0
+  });
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
@@ -382,12 +397,31 @@ export default function App() {
     try {
       await copyPreviewToWechat();
       setStatusMessage("已复制预览内容，可直接粘贴到微信公众号编辑器");
+      setAppToast((previousToast) => ({
+        isOpen: true,
+        message: "复制成功，可直接粘贴到微信公众号编辑器",
+        variant: "success",
+        triggerKey: previousToast.triggerKey + 1
+      }));
     } catch (error) {
       setStatusMessage(`复制失败：${formatError(error)}`);
     } finally {
       setIsWechatCopying(false);
     }
   }, [isWechatCopying]);
+
+  // 关闭顶部提示：供自动计时与后续手动关闭复用。
+  const closeAppToast = useCallback(() => {
+    setAppToast((previousToast) => {
+      if (!previousToast.isOpen) {
+        return previousToast;
+      }
+      return {
+        ...previousToast,
+        isOpen: false
+      };
+    });
+  }, []);
 
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
@@ -412,6 +446,15 @@ export default function App() {
   return (
     // 主页面容器。
     <div className="page">
+      <TopToast
+        open={appToast.isOpen}
+        message={appToast.message}
+        variant={appToast.variant}
+        triggerKey={appToast.triggerKey}
+        durationMs={2600}
+        onClose={closeAppToast}
+        icon={<CheckCircle2 size={16} />}
+      />
       {/* 当前主题样式：先注入内置模板变量，后续允许外部样式继续覆盖。 */}
       {activePreviewThemeStyleText ? (
         <style id="plaindoc-preview-theme-style">{activePreviewThemeStyleText}</style>
