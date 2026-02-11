@@ -4,8 +4,6 @@ import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { AlertCircle, CheckCircle2, LoaderCircle, Monitor, Smartphone } from "lucide-react";
 import MarkdownIt from "markdown-it";
-// KaTeX 样式：用于行内/块级公式排版。
-import "katex/dist/katex.min.css";
 // KaTeX mhchem 扩展：支持 `\\ce{}` 化学公式语法。
 import "katex/contrib/mhchem";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -20,6 +18,7 @@ import {
   DEFAULT_PREVIEW_THEME_ID,
   FALLBACK_CONTENT,
   PREVIEW_BODY_CLASS,
+  PREVIEW_BODY_ID,
   PREVIEW_CUSTOM_STYLE_EVENT,
   PREVIEW_CUSTOM_STYLE_STORAGE_KEY,
   PREVIEW_PANE_CLASS,
@@ -44,6 +43,7 @@ import {
   formatSavedTime,
   resolveSaveIndicatorVariant
 } from "./editor/status-utils";
+import { copyPreviewToWechat } from "./editor/wechat-export";
 import type { PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
 import { PREVIEW_THEME_TEMPLATES, resolvePreviewTheme } from "./preview-themes";
@@ -82,13 +82,15 @@ export default function App() {
   const [customPreviewStyleText, setCustomPreviewStyleText] = useState("");
   // 预览视口模式：desktop 保持现状，mobile 模拟窄屏阅读。
   const [previewViewportMode, setPreviewViewportMode] = useState<PreviewViewportMode>("desktop");
+  // 复制到公众号时的进行中状态：防止重复点击触发并发复制。
+  const [isWechatCopying, setIsWechatCopying] = useState(false);
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
     () => resolvePreviewTheme(activePreviewThemeId),
     [activePreviewThemeId]
   );
-  // 预览区主题类名：挂到预览容器上参与选择器匹配。
+  // 预览区主题类名：挂到正文 article 上参与主题变量匹配。
   const activePreviewThemeClassName = useMemo(
     () => getPreviewThemeClassName(activePreviewTheme.id),
     [activePreviewTheme.id]
@@ -371,6 +373,22 @@ export default function App() {
     );
   }, []);
 
+  // 导出预览区为内联样式 HTML，并写入剪贴板供公众号编辑器粘贴。
+  const handleCopyToWechat = useCallback(async () => {
+    if (isWechatCopying) {
+      return;
+    }
+    setIsWechatCopying(true);
+    try {
+      await copyPreviewToWechat();
+      setStatusMessage("已复制预览内容，可直接粘贴到微信公众号编辑器");
+    } catch (error) {
+      setStatusMessage(`复制失败：${formatError(error)}`);
+    } finally {
+      setIsWechatCopying(false);
+    }
+  }, [isWechatCopying]);
+
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
     if (!activeDocId) {
@@ -408,6 +426,17 @@ export default function App() {
         <div className="header-actions">
           {/* 目录菜单：展示标题结构并支持快速跳转。 */}
           {hasTocMarker ? <TocMenu items={tocItems} onSelectItem={handleTocNavigate} /> : null}
+          {/* 复制到公众号：将当前预览导出为内联样式 HTML。 */}
+          <button
+            type="button"
+            className="wechat-copy-button"
+            onClick={() => void handleCopyToWechat()}
+            disabled={isWechatCopying}
+            title="复制当前预览为公众号可粘贴内容"
+            aria-label="复制当前预览为公众号可粘贴内容"
+          >
+            {isWechatCopying ? "复制中..." : "复制到公众号"}
+          </button>
           {/* 预览模式切换：在 PC 与移动端窄屏模拟之间切换。 */}
           <button
             type="button"
@@ -453,12 +482,15 @@ export default function App() {
         </section>
         <section
           id={PREVIEW_PANE_ID}
-          className={`pane preview-pane preview-pane--${previewViewportMode} ${PREVIEW_PANE_CLASS} ${activePreviewThemeClassName}`}
+          className={`pane preview-pane preview-pane--${previewViewportMode} ${PREVIEW_PANE_CLASS}`}
           // 使用稳定 ref 回调，保证滚动监听不会被重复拆装。
           ref={handlePreviewScrollerRef}
         >
           <div className={`preview-viewport preview-viewport--${previewViewportMode}`}>
-            <article className={`markdown-body ${PREVIEW_BODY_CLASS}`}>
+            <article
+              id={PREVIEW_BODY_ID}
+              className={`markdown-body ${PREVIEW_BODY_CLASS} preview-body--${previewViewportMode} ${activePreviewThemeClassName}`}
+            >
               {/* 使用 remark 插件渲染 Markdown 并写入 block 锚点。 */}
               <ReactMarkdown
                 remarkPlugins={remarkPlugins}

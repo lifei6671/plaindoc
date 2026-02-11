@@ -3,7 +3,7 @@
   line-height: 1.5;
   font-weight: 400;
   color: #111827;
-  background-color: #f3f4f6;
+  background-color: #ffffff;
 }
 
 /* 锁定根节点高度并禁止整页滚动，避免滚轮穿透把整页推离可视区域。 */
@@ -53,6 +53,35 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* 顶栏“复制到公众号”按钮：触发预览内容内联导出并写入剪贴板。 */
+.wechat-copy-button {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wechat-copy-button:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.wechat-copy-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.wechat-copy-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 /* 预览模式切换按钮：用于 PC / 移动端预览快速切换。 */
@@ -589,7 +618,7 @@ body {
 }
 
 /* 清爽技术主题下提高 Mermaid 图可读性与层次感。 */
-#plaindoc-preview-pane.plaindoc-preview-pane--clean-tech {
+#plaindoc-preview-body.plaindoc-preview-body--clean-tech {
   --pd-mermaid-card-bg: linear-gradient(180deg, #ffffff 0%, #eef6ff 100%);
   --pd-mermaid-card-border: #bfdbfe;
   --pd-mermaid-card-shadow: 0 10px 22px rgba(14, 116, 144, 0.12);
@@ -598,7 +627,7 @@ body {
 }
 
 /* 预览区默认主题变量：外部可用同一选择器覆写这些变量。 */
-#plaindoc-preview-pane.plaindoc-preview-pane--default {
+#plaindoc-preview-body.plaindoc-preview-body--default {
   --pd-preview-padding: 30px;
   --pd-preview-font-family: Optima-Regular, Optima, PingFangSC-light, PingFangTC-light,
     "PingFang SC", Cambria, Cochin, Georgia, Times, "Times New Roman", serif;
@@ -653,27 +682,27 @@ body {
 /* 统一收窄滚动条，并增强滚动反馈可见性。 */
 .editor-pane .cm-scroller,
 .preview-pane,
-#plaindoc-preview-pane .plaindoc-preview-body pre {
+#plaindoc-preview-body pre {
   scrollbar-width: thin;
   scrollbar-color: #94a3b8 transparent;
 }
 
 .editor-pane .cm-scroller::-webkit-scrollbar,
 .preview-pane::-webkit-scrollbar,
-#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar {
+#plaindoc-preview-body pre::-webkit-scrollbar {
   width: 7px;
   height: 7px;
 }
 
 .editor-pane .cm-scroller::-webkit-scrollbar-track,
 .preview-pane::-webkit-scrollbar-track,
-#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar-track {
+#plaindoc-preview-body pre::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .editor-pane .cm-scroller::-webkit-scrollbar-thumb,
 .preview-pane::-webkit-scrollbar-thumb,
-#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar-thumb {
+#plaindoc-preview-body pre::-webkit-scrollbar-thumb {
   border-radius: 999px;
   border: 2px solid transparent;
   background: #94a3b8;
@@ -682,7 +711,7 @@ body {
 
 .editor-pane .cm-scroller::-webkit-scrollbar-thumb:hover,
 .preview-pane::-webkit-scrollbar-thumb:hover,
-#plaindoc-preview-pane .plaindoc-preview-body pre::-webkit-scrollbar-thumb:hover {
+#plaindoc-preview-body pre::-webkit-scrollbar-thumb:hover {
   background: #64748b;
   background-clip: content-box;
 }
@@ -700,7 +729,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body {
+#plaindoc-preview-body {
   padding: var(--pd-preview-padding);
   min-height: 100%;
   color: var(--pd-preview-text-color);
@@ -719,14 +748,14 @@ body {
 }
 
 #plaindoc-preview-pane.preview-pane--mobile .preview-viewport {
-  width: min(100%, 440px);
+  width: min(100%, 375px);
   margin: 0 auto;
   min-height: 100%;
   padding: 14px 0 20px;
 }
 
-#plaindoc-preview-pane.preview-pane--mobile .plaindoc-preview-body {
-  width: min(100%, 390px);
+#plaindoc-preview-pane.preview-pane--mobile .preview-body--mobile {
+  width: 100%;
   min-height: 100%;
   margin: 0 auto;
   padding: min(var(--pd-preview-padding), 24px);
@@ -736,39 +765,39 @@ body {
   background: #ffffff;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body p {
+#plaindoc-preview-body p {
   margin-top: var(--pd-preview-paragraph-margin-top);
   margin-bottom: var(--pd-preview-paragraph-margin-bottom);
   text-indent: var(--pd-preview-paragraph-indent);
   color: var(--pd-preview-text-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body li>p,
-#plaindoc-preview-pane .plaindoc-preview-body blockquote p,
-#plaindoc-preview-pane .plaindoc-preview-body td p,
-#plaindoc-preview-pane .plaindoc-preview-body th p {
+#plaindoc-preview-body li>p,
+#plaindoc-preview-body blockquote p,
+#plaindoc-preview-body td p,
+#plaindoc-preview-body th p {
   text-indent: 0;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body h1,
-#plaindoc-preview-pane .plaindoc-preview-body h2,
-#plaindoc-preview-pane .plaindoc-preview-body h3,
-#plaindoc-preview-pane .plaindoc-preview-body h4,
-#plaindoc-preview-pane .plaindoc-preview-body h5,
-#plaindoc-preview-pane .plaindoc-preview-body h6 {
+#plaindoc-preview-body h1,
+#plaindoc-preview-body h2,
+#plaindoc-preview-body h3,
+#plaindoc-preview-body h4,
+#plaindoc-preview-body h5,
+#plaindoc-preview-body h6 {
   margin-top: 30px;
   border-bottom-style: solid;
 }
 
 /* 标题层级样式变量：支持 h1~h6 独立控制文字色和下边框。 */
-#plaindoc-preview-pane .plaindoc-preview-body h1 {
+#plaindoc-preview-body h1 {
   font-size: var(--pd-preview-h1-font-size, 2em);
   color: var(--pd-preview-h1-color, var(--pd-preview-title-color));
   border-bottom-width: var(--pd-preview-h1-border-width, 0);
   border-bottom-color: var(--pd-preview-h1-border-color, transparent);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body h2 {
+#plaindoc-preview-body h2 {
   font-size: var(--pd-preview-h2-font-size, 1.5em);
   color: var(--pd-preview-h2-color, var(--pd-preview-title-color));
   margin-bottom: 24px;
@@ -777,28 +806,28 @@ body {
   border-bottom-color: var(--pd-preview-h2-border-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body h3 {
+#plaindoc-preview-body h3 {
   font-size: var(--pd-preview-h3-font-size, 1.25em);
   color: var(--pd-preview-h3-color, var(--pd-preview-title-color));
   border-bottom-width: var(--pd-preview-h3-border-width, 0);
   border-bottom-color: var(--pd-preview-h3-border-color, transparent);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body h4 {
+#plaindoc-preview-body h4 {
   font-size: var(--pd-preview-h4-font-size, 1.05em);
   color: var(--pd-preview-h4-color, var(--pd-preview-title-color));
   border-bottom-width: var(--pd-preview-h4-border-width, 0);
   border-bottom-color: var(--pd-preview-h4-border-color, transparent);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body h5 {
+#plaindoc-preview-body h5 {
   font-size: var(--pd-preview-h5-font-size, 0.95em);
   color: var(--pd-preview-h5-color, var(--pd-preview-title-color));
   border-bottom-width: var(--pd-preview-h5-border-width, 0);
   border-bottom-color: var(--pd-preview-h5-border-color, transparent);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body h6 {
+#plaindoc-preview-body h6 {
   font-size: var(--pd-preview-h6-font-size, 0.88em);
   color: var(--pd-preview-h6-color, var(--pd-preview-title-color));
   border-bottom-width: var(--pd-preview-h6-border-width, 0);
@@ -806,12 +835,12 @@ body {
 }
 
 /* 行内公式：保持在文本流中显示，避免被全局 word-break 打断。 */
-#plaindoc-preview-pane .plaindoc-preview-body .katex {
+#plaindoc-preview-body .katex {
   word-break: normal;
 }
 
 /* 块级公式：允许横向滚动，避免长公式截断。 */
-#plaindoc-preview-pane .plaindoc-preview-body .katex-display {
+#plaindoc-preview-body .katex-display {
   margin: 14px 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -819,14 +848,14 @@ body {
 }
 
 /* 块级公式内容：保持单行渲染并确保最小可见宽度。 */
-#plaindoc-preview-pane .plaindoc-preview-body .katex-display > .katex {
+#plaindoc-preview-body .katex-display>.katex {
   display: inline-block;
   min-width: 100%;
   white-space: nowrap;
 }
 
 /* [TOC] 语法渲染结果：文档内目录容器。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline {
+#plaindoc-preview-body .toc-inline {
   margin: 14px 0;
   border: 1px solid #dbe2ea;
   border-radius: 10px;
@@ -835,7 +864,7 @@ body {
 }
 
 /* 折叠态目录头：默认只占一行高度，降低同步滚动失配。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__summary {
+#plaindoc-preview-body .toc-inline__summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -845,16 +874,16 @@ body {
   padding: 10px 12px;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__summary::-webkit-details-marker {
+#plaindoc-preview-body .toc-inline__summary::-webkit-details-marker {
   display: none;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline[open] .toc-inline__summary {
+#plaindoc-preview-body .toc-inline[open] .toc-inline__summary {
   border-bottom: 1px solid #dbe2ea;
 }
 
 /* 文档目录标题。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__title {
+#plaindoc-preview-body .toc-inline__title {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
@@ -862,13 +891,13 @@ body {
 }
 
 /* 目录项数量提示。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__meta {
+#plaindoc-preview-body .toc-inline__meta {
   font-size: 12px;
   color: #64748b;
 }
 
 /* 展开内容区：限制最大高度，避免目录过高破坏同步体验。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__body {
+#plaindoc-preview-body .toc-inline__body {
   max-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -876,18 +905,18 @@ body {
 }
 
 /* 文档目录列表。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__list {
+#plaindoc-preview-body .toc-inline__list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__item + .toc-inline__item {
+#plaindoc-preview-body .toc-inline__item+.toc-inline__item {
   margin-top: 4px;
 }
 
 /* 文档目录条目按钮。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__button {
+#plaindoc-preview-body .toc-inline__button {
   width: 100%;
   border: 0;
   border-radius: 8px;
@@ -900,17 +929,17 @@ body {
   cursor: pointer;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__button:hover {
+#plaindoc-preview-body .toc-inline__button:hover {
   background: #e2e8f0;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__button:focus-visible {
+#plaindoc-preview-body .toc-inline__button:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 1px;
 }
 
 /* 文档目录为空状态。 */
-#plaindoc-preview-pane .plaindoc-preview-body .toc-inline__empty {
+#plaindoc-preview-body .toc-inline__empty {
   margin: 0;
   padding: 10px 12px;
   font-size: 12px;
@@ -918,30 +947,30 @@ body {
   text-indent: 0;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body ul {
+#plaindoc-preview-body ul {
   list-style-type: disc;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body ol {
+#plaindoc-preview-body ol {
   list-style-type: decimal;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body a {
+#plaindoc-preview-body a {
   color: var(--pd-preview-link-color);
   text-decoration: none;
   border-bottom: 1px solid var(--pd-preview-link-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body strong {
+#plaindoc-preview-body strong {
   color: var(--pd-preview-strong-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body em,
-#plaindoc-preview-pane .plaindoc-preview-body em strong {
+#plaindoc-preview-body em,
+#plaindoc-preview-body em strong {
   color: var(--pd-preview-em-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body hr {
+#plaindoc-preview-body hr {
   border: 0;
   border-top: 1px solid var(--pd-preview-hr-color);
   height: 1px;
@@ -949,7 +978,7 @@ body {
   margin-bottom: 10px;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body blockquote {
+#plaindoc-preview-body blockquote {
   margin: 10px 0;
   padding: 10px 12px;
   line-height: 1.8;
@@ -959,7 +988,7 @@ body {
   color: var(--pd-preview-blockquote-text-color);
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body blockquote::before {
+#plaindoc-preview-body blockquote::before {
   content: "“";
   color: var(--pd-preview-blockquote-mark-color);
   font-size: 2.8em;
@@ -970,7 +999,7 @@ body {
   vertical-align: -0.3em;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body pre {
+#plaindoc-preview-body pre {
   background: #0f172a;
   color: #f8fafc;
   border-radius: 8px;
@@ -979,12 +1008,12 @@ body {
   overflow: auto;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body pre code {
+#plaindoc-preview-body pre code {
   display: block;
   white-space: pre;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block {
+#plaindoc-preview-body .mermaid-block {
   margin: 16px 0;
   padding: 16px 18px;
   border-radius: 12px;
@@ -997,7 +1026,7 @@ body {
   isolation: isolate;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block::before {
+#plaindoc-preview-body .mermaid-block::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -1009,36 +1038,36 @@ body {
   z-index: 0;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__diagram {
+#plaindoc-preview-body .mermaid-block__diagram {
   position: relative;
   z-index: 1;
   min-width: max-content;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__diagram svg {
+#plaindoc-preview-body .mermaid-block__diagram svg {
   display: block;
   max-width: 100%;
   height: auto;
   background: transparent;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block--loading {
+#plaindoc-preview-body .mermaid-block--loading {
   color: var(--pd-mermaid-loading-color);
   font-size: 13px;
   font-weight: 500;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block--error {
+#plaindoc-preview-body .mermaid-block--error {
   color: #dc2626;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__error-message {
+#plaindoc-preview-body .mermaid-block__error-message {
   margin: 0 0 8px;
   text-indent: 0;
   font-size: 13px;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body .mermaid-block__fallback {
+#plaindoc-preview-body .mermaid-block__fallback {
   margin: 0;
   padding: 0;
   border: 0;
@@ -1046,7 +1075,7 @@ body {
   color: inherit;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body img {
+#plaindoc-preview-body img {
   display: block;
   width: var(--pd-preview-image-width);
   max-width: 100%;
@@ -1055,7 +1084,7 @@ body {
 }
 
 /* Markdown 表格基础排版。 */
-#plaindoc-preview-pane .plaindoc-preview-body table {
+#plaindoc-preview-body table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -1071,7 +1100,7 @@ body {
 }
 
 /* Markdown 表头样式。 */
-#plaindoc-preview-pane .plaindoc-preview-body thead th {
+#plaindoc-preview-body thead th {
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   color: #0f172a;
   font-weight: 600;
@@ -1079,8 +1108,8 @@ body {
 }
 
 /* Markdown 单元格样式。 */
-#plaindoc-preview-pane .plaindoc-preview-body th,
-#plaindoc-preview-pane .plaindoc-preview-body td {
+#plaindoc-preview-body th,
+#plaindoc-preview-body td {
   padding: var(--pd-preview-table-cell-padding);
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
@@ -1090,29 +1119,29 @@ body {
 }
 
 /* 斑马纹提升长表格可读性。 */
-#plaindoc-preview-pane .plaindoc-preview-body tbody tr:nth-child(even) td {
+#plaindoc-preview-body tbody tr:nth-child(even) td {
   background: #f8fafc;
 }
 
 /* 鼠标悬停反馈，便于阅读定位。 */
-#plaindoc-preview-pane .plaindoc-preview-body tbody tr:hover td {
+#plaindoc-preview-body tbody tr:hover td {
   background: #eef6ff;
 }
 
 /* 清理右侧与底部边界线，避免重线。 */
-#plaindoc-preview-pane .plaindoc-preview-body th:last-child,
-#plaindoc-preview-pane .plaindoc-preview-body td:last-child {
+#plaindoc-preview-body th:last-child,
+#plaindoc-preview-body td:last-child {
   border-right: 0;
 }
 
-#plaindoc-preview-pane .plaindoc-preview-body tbody tr:last-child td {
+#plaindoc-preview-body tbody tr:last-child td {
   border-bottom: 0;
 }
 
 /* 表格内代码片段使用轻量底色，避免与单元格边界冲突。 */
-#plaindoc-preview-pane .plaindoc-preview-body table code,
-#plaindoc-preview-pane .plaindoc-preview-body p code,
-#plaindoc-preview-pane .plaindoc-preview-body li code {
+#plaindoc-preview-body table code,
+#plaindoc-preview-body p code,
+#plaindoc-preview-body li code {
   background: #eef2ff;
   color: var(--pd-preview-inline-code-color);
   border-radius: 4px;
@@ -1267,7 +1296,7 @@ body {
     padding: 10px 0 16px;
   }
 
-  #plaindoc-preview-pane.preview-pane--mobile .plaindoc-preview-body {
+  #plaindoc-preview-pane.preview-pane--mobile .preview-body--mobile {
     width: min(100%, 420px);
     border-radius: 20px;
   }

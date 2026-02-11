@@ -1,8 +1,7 @@
 import type { CSSProperties } from "react";
 import {
-  PREVIEW_BODY_CLASS,
-  PREVIEW_PANE_ID,
-  PREVIEW_PANE_THEME_CLASS_PREFIX
+  PREVIEW_BODY_ID,
+  PREVIEW_THEME_CLASS_PREFIX
 } from "./constants";
 import type { PreviewThemeTemplate } from "../preview-themes";
 
@@ -20,9 +19,9 @@ export function normalizePreviewStyleText(styleText: unknown): string {
   return styleText.trim();
 }
 
-// 根据主题 ID 生成预览容器类名。
+// 根据主题 ID 生成预览正文类名。
 export function getPreviewThemeClassName(themeId: string): string {
-  return `${PREVIEW_PANE_THEME_CLASS_PREFIX}${themeId}`;
+  return `${PREVIEW_THEME_CLASS_PREFIX}${themeId}`;
 }
 
 // 将主题变量序列化为 style 标签文本，便于动态注入。
@@ -33,7 +32,7 @@ export function buildPreviewThemeStyleText(theme: PreviewThemeTemplate): string 
   if (!declarations) {
     return "";
   }
-  const themeSelector = `#${PREVIEW_PANE_ID}.${getPreviewThemeClassName(theme.id)}`;
+  const themeSelector = `#${PREVIEW_BODY_ID}.${getPreviewThemeClassName(theme.id)}`;
   return `${themeSelector} {\n${declarations}\n}`;
 }
 
@@ -80,8 +79,8 @@ function buildCssDeclarationsSource(entries: StyleDetailEntry[]): string {
 
 // 生成当前主题可复制的 CSS 模板（包含注释说明）。
 export function buildThemeCssTemplate(theme: PreviewThemeTemplate): string {
-  const previewPaneSelector = `#${PREVIEW_PANE_ID}.${getPreviewThemeClassName(theme.id)}`;
-  const previewBodySelector = `${previewPaneSelector} .${PREVIEW_BODY_CLASS}`;
+  const previewBodySelector = `#${PREVIEW_BODY_ID}`;
+  const previewThemeSelector = `${previewBodySelector}.${getPreviewThemeClassName(theme.id)}`;
   const sortedVariables = Object.entries(theme.variables).sort(([left], [right]) =>
     left.localeCompare(right)
   );
@@ -102,7 +101,7 @@ export function buildThemeCssTemplate(theme: PreviewThemeTemplate): string {
  */
 
 /* 预览区基础变量 */
-${previewPaneSelector} {
+${previewThemeSelector} {
 ${variableSource}
 }
 

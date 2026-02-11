@@ -38,8 +38,8 @@ export const PREVIEW_PANE_ID = "plaindoc-preview-pane";
 // 预览区固定根节点类名，便于 class 级样式覆盖。
 export const PREVIEW_PANE_CLASS = "plaindoc-preview-pane";
 
-// 预览区主题类名前缀，实际类名为 `plaindoc-preview-pane--{themeId}`。
-export const PREVIEW_PANE_THEME_CLASS_PREFIX = "plaindoc-preview-pane--";
+// 预览主题类名前缀，实际类名为 `plaindoc-preview-body--{themeId}`。
+export const PREVIEW_THEME_CLASS_PREFIX = "plaindoc-preview-body--";
 
 // 默认主题 ID。
 export const DEFAULT_PREVIEW_THEME_ID = "default";
@@ -47,8 +47,11 @@ export const DEFAULT_PREVIEW_THEME_ID = "default";
 // 预览内容容器类名，外部样式可直接作用于该容器。
 export const PREVIEW_BODY_CLASS = "plaindoc-preview-body";
 
+// 预览正文容器固定 ID：正文渲染相关选择器统一从该节点起步。
+export const PREVIEW_BODY_ID = "plaindoc-preview-body";
+
 // 预览内容容器查询选择器（DOM 观测使用）。
-export const PREVIEW_BODY_SELECTOR = `.${PREVIEW_BODY_CLASS}`;
+export const PREVIEW_BODY_SELECTOR = `#${PREVIEW_BODY_ID}`;
 
 // 本地持久化自定义样式的键名。
 export const PREVIEW_CUSTOM_STYLE_STORAGE_KEY = "plaindoc.preview.custom-style";
