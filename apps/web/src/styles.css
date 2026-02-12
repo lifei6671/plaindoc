@@ -1097,6 +1097,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 2px;
+  -webkit-user-select: none;
   user-select: none;
 }
 
