@@ -1,3 +1,4 @@
 {
-    "chatgpt.runCodexInWindowsSubsystemForLinux": true
+    "chatgpt.runCodexInWindowsSubsystemForLinux": true,
+    "makefile.configureOnOpen": false
 }
