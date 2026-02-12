@@ -1,3 +1,6 @@
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
 :root {
   --pd-latin-mono-font-family: "Google Sans Code", "Google Sans Flex", "Google Sans", "Helvetica Neue", sans-serif;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -893,15 +896,253 @@ body {
   opacity: 0.7;
 }
 
+/* 工作区侧边栏：对齐知识库左栏风格，仅承载当前空间文档导航。 */
+.workspace-sidebar-slot {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-sidebar {
+  height: 100%;
+  min-height: 0;
+  border-right: 1px solid #dddddf;
+  background: #f3f3f4;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 12px;
+  overflow: auto;
+  transition: opacity 0.16s ease;
+}
+
+.workspace--sidebar-collapsed .workspace-sidebar-slot>aside {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workspace-sidebar__bookbar {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workspace-sidebar__bookbar-main {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-sidebar__book-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #4a90e2;
+  color: #f6f9ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+
+.workspace-sidebar__book-name {
+  margin: 0;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.24;
+  color: #2f2f2f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-sidebar__book-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #808486;
+}
+
+.workspace-sidebar__book-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-sidebar__divider {
+  margin: 14px 0 18px;
+  border-top: 1px solid #e0e1e3;
+}
+
+.workspace-sidebar__entry-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-sidebar__entry {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #2f2f30;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-sidebar__entry:hover {
+  background: #e8e8ea;
+}
+
+.workspace-sidebar__entry:focus-visible {
+  outline: 2px solid #8ea8c4;
+  outline-offset: -1px;
+}
+
+.workspace-sidebar__entry-icon {
+  width: 14px;
+  height: 14px;
+  color: #2f2f30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-sidebar__entry-label {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.workspace-sidebar__tree-zone {
+  margin-top: 12px;
+}
+
+.workspace-sidebar__tree-zone-header {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.workspace-sidebar__tree-zone-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-sidebar__tree-zone-icon {
+  width: 14px;
+  height: 14px;
+  color: #2f2f30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-sidebar__tree-zone-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2f2f30;
+}
+
+.workspace-sidebar__tree-zone-count {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #e6e7e8;
+  color: #727679;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-sidebar__group-title {
+  margin: 8px 6px 10px;
+  font-size: 14px;
+  color: #2f2f30;
+}
+
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, var(--workspace-sidebar-width, 320px)) 18px minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
   padding: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-sidebar-resizer {
+  height: 100%;
+  border-right: 1px solid #e5e7eb;
+  background: #f6f7f8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px;
+  user-select: none;
+}
+
+.workspace-sidebar-resizer__toggle,
+.workspace-sidebar-resizer__handle {
+  width: 14px;
+  border: 0;
+  background: transparent;
+  color: #7a7e82;
+  padding: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-sidebar-resizer__toggle {
+  height: 24px;
+  cursor: pointer;
+}
+
+.workspace-sidebar-resizer__toggle:hover {
+  color: #3f4348;
+  background: #e3e6ea;
+}
+
+.workspace-sidebar-resizer__toggle:focus-visible,
+.workspace-sidebar-resizer__handle:focus-visible {
+  outline: 2px solid #8ea8c4;
+  outline-offset: 1px;
+}
+
+.workspace-sidebar-resizer__handle {
+  flex: 1;
+  min-height: 88px;
+  width: 100%;
+  cursor: col-resize;
+}
+
+.workspace-sidebar-resizer__handle:hover {
+  color: #3f4348;
+}
+
+.workspace-sidebar-resizer__handle:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .pane {
@@ -1145,12 +1386,13 @@ body {
 #plaindoc-preview-body blockquote p,
 #plaindoc-preview-body td p,
 #plaindoc-preview-body th p,
-#plaindoc-preview-body g p{
+#plaindoc-preview-body g p {
   text-indent: 0 !important;
   word-spacing: normal;
-  letter-spacing:normal;
+  letter-spacing: normal;
 }
-#plaindoc-preview-body g p{
+
+#plaindoc-preview-body g p {
   margin: 0 !important;
 }
 
@@ -1945,6 +2187,23 @@ body {
 
   .workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .workspace-sidebar-resizer {
+    display: none;
+  }
+
+  .workspace--sidebar-collapsed .workspace-sidebar-slot>aside {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .workspace-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #e2e8f0;
+    max-height: 230px;
+    padding: 12px;
   }
 
   #plaindoc-preview-pane.preview-pane--mobile .preview-viewport {

@@ -3,11 +3,29 @@ import { languages } from "@codemirror/language-data";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { AlertCircle, CheckCircle2, LoaderCircle, Monitor, Settings2, Smartphone } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  GripVertical,
+  LoaderCircle,
+  Monitor,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings2,
+  Smartphone
+} from "lucide-react";
 import MarkdownIt from "markdown-it";
 // KaTeX mhchem 扩展：支持 `\\ce{}` 化学公式语法。
 import "katex/contrib/mhchem";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
@@ -15,6 +33,7 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { SettingsLayer } from "./components/SettingsLayer";
+import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { TopToast, type TopToastVariant } from "./components/TopToast";
@@ -47,7 +66,6 @@ import {
   normalizePreviewStyleText
 } from "./editor/preview-style";
 import {
-  findFirstDocId,
   formatError,
   formatSavedTime,
   resolveSaveIndicatorVariant
@@ -63,6 +81,7 @@ import {
   type ImageHostingConfig
 } from "./settings/image-hosting";
 import { uploadImageToDefaultHosting } from "./settings/image-hosting-upload";
+import { useWorkspace } from "./workspace/use-workspace";
 
 // 扩展 window 类型，支持外部注入预览样式字符串。
 declare global {
@@ -80,6 +99,42 @@ interface AppToastState {
 
 const TEMP_USER_ID = 1;
 const IMAGE_HOSTING_CONFIG_KEY = "image_hosting";
+const WORKSPACE_SIDEBAR_MIN_WIDTH = 240;
+const WORKSPACE_SIDEBAR_MAX_WIDTH = 560;
+const WORKSPACE_SIDEBAR_DEFAULT_WIDTH = 320;
+const WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY = "workspace.sidebar.width";
+const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY = "workspace.sidebar.collapsed";
+
+// 统一钳制侧栏宽度，避免本地脏值导致布局异常。
+function clampWorkspaceSidebarWidth(width: number): number {
+  return Math.min(WORKSPACE_SIDEBAR_MAX_WIDTH, Math.max(WORKSPACE_SIDEBAR_MIN_WIDTH, width));
+}
+
+// 读取侧栏宽度缓存：解析失败时回退默认宽度。
+function readStoredWorkspaceSidebarWidth(): number {
+  try {
+    const rawWidth = globalThis.localStorage.getItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!rawWidth) {
+      return WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
+    }
+    const parsedWidth = Number(rawWidth);
+    if (!Number.isFinite(parsedWidth)) {
+      return WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
+    }
+    return clampWorkspaceSidebarWidth(parsedWidth);
+  } catch {
+    return WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+// 读取侧栏折叠态缓存：仅 "1" 代表折叠。
+function readStoredWorkspaceSidebarCollapsed(): boolean {
+  try {
+    return globalThis.localStorage.getItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 // 从剪贴板事件中提取图片文件列表：优先 items，兜底 files。
 function extractImageFilesFromClipboard(event: ClipboardEvent): File[] {
@@ -143,24 +198,34 @@ function insertImageMarkdown(view: EditorView, markdownLines: string[]): void {
 export default function App() {
   // 数据网关单例。
   const dataGateway = useMemo(() => getDataGateway(), []);
-  // 当前编辑内容。
-  const [content, setContent] = useState(FALLBACK_CONTENT);
-  // 当前打开文档 ID。
-  const [activeDocId, setActiveDocId] = useState<string | null>(null);
-  // 当前保存基线版本。
-  const [baseVersion, setBaseVersion] = useState(0);
-  // 最近一次成功保存的内容。
-  const [lastSavedContent, setLastSavedContent] = useState(FALLBACK_CONTENT);
+  // 工作区状态层：统一管理空间/目录树/文档加载，减少 App 根组件职责。
+  const {
+    activeSpaceName,
+    workspaceTree,
+    activeDocumentTitle,
+    activeDocId,
+    content,
+    baseVersion,
+    lastSavedContent,
+    lastSavedAt,
+    bootstrapWorkspace,
+    createNode,
+    renameNode,
+    deleteNode,
+    openDocument,
+    setContent,
+    setBaseVersion,
+    setActiveDocumentTitle,
+    setLastSavedContent,
+    setLastSavedAt
+  } = useWorkspace({
+    dataGateway,
+    initialContent: FALLBACK_CONTENT
+  });
   // 保存状态。
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   // 页头状态文案。
   const [statusMessage, setStatusMessage] = useState("初始化中...");
-  // 当前文档所属空间名。
-  const [activeSpaceName, setActiveSpaceName] = useState("未命名空间");
-  // 当前文档名称。
-  const [activeDocumentTitle, setActiveDocumentTitle] = useState("未命名文档");
-  // 最近一次成功保存时间。
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   // 当前生效的预览主题 ID。
   const [activePreviewThemeId, setActivePreviewThemeId] = useState(DEFAULT_PREVIEW_THEME_ID);
   // 外部注入的预览样式文本；为空时仅使用内置主题。
@@ -197,6 +262,12 @@ export default function App() {
   const imageHostingConfigRef = useRef(imageHostingConfig);
   // 上传中引用：用于 paste 事件同步分支判断，避免并发上传。
   const isImageUploadingRef = useRef(isImageUploading);
+  // 工作区宽度与折叠状态：支持侧栏拖拽调宽与隐藏。
+  const [workspaceSidebarWidth, setWorkspaceSidebarWidth] = useState(readStoredWorkspaceSidebarWidth);
+  const [isWorkspaceSidebarCollapsed, setIsWorkspaceSidebarCollapsed] = useState(
+    readStoredWorkspaceSidebarCollapsed
+  );
+  const workspaceSidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
@@ -525,44 +596,13 @@ export default function App() {
 
     const bootstrap = async () => {
       try {
-        const spaces = await dataGateway.workspace.listSpaces();
-        const space =
-          spaces[0] ??
-          (await dataGateway.workspace.createSpace({
-            name: "默认空间"
-          }));
-        const tree = await dataGateway.workspace.getTree(space.id);
-        const existingDocId = findFirstDocId(tree);
-        const docId =
-          existingDocId ??
-          (
-            await dataGateway.workspace.createNode({
-              spaceId: space.id,
-              parentId: null,
-              type: "doc",
-              title: "未命名文档"
-            })
-          ).docId;
-
-        if (!docId) {
-          throw new Error("无法创建初始化文档");
-        }
-
-        const document = await dataGateway.document.getDocument(docId);
+        const bootstrapResult = await bootstrapWorkspace();
         if (cancelled) {
           return;
         }
 
-        // 初始化编辑状态与保存基线。
-        setActiveSpaceName(space.name);
-        setActiveDocumentTitle(document.title || "未命名文档");
-        setLastSavedAt(document.updatedAt);
-        setActiveDocId(document.id);
-        setBaseVersion(document.version);
-        setContent(document.contentMd);
-        setLastSavedContent(document.contentMd);
         setSaveStatus("ready");
-        setStatusMessage(`已加载文档 v${document.version}`);
+        setStatusMessage(`已加载文档 v${bootstrapResult.documentVersion}`);
       } catch (error) {
         if (cancelled) {
           return;
@@ -577,7 +617,173 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [dataGateway]);
+  }, [bootstrapWorkspace]);
+
+  // 在离开当前文档前确认未保存修改，避免目录切换导致内容丢失。
+  const confirmLeaveForDocumentSwitch = useCallback((): boolean => {
+    const hasUnsavedChanges =
+      content !== lastSavedContent && saveStatus !== "loading" && saveStatus !== "saving";
+    if (!hasUnsavedChanges) {
+      return true;
+    }
+    return window.confirm("当前文档仍有未保存修改，切换文档后这些修改将丢失。是否继续？");
+  }, [content, lastSavedContent, saveStatus]);
+
+  // 从侧边栏打开目标文档：保持保存状态与状态栏提示一致。
+  const handleOpenWorkspaceDocument = useCallback(
+    async (docId: string): Promise<void> => {
+      if (docId === activeDocId) {
+        return;
+      }
+      if (!confirmLeaveForDocumentSwitch()) {
+        return;
+      }
+      setSaveStatus("loading");
+      setStatusMessage("切换文档中...");
+      try {
+        const result = await openDocument(docId);
+        setSaveStatus("ready");
+        setStatusMessage(`已切换文档 v${result.version}`);
+      } catch (error) {
+        setSaveStatus("error");
+        setStatusMessage(`切换文档失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [activeDocId, confirmLeaveForDocumentSwitch, openDocument]
+  );
+
+  // 目录树菜单动作：创建节点后若为文档则自动打开，保持编辑流连续。
+  const handleCreateWorkspaceNode = useCallback(
+    async (input: { parentId: string | null; type: "folder" | "doc"; title: string }): Promise<void> => {
+      try {
+        const created = await createNode(input);
+        if (created.docId) {
+          await handleOpenWorkspaceDocument(created.docId);
+          return;
+        }
+        setStatusMessage(input.type === "folder" ? "目录创建成功" : "文档创建成功");
+      } catch (error) {
+        setStatusMessage(`创建失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [createNode, handleOpenWorkspaceDocument]
+  );
+
+  // 节点重命名动作：失败时回写状态栏，便于用户定位问题。
+  const handleRenameWorkspaceNode = useCallback(
+    async (nodeId: string, title: string): Promise<void> => {
+      try {
+        await renameNode(nodeId, title);
+        setStatusMessage("重命名成功");
+      } catch (error) {
+        setStatusMessage(`重命名失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [renameNode]
+  );
+
+  // 节点删除动作：由工作区层负责文档兜底切换，页面只承接状态提示。
+  const handleDeleteWorkspaceNode = useCallback(
+    async (nodeId: string): Promise<void> => {
+      try {
+        await deleteNode(nodeId);
+        setStatusMessage("删除成功");
+      } catch (error) {
+        setStatusMessage(`删除失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [deleteNode]
+  );
+
+  // 侧栏拖拽移动：按起始宽度和鼠标偏移计算目标宽度。
+  const handleWorkspaceSidebarResizeMove = useCallback((event: PointerEvent) => {
+    const resizeState = workspaceSidebarResizeStateRef.current;
+    if (!resizeState) {
+      return;
+    }
+    const deltaX = event.clientX - resizeState.startX;
+    const nextWidth = clampWorkspaceSidebarWidth(resizeState.startWidth + deltaX);
+    setWorkspaceSidebarWidth(nextWidth);
+  }, []);
+
+  // 结束侧栏拖拽：统一移除全局监听，避免残留事件导致内存泄漏。
+  const finishWorkspaceSidebarResize = useCallback(() => {
+    workspaceSidebarResizeStateRef.current = null;
+    window.removeEventListener("pointermove", handleWorkspaceSidebarResizeMove);
+    window.removeEventListener("pointerup", finishWorkspaceSidebarResize);
+    window.removeEventListener("pointercancel", finishWorkspaceSidebarResize);
+  }, [handleWorkspaceSidebarResizeMove]);
+
+  // 开始侧栏拖拽：仅在“未折叠”状态下启用拖拽调宽。
+  const handleWorkspaceSidebarResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (isWorkspaceSidebarCollapsed) {
+        return;
+      }
+      event.preventDefault();
+      workspaceSidebarResizeStateRef.current = {
+        startX: event.clientX,
+        startWidth: workspaceSidebarWidth
+      };
+      window.addEventListener("pointermove", handleWorkspaceSidebarResizeMove);
+      window.addEventListener("pointerup", finishWorkspaceSidebarResize);
+      window.addEventListener("pointercancel", finishWorkspaceSidebarResize);
+    },
+    [
+      finishWorkspaceSidebarResize,
+      handleWorkspaceSidebarResizeMove,
+      isWorkspaceSidebarCollapsed,
+      workspaceSidebarWidth
+    ]
+  );
+
+  // 工作区显隐切换：折叠后保留已调节宽度，展开时恢复该宽度。
+  const toggleWorkspaceSidebar = useCallback(() => {
+    setIsWorkspaceSidebarCollapsed((collapsed) => !collapsed);
+  }, []);
+
+  // 页面卸载时兜底清理拖拽监听，确保不会残留全局事件。
+  useEffect(() => {
+    return () => {
+      finishWorkspaceSidebarResize();
+    };
+  }, [finishWorkspaceSidebarResize]);
+
+  // 持久化侧栏宽度：刷新后保持上次调节结果。
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY,
+        String(clampWorkspaceSidebarWidth(workspaceSidebarWidth))
+      );
+    } catch {
+      // localStorage 不可用时仅忽略持久化，不影响当前会话。
+    }
+  }, [workspaceSidebarWidth]);
+
+  // 持久化侧栏折叠态：刷新后保留用户显隐偏好。
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY,
+        isWorkspaceSidebarCollapsed ? "1" : "0"
+      );
+    } catch {
+      // localStorage 不可用时仅忽略持久化，不影响当前会话。
+    }
+  }, [isWorkspaceSidebarCollapsed]);
+
+  const workspaceLayoutStyle = useMemo<CSSProperties>(
+    () =>
+      ({
+        "--workspace-sidebar-width": `${isWorkspaceSidebarCollapsed ? 0 : workspaceSidebarWidth}px`
+      }) as CSSProperties,
+    [isWorkspaceSidebarCollapsed, workspaceSidebarWidth]
+  );
 
   // 自动保存：内容变化后延迟提交，处理版本冲突与失败状态。
   useEffect(() => {
@@ -721,12 +927,7 @@ export default function App() {
       return;
     }
     try {
-      const latestDocument = await dataGateway.document.getDocument(activeDocId);
-      setActiveDocumentTitle(latestDocument.title || "未命名文档");
-      setLastSavedAt(latestDocument.updatedAt);
-      setContent(latestDocument.contentMd);
-      setBaseVersion(latestDocument.version);
-      setLastSavedContent(latestDocument.contentMd);
+      const latestDocument = await openDocument(activeDocId);
       setSaveStatus("ready");
       setStatusMessage(`已同步到最新版本 v${latestDocument.version}`);
     } catch (error) {
@@ -819,8 +1020,47 @@ export default function App() {
           </button>
         </div>
       </header>
-      {/* 双栏工作区：左编辑、右预览。 */}
-      <main className="workspace">
+      {/* 工作区主区域：左侧边栏 + 中间编辑器 + 右侧预览。 */}
+      <main
+        className={`workspace ${isWorkspaceSidebarCollapsed ? "workspace--sidebar-collapsed" : ""}`}
+        style={workspaceLayoutStyle}
+      >
+        <div className="workspace-sidebar-slot">
+          <WorkspaceSidebar
+            activeSpaceName={activeSpaceName}
+            activeDocId={activeDocId}
+            workspaceTree={workspaceTree}
+            onOpenDocument={handleOpenWorkspaceDocument}
+            onCreateNode={handleCreateWorkspaceNode}
+            onRenameNode={handleRenameWorkspaceNode}
+            onDeleteNode={handleDeleteWorkspaceNode}
+          />
+        </div>
+        <div className="workspace-sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="工作区宽度调节">
+          <button
+            type="button"
+            className="workspace-sidebar-resizer__toggle"
+            onClick={toggleWorkspaceSidebar}
+            title={isWorkspaceSidebarCollapsed ? "展开工作区目录" : "隐藏工作区目录"}
+            aria-label={isWorkspaceSidebarCollapsed ? "展开工作区目录" : "隐藏工作区目录"}
+          >
+            {isWorkspaceSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+          </button>
+          <button
+            type="button"
+            className="workspace-sidebar-resizer__handle"
+            onPointerDown={handleWorkspaceSidebarResizeStart}
+            disabled={isWorkspaceSidebarCollapsed}
+            title={
+              isWorkspaceSidebarCollapsed ? "请先展开工作区目录" : "拖拽调整工作区目录宽度"
+            }
+            aria-label={
+              isWorkspaceSidebarCollapsed ? "请先展开工作区目录" : "拖拽调整工作区目录宽度"
+            }
+          >
+            <GripVertical size={14} />
+          </button>
+        </div>
         <section className="pane editor-pane" ref={handleEditorPaneRef}>
           <CodeMirror
             value={content}
