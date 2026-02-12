@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { NodeType, TreeNode } from "../data-access";
+import type { CreateNodeResult, NodeType, TreeNode } from "../data-access";
 import { WorkspaceTree } from "./WorkspaceTree";
 
 // 工作区侧边栏入参：仅管理“当前空间”文档，不提供空间维护能力。
@@ -11,7 +11,7 @@ interface WorkspaceSidebarProps {
     parentId: string | null;
     type: NodeType;
     title: string;
-  }) => Promise<void>;
+  }) => Promise<CreateNodeResult>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
   activeDocId: string | null;

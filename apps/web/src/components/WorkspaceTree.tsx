@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type ReactNode
 } from "react";
@@ -18,7 +19,7 @@ import {
   type TreeItemRenderContext,
   type TreeViewState
 } from "react-complex-tree";
-import type { NodeType, TreeNode } from "../data-access";
+import type { CreateNodeResult, NodeType, TreeNode } from "../data-access";
 import { formatError } from "../editor/status-utils";
 
 const WORKSPACE_TREE_ID = "workspace-doc-tree";
@@ -51,7 +52,7 @@ interface WorkspaceTreeProps {
     parentId: string | null;
     type: NodeType;
     title: string;
-  }) => Promise<void>;
+  }) => Promise<CreateNodeResult>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
 }
@@ -146,8 +147,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const expandableNodeIds = useMemo(() => collectExpandableNodeIds(nodes), [nodes]);
   const knownExpandableNodeIdsRef = useRef<Set<string>>(new Set());
   const actionMenuRootRef = useRef<HTMLDivElement | null>(null);
+  const inlineEditInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingInlineEditFocusNodeIdRef = useRef<string | null>(null);
+  const isCommittingInlineEditRef = useRef(false);
   const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>(expandableNodeIds);
   const [openActionNodeId, setOpenActionNodeId] = useState<string | null>(null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editingNodeTitle, setEditingNodeTitle] = useState("");
 
   // 树结构变化时更新展开状态：保留用户折叠选择，仅默认展开新出现的目录。
   useEffect(() => {
@@ -202,6 +208,42 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     };
   }, [openActionNodeId]);
 
+  // 若正在编辑的节点被删除或不可见，自动退出编辑态，避免残留脏状态。
+  useEffect(() => {
+    if (!editingNodeId) {
+      return;
+    }
+    if (pendingInlineEditFocusNodeIdRef.current === editingNodeId) {
+      return;
+    }
+    if (!nodeById.has(editingNodeId)) {
+      setEditingNodeId(null);
+      setEditingNodeTitle("");
+    }
+  }, [editingNodeId, nodeById]);
+
+  // 进入编辑态后自动聚焦并选中文本，保证“创建即改名”流程顺滑。
+  useEffect(() => {
+    if (!editingNodeId) {
+      return;
+    }
+    if (pendingInlineEditFocusNodeIdRef.current !== editingNodeId) {
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      const inputElement = inlineEditInputRef.current;
+      if (!inputElement) {
+        return;
+      }
+      inputElement.focus();
+      inputElement.select();
+      pendingInlineEditFocusNodeIdRef.current = null;
+    });
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [editingNodeId]);
+
   const viewState = useMemo<TreeViewState>(() => {
     return {
       [WORKSPACE_TREE_ID]: {
@@ -218,6 +260,11 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     event.stopPropagation();
   }, []);
 
+  // 输入框仅阻止冒泡，保留默认行为（聚焦、文本选择等）。
+  const stopTreeItemPropagation = useCallback((event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  }, []);
+
   // 封装菜单动作执行：统一处理错误提示和菜单收起行为。
   const runActionMenuTask = useCallback(async (task: () => Promise<void>) => {
     try {
@@ -227,6 +274,69 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       window.alert(`操作失败：${formatError(error)}`);
     }
   }, []);
+
+  const beginInlineEdit = useCallback((nodeId: string, initialTitle: string) => {
+    pendingInlineEditFocusNodeIdRef.current = nodeId;
+    setEditingNodeId(nodeId);
+    setEditingNodeTitle(initialTitle);
+  }, []);
+
+  const cancelInlineEdit = useCallback(() => {
+    pendingInlineEditFocusNodeIdRef.current = null;
+    setEditingNodeId(null);
+    setEditingNodeTitle("");
+  }, []);
+
+  const commitInlineEdit = useCallback(async () => {
+    if (!editingNodeId || isCommittingInlineEditRef.current) {
+      return;
+    }
+
+    const currentNode = nodeById.get(editingNodeId);
+    if (!currentNode) {
+      cancelInlineEdit();
+      return;
+    }
+
+    const fallbackTitle = currentNode.type === "folder" ? DEFAULT_FOLDER_TITLE : DEFAULT_DOCUMENT_TITLE;
+    const normalizedTitle = editingNodeTitle.trim() || fallbackTitle;
+
+    if (normalizedTitle === currentNode.title) {
+      cancelInlineEdit();
+      return;
+    }
+
+    isCommittingInlineEditRef.current = true;
+    try {
+      await onRenameNode(editingNodeId, normalizedTitle);
+    } catch (error) {
+      window.alert(`重命名失败：${formatError(error)}`);
+    } finally {
+      isCommittingInlineEditRef.current = false;
+      cancelInlineEdit();
+    }
+  }, [cancelInlineEdit, editingNodeId, editingNodeTitle, nodeById, onRenameNode]);
+
+  const createNodeAndEnterInlineEdit = useCallback(
+    async (input: { parentId: string | null; type: NodeType; title: string }) => {
+      try {
+        const created = await onCreateNode(input);
+        if (input.parentId) {
+          setExpandedNodeIds((previousExpandedNodeIds) => {
+            if (previousExpandedNodeIds.includes(input.parentId!)) {
+              return previousExpandedNodeIds;
+            }
+            return [...previousExpandedNodeIds, input.parentId!];
+          });
+        }
+        setOpenActionNodeId(null);
+        beginInlineEdit(created.nodeId, input.title);
+      } catch (error) {
+        window.alert(`操作失败：${formatError(error)}`);
+      }
+    },
+    [beginInlineEdit, onCreateNode]
+  );
 
   const handleExpandNode = useCallback((item: TreeItem<WorkspaceTreeItemData>) => {
     const nodeId = String(item.index);
@@ -259,13 +369,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
 
   const handleCreateChildDocument = useCallback(
     async (nodeId: string): Promise<void> => {
-      await onCreateNode({
+      await createNodeAndEnterInlineEdit({
         parentId: nodeId,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE
       });
     },
-    [onCreateNode]
+    [createNodeAndEnterInlineEdit]
   );
 
   const handleCreateSiblingDocument = useCallback(
@@ -274,24 +384,24 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (!currentNode) {
         throw new Error("目录节点不存在");
       }
-      await onCreateNode({
+      await createNodeAndEnterInlineEdit({
         parentId: currentNode.parentId,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE
       });
     },
-    [nodeById, onCreateNode]
+    [createNodeAndEnterInlineEdit, nodeById]
   );
 
   const handleCreateChildFolder = useCallback(
     async (nodeId: string): Promise<void> => {
-      await onCreateNode({
+      await createNodeAndEnterInlineEdit({
         parentId: nodeId,
         type: "folder",
         title: DEFAULT_FOLDER_TITLE
       });
     },
-    [onCreateNode]
+    [createNodeAndEnterInlineEdit]
   );
 
   const handleRenameNode = useCallback(
@@ -300,13 +410,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (!currentNode) {
         throw new Error("目录节点不存在");
       }
-      const renamedTitle = window.prompt("请输入新的名称", currentNode.title);
-      if (renamedTitle === null) {
-        return;
-      }
-      await onRenameNode(nodeId, renamedTitle);
+      beginInlineEdit(nodeId, currentNode.title);
     },
-    [nodeById, onRenameNode]
+    [beginInlineEdit, nodeById]
   );
 
   const handleDeleteNode = useCallback(
@@ -348,13 +454,14 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const isFolder = item.data.type === "folder" || item.isFolder;
       const isActive = nodeId === activeDocId;
       const isActionMenuOpen = openActionNodeId === nodeId;
+      const isInlineEditing = editingNodeId === nodeId;
       const rowStyle = {
         ...(context.itemContainerWithoutChildrenProps.style ?? {}),
         paddingLeft: `${8 + depth * 20}px`,
         cursor: "pointer"
       };
-      const interactiveType = context.isRenaming ? undefined : "button";
-      const InteractiveComponent = context.isRenaming ? "div" : "button";
+      const interactiveType = context.isRenaming || isInlineEditing ? undefined : "button";
+      const InteractiveComponent = context.isRenaming || isInlineEditing ? "div" : "button";
 
       return (
         <li {...(context.itemContainerWithChildrenProps as any)} className="m-0 p-0">
@@ -380,113 +487,143 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             </span>
             <InteractiveComponent
               type={interactiveType}
-              {...(context.interactiveElementProps as any)}
+              {...(!isInlineEditing ? (context.interactiveElementProps as any) : {})}
               className="flex min-h-[36px] min-w-0 flex-1 !cursor-pointer items-center border-0 bg-transparent p-0 text-left text-[14px] text-[#2f2f30] focus-visible:outline-none disabled:!cursor-pointer"
             >
-              <span
-                className={mergeClassNames(
-                  "min-w-0 truncate leading-[1.3]",
-                  isActive && "font-semibold"
-                )}
-                title={item.data.title}
-              >
-                {title}
-              </span>
-            </InteractiveComponent>
-            <div className="relative ml-1.5 inline-flex items-center" ref={isActionMenuOpen ? actionMenuRootRef : undefined}>
-              <button
-                type="button"
-                className={mergeClassNames(
-                  "inline-flex h-[26px] w-[26px] items-center justify-center rounded-[8px] border-0 bg-transparent text-[#71767a]",
-                  "transition-[opacity,background-color,color] duration-100",
-                  "hover:bg-[#dde0e4] hover:text-[#3e4247] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]",
-                  isActionMenuOpen
-                    ? "pointer-events-auto opacity-100"
-                    : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-                )}
-                aria-label="打开文档操作菜单"
-                onMouseDown={stopTreeItemEvent}
-                onClick={(event) => {
-                  stopTreeItemEvent(event);
-                  setOpenActionNodeId((previousNodeId) => (previousNodeId === nodeId ? null : nodeId));
-                }}
-              >
-                <Plus size={14} />
-              </button>
-              {isActionMenuOpen ? (
-                <div
-                  className="absolute top-[calc(100%+6px)] right-0 z-30 flex min-w-[196px] flex-col gap-0.5 rounded-[12px] bg-white p-1.5 shadow-[0_14px_30px_rgba(15,23,42,0.16)]"
-                  role="menu"
-                  aria-label="文档操作菜单"
+              {isInlineEditing ? (
+                <input
+                  ref={inlineEditInputRef}
+                  value={editingNodeTitle}
+                  className="h-[28px] w-full rounded-[8px] border border-[#c8cdd2] bg-white px-2 text-[13px] leading-[1.2] text-[#1f2328] outline-none focus:border-[#8ea8c4]"
+                  aria-label="输入文档名称"
+                  onMouseDown={stopTreeItemPropagation}
+                  onClick={stopTreeItemPropagation}
+                  onChange={(event) => {
+                    setEditingNodeTitle(event.target.value);
+                  }}
+                  onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void commitInlineEdit();
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelInlineEdit();
+                    }
+                  }}
+                  onBlur={() => {
+                    void commitInlineEdit();
+                  }}
+                />
+              ) : (
+                <span
+                  className={mergeClassNames(
+                    "min-w-0 truncate leading-[1.3]",
+                    isActive && "font-semibold"
+                  )}
+                  title={item.data.title}
                 >
-                  <button
-                    type="button"
-                    className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
-                    role="menuitem"
-                    onMouseDown={stopTreeItemEvent}
-                    onClick={(event) => {
-                      stopTreeItemEvent(event);
-                      void runActionMenuTask(() => handleCreateChildDocument(nodeId));
-                    }}
+                  {title}
+                </span>
+              )}
+            </InteractiveComponent>
+            {isInlineEditing ? null : (
+              <div className="relative ml-1.5 inline-flex items-center" ref={isActionMenuOpen ? actionMenuRootRef : undefined}>
+                <button
+                  type="button"
+                  className={mergeClassNames(
+                    "inline-flex h-[26px] w-[26px] items-center justify-center rounded-[8px] border-0 bg-transparent text-[#71767a]",
+                    "transition-[opacity,background-color,color] duration-100",
+                    "hover:bg-[#dde0e4] hover:text-[#3e4247] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]",
+                    isActionMenuOpen
+                      ? "pointer-events-auto opacity-100"
+                      : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                  )}
+                  aria-label="打开文档操作菜单"
+                  onMouseDown={stopTreeItemEvent}
+                  onClick={(event) => {
+                    stopTreeItemEvent(event);
+                    setOpenActionNodeId((previousNodeId) => (previousNodeId === nodeId ? null : nodeId));
+                  }}
+                >
+                  <Plus size={14} />
+                </button>
+                {isActionMenuOpen ? (
+                  <div
+                    className="absolute top-[calc(100%+6px)] right-0 z-30 flex min-w-[196px] flex-col gap-0.5 rounded-[12px] bg-white p-1.5 shadow-[0_14px_30px_rgba(15,23,42,0.16)]"
+                    role="menu"
+                    aria-label="文档操作菜单"
                   >
-                    <FilePlus2 size={14} />
-                    <span>新建子文档</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
-                    role="menuitem"
-                    onMouseDown={stopTreeItemEvent}
-                    onClick={(event) => {
-                      stopTreeItemEvent(event);
-                      void runActionMenuTask(() => handleCreateSiblingDocument(nodeId));
-                    }}
-                  >
-                    <FilePlus2 size={14} />
-                    <span>新建同级文档</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
-                    role="menuitem"
-                    onMouseDown={stopTreeItemEvent}
-                    onClick={(event) => {
-                      stopTreeItemEvent(event);
-                      void runActionMenuTask(() => handleCreateChildFolder(nodeId));
-                    }}
-                  >
-                    <FolderPlus size={14} />
-                    <span>新建子目录</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
-                    role="menuitem"
-                    onMouseDown={stopTreeItemEvent}
-                    onClick={(event) => {
-                      stopTreeItemEvent(event);
-                      void runActionMenuTask(() => handleRenameNode(nodeId));
-                    }}
-                  >
-                    <PencilLine size={14} />
-                    <span>重命名</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#b42318] hover:bg-[#fff0ef] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
-                    role="menuitem"
-                    onMouseDown={stopTreeItemEvent}
-                    onClick={(event) => {
-                      stopTreeItemEvent(event);
-                      void runActionMenuTask(() => handleDeleteNode(nodeId));
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    <span>删除</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      role="menuitem"
+                      onMouseDown={stopTreeItemEvent}
+                      onClick={(event) => {
+                        stopTreeItemEvent(event);
+                        void handleCreateChildDocument(nodeId);
+                      }}
+                    >
+                      <FilePlus2 size={14} />
+                      <span>新建子文档</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      role="menuitem"
+                      onMouseDown={stopTreeItemEvent}
+                      onClick={(event) => {
+                        stopTreeItemEvent(event);
+                        void handleCreateSiblingDocument(nodeId);
+                      }}
+                    >
+                      <FilePlus2 size={14} />
+                      <span>新建同级文档</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      role="menuitem"
+                      onMouseDown={stopTreeItemEvent}
+                      onClick={(event) => {
+                        stopTreeItemEvent(event);
+                        void handleCreateChildFolder(nodeId);
+                      }}
+                    >
+                      <FolderPlus size={14} />
+                      <span>新建子目录</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      role="menuitem"
+                      onMouseDown={stopTreeItemEvent}
+                      onClick={(event) => {
+                        stopTreeItemEvent(event);
+                        void runActionMenuTask(() => handleRenameNode(nodeId));
+                      }}
+                    >
+                      <PencilLine size={14} />
+                      <span>重命名</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#b42318] hover:bg-[#fff0ef] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      role="menuitem"
+                      onMouseDown={stopTreeItemEvent}
+                      onClick={(event) => {
+                        stopTreeItemEvent(event);
+                        void runActionMenuTask(() => handleDeleteNode(nodeId));
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      <span>删除</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
           {children}
         </li>
@@ -499,8 +636,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       handleCreateSiblingDocument,
       handleDeleteNode,
       handleRenameNode,
+      cancelInlineEdit,
+      commitInlineEdit,
+      editingNodeId,
+      editingNodeTitle,
       openActionNodeId,
       runActionMenuTask,
+      stopTreeItemPropagation,
       stopTreeItemEvent
     ]
   );

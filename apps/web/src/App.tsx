@@ -37,7 +37,7 @@ import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { TopToast, type TopToastVariant } from "./components/TopToast";
-import { ConflictError, getDataGateway } from "./data-access";
+import { ConflictError, getDataGateway, type CreateNodeResult } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
   FALLBACK_CONTENT,
@@ -655,14 +655,19 @@ export default function App() {
 
   // 目录树菜单动作：创建节点后若为文档则自动打开，保持编辑流连续。
   const handleCreateWorkspaceNode = useCallback(
-    async (input: { parentId: string | null; type: "folder" | "doc"; title: string }): Promise<void> => {
+    async (input: {
+      parentId: string | null;
+      type: "folder" | "doc";
+      title: string;
+    }): Promise<CreateNodeResult> => {
       try {
         const created = await createNode(input);
         if (created.docId) {
           await handleOpenWorkspaceDocument(created.docId);
-          return;
+          return created;
         }
         setStatusMessage(input.type === "folder" ? "目录创建成功" : "文档创建成功");
+        return created;
       } catch (error) {
         setStatusMessage(`创建失败：${formatError(error)}`);
         throw error;
