@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type { CreateNodeResult, Document, MoveNodeInput, Space, TreeNode } from "../data-access";
 import { findFirstDocId, formatError } from "../editor/status-utils";
 import type {
+  WorkspaceBootstrapInput,
   UseWorkspaceOptions,
   UseWorkspaceResult,
   WorkspaceBootstrapResult,
@@ -139,14 +140,19 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
 
   // 确保目标空间存在可编辑文档：不存在时自动创建默认文档。
   const ensureSpaceReady = useCallback(
-    async (space: Space): Promise<WorkspaceBootstrapResult> => {
+    async (space: Space, preferredDocId?: string | null): Promise<WorkspaceBootstrapResult> => {
       setActiveSpaceId(space.id);
       setActiveSpaceName(space.name);
 
       let tree = await dataGateway.workspace.getTree(space.id);
       setWorkspaceTree(tree);
 
-      let docId = findFirstDocId(tree);
+      // 启动恢复场景优先使用上次文档；不存在时回退到首篇文档。
+      const preferredDocNode = preferredDocId ? findNodeById(tree, preferredDocId) : null;
+      let docId =
+        preferredDocNode && preferredDocNode.type === "doc"
+          ? preferredDocNode.id
+          : findFirstDocId(tree);
       if (!docId) {
         const created = await dataGateway.workspace.createNode({
           spaceId: space.id,
@@ -337,26 +343,35 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
   );
 
   // 启动工作区：确保至少有一个空间和一篇可编辑文档。
-  const bootstrapWorkspace = useCallback(async (): Promise<WorkspaceBootstrapResult> => {
-    setIsWorkspaceBootstrapping(true);
-    setWorkspaceErrorMessage(null);
-    try {
-      const listedSpaces = await dataGateway.workspace.listSpaces();
-      const sortedSpaces = sortSpaces(listedSpaces);
-      const targetSpace =
-        sortedSpaces[0] ??
-        (await dataGateway.workspace.createSpace({
-          name: defaultSpaceName
-        }));
-      setSpaces(mergeUniqueSpaces([targetSpace], sortedSpaces));
-      return await ensureSpaceReady(targetSpace);
-    } catch (error) {
-      setWorkspaceErrorMessage(formatError(error));
-      throw error;
-    } finally {
-      setIsWorkspaceBootstrapping(false);
-    }
-  }, [dataGateway.workspace, defaultSpaceName, ensureSpaceReady]);
+  const bootstrapWorkspace = useCallback(
+    async (input?: WorkspaceBootstrapInput): Promise<WorkspaceBootstrapResult> => {
+      setIsWorkspaceBootstrapping(true);
+      setWorkspaceErrorMessage(null);
+      try {
+        const listedSpaces = await dataGateway.workspace.listSpaces();
+        const sortedSpaces = sortSpaces(listedSpaces);
+        const preferredSpace =
+          input?.preferredSpaceId
+            ? sortedSpaces.find((space) => space.id === input.preferredSpaceId) ?? null
+            : null;
+        const targetSpace =
+          preferredSpace ??
+          sortedSpaces[0] ??
+          (await dataGateway.workspace.createSpace({
+            name: defaultSpaceName
+          }));
+        setSpaces(mergeUniqueSpaces([targetSpace], sortedSpaces));
+        const preferredDocId = preferredSpace ? input?.preferredDocId ?? null : null;
+        return await ensureSpaceReady(targetSpace, preferredDocId);
+      } catch (error) {
+        setWorkspaceErrorMessage(formatError(error));
+        throw error;
+      } finally {
+        setIsWorkspaceBootstrapping(false);
+      }
+    },
+    [dataGateway.workspace, defaultSpaceName, ensureSpaceReady]
+  );
 
   // 目录拖拽排序扩展点：本期默认未实现，仅保留调用入口。
   const moveNode = useCallback(

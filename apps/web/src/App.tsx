@@ -104,6 +104,8 @@ const WORKSPACE_SIDEBAR_MAX_WIDTH = 560;
 const WORKSPACE_SIDEBAR_DEFAULT_WIDTH = 320;
 const WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY = "workspace.sidebar.width";
 const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY = "workspace.sidebar.collapsed";
+const WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY = "workspace.activeSpaceId";
+const WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY = "workspace.activeDocId";
 
 // 统一钳制侧栏宽度，避免本地脏值导致布局异常。
 function clampWorkspaceSidebarWidth(width: number): number {
@@ -133,6 +135,26 @@ function readStoredWorkspaceSidebarCollapsed(): boolean {
     return globalThis.localStorage.getItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+// 读取上次激活空间：用于刷新后恢复目录上下文。
+function readStoredWorkspaceActiveSpaceId(): string | null {
+  try {
+    const value = window.localStorage.getItem(WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY);
+    return value && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// 读取上次激活文档：用于刷新后恢复选中态和编辑内容。
+function readStoredWorkspaceActiveDocId(): string | null {
+  try {
+    const value = window.localStorage.getItem(WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY);
+    return value && value.trim() ? value : null;
+  } catch {
+    return null;
   }
 }
 
@@ -200,6 +222,7 @@ export default function App() {
   const dataGateway = useMemo(() => getDataGateway(), []);
   // 工作区状态层：统一管理空间/目录树/文档加载，减少 App 根组件职责。
   const {
+    activeSpaceId,
     activeSpaceName,
     workspaceTree,
     activeDocumentTitle,
@@ -596,7 +619,10 @@ export default function App() {
 
     const bootstrap = async () => {
       try {
-        const bootstrapResult = await bootstrapWorkspace();
+        const bootstrapResult = await bootstrapWorkspace({
+          preferredSpaceId: readStoredWorkspaceActiveSpaceId(),
+          preferredDocId: readStoredWorkspaceActiveDocId()
+        });
         if (cancelled) {
           return;
         }
@@ -618,6 +644,32 @@ export default function App() {
       cancelled = true;
     };
   }, [bootstrapWorkspace]);
+
+  // 持久化当前激活空间：刷新后尽量恢复到上次知识本上下文。
+  useEffect(() => {
+    try {
+      if (activeSpaceId) {
+        window.localStorage.setItem(WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY, activeSpaceId);
+      } else {
+        window.localStorage.removeItem(WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY);
+      }
+    } catch {
+      // localStorage 不可用时仅忽略持久化，不影响当前会话。
+    }
+  }, [activeSpaceId]);
+
+  // 持久化当前激活文档：刷新后恢复树节点高亮和文档加载。
+  useEffect(() => {
+    try {
+      if (activeDocId) {
+        window.localStorage.setItem(WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY, activeDocId);
+      } else {
+        window.localStorage.removeItem(WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY);
+      }
+    } catch {
+      // localStorage 不可用时仅忽略持久化，不影响当前会话。
+    }
+  }, [activeDocId]);
 
   // 在离开当前文档前确认未保存修改，避免目录切换导致内容丢失。
   const confirmLeaveForDocumentSwitch = useCallback((): boolean => {

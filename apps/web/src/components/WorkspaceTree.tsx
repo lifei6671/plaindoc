@@ -469,8 +469,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             {...(context.itemContainerWithoutChildrenProps as any)}
             className={mergeClassNames(
               "group relative flex min-h-[36px] w-full cursor-pointer items-center rounded-[10px] pr-2 text-[14px] text-[#2f2f30]",
-              "bg-transparent hover:bg-[#e8e8ea]",
-              isActive && "bg-[#d9dade]",
+              isActive ? "bg-[#d9dade]" : "bg-transparent hover:bg-[#e8e8ea]",
               context.isFocused && "outline-none"
             )}
             style={rowStyle}

@@ -1,219 +1,203 @@
-# Implementation Phases: 本地工作区（空间 + 目录树）
+# Implementation Phases: 本地工作区（当前执行基线）
 
 **Project Type**: 现有 Web 前端功能扩展（Local Workspace MVP）  
-**Scope**: 在 `localAdapter` 下支持“本地空间 + 目录树 + 文档切换 + 基础 CRUD + ULID 业务 ID 策略”  
-**Stack**: React + Vite + TypeScript + 现有 DataGateway 抽象  
-**Estimated Total**: 17 小时（约 1020 分钟人工时间）
+**Scope**: `localAdapter` + 文档树工作区 + 本地持久化 + ULID 业务 ID  
+**Stack**: React + Vite + TypeScript + React Complex Tree + Dexie  
+**Current Date**: 2026-02-12
 
 ---
 
-## 范围与边界
+## 范围与边界（已确认）
 
-**本次目标（MVP）**：
-- 左侧工作区侧边栏（空间切换 + 目录树）
-- 本地空间新建与切换
-- 目录/文档树形展示（展开/收起）
-- 文档节点打开与编辑区联动
-- 本地目录树基础 CRUD（新建、重命名、删除）
-- 本地状态持久化（最近空间/文档、展开状态）
-- 业务 ID 统一使用小写 ULID（非自增）
+**本期已固定目标**：
+- 工作区仅负责“当前知识本内文档树”管理。
+- 目录树支持文档/目录新建、重命名、删除。
+- 文档节点点击后与编辑区内容联动。
+- 刷新后恢复上次激活空间和激活文档。
+- 本地业务 ID 统一为小写 ULID。
 
-**本次不做**：
-- 拖拽排序（Drag & Drop）
-- 多人协作与权限 UI
-- 跨标签页实时同步
-- 完整回收站/撤销删除流程
+**本期不做**：
+- 拖拽排序（仅保留扩展点）。
+- 空间删除（仅保留扩展点）。
+- 空间管理 UI（例如空间切换器入口）。
+- 跨标签页实时同步。
 
 ---
 
-## Phase 1: 工作区状态层落地
+## 阶段总览
+
+1. Phase 1 `工作区状态层`：已完成
+2. Phase 2 `侧栏布局与交互骨架`：已完成
+3. Phase 3 `目录树交互与编辑体验`：已完成
+4. Phase 4 `本地数据层与 ULID 策略`：已完成
+5. Phase 5 `状态恢复与持久化增强`：部分完成
+6. Phase 6 `验收文档与回归基线`：进行中
+
+---
+
+## Phase 1: 工作区状态层
+**Status**: Completed  
 **Type**: UI  
-**Estimated**: 3 小时（约 180 分钟）  
 **Files**:
-- `apps/web/src/workspace/types.ts`（新增）
-- `apps/web/src/workspace/use-workspace.ts`（新增）
-- `apps/web/src/App.tsx`
-- `apps/web/src/editor/status-utils.ts`
-- `apps/web/src/data-access/types.ts`（扩展点声明）
-
-**Tasks**:
-- [ ] 新增 `workspace` 领域状态类型：当前空间、当前文档、目录树、加载状态、错误状态。
-- [ ] 将 `App.tsx` 内“空间/文档启动加载逻辑”抽离到 `useWorkspace`，避免 `App` 继续膨胀。
-- [ ] 在 Hook 中封装 `bootstrapWorkspace`、`openDocument`、`reloadTree` 等动作。
-- [ ] 保持现有保存链路（自动保存/冲突处理）不变，只替换文档来源与切换入口。
-- [ ] 预留扩展点：在工作区动作层保留 `moveNode`（拖拽排序）与 `deleteSpace`（空间删除）能力位，当前版本可返回 `NotImplemented`。
-- [ ] 新增/调整中文注释，说明状态边界与关键流程。
-
-**Verification Criteria**:
-- [ ] 首次启动时，若无空间则自动创建默认空间与默认文档。
-- [ ] 已有空间场景下可稳定加载首个文档并进入可编辑状态。
-- [ ] 文档切换后标题、版本号、保存状态正确更新。
-- [ ] 扩展点能力位不影响现有流程（即使未启用也不报错）。
-- [ ] `npm run web:build` 通过。
-
-**Exit Criteria**: `App` 不再直接管理工作区初始化细节，工作区状态读写统一由 `useWorkspace` 提供，且不引入保存能力回归。
-
----
-
-## Phase 2: 空间侧边栏骨架
-**Type**: UI  
-**Estimated**: 2.5 小时（约 150 分钟）  
-**Files**:
-- `apps/web/src/components/WorkspaceSidebar.tsx`（新增）
-- `apps/web/src/components/SpaceSwitcher.tsx`（新增）
-- `apps/web/src/App.tsx`
-- `apps/web/src/styles.css`
-
-**Tasks**:
-- [ ] 在主工作区中增加左侧栏布局（侧栏 + 编辑区 + 预览区）。
-- [ ] 实现空间切换器（空间列表、当前空间高亮、创建空间入口）。
-- [ ] 侧边栏微交互状态放在子组件内部，避免触发 `App` 根组件重渲染。
-- [ ] 保持预览区关键选择器不变：`#plaindoc-preview-pane`、`.plaindoc-preview-pane`、`.plaindoc-preview-body`。
-- [ ] 增加必要中文注释，说明性能边界和状态归属。
-
-**Verification Criteria**:
-- [ ] 可创建新空间并自动切换到新空间。
-- [ ] 空间切换后，当前文档和状态栏“文档位置”正确更新。
-- [ ] 展开/收起空间菜单时，编辑输入无明显卡顿。
-- [ ] 预览滚动同步与主题切换不受布局改动影响。
-
-**Exit Criteria**: 侧边栏结构稳定、空间切换可用，且未破坏现有编辑/预览核心链路。
-
----
-
-## Phase 3: 目录树渲染与文档切换
-**Type**: UI  
-**Estimated**: 3 小时（约 180 分钟）  
-**Files**:
-- `apps/web/src/components/WorkspaceTree.tsx`（新增）
-- `apps/web/src/components/WorkspaceTreeNode.tsx`（新增）
-- `apps/web/src/components/WorkspaceSidebar.tsx`
+- `apps/web/src/workspace/types.ts`
 - `apps/web/src/workspace/use-workspace.ts`
-- `apps/web/src/styles.css`
+- `apps/web/src/App.tsx`
+- `apps/web/src/data-access/types.ts`
 
-**Tasks**:
-- [ ] 递归渲染目录树（`folder/doc` 图标、层级缩进、选中态）。
-- [ ] 支持目录展开/收起与当前文档高亮。
-- [ ] 点击文档节点触发 `openDocument`，更新编辑区内容与版本基线。
-- [ ] 为空空间提供“新建首篇文档”引导态。
-- [ ] 关键渲染/递归逻辑补充中文注释。
+**当前已落地能力**:
+- 工作区状态统一收敛到 `useWorkspace`。
+- 启动流程封装 `bootstrapWorkspace`，并保证空间/文档兜底创建。
+- 文档切换、树刷新、节点 CRUD 调用链由 Hook 提供统一入口。
+- 扩展点 `moveNode` / `deleteSpace` 已预留能力位。
 
-**Verification Criteria**:
-- [ ] 3 层以上目录结构可正确渲染与展开。
-- [ ] 文档切换后内容、标题、版本、最后保存时间同步更新。
-- [ ] 切换文档后继续编辑，自动保存仍正常。
-- [ ] 长文档 + 长图场景下双向滚动同步无明显漂移。
+**后续注意点**:
+- 不要把空间/文档初始化逻辑散回 `App.tsx`。
+- 扩展点未实现前应保持明确错误提示，不可静默失败。
 
-**Exit Criteria**: 目录树浏览与文档切换形成完整闭环，可支持日常多文档编辑。
+**Exit Criteria**:
+- 启动、切换、保存链路稳定；`App` 不直接管理工作区初始化细节。
 
 ---
 
-## Phase 4: 目录树本地 CRUD 闭环
+## Phase 2: 侧栏布局与交互骨架
+**Status**: Completed  
+**Type**: UI  
+**Files**:
+- `apps/web/src/components/WorkspaceSidebar.tsx`
+- `apps/web/src/App.tsx`
+- `apps/web/src/styles.css`
+
+**当前已落地能力**:
+- 左侧工作区已集成到主布局。
+- 侧栏支持拖拽调宽。
+- 侧栏支持隐藏/展开。
+- 侧栏宽度与折叠状态已持久化。
+- 侧栏无额头部，符合“只管文档树”的产品定位。
+
+**后续注意点**:
+- 不要在侧栏重新引入空间管理操作。
+- 侧栏尺寸状态需要继续保持可恢复，不要改成会话级临时状态。
+
+**Exit Criteria**:
+- 侧栏布局稳定且不影响编辑区核心体验。
+
+---
+
+## Phase 3: 目录树交互与编辑体验
+**Status**: Completed  
+**Type**: UI  
+**Files**:
+- `apps/web/src/components/WorkspaceTree.tsx`
+- `apps/web/src/components/WorkspaceSidebar.tsx`
+- `apps/web/src/App.tsx`
+
+**当前已落地能力**:
+- 目录树基于 `react-complex-tree`。
+- 不仅叶子节点，所有文档节点都可点击打开。
+- 节点 hover 显示右侧 `+` 操作菜单。
+- 新建文档/目录后进入树内原位输入框。
+- 重命名已改为树内原位输入框，不再用 `prompt`。
+- 当前激活文档节点有灰色选中背景。
+- 树节点行高统一 `36px`。
+
+**后续注意点**:
+- 必须保留 `canInvokePrimaryActionOnItemContainer`，避免退化为仅叶子可点击。
+- 选中背景与默认背景类要保持互斥，避免激活态被覆盖。
+- 输入框交互应保持一致：`Enter` 提交、`Esc` 取消、`Blur` 提交。
+
+**Exit Criteria**:
+- 树浏览、文档打开、创建重命名交互形成完整闭环。
+
+---
+
+## Phase 4: 本地数据层与 ULID 策略
+**Status**: Completed  
 **Type**: API  
-**Estimated**: 4.5 小时（约 270 分钟）  
 **Files**:
-- `apps/web/src/workspace/use-workspace.ts`
-- `apps/web/src/components/WorkspaceTreeNode.tsx`
-- `apps/web/src/data-access/local/adapter.ts`
+- `apps/web/src/data-access/local/ulid.ts`
 - `apps/web/src/data-access/local/store.ts`
-- `apps/web/src/data-access/local/ulid.ts`（新增）
-- `apps/web/src/data-access/types.ts`（如需扩展输入类型）
-- `apps/web/src/data-access/http/adapter.ts`（接口对齐）
+- `apps/web/src/data-access/local/adapter.ts`
+- `apps/web/src/data-access/types.ts`
+- `docs/local-indexeddb-schema.md`
 
-**Tasks**:
-- [ ] 支持在任意目录下新建子目录/子文档。
-- [ ] 支持节点重命名（目录与文档）。
-- [ ] 支持节点删除（目录递归删除、文档删除）。
-- [ ] 删除当前激活文档时，自动选择下一个可用文档；无文档时自动创建占位文档。
-- [ ] 将本地 ID 生成切换为小写 ULID（业务主键），不使用自增 ID。
-- [ ] ULID 去重策略：生成后先校验当前内存/存储是否已存在，冲突则重试（建议最多 8 次），仍冲突则抛错。
-- [ ] 统一 ID 生成入口，避免空间/节点/文档/修订各自散落实现。
-- [ ] 为本地适配器补充必要校验（不存在节点、非法父节点等）并返回可读错误。
-- [ ] 复杂分支补充中文注释，避免后续误改。
+**当前已落地能力**:
+- 本地存储已迁移为 IndexedDB（Dexie），不再使用 `localStorage` 大对象数据库。
+- 业务 ID 全面切换为小写 ULID。
+- ULID 具备冲突检测与重试策略（默认 8 次）。
+- 核心表采用双主键语义：`id`（技术）+ `ulid`（业务）。
+- 节点递归删除与文档修订链路已联动处理。
 
-**Verification Criteria**:
-- [ ] 新建目录/文档后，树与编辑区实时更新。
-- [ ] 重命名文档后，状态栏标题与文档标题同步。
-- [ ] 删除目录时，其子树被正确移除且无孤儿节点。
-- [ ] 删除激活文档后不会出现空白崩溃状态。
-- [ ] 所有新建实体 ID 均为小写 ULID，且无重复。
-- [ ] `npm run web:build` 通过。
+**后续注意点**:
+- 不要在 Dexie 事务内调用事务外异步流程（尤其是 ID 生成）。
+- 该问题会直接触发 `Transaction committed too early`。
+- 数据模型详见 `docs/local-indexeddb-schema.md`。
 
-**Exit Criteria**: 目录树本地 CRUD 可用且数据一致性可控，用户不会被操作流程卡死。
+**Exit Criteria**:
+- 本地 CRUD、版本保存、ID 生成与唯一性策略稳定可用。
 
 ---
 
-## Phase 5: 本地持久化与性能回归
+## Phase 5: 状态恢复与持久化增强
+**Status**: Partial  
 **Type**: Integration  
-**Estimated**: 2.5 小时（约 150 分钟）  
 **Files**:
-- `apps/web/src/workspace/use-workspace.ts`
-- `apps/web/src/components/WorkspaceSidebar.tsx`
-- `apps/web/src/data-access/user-config/indexeddb-gateway.ts`（如需小幅增强）
 - `apps/web/src/App.tsx`
-- `apps/web/src/styles.css`
+- `apps/web/src/workspace/use-workspace.ts`
+- `apps/web/src/components/WorkspaceTree.tsx`
 
-**Tasks**:
-- [ ] 持久化 `activeSpaceId`、`activeDocId`、`expandedFolderIds`（优先复用 `userConfigGateway`）。
-- [ ] 启动时恢复上述状态，若目标不存在则自动回退到最近可用文档。
-- [ ] 复查组件重渲染边界，确保侧栏交互不拖慢编辑区输入。
-- [ ] 保持主题菜单与样式抽屉性能隔离策略不被破坏。
-- [ ] 增补中文注释，记录持久化键与恢复回退策略。
+**已完成**:
+- 刷新后恢复 `activeSpaceId` 与 `activeDocId`。
+- 恢复后自动加载目标文档内容到编辑区。
+- 侧栏宽度与折叠状态持久化已稳定。
 
-**Verification Criteria**:
-- [ ] 刷新页面后保留上次空间、文档和目录展开状态。
-- [ ] 删除上次激活文档后再次刷新，能正确回退到可用文档。
-- [ ] 主题切换 + 外部样式覆盖后滚动映射仍正确重建。
-- [ ] 编辑区连续输入 30 秒无明显卡顿。
+**待完成**:
+- `expandedFolderIds` 的持久化与恢复。
+- 删除上次激活节点后的恢复策略专项回归（含嵌套目录场景）。
 
-**Exit Criteria**: 工作区状态可恢复、体验稳定，核心性能与同步滚动链路无回归。
+**后续注意点**:
+- 启动恢复顺序：先空间后文档，目标缺失时必须回退到可用文档。
+- 不要让刷新恢复破坏当前自动保存与冲突检测链路。
+
+**Exit Criteria**:
+- 树状态与文档状态在刷新后可稳定恢复，且回退策略可预期。
 
 ---
 
-## Phase 6: 验收清单与交付门槛
+## Phase 6: 验收文档与回归基线
+**Status**: In Progress  
 **Type**: Testing  
-**Estimated**: 1.5 小时（约 90 分钟）  
 **Files**:
-- `docs/LOCAL_WORKSPACE_ACCEPTANCE.md`（新增）
+- `docs/local-workspace-ai-handoff.md`
+- `docs/LOCAL_WORKSPACE_ACCEPTANCE.md`（待新增）
 
-**Tasks**:
-- [ ] 编写本地工作区手工回归清单（空间、目录树、文档切换、删除边界、刷新恢复）。
-- [ ] 增加 ULID 验收项（小写格式、唯一性、冲突重试）。
-- [ ] 固化最小构建验收命令：`npm run web:build`。
-- [ ] 记录已知限制与后续迭代项（拖拽排序、跨标签页同步等）。
+**已完成**:
+- 已有 AI 接手上下文文档，覆盖实现边界与高风险注意点。
 
-**Verification Criteria**:
-- [ ] 构建命令通过。
-- [ ] 验收清单全部通过并留存结果。
-- [ ] 无阻断级问题（无法打开文档、删除后崩溃、滚动同步失效等）。
-- [ ] 扩展点确认：`moveNode` / `deleteSpace` 的接口位置与调用链清晰可扩展。
+**待完成**:
+- 补充正式手工验收清单文档（按场景逐条打勾）。
+- 固化本地工作区专项回归项（创建、重命名、删除、刷新恢复、崩溃兜底）。
 
-**Exit Criteria**: 本地工作区 MVP 达到“可日常使用”标准，具备进入后续后端接入阶段的质量基线。
+**后续注意点**:
+- 每次继续开发后最少执行一次 `npm run web:build`。
+- 回归必须包含“刷新恢复激活文档”场景，不可只测首次启动。
 
----
-
-## Notes
-
-**Testing Strategy**: 以阶段内手工验收 + 最终回归清单为主（当前仓库未接入前端自动化测试框架）。  
-**Deployment Strategy**: 每个 Phase 结束执行本地构建，阶段 3/4/5 结束后进行一次完整手工回归。  
-**Context Management**: 每个 Phase 控制在 4-6 个文件、2-4 小时，确保单次会话可完整收敛。
+**Exit Criteria**:
+- 验收清单可复用，后续 AI 能基于文档稳定推进而不回退既有能力。
 
 ---
 
-## 已确认策略（本轮评审）
+## 关键约束（后续 AI 必须遵守）
 
-1. 文档删除后兜底：自动选择同层下一个文档，若不存在则自动创建“未命名文档”。
-2. 本期不做拖拽排序，但必须预留扩展点（动作层与数据层入口）。
-3. 本期不做空间删除，但必须预留扩展点（空间操作位与 UI 承载位）。
-4. 允许目录/文档重名（即允许重命名为已存在名称）。
-5. 业务 ID 策略：统一使用小写 ULID，禁止使用自增 ID 作为业务主键。
-6. 未来数据库策略：数据库可保留自增 `id`（技术主键），但业务关联与外部引用使用 `ulid` 字段。
+1. 工作区只管理文档树，不扩展为空间管理面板。
+2. 本期禁止回退 ULID 方案，也禁止恢复自增业务 ID。
+3. 新建/重命名必须保持树内输入框交互，不使用 `prompt`。
+4. 所有文档节点都必须可点击打开（不限是否叶子）。
+5. 任何改动后若破坏激活高亮、刷新恢复、事务稳定性，视为阻断问题。
 
 ---
 
-## 数据模型前瞻（数据库接入阶段）
+## 关联文档
 
-- 每张核心表建议双主键语义：
-- `id BIGINT AUTO_INCREMENT`：仅内部技术用途（排序/排障），业务逻辑不依赖。
-- `ulid CHAR(26)`：业务主标识，`UNIQUE NOT NULL`，所有接口和关联优先使用。
-- 外键建议优先关联 `ulid`（或维护 `*_ulid` 字段），避免未来从本地到后端迁移时 ID 语义变化。
+- `docs/local-workspace-ai-handoff.md`
+- `docs/local-indexeddb-schema.md`
+- `docs/ai-handoff-pitfalls.md`

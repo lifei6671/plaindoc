@@ -39,6 +39,12 @@ export interface WorkspaceBootstrapResult {
   documentVersion: number;
 }
 
+// 启动恢复输入：用于按上次会话优先还原空间与文档。
+export interface WorkspaceBootstrapInput {
+  preferredSpaceId?: string | null;
+  preferredDocId?: string | null;
+}
+
 // 目录移动参数：作为拖拽排序扩展点的统一输入结构。
 export interface WorkspaceMoveNodeInput {
   nodeId: string;
@@ -55,7 +61,7 @@ export interface WorkspaceCreateNodeInput {
 
 // 工作区动作：统一封装目录树和文档加载行为。
 export interface WorkspaceActions {
-  bootstrapWorkspace(): Promise<WorkspaceBootstrapResult>;
+  bootstrapWorkspace(input?: WorkspaceBootstrapInput): Promise<WorkspaceBootstrapResult>;
   refreshSpaces(): Promise<Space[]>;
   switchSpace(spaceId: string): Promise<WorkspaceBootstrapResult>;
   createSpace(spaceName: string): Promise<WorkspaceBootstrapResult>;
