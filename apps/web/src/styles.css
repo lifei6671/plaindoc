@@ -1405,6 +1405,8 @@ body {
 #plaindoc-preview-body h6 {
   margin-top: 30px;
   border-bottom-style: solid;
+  /* 标题通常高于正文字号，单独设置相对行高避免换行时字形上下重叠。 */
+  line-height: 1.45;
 }
 
 /* 标题层级样式变量：支持 h1~h6 独立控制文字色和下边框。 */
