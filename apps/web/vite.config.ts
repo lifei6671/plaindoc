@@ -1,5 +1,5 @@
-import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -9,7 +9,7 @@ export default defineConfig({
     PACKAGE_VERSION: JSON.stringify("3.2.1")
   },
   server: {
-    port: 3000,
+    port: 3001,
     host: "0.0.0.0"
   }
 });

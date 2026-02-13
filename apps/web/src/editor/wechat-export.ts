@@ -450,6 +450,7 @@ function normalizeWechatHtmlCompatibility(html: string): string {
     return html;
   }
 
+  normalizeMermaidForeignObjectWrappersInExportHtml(rootElement);
   normalizeWechatStyledSpanContainers(rootElement);
   normalizeWechatBlockquotes(rootElement);
 
@@ -1016,17 +1017,75 @@ function stripMermaidUnsafeInlineStyle(node: Element): void {
   });
 }
 
-// 微信兼容兜底：只通过样式覆盖，保留 Mermaid 原节点结构不变。
+function normalizeMermaidTextContent(text: string): string {
+  return text
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200b\u200c\u200d\u2060\ufeff]/g, "")
+    .trim();
+}
+
+function isMermaidPlaceholderParagraph(paragraphElement: HTMLElement): boolean {
+  const normalizedText = normalizeMermaidTextContent(paragraphElement.textContent ?? "");
+  const hasTrailingBreak = Boolean(paragraphElement.querySelector("br.ProseMirror-trailingBreak"));
+  if (hasTrailingBreak && !normalizedText) {
+    return true;
+  }
+
+  const hasNodeLabelPlaceholder = Boolean(paragraphElement.querySelector(".nodeLabel"));
+  const hasLeafNode = Boolean(paragraphElement.querySelector("[leaf]"));
+  if (hasNodeLabelPlaceholder && !normalizedText && !hasLeafNode) {
+    return true;
+  }
+
+  return false;
+}
+
+function unwrapElementPreservingChildren(element: HTMLElement): void {
+  const parentNode = element.parentNode;
+  if (!parentNode) {
+    element.remove();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  while (element.firstChild) {
+    fragment.appendChild(element.firstChild);
+  }
+  parentNode.replaceChild(fragment, element);
+}
+
+// 微信会把 foreignObject 内的段落节点重新格式化，导出时直接移除“文本段落 p”包装层。
+function normalizeMermaidForeignObjectParagraphWrappers(foreignObjectElement: HTMLElement): void {
+  const paragraphElements = Array.from(foreignObjectElement.querySelectorAll<HTMLElement>("p"));
+  paragraphElements.forEach((paragraphElement) => {
+    if (isMermaidPlaceholderParagraph(paragraphElement)) {
+      paragraphElement.remove();
+      return;
+    }
+    unwrapElementPreservingChildren(paragraphElement);
+  });
+}
+
+// 兜底处理：juice 可能在内联阶段重新生成 foreignObject 内的 <p>，这里二次清理。
+function normalizeMermaidForeignObjectWrappersInExportHtml(rootElement: HTMLElement): void {
+  const foreignObjectElements = Array.from(rootElement.querySelectorAll<HTMLElement>("foreignObject"));
+  foreignObjectElements.forEach((foreignObjectElement) => {
+    normalizeMermaidForeignObjectParagraphWrappers(foreignObjectElement);
+  });
+}
+
+// 微信兼容兜底：Mermaid foreignObject 仅做最小结构校正与样式覆盖。
 function applyMermaidWechatStyleFallback(svgElement: SVGSVGElement): void {
   svgElement.style.overflow = "visible";
 
   const foreignObjectElements = Array.from(svgElement.querySelectorAll<HTMLElement>("foreignObject"));
   foreignObjectElements.forEach((foreignObjectElement) => {
+    normalizeMermaidForeignObjectParagraphWrappers(foreignObjectElement);
     foreignObjectElement.style.overflow = "visible";
     foreignObjectElement.style.removeProperty("height");
 
     const inlineElements = Array.from(
-      foreignObjectElement.querySelectorAll<HTMLElement>("p, div, span")
+      foreignObjectElement.querySelectorAll<HTMLElement>("div, span")
     );
     inlineElements.forEach((inlineElement) => {
       stripMermaidUnsafeInlineStyle(inlineElement);
@@ -1044,10 +1103,7 @@ function applyMermaidWechatStyleFallback(svgElement: SVGSVGElement): void {
       }
 
       const hasNodeLabelPlaceholder = Boolean(inlineElement.querySelector(".nodeLabel"));
-      const normalizedText = (inlineElement.textContent ?? "")
-        .replace(/\u00a0/g, " ")
-        .replace(/[\u200b\u200c\u200d\u2060\ufeff]/g, "")
-        .trim();
+      const normalizedText = normalizeMermaidTextContent(inlineElement.textContent ?? "");
       const hasLeafNode = Boolean(inlineElement.querySelector("[leaf]"));
       if (hasNodeLabelPlaceholder && !normalizedText && !hasLeafNode) {
         inlineElement.style.display = "none";
