@@ -178,6 +178,12 @@ body {
   color: #0369a1;
 }
 
+.preview-mode-toggle--footnote {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .preview-mode-toggle__label {
   line-height: 1;
 }
@@ -1383,6 +1389,67 @@ body {
   color: var(--pd-preview-text-color);
 }
 
+/* 引用式脚注区块：文末展示 `[n]: url "title"`，统一关闭段首缩进。 */
+#plaindoc-preview-body .reference-footnote-title,
+#plaindoc-preview-body .reference-footnote-line {
+  text-indent: 0;
+  word-break: break-word;
+}
+
+#plaindoc-preview-body .footnote-ref,
+#plaindoc-preview-body .footnote-word {
+  color: var(--pd-preview-link-color);
+}
+
+#plaindoc-preview-body .preview-link-footnote-ref {
+  vertical-align: super;
+  line-height: 1;
+  font-size: 0.78em;
+  margin-left: 2px;
+}
+
+#plaindoc-preview-body .reference-footnote-title {
+  margin-top: 12px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+#plaindoc-preview-body .reference-footnote-line {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+#plaindoc-preview-body .reference-footnote-note {
+  color: var(--pd-preview-text-color);
+  font-size: 14px;
+}
+
+/* 微信导出外链脚注：用于“链接转纯文本”后的上标与文末列表样式。 */
+#plaindoc-preview-body .wechat-link-footnote-ref,
+#plaindoc-preview-body .wechat-link-footnotes-item-ref {
+  margin-left: 2px;
+  font-size: 0.78em;
+}
+
+#plaindoc-preview-body .wechat-link-footnotes-title {
+  margin-top: 12px;
+  margin-bottom: 8px;
+  text-indent: 0;
+  font-weight: 600;
+}
+
+#plaindoc-preview-body .wechat-link-footnotes-item {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  text-indent: 0;
+  word-break: break-word;
+}
+
+#plaindoc-preview-body .wechat-link-footnotes-item-url {
+  word-break: break-all;
+}
+
 #plaindoc-preview-body li>p,
 #plaindoc-preview-body blockquote p,
 #plaindoc-preview-body td p,
@@ -1810,6 +1877,7 @@ body {
 
 #plaindoc-preview-body.plaindoc-preview-body--orange-heart .footnote-ref {
   color: rgb(239, 112, 96);
+  font-size: 14px;
 }
 
 #plaindoc-preview-body ul {

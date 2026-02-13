@@ -7,6 +7,7 @@ import {
   AlertCircle,
   CheckCircle2,
   GripVertical,
+  Link2,
   LoaderCircle,
   Monitor,
   PanelLeftClose,
@@ -60,6 +61,7 @@ import {
   PREVIEW_HTML_SANITIZE_SCHEMA,
   PREVIEW_MARKDOWN_REHYPE_OPTIONS
 } from "./editor/markdown-sanitize";
+import { remarkReferenceFootnotePlugin } from "./editor/remark-reference-footnotes";
 import {
   buildPreviewThemeStyleText,
   getPreviewThemeClassName,
@@ -70,7 +72,7 @@ import {
   formatSavedTime,
   resolveSaveIndicatorVariant
 } from "./editor/status-utils";
-import type { PreviewViewportMode, SaveStatus } from "./editor/types";
+import type { PreviewLinkRenderMode, PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
 import { copyPreviewToWechat } from "./editor/wechat-export";
 import { PREVIEW_THEME_TEMPLATES, resolvePreviewTheme } from "./preview-themes";
@@ -106,6 +108,7 @@ const WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY = "workspace.sidebar.width";
 const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY = "workspace.sidebar.collapsed";
 const WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY = "workspace.activeSpaceId";
 const WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY = "workspace.activeDocId";
+const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode";
 
 // 统一钳制侧栏宽度，避免本地脏值导致布局异常。
 function clampWorkspaceSidebarWidth(width: number): number {
@@ -155,6 +158,16 @@ function readStoredWorkspaceActiveDocId(): string | null {
     return value && value.trim() ? value : null;
   } catch {
     return null;
+  }
+}
+
+// 读取链接渲染模式：默认保持原始链接，避免影响已有阅读习惯。
+function readStoredPreviewLinkRenderMode(): PreviewLinkRenderMode {
+  try {
+    const value = window.localStorage.getItem(PREVIEW_LINK_RENDER_MODE_STORAGE_KEY);
+    return value === "footnote" ? "footnote" : "link";
+  } catch {
+    return "link";
   }
 }
 
@@ -255,6 +268,10 @@ export default function App() {
   const [customPreviewStyleText, setCustomPreviewStyleText] = useState("");
   // 预览视口模式：desktop 保持现状，mobile 模拟窄屏阅读。
   const [previewViewportMode, setPreviewViewportMode] = useState<PreviewViewportMode>("desktop");
+  // 链接渲染模式：支持“原始链接”与“脚注+角标”双模式切换。
+  const [previewLinkRenderMode, setPreviewLinkRenderMode] = useState<PreviewLinkRenderMode>(
+    readStoredPreviewLinkRenderMode
+  );
   // 复制到公众号时的进行中状态：防止重复点击触发并发复制。
   const [isWechatCopying, setIsWechatCopying] = useState(false);
   // 粘贴图片上传状态：用于防止重复触发并展示状态文案。
@@ -396,6 +413,15 @@ export default function App() {
       // localStorage 失败时忽略持久化，不影响当前显示。
     }
   }, [previewViewportMode]);
+
+  // 链接渲染模式变化时写入本地缓存，便于下次启动直接恢复。
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PREVIEW_LINK_RENDER_MODE_STORAGE_KEY, previewLinkRenderMode);
+    } catch {
+      // localStorage 失败时忽略持久化，不影响当前显示。
+    }
+  }, [previewLinkRenderMode]);
 
   // 同步配置引用，确保粘贴上传始终使用最新“默认图床 + 凭据”。
   useEffect(() => {
@@ -546,8 +572,14 @@ export default function App() {
     ],
     []
   );
-  // remark 插件顺序：先 GFM，再解析数学公式，最后注入锚点属性。
-  const remarkPlugins = useMemo(() => [remarkGfm, remarkMath, remarkBlockAnchorPlugin], []);
+  // remark 插件顺序：先 GFM，再解析数学公式，再按链接模式处理脚注，最后注入锚点属性。
+  const remarkPlugins = useMemo(() => {
+    const referenceFootnotePlugin: [typeof remarkReferenceFootnotePlugin, { mode: PreviewLinkRenderMode }] = [
+      remarkReferenceFootnotePlugin,
+      { mode: previewLinkRenderMode }
+    ];
+    return [remarkGfm, remarkMath, referenceFootnotePlugin, remarkBlockAnchorPlugin];
+  }, [previewLinkRenderMode]);
   // rehype 插件顺序：先解析内嵌 HTML，再做白名单清洗，最后渲染 KaTeX。
   const rehypePlugins = useMemo(() => {
     const sanitizePlugin: [typeof rehypeSanitize, typeof PREVIEW_HTML_SANITIZE_SCHEMA] = [
@@ -902,6 +934,13 @@ export default function App() {
     );
   }, []);
 
+  // 切换链接渲染模式：原始链接 <-> 脚注角标。
+  const togglePreviewLinkRenderMode = useCallback(() => {
+    setPreviewLinkRenderMode((previousMode) =>
+      previousMode === "link" ? "footnote" : "link"
+    );
+  }, []);
+
   // 导出预览区为内联样式 HTML，并写入剪贴板供公众号编辑器粘贴。
   const handleCopyToWechat = useCallback(async () => {
     if (isWechatCopying) {
@@ -909,7 +948,9 @@ export default function App() {
     }
     setIsWechatCopying(true);
     try {
-      await copyPreviewToWechat();
+      await copyPreviewToWechat({
+        linkRenderMode: previewLinkRenderMode
+      });
       setStatusMessage("已复制预览内容，可直接粘贴到微信公众号编辑器");
       setAppToast((previousToast) => ({
         isOpen: true,
@@ -922,7 +963,7 @@ export default function App() {
     } finally {
       setIsWechatCopying(false);
     }
-  }, [isWechatCopying]);
+  }, [isWechatCopying, previewLinkRenderMode]);
 
   // 关闭顶部提示：供自动计时与后续手动关闭复用。
   const closeAppToast = useCallback(() => {
@@ -1056,6 +1097,29 @@ export default function App() {
             {previewViewportMode === "desktop" ? <Monitor size={14} /> : <Smartphone size={14} />}
             <span className="preview-mode-toggle__label">
               {previewViewportMode === "desktop" ? "PC 预览" : "移动预览"}
+            </span>
+          </button>
+          {/* 链接渲染开关：原始链接 / 脚注角标。 */}
+          <button
+            type="button"
+            className={`preview-mode-toggle ${
+              previewLinkRenderMode === "footnote" ? "preview-mode-toggle--footnote" : ""
+            }`}
+            onClick={togglePreviewLinkRenderMode}
+            title={
+              previewLinkRenderMode === "link"
+                ? "切换为脚注+角标渲染"
+                : "切换为原始链接渲染"
+            }
+            aria-label={
+              previewLinkRenderMode === "link"
+                ? "切换为脚注+角标渲染"
+                : "切换为原始链接渲染"
+            }
+          >
+            <Link2 size={14} />
+            <span className="preview-mode-toggle__label">
+              {previewLinkRenderMode === "link" ? "链接渲染" : "脚注渲染"}
             </span>
           </button>
           {/* 主题菜单：展开/收起只更新菜单组件自身。 */}

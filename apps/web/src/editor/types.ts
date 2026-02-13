@@ -7,6 +7,9 @@ export type SaveIndicatorVariant = "unsaved" | "saving" | "saved";
 // 预览区视口模式：PC 全宽 / 移动端窄屏。
 export type PreviewViewportMode = "desktop" | "mobile";
 
+// 预览链接渲染模式：原始链接 / 脚注角标。
+export type PreviewLinkRenderMode = "link" | "footnote";
+
 // 当前滚动事件的来源。
 export type ScrollSource = "editor" | "preview";
 

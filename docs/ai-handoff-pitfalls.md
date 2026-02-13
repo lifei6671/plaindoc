@@ -152,6 +152,10 @@
   - 预览区选择器（`#plaindoc-preview-pane ...`）
   - 主题菜单下拉布局
   - 抽屉层级与遮罩
+- `apps/web/src/editor/wechat-export.ts` 中以下区域：
+  - `WECHAT_CRITICAL_SELECTORS_BY_TYPE`
+  - `inlineCriticalStylesBySelector`
+  - `inlineWechatCriticalStyles`
 
 ## 5. 给后续 AI 的改动原则
 
@@ -163,6 +167,7 @@
 - 原则 6（强制规范）：所有 AI 生成或修改的代码必须包含中文注释，至少覆盖模块职责、关键函数和复杂分支；不满足该规范的改动视为不合格。
 - 原则 7：每一块功能的引入需要考虑是否可以抽离成独立模块，方便后续迭代。
 - 原则 8：涉及 `rehype-sanitize` 的改动必须验证“锚点属性保留 + XSS 拦截 + 公式渲染”三件事同时成立。
+- 原则 9：预览区样式（`apps/web/src/styles.css` 与 `App.tsx` 里相关 class）发生新增或改动时，必须同步更新 `apps/web/src/editor/wechat-export.ts` 里的 `WECHAT_CRITICAL_SELECTORS_BY_TYPE`，且不得删除 `inlineWechatCriticalStyles` 这条“预览样式 -> 微信内联样式”兜底链路。
 
 ## 6. 新会话最小验证清单
 

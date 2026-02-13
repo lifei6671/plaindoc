@@ -1,16 +1,29 @@
 import juice from "juice";
 import { PREVIEW_BODY_ID } from "./constants";
+import type { PreviewLinkRenderMode } from "./types";
 
 // 微信复制选项：允许调用方覆盖预览容器定位，便于后续复用。
 interface CopyPreviewToWechatOptions {
   previewPaneId?: string;
   previewBodyClass?: string;
+  linkRenderMode?: PreviewLinkRenderMode;
 }
 
 // 复制结果：返回最终 HTML 与纯文本，便于调试或扩展埋点。
 interface WechatClipboardPayload {
   html: string;
   plainText: string;
+}
+
+interface WechatExternalFootnote {
+  index: number;
+  href: string;
+  title: string | null;
+}
+
+interface WechatFootnoteStyleTokens {
+  referenceColor: string | null;
+  wordColor: string | null;
 }
 
 const LEGACY_COPY_INPUT_ID = "plaindoc-wechat-copy-input";
@@ -20,6 +33,357 @@ function toPlainTextFromHtml(html: string): string {
   const container = document.createElement("div");
   container.innerHTML = html;
   return container.textContent?.trim() ?? "";
+}
+
+// 判定是否为微信环境不可用的外链：仅处理 http/https/mailto/tel 与协议相对地址。
+function isExternalLinkHref(rawHref: string): boolean {
+  const href = rawHref.trim();
+  if (!href || href.startsWith("#")) {
+    return false;
+  }
+  if (href.startsWith("//")) {
+    return true;
+  }
+  return /^(https?:|mailto:|tel:)/i.test(href);
+}
+
+// 去掉预览阶段生成的“参考链接”区块，避免导出时与微信外链脚注重复。
+function removeReferenceFootnoteSection(rootElement: HTMLElement): void {
+  const referenceTitles = rootElement.querySelectorAll<HTMLElement>(".reference-footnote-title");
+  referenceTitles.forEach((titleElement) => {
+    const previousElement = titleElement.previousElementSibling;
+    if (previousElement?.tagName.toLowerCase() === "hr") {
+      previousElement.remove();
+    }
+
+    let sibling = titleElement.nextElementSibling;
+    while (sibling instanceof HTMLElement && sibling.classList.contains("reference-footnote-line")) {
+      const nextSibling = sibling.nextElementSibling;
+      sibling.remove();
+      sibling = nextSibling;
+    }
+    titleElement.remove();
+  });
+}
+
+// 从预览区采样指定类名的计算颜色，作为微信导出时的稳定内联颜色来源。
+function resolvePreviewClassColor(sourceRoot: HTMLElement, className: string): string | null {
+  const probeElement = document.createElement("span");
+  probeElement.className = className;
+  probeElement.textContent = "1";
+  probeElement.style.position = "absolute";
+  probeElement.style.left = "-9999px";
+  probeElement.style.top = "0";
+  probeElement.style.pointerEvents = "none";
+  sourceRoot.appendChild(probeElement);
+  const color = window.getComputedStyle(probeElement).color.trim();
+  probeElement.remove();
+  if (!color || color === "rgba(0, 0, 0, 0)") {
+    return null;
+  }
+  return color;
+}
+
+// 汇总脚注相关样式令牌：确保编号与链接文本在微信侧保持原主题颜色。
+function resolveWechatFootnoteStyleTokens(sourceRoot: HTMLElement): WechatFootnoteStyleTokens {
+  return {
+    referenceColor: resolvePreviewClassColor(sourceRoot, "footnote-ref"),
+    wordColor: resolvePreviewClassColor(sourceRoot, "footnote-word")
+  };
+}
+
+// 将正文中的外链替换为纯文本 + 上标编号，并返回按出现顺序收集的脚注定义。
+function convertExternalLinksToFootnotes(
+  rootElement: HTMLElement,
+  styleTokens: WechatFootnoteStyleTokens
+): WechatExternalFootnote[] {
+  const footnotes: WechatExternalFootnote[] = [];
+  const footnoteIndexByHref = new Map<string, number>();
+  const anchorElements = Array.from(rootElement.querySelectorAll<HTMLAnchorElement>("a[href]"));
+
+  for (const anchorElement of anchorElements) {
+    const rawHref = anchorElement.getAttribute("href");
+    if (!rawHref || !isExternalLinkHref(rawHref)) {
+      continue;
+    }
+
+    const normalizedHref = rawHref.trim();
+    const titleText = anchorElement.getAttribute("title")?.trim() || null;
+    let footnoteIndex = footnoteIndexByHref.get(normalizedHref);
+    if (!footnoteIndex) {
+      footnoteIndex = footnotes.length + 1;
+      footnoteIndexByHref.set(normalizedHref, footnoteIndex);
+      footnotes.push({
+        index: footnoteIndex,
+        href: normalizedHref,
+        title: titleText
+      });
+    } else if (titleText) {
+      const existingFootnote = footnotes[footnoteIndex - 1];
+      if (existingFootnote && !existingFootnote.title) {
+        existingFootnote.title = titleText;
+      }
+    }
+
+    const replacementFragment = document.createDocumentFragment();
+    if (anchorElement.childNodes.length) {
+      while (anchorElement.firstChild) {
+        replacementFragment.appendChild(anchorElement.firstChild);
+      }
+    } else {
+      replacementFragment.appendChild(document.createTextNode(normalizedHref));
+    }
+
+    const referenceElement = document.createElement("sup");
+    referenceElement.className = "footnote-ref wechat-link-footnote-ref";
+    referenceElement.textContent = `[${footnoteIndex}]`;
+    // 微信对 `<sup>` 的保留不稳定，导出前先写入关键内联样式兜底。
+    referenceElement.style.verticalAlign = "super";
+    referenceElement.style.fontSize = "0.78em";
+    referenceElement.style.lineHeight = "1";
+    referenceElement.style.marginLeft = "2px";
+    if (styleTokens.referenceColor) {
+      referenceElement.style.color = styleTokens.referenceColor;
+    }
+    replacementFragment.appendChild(referenceElement);
+    anchorElement.replaceWith(replacementFragment);
+  }
+
+  return footnotes;
+}
+
+// 在文末追加“外链脚注”区块，仅保留纯文本 URL，确保公众号粘贴后不出现可点击外链。
+function appendWechatExternalFootnotes(
+  rootElement: HTMLElement,
+  footnotes: WechatExternalFootnote[],
+  styleTokens: WechatFootnoteStyleTokens
+): void {
+  if (!footnotes.length) {
+    return;
+  }
+
+  const dividerElement = document.createElement("hr");
+  dividerElement.className = "wechat-link-footnotes-divider";
+  rootElement.appendChild(dividerElement);
+
+  const titleElement = document.createElement("p");
+  titleElement.className = "wechat-link-footnotes-title";
+  titleElement.textContent = "外链脚注";
+  rootElement.appendChild(titleElement);
+
+  footnotes.forEach((footnote) => {
+    const lineElement = document.createElement("p");
+    lineElement.className = "wechat-link-footnotes-item";
+
+    const indexElement = document.createElement("span");
+    indexElement.className = "footnote-ref wechat-link-footnotes-item-ref";
+    indexElement.textContent = `[${footnote.index}]`;
+    if (styleTokens.referenceColor) {
+      indexElement.style.color = styleTokens.referenceColor;
+    }
+
+    const hrefElement = document.createElement("span");
+    hrefElement.className = "footnote-word wechat-link-footnotes-item-url";
+    hrefElement.textContent = footnote.href;
+    if (styleTokens.wordColor) {
+      hrefElement.style.color = styleTokens.wordColor;
+    }
+
+    lineElement.appendChild(indexElement);
+    lineElement.appendChild(document.createTextNode(" "));
+    lineElement.appendChild(hrefElement);
+
+    if (footnote.title) {
+      const titleTextElement = document.createElement("span");
+      titleTextElement.className = "wechat-link-footnotes-item-title";
+      titleTextElement.textContent = ` "${footnote.title}"`;
+      lineElement.appendChild(titleTextElement);
+    }
+
+    rootElement.appendChild(lineElement);
+  });
+}
+
+// 公众号导出专用：把外链统一转为无链接脚注，避免微信环境丢失跳转行为。
+function normalizeExternalLinksForWechatExport(
+  rootElement: HTMLElement,
+  styleTokens: WechatFootnoteStyleTokens
+): void {
+  removeReferenceFootnoteSection(rootElement);
+  const footnotes = convertExternalLinksToFootnotes(rootElement, styleTokens);
+  appendWechatExternalFootnotes(rootElement, footnotes, styleTokens);
+}
+
+const WECHAT_CRITICAL_STYLE_PROPS = [
+  "display",
+  "color",
+  "background",
+  "background-color",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "line-height",
+  "letter-spacing",
+  "word-spacing",
+  "text-align",
+  "text-indent",
+  "text-decoration",
+  "text-transform",
+  "white-space",
+  "vertical-align",
+  "padding",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  "margin",
+  "margin-top",
+  "margin-right",
+  "margin-bottom",
+  "margin-left",
+  "border",
+  "border-top",
+  "border-right",
+  "border-bottom",
+  "border-left",
+  "border-radius"
+];
+
+// 微信导出关键选择器清单：按“标签/类”分类维护，便于和预览区样式同步。
+// 约束：预览区新增关键样式时，必须同步补充到这里，避免复制到微信后丢失样式。
+const WECHAT_CRITICAL_SELECTORS_BY_TYPE = {
+  tag: ["h1", "h2", "h3", "h4", "h5", "h6", "mark", "strong"],
+  class: [
+    ".prefix",
+    ".content",
+    ".suffix",
+    ".footnote-word",
+    ".footnote-ref",
+    ".reference-footnote-title",
+    ".reference-footnote-line",
+    ".reference-footnote-note"
+  ]
+} as const;
+
+// 把 source 对应节点的关键计算样式写到 clone，作为 juice 失败或微信过滤时的兜底。
+function inlineCriticalStylesBySelector(
+  sourceRoot: HTMLElement,
+  clonedRoot: HTMLElement,
+  selector: string
+): void {
+  const sourceNodes = sourceRoot.querySelectorAll<HTMLElement>(selector);
+  const clonedNodes = clonedRoot.querySelectorAll<HTMLElement>(selector);
+  const nodeCount = Math.min(sourceNodes.length, clonedNodes.length);
+  for (let index = 0; index < nodeCount; index += 1) {
+    const sourceNode = sourceNodes[index];
+    const clonedNode = clonedNodes[index];
+    const computedStyle = window.getComputedStyle(sourceNode);
+    const styleEntries: string[] = [];
+    WECHAT_CRITICAL_STYLE_PROPS.forEach((propertyName) => {
+      const propertyValue = computedStyle.getPropertyValue(propertyName).trim();
+      if (propertyValue) {
+        styleEntries.push(`${propertyName}:${propertyValue}`);
+      }
+    });
+    if (!styleEntries.length) {
+      continue;
+    }
+    const existingStyle = clonedNode.getAttribute("style");
+    const mergedStyle = existingStyle ? `${existingStyle};${styleEntries.join(";")}` : styleEntries.join(";");
+    clonedNode.setAttribute("style", mergedStyle);
+  }
+}
+
+// 微信导出重点兜底：标题、标题装饰段、mark 标注、脚注引用都强制写入内联样式。
+function inlineWechatCriticalStyles(sourceRoot: HTMLElement, clonedRoot: HTMLElement): void {
+  Object.values(WECHAT_CRITICAL_SELECTORS_BY_TYPE).forEach((selectorGroup) => {
+    const mergedSelector = selectorGroup.join(", ");
+    if (!mergedSelector) {
+      return;
+    }
+    inlineCriticalStylesBySelector(sourceRoot, clonedRoot, mergedSelector);
+  });
+}
+
+// 替换标签名并保留属性与子节点内容，用于微信不稳定标签的导出阶段兼容。
+function replaceElementTag(
+  originalElement: HTMLElement,
+  targetTagName: "p" | "span"
+): HTMLElement {
+  const replacementElement = document.createElement(targetTagName);
+  Array.from(originalElement.attributes).forEach((attribute) => {
+    replacementElement.setAttribute(attribute.name, attribute.value);
+  });
+  while (originalElement.firstChild) {
+    replacementElement.appendChild(originalElement.firstChild);
+  }
+  originalElement.replaceWith(replacementElement);
+  return replacementElement;
+}
+
+// 公众号粘贴兼容：把 h1~h6 转 p，把 mark 转 span，降低微信编辑器二次清洗丢样式概率。
+function normalizeWechatHtmlCompatibility(html: string): string {
+  const wrapperElement = document.createElement("div");
+  wrapperElement.innerHTML = html;
+
+  const rootElement = wrapperElement.firstElementChild;
+  if (!(rootElement instanceof HTMLElement)) {
+    return html;
+  }
+
+  const headingElements = Array.from(rootElement.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"));
+  headingElements.forEach((headingElement) => {
+    const headingTagName = headingElement.tagName.toLowerCase();
+    const paragraphElement = replaceElementTag(headingElement, "p");
+    paragraphElement.classList.add("wechat-heading", `wechat-heading-${headingTagName}`);
+  });
+
+  const markElements = Array.from(rootElement.querySelectorAll<HTMLElement>("mark"));
+  markElements.forEach((markElement) => {
+    const spanElement = replaceElementTag(markElement, "span");
+    spanElement.classList.add("wechat-mark");
+    // 如果原样式缺少背景色，给一个保守兜底，确保“标注”语义可见。
+    if (!spanElement.style.backgroundColor) {
+      spanElement.style.backgroundColor = "#fff3a3";
+    }
+    if (!spanElement.style.padding) {
+      spanElement.style.padding = "0 2px";
+    }
+  });
+
+  // 微信端对 strong 的样式保留不稳定，导出时改为 span 并显式保留加粗与颜色。
+  const strongElements = Array.from(rootElement.querySelectorAll<HTMLElement>("strong"));
+  strongElements.forEach((strongElement) => {
+    const spanElement = replaceElementTag(strongElement, "span");
+    spanElement.classList.add("wechat-strong");
+    if (!spanElement.style.fontWeight) {
+      spanElement.style.fontWeight = "700";
+    }
+  });
+
+  // 正文脚注编号统一转为 span + super，对齐“右上角数字”且减少微信对 sup 的清洗影响。
+  const inlineFootnoteReferenceElements = Array.from(
+    rootElement.querySelectorAll<HTMLElement>("sup.wechat-link-footnote-ref, sup.footnote-ref")
+  );
+  inlineFootnoteReferenceElements.forEach((referenceElement) => {
+    const spanElement = replaceElementTag(referenceElement, "span");
+    spanElement.classList.add("wechat-inline-footnote-ref");
+    if (!spanElement.style.verticalAlign) {
+      spanElement.style.verticalAlign = "super";
+    }
+    if (!spanElement.style.fontSize) {
+      spanElement.style.fontSize = "0.78em";
+    }
+    if (!spanElement.style.lineHeight) {
+      spanElement.style.lineHeight = "1";
+    }
+    if (!spanElement.style.marginLeft) {
+      spanElement.style.marginLeft = "2px";
+    }
+  });
+
+  return rootElement.outerHTML;
 }
 
 // 扫描 CSS 文本中的 `--foo: value` 声明，建立自定义变量映射。
@@ -342,6 +706,7 @@ async function buildWechatClipboardPayload(
   options: CopyPreviewToWechatOptions = {}
 ): Promise<WechatClipboardPayload> {
   const previewBodyId = options.previewPaneId ?? PREVIEW_BODY_ID;
+  const linkRenderMode = options.linkRenderMode ?? "link";
 
   const previewBody = document.getElementById(previewBodyId);
   if (!previewBody) {
@@ -353,6 +718,17 @@ async function buildWechatClipboardPayload(
     throw new Error("导出失败：预览内容克隆异常");
   }
 
+  const footnoteStyleTokens = resolveWechatFootnoteStyleTokens(previewBody);
+  // 脚注模式优先复用预览区现成“角标 + 文末脚注”，避免导出阶段重复编号。
+  const hasPreviewFootnoteSection = Boolean(
+    clonedPreviewBody.querySelector(".reference-footnote-title, .reference-footnote-line")
+  );
+  if (linkRenderMode === "footnote" && hasPreviewFootnoteSection) {
+    // 保留预览区脚注结构，只做后续样式内联与兼容转换。
+  } else {
+    normalizeExternalLinksForWechatExport(clonedPreviewBody, footnoteStyleTokens);
+  }
+  inlineWechatCriticalStyles(previewBody, clonedPreviewBody);
   await convertKatexFormulasToSvg(previewBody, clonedPreviewBody);
   // Mermaid 的 SVG 样式依赖渲染时注入的 class 规则，需要从真实预览节点读取计算样式。
   inlineMermaidSvgStyles(previewBody, clonedPreviewBody);
@@ -365,7 +741,7 @@ async function buildWechatClipboardPayload(
     const themeStyleText = document.getElementById("plaindoc-preview-theme-style")?.innerText ?? "";
     const appStyleText = document.getElementById("plaindoc-app-style")?.innerText ?? "";
     const katexStyleText = document.getElementById("plaindoc-katex-style")?.innerText ?? "";
-    const rawStyleText = `${themeStyleText}\n${appStyleText}\n${katexStyleText}`;
+    const rawStyleText = `${katexStyleText}\n${appStyleText}\n${themeStyleText}\n`;
 
     const cssVariableMap = collectCssVariablesFromText(rawStyleText);
     collectCssVariablesFromComputedStyle(previewBody, cssVariableMap);
@@ -382,9 +758,11 @@ async function buildWechatClipboardPayload(
     inlinedHtml = html;
   }
 
+  const normalizedWechatHtml = normalizeWechatHtmlCompatibility(inlinedHtml);
+
   return {
-    html: inlinedHtml,
-    plainText: toPlainTextFromHtml(inlinedHtml)
+    html: normalizedWechatHtml,
+    plainText: toPlainTextFromHtml(normalizedWechatHtml)
   };
 }
 
