@@ -62,6 +62,7 @@ import {
   PREVIEW_MARKDOWN_REHYPE_OPTIONS
 } from "./editor/markdown-sanitize";
 import { remarkReferenceFootnotePlugin } from "./editor/remark-reference-footnotes";
+import { remarkStyledSpanContainerPlugin } from "./editor/remark-styled-span-container";
 import {
   buildPreviewThemeStyleText,
   getPreviewThemeClassName,
@@ -572,13 +573,13 @@ export default function App() {
     ],
     []
   );
-  // remark 插件顺序：先 GFM，再解析数学公式，再按链接模式处理脚注，最后注入锚点属性。
+  // remark 插件顺序：先 GFM/数学公式，再规整样式 span 容器，再按链接模式处理脚注，最后注入锚点属性。
   const remarkPlugins = useMemo(() => {
     const referenceFootnotePlugin: [typeof remarkReferenceFootnotePlugin, { mode: PreviewLinkRenderMode }] = [
       remarkReferenceFootnotePlugin,
       { mode: previewLinkRenderMode }
     ];
-    return [remarkGfm, remarkMath, referenceFootnotePlugin, remarkBlockAnchorPlugin];
+    return [remarkGfm, remarkMath, remarkStyledSpanContainerPlugin, referenceFootnotePlugin, remarkBlockAnchorPlugin];
   }, [previewLinkRenderMode]);
   // rehype 插件顺序：先解析内嵌 HTML，再做白名单清洗，最后渲染 KaTeX。
   const rehypePlugins = useMemo(() => {

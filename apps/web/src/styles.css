@@ -1685,7 +1685,7 @@ body {
 
 /* 绿衣清新主题覆盖：对齐第三方模板中的标题、段落和引用细节。 */
 #plaindoc-preview-body.plaindoc-preview-body--green-fresh p {
-  margin: 1em 4px;
+  margin: 1px 4px;
 }
 
 #plaindoc-preview-body.plaindoc-preview-body--green-fresh h1 {

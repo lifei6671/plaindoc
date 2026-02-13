@@ -5,6 +5,8 @@ const defaultAttributes = defaultSchema.attributes ?? {};
 const defaultGlobalAttributes = defaultAttributes["*"] ?? [];
 const defaultCodeAttributes = defaultAttributes.code ?? [];
 const defaultLinkAttributes = defaultAttributes.a ?? [];
+// 受控内联样式校验：阻断 url()/expression/javascript/@import 等高风险值。
+const SAFE_INLINE_STYLE_PATTERN = /^(?!.*(?:expression\s*\(|url\s*\(|javascript:|@import))[^<>]*$/i;
 
 // Markdown 内嵌 HTML 的清洗白名单：在开启 rehype-raw 后用于兜底 XSS 防护。
 export const PREVIEW_HTML_SANITIZE_SCHEMA: Schema = {
@@ -15,6 +17,7 @@ export const PREVIEW_HTML_SANITIZE_SCHEMA: Schema = {
     "*": [
       ...defaultGlobalAttributes,
       "className",
+      ["style", SAFE_INLINE_STYLE_PATTERN],
       // hast-util-sanitize 对 data 属性建议使用 `data*` 放行；否则会把自定义锚点清洗掉。
       "data*"
     ],

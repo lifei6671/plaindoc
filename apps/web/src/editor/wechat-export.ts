@@ -26,6 +26,29 @@ interface WechatFootnoteStyleTokens {
   wordColor: string | null;
 }
 
+const WECHAT_BLOCK_TAG_NAMES = new Set([
+  "p",
+  "div",
+  "blockquote",
+  "ul",
+  "ol",
+  "li",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "td",
+  "th",
+  "pre",
+  "hr",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6"
+]);
+
 const LEGACY_COPY_INPUT_ID = "plaindoc-wechat-copy-input";
 
 // 从 HTML 生成纯文本版本，剪贴板里同时放 text/plain 便于兜底粘贴。
@@ -253,11 +276,12 @@ const WECHAT_CRITICAL_STYLE_PROPS = [
 // 微信导出关键选择器清单：按“标签/类”分类维护，便于和预览区样式同步。
 // 约束：预览区新增关键样式时，必须同步补充到这里，避免复制到微信后丢失样式。
 const WECHAT_CRITICAL_SELECTORS_BY_TYPE = {
-  tag: ["h1", "h2", "h3", "h4", "h5", "h6", "mark", "strong"],
+  tag: ["h1", "h2", "h3", "h4", "h5", "h6", "mark", "strong", "blockquote"],
   class: [
     ".prefix",
     ".content",
     ".suffix",
+    ".plaindoc-styled-span-container",
     ".footnote-word",
     ".footnote-ref",
     ".reference-footnote-title",
@@ -309,7 +333,7 @@ function inlineWechatCriticalStyles(sourceRoot: HTMLElement, clonedRoot: HTMLEle
 // 替换标签名并保留属性与子节点内容，用于微信不稳定标签的导出阶段兼容。
 function replaceElementTag(
   originalElement: HTMLElement,
-  targetTagName: "p" | "span"
+  targetTagName: "p" | "span" | "div"
 ): HTMLElement {
   const replacementElement = document.createElement(targetTagName);
   Array.from(originalElement.attributes).forEach((attribute) => {
@@ -322,6 +346,100 @@ function replaceElementTag(
   return replacementElement;
 }
 
+// 容器样式下沉：微信可能把外层 div 清洗成 p，需要把关键视觉样式同步到内部段落兜底。
+function inlineContainerVisualStylesToParagraphs(containerElement: HTMLElement): void {
+  const paragraphElements = Array.from(containerElement.querySelectorAll<HTMLElement>("p"));
+  paragraphElements.forEach((paragraphElement) => {
+    if (paragraphElement.closest("li")) {
+      return;
+    }
+    if (!paragraphElement.style.display) {
+      paragraphElement.style.display = "block";
+    }
+    if (!paragraphElement.style.padding && containerElement.style.padding) {
+      paragraphElement.style.padding = containerElement.style.padding;
+    }
+    if (!paragraphElement.style.borderLeft && containerElement.style.borderLeft) {
+      paragraphElement.style.borderLeft = containerElement.style.borderLeft;
+    }
+    if (!paragraphElement.style.border && containerElement.style.border) {
+      paragraphElement.style.border = containerElement.style.border;
+    }
+    if (!paragraphElement.style.borderRadius && containerElement.style.borderRadius) {
+      paragraphElement.style.borderRadius = containerElement.style.borderRadius;
+    }
+    if (!paragraphElement.style.margin && containerElement.style.margin) {
+      paragraphElement.style.margin = containerElement.style.margin;
+    }
+    if (
+      !paragraphElement.style.backgroundColor &&
+      !paragraphElement.style.background &&
+      (containerElement.style.backgroundColor || containerElement.style.background)
+    ) {
+      if (containerElement.style.backgroundColor) {
+        paragraphElement.style.backgroundColor = containerElement.style.backgroundColor;
+      } else if (containerElement.style.background) {
+        paragraphElement.style.background = containerElement.style.background;
+      }
+    }
+    if (!paragraphElement.style.color && containerElement.style.color) {
+      paragraphElement.style.color = containerElement.style.color;
+    }
+    if (!paragraphElement.style.textIndent) {
+      paragraphElement.style.textIndent = "0";
+    }
+  });
+}
+
+// 自定义样式容器兼容：微信对 div/span 的复杂样式保留不稳定，文本块优先转 p 保真。
+function normalizeWechatStyledSpanContainers(rootElement: HTMLElement): void {
+  const styledContainerElements = Array.from(
+    rootElement.querySelectorAll<HTMLElement>(".plaindoc-styled-span-container")
+  );
+  styledContainerElements.forEach((containerElement) => {
+    if (containerElement.tagName.toLowerCase() !== "div") {
+      return;
+    }
+    const hasBlockChild = Array.from(containerElement.children).some((childElement) =>
+      WECHAT_BLOCK_TAG_NAMES.has(childElement.tagName.toLowerCase())
+    );
+    if (hasBlockChild) {
+      if (!containerElement.style.display) {
+        containerElement.style.display = "block";
+      }
+      inlineContainerVisualStylesToParagraphs(containerElement);
+      return;
+    }
+    const paragraphElement = replaceElementTag(containerElement, "p");
+    paragraphElement.classList.add("wechat-styled-span-container");
+    if (!paragraphElement.style.display) {
+      paragraphElement.style.display = "block";
+    }
+  });
+}
+
+// 引用块兼容：微信对 blockquote 标签样式保留不稳定，导出阶段转为 div 并保留关键视觉样式。
+function normalizeWechatBlockquotes(rootElement: HTMLElement): void {
+  const blockquoteElements = Array.from(rootElement.querySelectorAll<HTMLElement>("blockquote"));
+  blockquoteElements.forEach((blockquoteElement) => {
+    const divElement = replaceElementTag(blockquoteElement, "div");
+    divElement.classList.add("wechat-blockquote");
+    if (!divElement.style.display) {
+      divElement.style.display = "block";
+    }
+    if (!divElement.style.padding) {
+      divElement.style.padding = "10px 12px";
+    }
+    if (!divElement.style.borderLeft) {
+      divElement.style.borderLeft = "4px solid #cbd5e1";
+    }
+    if (!divElement.style.backgroundColor && !divElement.style.background) {
+      divElement.style.backgroundColor = "#f8fafc";
+    }
+    inlineContainerVisualStylesToParagraphs(divElement);
+  });
+}
+
 // 公众号粘贴兼容：把 h1~h6 转 p，把 mark 转 span，降低微信编辑器二次清洗丢样式概率。
 function normalizeWechatHtmlCompatibility(html: string): string {
   const wrapperElement = document.createElement("div");
@@ -331,6 +449,9 @@ function normalizeWechatHtmlCompatibility(html: string): string {
   if (!(rootElement instanceof HTMLElement)) {
     return html;
   }
+
+  normalizeWechatStyledSpanContainers(rootElement);
+  normalizeWechatBlockquotes(rootElement);
 
   const headingElements = Array.from(rootElement.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"));
   headingElements.forEach((headingElement) => {
@@ -853,7 +974,6 @@ const MERMAID_SVG_STYLE_PROPS = [
   "font-weight",
   "font-style",
   "font-variant",
-  "line-height",
   "white-space",
   "color",
   "opacity",
@@ -861,11 +981,6 @@ const MERMAID_SVG_STYLE_PROPS = [
   "text-align",
   "text-decoration",
   "text-rendering",
-  "dominant-baseline",
-  "alignment-baseline",
-  "baseline-shift",
-  "letter-spacing",
-  "word-spacing",
   "background-color",
   "vector-effect",
   "filter",
@@ -880,23 +995,67 @@ const MERMAID_SVG_STYLE_PROPS = [
   "pointer-events",
 ];
 
-// 从 Mermaid 生成的 <style> 文本提取属性名，降低固定白名单遗漏风险。
-function collectMermaidSvgStyleProps(svg: Element): string[] {
-  const propertyNames = new Set<string>();
-  const propertyPattern = /([a-zA-Z-]+)\s*:/g;
-  const styleNodes = svg.querySelectorAll("style");
-  styleNodes.forEach((styleNode) => {
-    const cssText = styleNode.textContent ?? "";
-    let matched: RegExpExecArray | null = propertyPattern.exec(cssText);
-    while (matched) {
-      const propertyName = matched[1].trim().toLowerCase();
-      if (propertyName && !propertyName.startsWith("--")) {
-        propertyNames.add(propertyName);
-      }
-      matched = propertyPattern.exec(cssText);
-    }
+// 微信环境对这些文本基线/排版属性兼容性不稳定，内联时统一过滤。
+const MERMAID_SVG_UNSAFE_STYLE_PROPS = new Set([
+  "dominant-baseline",
+  "alignment-baseline",
+  "baseline-shift",
+  "line-height",
+  "letter-spacing",
+  "word-spacing",
+  "vertical-align",
+  "text-indent"
+]);
+
+function stripMermaidUnsafeInlineStyle(node: Element): void {
+  if (!(node instanceof SVGElement || node instanceof HTMLElement)) {
+    return;
+  }
+  MERMAID_SVG_UNSAFE_STYLE_PROPS.forEach((propertyName) => {
+    node.style.removeProperty(propertyName);
   });
-  return Array.from(propertyNames);
+}
+
+// 微信兼容兜底：只通过样式覆盖，保留 Mermaid 原节点结构不变。
+function applyMermaidWechatStyleFallback(svgElement: SVGSVGElement): void {
+  svgElement.style.overflow = "visible";
+
+  const foreignObjectElements = Array.from(svgElement.querySelectorAll<HTMLElement>("foreignObject"));
+  foreignObjectElements.forEach((foreignObjectElement) => {
+    foreignObjectElement.style.overflow = "visible";
+    foreignObjectElement.style.removeProperty("height");
+
+    const inlineElements = Array.from(
+      foreignObjectElement.querySelectorAll<HTMLElement>("p, div, span")
+    );
+    inlineElements.forEach((inlineElement) => {
+      stripMermaidUnsafeInlineStyle(inlineElement);
+      inlineElement.style.margin = "0";
+      inlineElement.style.padding = "0";
+      if (!inlineElement.style.lineHeight) {
+        inlineElement.style.lineHeight = "1.2";
+      }
+
+      const hasTrailingBreak = Boolean(inlineElement.querySelector("br.ProseMirror-trailingBreak"));
+      if (hasTrailingBreak) {
+        inlineElement.style.display = "none";
+        inlineElement.style.height = "0";
+        inlineElement.style.lineHeight = "0";
+      }
+
+      const hasNodeLabelPlaceholder = Boolean(inlineElement.querySelector(".nodeLabel"));
+      const normalizedText = (inlineElement.textContent ?? "")
+        .replace(/\u00a0/g, " ")
+        .replace(/[\u200b\u200c\u200d\u2060\ufeff]/g, "")
+        .trim();
+      const hasLeafNode = Boolean(inlineElement.querySelector("[leaf]"));
+      if (hasNodeLabelPlaceholder && !normalizedText && !hasLeafNode) {
+        inlineElement.style.display = "none";
+        inlineElement.style.height = "0";
+        inlineElement.style.lineHeight = "0";
+      }
+    });
+  });
 }
 
 function inlineMermaidSvgStyles(
@@ -907,15 +1066,15 @@ function inlineMermaidSvgStyles(
     return;
   }
 
-  const sourceSvgs = sourceRoot.querySelectorAll(".mermaid-block svg");
-  const clonedSvgs = clonedRoot.querySelectorAll(".mermaid-block svg");
+  const sourceSvgs = sourceRoot.querySelectorAll<SVGSVGElement>(".mermaid-block svg");
+  const clonedSvgs = clonedRoot.querySelectorAll<SVGSVGElement>(".mermaid-block svg");
   const svgCount = Math.min(sourceSvgs.length, clonedSvgs.length);
 
   for (let svgIndex = 0; svgIndex < svgCount; svgIndex += 1) {
     const sourceSvg = sourceSvgs[svgIndex];
     const clonedSvg = clonedSvgs[svgIndex];
-    const stylePropNames = Array.from(
-      new Set([...MERMAID_SVG_STYLE_PROPS, ...collectMermaidSvgStyleProps(sourceSvg)])
+    const stylePropNames = MERMAID_SVG_STYLE_PROPS.filter(
+      (propertyName) => !MERMAID_SVG_UNSAFE_STYLE_PROPS.has(propertyName)
     );
     const sourceNodes: Element[] = [sourceSvg, ...sourceSvg.querySelectorAll("*")];
     const clonedNodes: Element[] = [clonedSvg, ...clonedSvg.querySelectorAll("*")];
@@ -938,7 +1097,10 @@ function inlineMermaidSvgStyles(
         const merged = existing ? `${existing};${parts.join(";")}` : parts.join(";");
         clonedNode.setAttribute("style", merged);
       }
+      stripMermaidUnsafeInlineStyle(clonedNode);
     }
+
+    applyMermaidWechatStyleFallback(clonedSvg);
 
     // 清理 Mermaid 内嵌 style，避免公众号端丢失 class 规则后出现样式偏差。
     clonedSvg.querySelectorAll("style").forEach((styleNode) => styleNode.remove());

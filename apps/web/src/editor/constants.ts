@@ -14,7 +14,9 @@ export const BLOCK_NODE_TYPES = new Set([
   "math",
   "table",
   "thematicBreak",
-  "html"
+  "html",
+  // 样式容器插件注入的块级节点：用于承载 `<span style>...</span>` 跨块语法。
+  "plaindocStyledSpanContainer"
 ]);
 
 // 预览区锚点节点选择器：仅采集 remark 注入的 block 级锚点，避免子节点噪声干扰。
