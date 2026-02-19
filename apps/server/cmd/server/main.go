@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
 func main() {
@@ -31,6 +34,31 @@ func main() {
 	}
 
 	logger := logit.NewLoggerWithWriter(cfg.LogLevel, logWriter)
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: cfg.Database.Driver,
+		DSN:    cfg.Database.DSN,
+	})
+	if err != nil {
+		logger.Error("open database failed", logit.Error("error", err))
+		log.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		if closeErr := database.Close(); closeErr != nil {
+			logger.Error("close database failed", logit.Error("error", closeErr))
+		}
+	}()
+	logger.Info("database connected", "db_driver", database.Driver)
+
+	if cfg.Database.AutoMigrate {
+		migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancelMigrate()
+		if err := storage.MigrateUp(migrateCtx, database.ORM, database.Driver); err != nil {
+			logger.Error("database migrate up failed", logit.Error("error", err))
+			log.Fatalf("database migrate up failed: %v", err)
+		}
+		logger.Info("database migrations applied")
+	}
+
 	router := server.NewRouter(cfg, logger)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

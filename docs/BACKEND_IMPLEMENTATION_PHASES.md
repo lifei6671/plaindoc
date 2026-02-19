@@ -2,7 +2,7 @@
 
 **Project Type**: 现有项目前后端联调（后端从健康检查扩展到业务 API）  
 **Scope**: `auth` + `spaces/tree` + `documents/revisions` + `ACL` + 冲突检测  
-**Stack**: Go + Gin + SQL（SQLite 起步，兼容 PostgreSQL/MySQL）  
+**Stack**: Go + Gin + GORM + SQL Migrations（SQLite 起步，兼容 PostgreSQL/MySQL）  
 **Current Baseline**: `apps/server` 当前仅有 `/api/healthz` 与 CORS  
 **Estimated Total**: 6~8 周（约 160~220 工时）
 
@@ -19,6 +19,7 @@
 ---
 
 ## Milestone 1: 工程基础与可观测性
+**Status**: Completed（2026-02-19）  
 **Type**: Infrastructure  
 **Estimated**: 8~12 小时  
 **Files**:
@@ -35,16 +36,17 @@
 - 保持现有 `/api/healthz` 不回归。
 
 **Verification Criteria**:
-- [ ] 服务可启动，配置缺失时有明确报错。
-- [ ] `GET /api/healthz` 返回 `200`。
-- [ ] 非法路由返回统一 JSON 错误响应。
-- [ ] 中间件对 `OPTIONS`、`GET`、`POST` 请求行为一致且可预期。
+- [x] 服务可启动，配置缺失时有明确报错。
+- [x] `GET /api/healthz` 返回 `200`。
+- [x] 非法路由返回统一 JSON 错误响应。
+- [x] 中间件对 `OPTIONS`、`GET`、`POST` 请求行为一致且可预期。
 
 **Exit Criteria**: 后续业务模块可直接复用统一配置与错误处理，不再重复造轮子。
 
 ---
 
 ## Milestone 2: 数据库接入与迁移基线
+**Status**: Completed（2026-02-19）  
 **Type**: Database  
 **Estimated**: 14~18 小时  
 **Files**:
@@ -61,10 +63,10 @@
 - 定义仓储层最小接口（不实现业务，仅打通 CRUD 骨架）。
 
 **Verification Criteria**:
-- [ ] 迁移可在空库执行并成功回滚。
-- [ ] 核心表约束生效（唯一索引、外键、非空）。
-- [ ] 简单 CRUD 冒烟通过（新增用户、空间、节点、文档）。
-- [ ] SQLite 本地运行稳定，不影响服务启动。
+- [x] 迁移可在空库执行并成功回滚。
+- [x] 核心表约束生效（唯一索引、外键、非空）。
+- [x] 简单 CRUD 冒烟通过（新增用户、空间、节点、文档）。
+- [x] SQLite 本地运行稳定，不影响服务启动。
 
 **Exit Criteria**: 所有业务 API 可以在迁移完成后的数据库上实现，不再改动基础表结构。
 

@@ -7,7 +7,7 @@
 ```text
 .
 ├── apps
-│   ├── server   # Go + Gin API
+│   ├── server   # Go + Gin + GORM API
 │   └── web      # React + Vite 编辑器前端
 └── docs
 ```
@@ -70,6 +70,7 @@ window.dispatchEvent(
 ```bash
 cd apps/server
 cp .env.example .env
+# 需要 Go 1.26+
 go mod tidy
 go run ./cmd/server
 ```
@@ -78,8 +79,28 @@ go run ./cmd/server
 
 健康检查接口：`GET /api/healthz`
 
+### 数据库与迁移（Milestone 2 基线）
+
+- 默认数据库：SQLite（`DB_DRIVER=sqlite`）。
+- 默认连接串：`DB_DSN=file:plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)`。
+- ORM：GORM（连接层走 `gorm.io/gorm` + 多驱动方言）。
+- 默认启动自动迁移：`DB_AUTO_MIGRATE=true`（启动时自动执行 `internal/storage/migrations/<driver>` 下的 up 迁移）。
+
+常用本地命令：
+
+```bash
+cd apps/server
+go test ./...
+go run ./cmd/server
+```
+
+若你要切换数据库：
+
+- PostgreSQL：`DB_DRIVER=postgres` + 对应 `DB_DSN`。
+- MySQL：`DB_DRIVER=mysql` + 对应 `DB_DSN`。
+
 ## 下一步
 
 - 接入登录注册接口（JWT）
-- 接入空间/目录/文档数据模型
+- 接入空间/目录/文档业务接口
 - 接入文档版本冲突检测与本地历史

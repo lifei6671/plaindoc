@@ -71,3 +71,12 @@ func TestLoad_FileOutputRequiresPath(t *testing.T) {
 		t.Fatal("expected error when LOG_FILE_PATH is empty for file output")
 	}
 }
+
+func TestLoad_InvalidAutoMigrateBool(t *testing.T) {
+	t.Setenv("DB_AUTO_MIGRATE", "maybe")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid DB_AUTO_MIGRATE value")
+	}
+}

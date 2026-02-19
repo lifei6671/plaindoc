@@ -27,8 +27,9 @@ type Config struct {
 
 // DatabaseConfig 预留多数据库接入所需参数。
 type DatabaseConfig struct {
-	Driver string
-	DSN    string
+	Driver      string
+	DSN         string
+	AutoMigrate bool
 }
 
 // JWTConfig 为后续认证阶段提供密钥与过期时间基线。
@@ -60,6 +61,12 @@ func Load() (Config, error) {
 	cfg.LogLevel = logLevel
 	cfg.LogOutput = strings.ToLower(getenv("LOG_OUTPUT", "stdout"))
 	cfg.LogFilePath = getenv("LOG_FILE_PATH", "")
+
+	autoMigrate, err := parseBool("DB_AUTO_MIGRATE", "true")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Database.AutoMigrate = autoMigrate
 
 	requestTimeout, err := parseDuration("REQUEST_TIMEOUT", "10s")
 	if err != nil {
@@ -168,6 +175,18 @@ func parseLogLevel(value string) (slog.Level, error) {
 		return slog.LevelError, nil
 	default:
 		return 0, fmt.Errorf("LOG_LEVEL must be one of debug/info/warn/error, got %q", value)
+	}
+}
+
+func parseBool(key string, fallback string) (bool, error) {
+	raw := strings.ToLower(strings.TrimSpace(getenv(key, fallback)))
+	switch raw {
+	case "1", "t", "true", "y", "yes", "on":
+		return true, nil
+	case "0", "f", "false", "n", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be a valid boolean value, got %q", key, raw)
 	}
 }
 

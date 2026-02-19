@@ -1,0 +1,134 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"gorm.io/gorm"
+)
+
+func TestMigrateUpAndDown_SQLite(t *testing.T) {
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-migrate-up-down?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := MigrateUp(ctx, database.ORM, DriverSQLite); err != nil {
+		t.Fatalf("MigrateUp failed: %v", err)
+	}
+	// 中文注释：重复执行 up 迁移应保持幂等，不应报错。
+	if err := MigrateUp(ctx, database.ORM, DriverSQLite); err != nil {
+		t.Fatalf("MigrateUp (idempotent) failed: %v", err)
+	}
+
+	requiredTables := []string{
+		"users",
+		"spaces",
+		"space_members",
+		"nodes",
+		"documents",
+		"document_revisions",
+		"node_permissions",
+		"document_permissions",
+	}
+	for _, table := range requiredTables {
+		exists, err := sqliteTableExists(ctx, database.SQL, table)
+		if err != nil {
+			t.Fatalf("check table %s failed: %v", table, err)
+		}
+		if !exists {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+
+	if err := smokeInsertGraph(ctx, database.ORM); err != nil {
+		t.Fatalf("smokeInsertGraph failed: %v", err)
+	}
+
+	if err := MigrateDown(ctx, database.ORM, DriverSQLite, 1); err != nil {
+		t.Fatalf("MigrateDown failed: %v", err)
+	}
+
+	for _, table := range requiredTables {
+		exists, err := sqliteTableExists(ctx, database.SQL, table)
+		if err != nil {
+			t.Fatalf("check table %s after down failed: %v", table, err)
+		}
+		if exists {
+			t.Fatalf("expected table %s to be dropped", table)
+		}
+	}
+}
+
+func sqliteTableExists(ctx context.Context, db *sql.DB, tableName string) (bool, error) {
+	const query = `SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`
+	var value int
+	err := db.QueryRowContext(ctx, query, tableName).Scan(&value)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
+	userULID := "01h0m1gr4t10n0000000000001"
+	spaceULID := "01h0m1gr4t10n0000000000002"
+	nodeULID := "01h0m1gr4t10n0000000000003"
+	documentULID := "01h0m1gr4t10n0000000000004"
+
+	user := &models.User{
+		ULID:         userULID,
+		Email:        "tester@example.com",
+		PasswordHash: "hashed",
+		Name:         "tester",
+	}
+	if err := orm.WithContext(ctx).Create(user).Error; err != nil {
+		return err
+	}
+
+	space := &models.Space{
+		ULID:      spaceULID,
+		Name:      "default",
+		OwnerULID: userULID,
+	}
+	if err := orm.WithContext(ctx).Create(space).Error; err != nil {
+		return err
+	}
+
+	node := &models.Node{
+		ULID:      nodeULID,
+		SpaceULID: spaceULID,
+		Type:      models.NodeTypeDoc,
+		Title:     "hello",
+		Sort:      1,
+	}
+	if err := orm.WithContext(ctx).Create(node).Error; err != nil {
+		return err
+	}
+
+	document := &models.Document{
+		ULID:          documentULID,
+		NodeULID:      nodeULID,
+		Title:         "hello",
+		ContentMD:     "# hello",
+		Version:       1,
+		UpdatedByULID: &userULID,
+	}
+	if err := orm.WithContext(ctx).Create(document).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
