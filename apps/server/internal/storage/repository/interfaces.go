@@ -32,6 +32,7 @@ type NodeRepository interface {
 type DocumentRepository interface {
 	Create(ctx context.Context, document *models.Document) error
 	GetByDocumentID(ctx context.Context, documentID string) (*models.Document, error)
+	UpdateTheme(ctx context.Context, documentID string, themeID string) (*models.Document, error)
 	UpdateWithVersion(ctx context.Context, document *models.Document, baseVersion int) (bool, error)
 }
 
@@ -39,4 +40,10 @@ type DocumentRepository interface {
 type RevisionRepository interface {
 	Create(ctx context.Context, revision *models.DocumentRevision) error
 	ListByDocumentID(ctx context.Context, documentID string) ([]models.DocumentRevision, error)
+}
+
+// ThemeRepository 主题仓储最小接口。
+type ThemeRepository interface {
+	List(ctx context.Context) ([]models.Theme, error)
+	GetByThemeID(ctx context.Context, themeID string) (*models.Theme, error)
 }

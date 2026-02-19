@@ -9,10 +9,11 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"gorm.io/gorm"
 )
 
 // NewRouter 按统一中间件链装配路由，作为服务入口。
-func NewRouter(cfg config.Config, logger *slog.Logger) *gin.Engine {
+func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine {
 	if cfg.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -29,6 +30,10 @@ func NewRouter(cfg config.Config, logger *slog.Logger) *gin.Engine {
 	api := router.Group("/api")
 	{
 		api.GET("/healthz", handler.Health)
+		themeHandler := handler.NewThemeHandler(db)
+		documentThemeHandler := handler.NewDocumentThemeHandler(db)
+		api.GET("/themes", themeHandler.List)
+		api.PUT("/docs/:docId/theme", documentThemeHandler.UpdateTheme)
 	}
 
 	router.NoRoute(func(c *gin.Context) {

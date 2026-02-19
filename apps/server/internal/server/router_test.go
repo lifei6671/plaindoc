@@ -38,7 +38,7 @@ func testConfig() config.Config {
 
 func TestRouter_Healthz(t *testing.T) {
 	logger := logit.NewLogger(slog.LevelError)
-	router := NewRouter(testConfig(), logger)
+	router := NewRouter(testConfig(), logger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -60,7 +60,7 @@ func TestRouter_Healthz(t *testing.T) {
 
 func TestRouter_NoRouteUsesUnifiedErrorShape(t *testing.T) {
 	logger := logit.NewLogger(slog.LevelError)
-	router := NewRouter(testConfig(), logger)
+	router := NewRouter(testConfig(), logger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/not-exists", nil)
 	rec := httptest.NewRecorder()
@@ -93,7 +93,7 @@ func TestRouter_NoRouteUsesUnifiedErrorShape(t *testing.T) {
 func TestRouter_RequestAttrsAreFlushedAtRequestEnd(t *testing.T) {
 	var buffer bytes.Buffer
 	logger := logit.NewLoggerWithWriter(slog.LevelInfo, &buffer)
-	router := NewRouter(testConfig(), logger)
+	router := NewRouter(testConfig(), logger, nil)
 	router.GET("/api/test-attrs", func(c *gin.Context) {
 		logit.SetRequestAttrs(c.Request.Context(),
 			logit.String("phase", "prepare"),

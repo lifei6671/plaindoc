@@ -48,7 +48,6 @@ import {
   PREVIEW_CUSTOM_STYLE_STORAGE_KEY,
   PREVIEW_PANE_CLASS,
   PREVIEW_PANE_ID,
-  PREVIEW_THEME_STORAGE_KEY,
   PREVIEW_VIEWPORT_MODE_STORAGE_KEY
 } from "./editor/constants";
 import { buildMarkdownComponents } from "./editor/markdown-components";
@@ -76,7 +75,11 @@ import {
 import type { PreviewLinkRenderMode, PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
 import { copyPreviewToWechat } from "./editor/wechat-export";
-import { PREVIEW_THEME_TEMPLATES, resolvePreviewTheme } from "./preview-themes";
+import {
+  DEFAULT_PREVIEW_THEME_TEMPLATE,
+  resolvePreviewTheme,
+  toPreviewThemeTemplate
+} from "./preview-themes";
 import {
   DEFAULT_IMAGE_HOSTING_CONFIG,
   cloneImageHostingConfig,
@@ -240,6 +243,7 @@ export default function App() {
     activeSpaceName,
     workspaceTree,
     activeDocumentTitle,
+    activeDocumentThemeId,
     activeDocId,
     content,
     baseVersion,
@@ -253,6 +257,7 @@ export default function App() {
     setContent,
     setBaseVersion,
     setActiveDocumentTitle,
+    setActiveDocumentThemeId,
     setLastSavedContent,
     setLastSavedAt
   } = useWorkspace({
@@ -263,6 +268,8 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   // 页头状态文案。
   const [statusMessage, setStatusMessage] = useState("初始化中...");
+  // 当前可用主题列表：统一从数据层读取（local/http 均走 DataGateway）。
+  const [previewThemes, setPreviewThemes] = useState([DEFAULT_PREVIEW_THEME_TEMPLATE]);
   // 当前生效的预览主题 ID。
   const [activePreviewThemeId, setActivePreviewThemeId] = useState(DEFAULT_PREVIEW_THEME_ID);
   // 外部注入的预览样式文本；为空时仅使用内置主题。
@@ -312,8 +319,8 @@ export default function App() {
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
-    () => resolvePreviewTheme(activePreviewThemeId),
-    [activePreviewThemeId]
+    () => resolvePreviewTheme(activePreviewThemeId, previewThemes),
+    [activePreviewThemeId, previewThemes]
   );
   // 预览区主题类名：挂到正文 article 上参与主题变量匹配。
   const activePreviewThemeClassName = useMemo(
@@ -371,19 +378,43 @@ export default function App() {
     };
   }, []);
 
-  // 首次加载时恢复上次选择的主题模板。
+  // 首次加载主题模板：统一从数据层读取，保证 local/http 一致。
   useEffect(() => {
-    try {
-      const storedThemeId = window.localStorage.getItem(PREVIEW_THEME_STORAGE_KEY);
-      if (!storedThemeId) {
-        return;
+    let cancelled = false;
+
+    const loadThemes = async () => {
+      try {
+        const themes = await dataGateway.theme.listThemes();
+        if (cancelled) {
+          return;
+        }
+        if (!themes.length) {
+          setPreviewThemes([DEFAULT_PREVIEW_THEME_TEMPLATE]);
+          return;
+        }
+        setPreviewThemes(themes.map(toPreviewThemeTemplate));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        console.error("[theme] 加载主题列表失败", error);
+        setPreviewThemes([DEFAULT_PREVIEW_THEME_TEMPLATE]);
       }
-      const restoredTheme = resolvePreviewTheme(storedThemeId);
-      setActivePreviewThemeId(restoredTheme.id);
-    } catch {
-      // localStorage 不可用时保持默认主题。
-    }
-  }, []);
+    };
+
+    void loadThemes();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataGateway]);
+
+  // 当前文档变化时，自动切换到文档绑定的主题。
+  useEffect(() => {
+    const targetTheme = resolvePreviewTheme(activeDocumentThemeId, previewThemes);
+    setActivePreviewThemeId((previousThemeID) =>
+      previousThemeID === targetTheme.id ? previousThemeID : targetTheme.id
+    );
+  }, [activeDocumentThemeId, previewThemes]);
 
   // 首次加载时恢复上次选择的预览视口模式（PC / 移动端）。
   useEffect(() => {
@@ -396,15 +427,6 @@ export default function App() {
       // localStorage 不可用时保持默认 PC 预览模式。
     }
   }, []);
-
-  // 主题变化时写入本地缓存，便于下次启动直接恢复。
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(PREVIEW_THEME_STORAGE_KEY, activePreviewThemeId);
-    } catch {
-      // localStorage 失败时忽略持久化，不影响当前显示。
-    }
-  }, [activePreviewThemeId]);
 
   // 预览模式变化时写入本地缓存，便于下次启动直接恢复。
   useEffect(() => {
@@ -613,11 +635,11 @@ export default function App() {
   const markdownComponents = useMemo(
     () =>
       buildMarkdownComponents({
-        activePreviewThemeId,
+        activePreviewTheme,
         tocItems,
         onTocNavigate: handleTocNavigate
       }),
-    [activePreviewThemeId, handleTocNavigate, tocItems]
+    [activePreviewTheme, handleTocNavigate, tocItems]
   );
   // 提取 Markdown 对应的纯文本内容。
   const plainTextContent = useMemo(
@@ -634,6 +656,11 @@ export default function App() {
   const activePreviewThemeStyleText = useMemo(
     () => buildPreviewThemeStyleText(activePreviewTheme),
     [activePreviewTheme]
+  );
+  // 主题自定义 CSS：由主题数据直接下发，作为统一主题数据源的一部分。
+  const activePreviewThemeCustomStyleText = useMemo(
+    () => normalizePreviewStyleText(activePreviewTheme.customCss ?? ""),
+    [activePreviewTheme.customCss]
   );
   // 图片上传中的顶部提示文案：展示 x/y 进度以降低等待焦虑。
   const imageUploadLoadingMessage = useMemo(() => {
@@ -897,6 +924,7 @@ export default function App() {
         });
         setBaseVersion(result.document.version);
         setActiveDocumentTitle(result.document.title || "未命名文档");
+        setActiveDocumentThemeId(result.document.themeId || DEFAULT_PREVIEW_THEME_ID);
         setLastSavedAt(result.document.updatedAt);
         setLastSavedContent(result.document.contentMd);
         setSaveStatus("saved");
@@ -920,13 +948,32 @@ export default function App() {
     };
   }, [activeDocId, baseVersion, content, dataGateway, lastSavedContent, saveStatus]);
 
-  // 应用选中的主题：仅在主题真正变化时更新父组件状态。
-  const handleThemeChange = useCallback((themeId: string) => {
-    const targetTheme = resolvePreviewTheme(themeId);
-    setActivePreviewThemeId((previousThemeId) =>
-      previousThemeId === targetTheme.id ? previousThemeId : targetTheme.id
-    );
-  }, []);
+  // 应用选中的主题：更新文档主题绑定并同步预览区渲染。
+  const handleThemeChange = useCallback(
+    (themeId: string) => {
+      if (!activeDocId) {
+        setStatusMessage("当前未打开文档，无法切换主题");
+        return;
+      }
+      const targetTheme = resolvePreviewTheme(themeId, previewThemes);
+      if (targetTheme.id === activeDocumentThemeId) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          const updatedDocument = await dataGateway.document.setDocumentTheme(activeDocId, targetTheme.id);
+          setActiveDocumentThemeId(updatedDocument.themeId);
+          setActivePreviewThemeId(updatedDocument.themeId);
+          setLastSavedAt(updatedDocument.updatedAt);
+          setStatusMessage(`主题已切换：${targetTheme.name}`);
+        } catch (error) {
+          setStatusMessage(`切换主题失败：${formatError(error)}`);
+        }
+      })();
+    },
+    [activeDocId, activeDocumentThemeId, dataGateway, previewThemes, setActiveDocumentThemeId, setLastSavedAt]
+  );
 
   // 切换预览视口：desktop <-> mobile。
   const togglePreviewViewportMode = useCallback(() => {
@@ -1057,6 +1104,10 @@ export default function App() {
       {activePreviewThemeStyleText ? (
         <style id="plaindoc-preview-theme-style">{activePreviewThemeStyleText}</style>
       ) : null}
+      {/* 主题表内的自定义 CSS：与主题元数据一并维护。 */}
+      {activePreviewThemeCustomStyleText ? (
+        <style id="plaindoc-preview-theme-custom-style">{activePreviewThemeCustomStyleText}</style>
+      ) : null}
       {/* 外部自定义预览样式：存在时插入到页面末端，确保覆盖内置主题。 */}
       {customPreviewStyleText ? (
         <style id="plaindoc-preview-custom-style">{customPreviewStyleText}</style>
@@ -1125,7 +1176,7 @@ export default function App() {
           </button>
           {/* 主题菜单：展开/收起只更新菜单组件自身。 */}
           <ThemeMenu
-            themes={PREVIEW_THEME_TEMPLATES}
+            themes={previewThemes}
             activeThemeId={activePreviewTheme.id}
             onSelectTheme={handleThemeChange}
             customPreviewStyleText={customPreviewStyleText}

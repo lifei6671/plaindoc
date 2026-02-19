@@ -7,6 +7,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func TestMigrateUpAndDown_SQLite(t *testing.T) {
@@ -35,6 +36,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		"spaces",
 		"space_members",
 		"nodes",
+		"themes",
 		"documents",
 		"document_revisions",
 		"node_permissions",
@@ -54,7 +56,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		t.Fatalf("smokeInsertGraph failed: %v", err)
 	}
 
-	if err := MigrateDown(ctx, database.ORM, DriverSQLite, 1); err != nil {
+	if err := MigrateDown(ctx, database.ORM, DriverSQLite, 10); err != nil {
 		t.Fatalf("MigrateDown failed: %v", err)
 	}
 
@@ -86,6 +88,7 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 	userID := "01h0m1gr4t10n0000000000001"
 	spaceID := "01h0m1gr4t10n0000000000002"
 	nodeID := "01h0m1gr4t10n0000000000003"
+	themeID := "default"
 	documentID := "01h0m1gr4t10n0000000000004"
 
 	user := &models.User{
@@ -118,9 +121,27 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 		return err
 	}
 
+	theme := &models.Theme{
+		ThemeID:                themeID,
+		Name:                   "内置默认",
+		Description:            "通用文档风格",
+		VariablesJSON:          "{}",
+		SyntaxTheme:            "one-light",
+		CodeBlockStyleJSON:     "{}",
+		CodeBlockCodeStyleJSON: "{}",
+		InlineCodeStyleJSON:    "{}",
+		IsBuiltin:              true,
+	}
+	if err := orm.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(theme).Error; err != nil {
+		return err
+	}
+
 	document := &models.Document{
 		DocumentID:      documentID,
 		NodeID:          nodeID,
+		ThemeID:         themeID,
 		Title:           "hello",
 		ContentMD:       "# hello",
 		Version:         1,

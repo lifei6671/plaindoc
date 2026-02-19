@@ -19,11 +19,11 @@ import {
 import type { TocItem } from "./types";
 import {
   PREVIEW_SYNTAX_THEMES,
-  resolvePreviewTheme
+  type PreviewThemeTemplate
 } from "../preview-themes";
 
 interface BuildMarkdownComponentsOptions {
-  activePreviewThemeId: string;
+  activePreviewTheme: PreviewThemeTemplate;
   tocItems: TocItem[];
   onTocNavigate: (item: TocItem) => void;
 }
@@ -129,14 +129,12 @@ function renderDecoratedHeading(
 
 // 构建 Markdown 渲染组件：拆分出 App，降低主文件复杂度。
 export function buildMarkdownComponents({
-  activePreviewThemeId,
+  activePreviewTheme,
   tocItems,
   onTocNavigate
 }: BuildMarkdownComponentsOptions): Components {
-  // 读取当前主题下的代码渲染配置。
-  const activeTheme = resolvePreviewTheme(activePreviewThemeId);
   const syntaxTheme =
-    PREVIEW_SYNTAX_THEMES[activeTheme.syntaxTheme] ?? PREVIEW_SYNTAX_THEMES["one-light"];
+    PREVIEW_SYNTAX_THEMES[activePreviewTheme.syntaxTheme] ?? PREVIEW_SYNTAX_THEMES["one-light"];
 
   return {
     // 标题统一渲染为 prefix/content/suffix 结构，便于主题扩展。
@@ -223,7 +221,7 @@ export function buildMarkdownComponents({
           {...anchorDataAttributes}
           style={{
             ...(preStyle ?? {}),
-            ...activeTheme.codeBlockStyle
+            ...activePreviewTheme.codeBlockStyle
           }}
         >
           {preChildren}
@@ -239,7 +237,7 @@ export function buildMarkdownComponents({
           wrapLongLines
           codeTagProps={{
             className: codeClassName,
-            style: activeTheme.codeBlockCodeStyle
+            style: activePreviewTheme.codeBlockCodeStyle
           }}
         >
           {codeText}
@@ -263,7 +261,7 @@ export function buildMarkdownComponents({
         <code
           className={className}
           style={{
-            ...activeTheme.inlineCodeStyle,
+            ...activePreviewTheme.inlineCodeStyle,
             ...(style ?? {})
           }}
           {...props}

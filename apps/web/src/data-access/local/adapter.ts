@@ -11,6 +11,8 @@ import {
   type SaveDocumentInput,
   type SaveDocumentResult,
   type Space,
+  type Theme,
+  type ThemeGateway,
   type TreeNode,
   type UpdateNodeInput,
   type WorkspaceGateway
@@ -18,9 +20,11 @@ import {
 import { createIndexedDbUserConfigGateway } from "../user-config/indexeddb-gateway";
 import {
   LOCAL_SESSION_USER_META_KEY,
+  DEFAULT_THEME_ID,
   buildTree,
   createLocalId,
   mapLocalDocument,
+  mapLocalTheme,
   mapLocalRevision,
   mapLocalSpace,
   mapLocalUser,
@@ -177,6 +181,7 @@ const workspaceGateway: WorkspaceGateway = {
         await database.documentsTable.add({
           ulid: nodeUlid,
           nodeUlid,
+          themeId: DEFAULT_THEME_ID,
           title: input.title,
           contentMd: "",
           version: 1,
@@ -355,6 +360,48 @@ const documentGateway: DocumentGateway = {
         .sort((left, right) => right.version - left.version || right.createdAt.localeCompare(left.createdAt))
         .map(mapLocalRevision);
     });
+  },
+
+  async setDocumentTheme(docId: string, themeId: string): Promise<Document> {
+    return useDatabaseTransaction("rw", async (database) => {
+      const theme = await database.themesTable.where("themeId").equals(themeId).first();
+      if (!theme) {
+        throw new Error("主题不存在");
+      }
+
+      const document = await database.documentsTable.where("ulid").equals(docId).first();
+      if (!document || typeof document.id !== "number") {
+        throw new Error("文档不存在");
+      }
+
+      const now = nowIso();
+      await database.documentsTable.update(document.id, {
+        themeId,
+        updatedAt: now
+      });
+
+      const latest = await database.documentsTable.where("ulid").equals(docId).first();
+      if (!latest) {
+        throw new Error("文档不存在");
+      }
+      return mapLocalDocument(latest);
+    });
+  }
+};
+
+const themeGateway: ThemeGateway = {
+  async listThemes(): Promise<Theme[]> {
+    return useDatabase(async (database) => {
+      const themes = await database.themesTable.toArray();
+      return themes
+        .sort((left, right) => {
+          if (left.builtIn !== right.builtIn) {
+            return left.builtIn ? -1 : 1;
+          }
+          return right.updatedAt.localeCompare(left.updatedAt);
+        })
+        .map(mapLocalTheme);
+    });
   }
 };
 
@@ -366,6 +413,7 @@ export function createLocalAdapter(): DataGateway {
     auth: authGateway,
     workspace: workspaceGateway,
     document: documentGateway,
+    theme: themeGateway,
     userConfig: userConfigGateway
   };
 }

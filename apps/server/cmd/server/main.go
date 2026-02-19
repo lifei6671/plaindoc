@@ -59,7 +59,7 @@ func main() {
 		logger.Info("database migrations applied")
 	}
 
-	router := server.NewRouter(cfg, logger)
+	router := server.NewRouter(cfg, logger, database.ORM)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           router,

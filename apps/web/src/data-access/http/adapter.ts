@@ -11,6 +11,8 @@ import {
   type SaveDocumentInput,
   type SaveDocumentResult,
   type Space,
+  type Theme,
+  type ThemeGateway,
   type TreeNode,
   type UpdateNodeInput,
   type WorkspaceGateway
@@ -115,6 +117,18 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     },
     async listRevisions(docId: string) {
       return request<DocumentRevision[]>(options.baseUrl, `/docs/${docId}/revisions`);
+    },
+    async setDocumentTheme(docId: string, themeId: string) {
+      return request<Document>(options.baseUrl, `/docs/${docId}/theme`, {
+        method: "PUT",
+        body: JSON.stringify({ themeId })
+      });
+    }
+  };
+
+  const theme: ThemeGateway = {
+    async listThemes() {
+      return request<Theme[]>(options.baseUrl, "/themes");
     }
   };
 
@@ -125,6 +139,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     auth,
     workspace,
     document,
+    theme,
     userConfig
   };
 }

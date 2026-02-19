@@ -46,10 +46,51 @@ CREATE TABLE IF NOT EXISTS nodes (
 	FOREIGN KEY (parent_node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS themes (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	theme_id TEXT NOT NULL UNIQUE,
+	name TEXT NOT NULL,
+	description TEXT NOT NULL,
+	variables_json TEXT NOT NULL,
+	syntax_theme TEXT NOT NULL CHECK (syntax_theme IN ('one-light', 'one-dark')),
+	code_block_style_json TEXT NOT NULL,
+	code_block_code_style_json TEXT NOT NULL,
+	inline_code_style_json TEXT NOT NULL,
+	custom_css TEXT NOT NULL DEFAULT '',
+	is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT OR IGNORE INTO themes (
+	theme_id,
+	name,
+	description,
+	variables_json,
+	syntax_theme,
+	code_block_style_json,
+	code_block_code_style_json,
+	inline_code_style_json,
+	custom_css,
+	is_builtin
+) VALUES (
+	'default',
+	'内置默认',
+	'通用文档风格',
+	'{"--pd-preview-padding":"30px","--pd-preview-font-family":"Optima-Regular, Optima, PingFangSC-light, PingFangTC-light, PingFang SC, Cambria, Cochin, Georgia, Times, Times New Roman, serif","--pd-preview-text-color":"rgb(89, 89, 89)","--pd-preview-link-color":"rgb(71, 193, 168)","--pd-preview-inline-code-color":"rgb(71, 193, 168)","--pd-preview-font-size":"16px","--pd-preview-line-height":"26px"}',
+	'one-light',
+	'{"margin":"16px 0","padding":"14px 16px","borderRadius":"10px","border":"1px solid #dbe2ea","boxShadow":"0 1px 2px rgba(15, 23, 42, 0.06)","overflowX":"auto","fontSize":"13px","lineHeight":"1.65","background":"#f8fafc"}',
+	'{"fontFamily":"Google Sans Code, Operator Mono, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"}',
+	'{"padding":"1px 6px","borderRadius":"5px","border":"1px solid #dbe2ea","background":"#f1f5f9","color":"#0f172a","fontSize":"0.92em","fontFamily":"Google Sans Code, Operator Mono, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"}',
+	'',
+	1
+);
+
 CREATE TABLE IF NOT EXISTS documents (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	document_id TEXT NOT NULL UNIQUE,
 	node_id TEXT NOT NULL UNIQUE,
+	theme_id TEXT NOT NULL DEFAULT 'default',
 	title TEXT NOT NULL,
 	content_md TEXT NOT NULL DEFAULT '',
 	version INTEGER NOT NULL DEFAULT 1,
@@ -57,6 +98,7 @@ CREATE TABLE IF NOT EXISTS documents (
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (node_id) REFERENCES nodes(node_id) ON DELETE CASCADE,
+	FOREIGN KEY (theme_id) REFERENCES themes(theme_id) ON DELETE RESTRICT,
 	FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
@@ -114,7 +156,10 @@ CREATE INDEX IF NOT EXISTS idx_nodes_parent_node_id ON nodes(parent_node_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_space_parent_sort ON nodes(space_id, parent_node_id, sort);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
 
+CREATE INDEX IF NOT EXISTS idx_themes_updated_at ON themes(updated_at);
+
 CREATE INDEX IF NOT EXISTS idx_documents_node_id ON documents(node_id);
+CREATE INDEX IF NOT EXISTS idx_documents_theme_id ON documents(theme_id);
 CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updated_at);
 
 CREATE INDEX IF NOT EXISTS idx_revisions_document_id ON document_revisions(document_id);

@@ -13,6 +13,7 @@ import type {
 const DEFAULT_SPACE_NAME = "默认空间";
 const DEFAULT_ACTIVE_SPACE_NAME = "未命名空间";
 const DEFAULT_DOCUMENT_TITLE = "未命名文档";
+const DEFAULT_DOCUMENT_THEME_ID = "default";
 
 // 规范化文档标题：空字符串或全空白时回退默认值。
 function resolveDocumentTitle(title: string, fallbackTitle: string): string {
@@ -86,6 +87,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
   // 当前打开文档的身份与内容快照。
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [activeDocumentTitle, setActiveDocumentTitle] = useState(initialDocumentTitle);
+  const [activeDocumentThemeId, setActiveDocumentThemeId] = useState(DEFAULT_DOCUMENT_THEME_ID);
   const [content, setContent] = useState(initialContent);
   const [baseVersion, setBaseVersion] = useState(0);
   const [lastSavedContent, setLastSavedContent] = useState(initialContent);
@@ -101,6 +103,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
         const document = await dataGateway.document.getDocument(docId);
         setActiveDocId(document.id);
         setActiveDocumentTitle(resolveDocumentTitle(document.title, defaultDocumentTitle));
+        setActiveDocumentThemeId(document.themeId || DEFAULT_DOCUMENT_THEME_ID);
         setContent(document.contentMd);
         setBaseVersion(document.version);
         setLastSavedContent(document.contentMd);
@@ -322,6 +325,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
         // 极端兜底：若仍找不到文档，清空当前激活态避免残留脏 ID。
         setActiveDocId(null);
         setActiveDocumentTitle(defaultDocumentTitle);
+        setActiveDocumentThemeId(DEFAULT_DOCUMENT_THEME_ID);
         setContent(initialContent);
         setBaseVersion(0);
         setLastSavedContent(initialContent);
@@ -406,6 +410,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
         setWorkspaceTree([]);
         setActiveDocId(null);
         setActiveDocumentTitle(initialDocumentTitle);
+        setActiveDocumentThemeId(DEFAULT_DOCUMENT_THEME_ID);
         setContent(initialContent);
         setBaseVersion(0);
         setLastSavedContent(initialContent);
@@ -422,6 +427,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
     workspaceTree,
     activeDocId,
     activeDocumentTitle,
+    activeDocumentThemeId,
     content,
     baseVersion,
     lastSavedContent,
@@ -441,6 +447,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
     deleteSpace,
     setActiveSpaceName,
     setActiveDocumentTitle,
+    setActiveDocumentThemeId,
     setContent,
     setBaseVersion,
     setLastSavedContent,

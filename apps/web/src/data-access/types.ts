@@ -32,6 +32,7 @@ export interface TreeNode {
 export interface Document {
   id: string;
   nodeId: string;
+  themeId: string;
   title: string;
   contentMd: string;
   version: number;
@@ -136,6 +137,24 @@ export interface DocumentGateway {
   getDocument(docId: string): Promise<Document>;
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
   listRevisions(docId: string): Promise<DocumentRevision[]>;
+  setDocumentTheme(docId: string, themeId: string): Promise<Document>;
+}
+
+export interface Theme {
+  id: string;
+  name: string;
+  description: string;
+  variables: Record<string, string>;
+  syntaxTheme: "one-light" | "one-dark";
+  codeBlockStyle: Record<string, string | number>;
+  codeBlockCodeStyle: Record<string, string | number>;
+  inlineCodeStyle: Record<string, string | number>;
+  customCss?: string;
+  builtin?: boolean;
+}
+
+export interface ThemeGateway {
+  listThemes(): Promise<Theme[]>;
 }
 
 export interface UserConfigGateway {
@@ -149,5 +168,6 @@ export interface DataGateway {
   auth: AuthGateway;
   workspace: WorkspaceGateway;
   document: DocumentGateway;
+  theme: ThemeGateway;
   userConfig: UserConfigGateway;
 }

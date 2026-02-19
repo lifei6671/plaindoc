@@ -1,9 +1,11 @@
 import Dexie, { type Table } from "dexie";
-import type { Document, DocumentRevision, NodeType, Space, TreeNode, User } from "../types";
+import type { Document, DocumentRevision, NodeType, Space, Theme, TreeNode, User } from "../types";
+import { BUILTIN_THEME_PRESETS } from "../../theme-presets";
 import { generateLowercaseUlid } from "./ulid";
 
 const LOCAL_DB_NAME = "plaindoc_local_workspace";
 export const LOCAL_SESSION_USER_META_KEY = "session_user_ulid";
+export const DEFAULT_THEME_ID = BUILTIN_THEME_PRESETS[0]?.id ?? "default";
 
 type LocalIdScope = "user" | "space" | "node" | "revision";
 
@@ -41,6 +43,7 @@ export interface LocalDocument {
   id?: number;
   ulid: string;
   nodeUlid: string;
+  themeId: string;
   title: string;
   contentMd: string;
   version: number;
@@ -59,10 +62,43 @@ export interface LocalDocumentRevision {
   source: "local" | "remote";
 }
 
+export interface LocalTheme {
+  id?: number;
+  themeId: string;
+  name: string;
+  description: string;
+  variables: Record<string, string>;
+  syntaxTheme: "one-light" | "one-dark";
+  codeBlockStyle: Record<string, string | number>;
+  codeBlockCodeStyle: Record<string, string | number>;
+  inlineCodeStyle: Record<string, string | number>;
+  customCss: string;
+  builtIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LocalMeta {
   key: string;
   value: string;
   updatedAt: string;
+}
+
+function toLocalThemeRecord(theme: Theme, now: string): LocalTheme {
+  return {
+    themeId: theme.id,
+    name: theme.name,
+    description: theme.description,
+    variables: { ...theme.variables },
+    syntaxTheme: theme.syntaxTheme,
+    codeBlockStyle: { ...theme.codeBlockStyle },
+    codeBlockCodeStyle: { ...theme.codeBlockCodeStyle },
+    inlineCodeStyle: { ...theme.inlineCodeStyle },
+    customCss: theme.customCss ?? "",
+    builtIn: Boolean(theme.builtin),
+    createdAt: now,
+    updatedAt: now
+  };
 }
 
 class LocalWorkspaceDatabase extends Dexie {
@@ -72,6 +108,7 @@ class LocalWorkspaceDatabase extends Dexie {
   readonly nodesTable: Table<LocalNode, number>;
   readonly documentsTable: Table<LocalDocument, number>;
   readonly revisionsTable: Table<LocalDocumentRevision, number>;
+  readonly themesTable: Table<LocalTheme, number>;
 
   constructor() {
     super(LOCAL_DB_NAME);
@@ -89,12 +126,43 @@ class LocalWorkspaceDatabase extends Dexie {
       revisions: "++id,&ulid,documentUlid,version,createdAt,[documentUlid+version],[documentUlid+createdAt]"
     });
 
+    // v2: 引入 themes 表，并为 documents 增加 themeId 引用字段。
+    this.version(2)
+      .stores({
+        users: "++id,&ulid,&email,updatedAt,createdAt",
+        meta: "&key,updatedAt",
+        spaces: "++id,&ulid,updatedAt,createdAt,name",
+        nodes:
+          "++id,&ulid,spaceUlid,parentUlid,type,sort,updatedAt,[spaceUlid+parentUlid],[spaceUlid+parentUlid+sort]",
+        documents: "++id,&ulid,&nodeUlid,themeId,updatedAt,version",
+        revisions: "++id,&ulid,documentUlid,version,createdAt,[documentUlid+version],[documentUlid+createdAt]",
+        themes: "++id,&themeId,updatedAt,createdAt,builtIn,name"
+      })
+      .upgrade(async (tx) => {
+        const now = nowIso();
+        const themesTable = tx.table<LocalTheme, number>("themes");
+        for (const preset of BUILTIN_THEME_PRESETS) {
+          const exists = await themesTable.where("themeId").equals(preset.id).count();
+          if (exists === 0) {
+            await themesTable.add(toLocalThemeRecord(preset, now));
+          }
+        }
+
+        const documentsTable = tx.table<LocalDocument, number>("documents");
+        await documentsTable.toCollection().modify((record) => {
+          if (!record.themeId) {
+            record.themeId = DEFAULT_THEME_ID;
+          }
+        });
+      });
+
     this.usersTable = this.table("users");
     this.metaTable = this.table("meta");
     this.spacesTable = this.table("spaces");
     this.nodesTable = this.table("nodes");
     this.documentsTable = this.table("documents");
     this.revisionsTable = this.table("revisions");
+    this.themesTable = this.table("themes");
   }
 }
 
@@ -136,7 +204,8 @@ function getAllTables(database: LocalWorkspaceDatabase): Array<Table<any, any>> 
     database.spacesTable,
     database.nodesTable,
     database.documentsTable,
-    database.revisionsTable
+    database.revisionsTable,
+    database.themesTable
   ];
 }
 
@@ -168,15 +237,26 @@ async function createUniqueUlid(
   });
 }
 
+async function ensureBuiltinThemes(database: LocalWorkspaceDatabase, now: string): Promise<void> {
+  for (const preset of BUILTIN_THEME_PRESETS) {
+    const exists = await database.themesTable.where("themeId").equals(preset.id).count();
+    if (exists === 0) {
+      await database.themesTable.add(toLocalThemeRecord(preset, now));
+    }
+  }
+}
+
 async function ensureSeeded(): Promise<void> {
   const database = getDatabase();
   await database.transaction("rw", getAllTables(database), async () => {
+    const now = nowIso();
+    await ensureBuiltinThemes(database, now);
+
     const spaceCount = await database.spacesTable.count();
     if (spaceCount > 0) {
       return;
     }
 
-    const now = nowIso();
     let owner = await database.usersTable.orderBy("createdAt").first();
     if (!owner) {
       owner = {
@@ -216,6 +296,7 @@ async function ensureSeeded(): Promise<void> {
     await database.documentsTable.add({
       ulid: nodeUlid,
       nodeUlid,
+      themeId: DEFAULT_THEME_ID,
       title: "欢迎文档",
       contentMd: WELCOME_CONTENT,
       version: 1,
@@ -294,10 +375,26 @@ export function mapLocalDocument(record: LocalDocument): Document {
   return {
     id: record.ulid,
     nodeId: record.nodeUlid,
+    themeId: record.themeId || DEFAULT_THEME_ID,
     title: record.title,
     contentMd: record.contentMd,
     version: record.version,
     updatedAt: record.updatedAt
+  };
+}
+
+export function mapLocalTheme(record: LocalTheme): Theme {
+  return {
+    id: record.themeId,
+    name: record.name,
+    description: record.description,
+    variables: record.variables,
+    syntaxTheme: record.syntaxTheme,
+    codeBlockStyle: record.codeBlockStyle,
+    codeBlockCodeStyle: record.codeBlockCodeStyle,
+    inlineCodeStyle: record.inlineCodeStyle,
+    customCss: record.customCss,
+    builtin: record.builtIn
   };
 }
 

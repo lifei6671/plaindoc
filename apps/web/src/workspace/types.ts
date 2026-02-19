@@ -19,6 +19,7 @@ export interface WorkspaceState {
   workspaceTree: TreeNode[];
   activeDocId: string | null;
   activeDocumentTitle: string;
+  activeDocumentThemeId: string;
   content: string;
   baseVersion: number;
   lastSavedContent: string;
@@ -78,6 +79,7 @@ export interface WorkspaceActions {
 export interface WorkspaceSetters {
   setActiveSpaceName: Dispatch<SetStateAction<string>>;
   setActiveDocumentTitle: Dispatch<SetStateAction<string>>;
+  setActiveDocumentThemeId: Dispatch<SetStateAction<string>>;
   setContent: Dispatch<SetStateAction<string>>;
   setBaseVersion: Dispatch<SetStateAction<number>>;
   setLastSavedContent: Dispatch<SetStateAction<string>>;

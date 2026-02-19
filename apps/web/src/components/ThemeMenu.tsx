@@ -46,16 +46,16 @@ export const ThemeMenu = memo(function ThemeMenu({
 
   // 当前抽屉展示的主题对象。
   const detailsTheme = useMemo(
-    () => (detailsThemeId ? resolvePreviewTheme(detailsThemeId) : null),
-    [detailsThemeId]
+    () => (detailsThemeId ? resolvePreviewTheme(detailsThemeId, themes) : null),
+    [detailsThemeId, themes]
   );
 
   // 打开指定主题的样式详情抽屉。
   const openThemeDetails = useCallback((themeId: string) => {
-    const targetTheme = resolvePreviewTheme(themeId);
+    const targetTheme = resolvePreviewTheme(themeId, themes);
     setDetailsThemeId(targetTheme.id);
     setIsThemeMenuOpen(false);
-  }, []);
+  }, [themes]);
 
   // 关闭样式详情抽屉。
   const closeStyleDetailsDrawer = useCallback(() => {

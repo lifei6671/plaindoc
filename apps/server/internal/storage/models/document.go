@@ -7,6 +7,7 @@ type Document struct {
 	ID              int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	DocumentID      string    `gorm:"column:document_id"`
 	NodeID          string    `gorm:"column:node_id"`
+	ThemeID         string    `gorm:"column:theme_id"`
 	Title           string    `gorm:"column:title"`
 	ContentMD       string    `gorm:"column:content_md"`
 	Version         int       `gorm:"column:version"`
