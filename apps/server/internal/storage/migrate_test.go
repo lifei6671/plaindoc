@@ -83,13 +83,13 @@ func sqliteTableExists(ctx context.Context, db *sql.DB, tableName string) (bool,
 }
 
 func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
-	userULID := "01h0m1gr4t10n0000000000001"
-	spaceULID := "01h0m1gr4t10n0000000000002"
-	nodeULID := "01h0m1gr4t10n0000000000003"
-	documentULID := "01h0m1gr4t10n0000000000004"
+	userID := "01h0m1gr4t10n0000000000001"
+	spaceID := "01h0m1gr4t10n0000000000002"
+	nodeID := "01h0m1gr4t10n0000000000003"
+	documentID := "01h0m1gr4t10n0000000000004"
 
 	user := &models.User{
-		ULID:         userULID,
+		UserID:       userID,
 		Email:        "tester@example.com",
 		PasswordHash: "hashed",
 		Name:         "tester",
@@ -99,32 +99,32 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 	}
 
 	space := &models.Space{
-		ULID:      spaceULID,
-		Name:      "default",
-		OwnerULID: userULID,
+		SpaceID:     spaceID,
+		Name:        "default",
+		OwnerUserID: userID,
 	}
 	if err := orm.WithContext(ctx).Create(space).Error; err != nil {
 		return err
 	}
 
 	node := &models.Node{
-		ULID:      nodeULID,
-		SpaceULID: spaceULID,
-		Type:      models.NodeTypeDoc,
-		Title:     "hello",
-		Sort:      1,
+		NodeID:  nodeID,
+		SpaceID: spaceID,
+		Type:    models.NodeTypeDoc,
+		Title:   "hello",
+		Sort:    1,
 	}
 	if err := orm.WithContext(ctx).Create(node).Error; err != nil {
 		return err
 	}
 
 	document := &models.Document{
-		ULID:          documentULID,
-		NodeULID:      nodeULID,
-		Title:         "hello",
-		ContentMD:     "# hello",
-		Version:       1,
-		UpdatedByULID: &userULID,
+		DocumentID:      documentID,
+		NodeID:          nodeID,
+		Title:           "hello",
+		ContentMD:       "# hello",
+		Version:         1,
+		UpdatedByUserID: &userID,
 	}
 	if err := orm.WithContext(ctx).Create(document).Error; err != nil {
 		return err
