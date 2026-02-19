@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lifei6671/plaindoc/apps/server/internal/observability"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 )
 
@@ -30,16 +30,16 @@ func AccessLog(logger *slog.Logger) gin.HandlerFunc {
 		}
 
 		baseAttrs := []slog.Attr{
-			slog.String("request_id", response.RequestIDFromContext(c)),
-			slog.String("method", c.Request.Method),
-			slog.String("route", route),
-			slog.Int("status", status),
-			slog.Duration("latency", time.Since(start)),
-			slog.String("client_ip", c.ClientIP()),
-			slog.String("user_agent", c.Request.UserAgent()),
+			logit.String("request_id", response.RequestIDFromContext(c)),
+			logit.String("method", c.Request.Method),
+			logit.String("route", route),
+			logit.Int("status", status),
+			logit.Duration("latency", time.Since(start)),
+			logit.String("client_ip", c.ClientIP()),
+			logit.String("user_agent", c.Request.UserAgent()),
 		}
 
-		requestAttrs := observability.SnapshotRequestAttrs(c.Request.Context())
+		requestAttrs := logit.SnapshotRequestAttrs(c.Request.Context())
 		attrs := mergeAttrs(baseAttrs, requestAttrs)
 
 		logger.LogAttrs(c.Request.Context(), level, "request completed", attrs...)

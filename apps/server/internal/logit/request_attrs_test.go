@@ -1,4 +1,4 @@
-package observability
+package logit
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 func TestRequestAttrs_OverrideByKey(t *testing.T) {
 	ctx := WithRequestAttrsContainer(context.Background())
 	SetRequestAttrs(ctx,
-		slog.String("stage", "start"),
-		slog.String("user_id", "u-1"),
+		String("stage", "start"),
+		String("user_id", "u-1"),
 	)
 	SetRequestAttrs(ctx,
-		slog.String("stage", "done"),
+		String("stage", "done"),
 	)
 
 	attrs := SnapshotRequestAttrs(ctx)
@@ -34,5 +34,5 @@ func TestRequestAttrs_OverrideByKey(t *testing.T) {
 
 func TestSetRequestAttrs_NoContainer_NoPanic(t *testing.T) {
 	// 中文注释：未初始化请求容器时写入属性应被安全忽略，避免业务代码额外判空。
-	SetRequestAttrs(context.Background(), slog.String("k", "v"))
+	SetRequestAttrs(context.Background(), String("k", "v"))
 }

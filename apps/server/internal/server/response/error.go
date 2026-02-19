@@ -1,11 +1,10 @@
 package response
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lifei6671/plaindoc/apps/server/internal/observability"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 )
 
 // RequestIDContextKey 用于在请求生命周期内传递 request_id。
@@ -36,10 +35,10 @@ func RequestIDFromContext(c *gin.Context) string {
 // Error 统一输出 JSON 错误响应，并自动附带 request_id。
 func Error(c *gin.Context, status int, code string, message string) {
 	// 中文注释：错误信息进入请求容器，便于请求结束时统一输出结构化日志。
-	observability.SetRequestAttrs(c.Request.Context(),
-		slog.Int("error_status", status),
-		slog.String("error_code", code),
-		slog.String("error_message", message),
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Int("error_status", status),
+		logit.String("error_code", code),
+		logit.String("error_message", message),
 	)
 
 	c.AbortWithStatusJSON(status, ErrorBody{

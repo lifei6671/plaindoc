@@ -3,11 +3,10 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lifei6671/plaindoc/apps/server/internal/observability"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 )
 
@@ -22,7 +21,7 @@ func RequestID() gin.HandlerFunc {
 		}
 
 		c.Set(response.RequestIDContextKey, requestID)
-		observability.SetRequestAttrs(c.Request.Context(), slog.String("request_id", requestID))
+		logit.SetRequestAttrs(c.Request.Context(), logit.String("request_id", requestID))
 		c.Header(requestIDHeader, requestID)
 		c.Next()
 	}

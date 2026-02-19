@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
-	"github.com/lifei6671/plaindoc/apps/server/internal/observability"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server"
 )
 
@@ -30,7 +30,7 @@ func main() {
 		}()
 	}
 
-	logger := observability.NewLoggerWithWriter(cfg.LogLevel, logWriter)
+	logger := logit.NewLoggerWithWriter(cfg.LogLevel, logWriter)
 	router := server.NewRouter(cfg, logger)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
