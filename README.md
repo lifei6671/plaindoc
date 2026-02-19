@@ -79,6 +79,11 @@ go run ./cmd/server
 
 健康检查接口：`GET /api/healthz`
 
+当前已实现的后端 API（除健康检查外）：
+
+- `GET /api/themes`
+- `PUT /api/docs/:docId/theme`
+
 ### 数据库与迁移（Milestone 2 基线）
 
 - 默认数据库：SQLite（`DB_DRIVER=sqlite`）。
@@ -98,6 +103,11 @@ go run ./cmd/server
 
 - PostgreSQL：`DB_DRIVER=postgres` + 对应 `DB_DSN`。
 - MySQL：`DB_DRIVER=mysql` + 对应 `DB_DSN`。
+
+更多后端进展与踩坑记录见：
+
+- `docs/BACKEND_IMPLEMENTATION_PHASES.md`
+- `docs/backend-ai-handoff.md`
 
 ## 下一步
 

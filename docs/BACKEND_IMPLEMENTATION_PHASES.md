@@ -8,6 +8,16 @@
 
 ---
 
+## 最新进展（2026-02-19）
+
+1. Milestone 1 与 Milestone 2 已完成。  
+2. 已落地主题能力（`themes` 表 + 文档 `theme_id` 引用 + `/api/themes` + `/api/docs/:docId/theme`）。  
+3. 已完成“原 TS 主题”全量迁移（7 个内置主题），并补齐历史库升级策略（upsert）。  
+
+详见：`docs/backend-ai-handoff.md`
+
+---
+
 ## 目标与约束
 
 1. 与前端 `apps/web/src/data-access/http/adapter.ts` 现有契约保持一致，优先保证可联调。  
@@ -245,3 +255,9 @@
 3. 拉通 Milestone 3 的最小认证闭环（register/login/me）。  
 
 这样在第一个冲刺结束时，你就能拿到“可登录 + 可鉴权 + 可扩展业务 API”的后端骨架。
+
+---
+
+## 关联文档
+
+- `docs/backend-ai-handoff.md`

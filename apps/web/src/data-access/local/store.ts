@@ -101,6 +101,22 @@ function toLocalThemeRecord(theme: Theme, now: string): LocalTheme {
   };
 }
 
+// 内置主题同步策略：存在则覆盖为最新预设，不存在则新增。
+async function syncBuiltinThemes(themesTable: Table<LocalTheme, number>, now: string): Promise<void> {
+  for (const preset of BUILTIN_THEME_PRESETS) {
+    const existing = await themesTable.where("themeId").equals(preset.id).first();
+    const nextRecord = toLocalThemeRecord(preset, now);
+    if (existing && typeof existing.id === "number") {
+      await themesTable.update(existing.id, {
+        ...nextRecord,
+        createdAt: existing.createdAt
+      });
+      continue;
+    }
+    await themesTable.add(nextRecord);
+  }
+}
+
 class LocalWorkspaceDatabase extends Dexie {
   readonly usersTable: Table<LocalUser, number>;
   readonly metaTable: Table<LocalMeta, string>;
@@ -141,12 +157,7 @@ class LocalWorkspaceDatabase extends Dexie {
       .upgrade(async (tx) => {
         const now = nowIso();
         const themesTable = tx.table<LocalTheme, number>("themes");
-        for (const preset of BUILTIN_THEME_PRESETS) {
-          const exists = await themesTable.where("themeId").equals(preset.id).count();
-          if (exists === 0) {
-            await themesTable.add(toLocalThemeRecord(preset, now));
-          }
-        }
+        await syncBuiltinThemes(themesTable, now);
 
         const documentsTable = tx.table<LocalDocument, number>("documents");
         await documentsTable.toCollection().modify((record) => {
@@ -238,12 +249,7 @@ async function createUniqueUlid(
 }
 
 async function ensureBuiltinThemes(database: LocalWorkspaceDatabase, now: string): Promise<void> {
-  for (const preset of BUILTIN_THEME_PRESETS) {
-    const exists = await database.themesTable.where("themeId").equals(preset.id).count();
-    if (exists === 0) {
-      await database.themesTable.add(toLocalThemeRecord(preset, now));
-    }
-  }
+  await syncBuiltinThemes(database.themesTable, now);
 }
 
 async function ensureSeeded(): Promise<void> {
