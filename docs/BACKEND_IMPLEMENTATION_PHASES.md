@@ -14,6 +14,8 @@
 2. 已落地主题能力（`themes` 表 + 文档 `theme_id` 引用 + `/api/themes` + `/api/docs/:docId/theme`）。  
 3. 已完成“原 TS 主题”全量迁移（7 个内置主题），并补齐历史库升级策略（upsert）。  
 4. 登录注册 UI 已接入并与后端认证接口联调完成（`/api/auth/*`）。  
+5. 管理后台规划文档已建立：`docs/ADMIN_CONSOLE_IMPLEMENTATION_PHASES.md`（含全站/空间双管理模型与任务清单）。  
+6. 管理后台 Milestone 1 已完成：`0005_admin_rbac` 迁移、`/api/admin/*` 基础鉴权、RBAC + Scope 权限求值。  
 
 详见：`docs/backend-ai-handoff.md`
 
