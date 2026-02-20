@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
@@ -30,8 +31,8 @@ func testConfig() config.Config {
 		},
 		JWT: config.JWTConfig{
 			Secret:          "test-secret",
-			AccessTokenTTL:  1,
-			RefreshTokenTTL: 1,
+			AccessTokenTTL:  time.Hour,
+			RefreshTokenTTL: 24 * time.Hour,
 		},
 	}
 }

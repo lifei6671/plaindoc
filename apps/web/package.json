@@ -25,6 +25,7 @@
     "react-complex-tree": "^2.6.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.13.0",
     "react-syntax-highlighter": "^16.1.0",
     "rehype-katex": "^7.0.1",
     "rehype-raw": "^7.0.0",

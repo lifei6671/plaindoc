@@ -2,8 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+)
+
+var (
+	// ErrInvalidSession 表示会话不存在、已吊销或刷新 token 与会话不匹配。
+	ErrInvalidSession = errors.New("invalid session")
 )
 
 // UserRepository 用户仓储最小接口，服务层可按需扩展。
@@ -11,6 +18,24 @@ type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
 	GetByUserID(ctx context.Context, userID string) (*models.User, error)
 	GetByEmail(ctx context.Context, email string) (*models.User, error)
+}
+
+// RotateUserSessionParams 定义 refresh token 旋转所需参数。
+type RotateUserSessionParams struct {
+	UserID                  string
+	CurrentSessionID        string
+	CurrentRefreshTokenHash string
+	NextSessionID           string
+	NextRefreshTokenHash    string
+	NextExpiresAt           time.Time
+	Now                     time.Time
+}
+
+// UserSessionRepository 会话仓储最小接口。
+type UserSessionRepository interface {
+	Create(ctx context.Context, session *models.UserSession) error
+	Rotate(ctx context.Context, params RotateUserSessionParams) error
+	Revoke(ctx context.Context, userID string, sessionID string, revokedAt time.Time) error
 }
 
 // SpaceRepository 空间仓储最小接口。

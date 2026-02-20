@@ -1,6 +1,6 @@
-# 后端与主题迁移进展记录（2026-02-19）
+# 后端与主题迁移进展记录（2026-02-20）
 
-> 更新时间：2026-02-19  
+> 更新时间：2026-02-20  
 > 目的：沉淀当天已落地能力与踩坑结论，降低后续迭代回归风险。
 
 ## 今日已实现功能
@@ -58,6 +58,35 @@
 - 新增三库主题种子迁移：`0002_seed_builtin_themes`（SQLite/PostgreSQL/MySQL）。
 - 主题种子已改为 upsert 策略，确保历史库中已有 `default` 也能被升级为完整数据。
 
+### 5) 登录与认证（Milestone 3）
+
+- 后端新增认证接口并挂载路由：
+  - `POST /api/auth/register`
+  - `POST /api/auth/login`
+  - `POST /api/auth/refresh`
+  - `GET /api/auth/me`
+  - `POST /api/auth/logout`
+- 密码策略：使用 `bcrypt` 哈希存储，禁止明文落库。
+- 新增三库会话迁移：`0003_auth_sessions`，用于 refresh token 校验与会话状态维护。
+- refresh token 能力升级为“旋转 + 旧 token 失效”：
+  - refresh 成功后写入新 session
+  - 原 session 置 `revoked_at`，并记录 `replaced_by_session_id`
+- logout 能力升级：
+  - 携带 access token 退出时，服务端会吊销当前 session（无 token 时幂等返回 `204`）。
+- 前端新增登录/注册 UI，并在 HTTP 适配器中实现：
+  - access/refresh token 本地存储
+  - `401` 自动 refresh + 重试一次
+  - `getSession()` 基于 `/auth/me` 恢复会话
+  - `logout()` 调用后强制清理本地 token
+
+### 6) 认证链路分层重构（可维护性修正）
+
+- 认证实现已改为标准分层：`handler -> service -> repository`。
+- `handler` 仅负责参数校验、HTTP 状态码与错误码映射。
+- `service` 承担认证业务编排（注册、登录、refresh 旋转、me、logout）。
+- `repository` 负责 GORM 数据访问细节（`users` / `user_sessions`）。
+- 路由层统一装配依赖：`NewAuthService(NewGormUserRepository, NewGormUserSessionRepository, JWTConfig)`。
+
 ## 今日踩坑记录（问题 / 根因 / 处理）
 
 ### 坑 1：ID 字段改名后，GORM 标签未同步导致映射错位
@@ -89,6 +118,30 @@
 - 问题：新增 `0002` 后，测试仍按 1 步回滚，残留表结构。
 - 根因：回滚测试与迁移版本数耦合。
 - 处理：测试改为足够步数的全量回滚（当前用 `10` 步兜底）。
+
+### 坑 6：refresh token 没有持久化时，无法真正做到“旋转后失效”
+
+- 问题：仅靠 JWT 自包含校验时，旧 refresh token 在过期前依然可继续换发。
+- 根因：服务端缺少会话状态存储，无法识别“已被替换/吊销”的 token。
+- 处理：新增 `user_sessions` 表，refresh 时进行 hash 对比与会话状态检查，并在旋转时吊销旧 session。
+
+### 坑 7：测试中 JWT TTL 若写成整数 `1`，会被解释为 1 纳秒
+
+- 问题：登录后立即请求 `me/refresh` 偶发 `401`。
+- 根因：`time.Duration` 默认单位是纳秒，TTL 过短导致 token 几乎立即过期。
+- 处理：测试配置改为显式时长（`time.Hour`、`24*time.Hour`）。
+
+### 坑 8：在 handler 直接写 SQL，导致职责混杂与后续扩展困难
+
+- 问题：业务逻辑、查询细节、HTTP 映射耦合在同一层，后续加鉴权策略或换存储实现成本高。
+- 根因：虽然定义了仓储接口，但认证链路初版未按接口分层实现。
+- 处理：将认证链路重构为 `handler -> service -> repository`，并补 GORM 仓储实现，保留统一错误语义。
+
+### 坑 9：SQLite 扫描 `time.Time` 字段在部分模型查询上存在兼容风险
+
+- 问题：直接 `SELECT *` 到包含 `time.Time` 字段的模型时，部分场景会触发扫描错误。
+- 根因：SQLite 驱动在时间类型返回值与模型字段解析上存在差异。
+- 处理：仓储查询改为显式 `Select` 业务所需列，避免不必要的时间字段扫描。
 
 ## 当前验证结论
 

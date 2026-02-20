@@ -33,6 +33,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 
 	requiredTables := []string{
 		"users",
+		"user_sessions",
 		"spaces",
 		"space_members",
 		"nodes",

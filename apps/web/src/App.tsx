@@ -9,6 +9,7 @@ import {
   GripVertical,
   Link2,
   LoaderCircle,
+  LogOut,
   Monitor,
   PanelLeftClose,
   PanelLeftOpen,
@@ -28,17 +29,19 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import ReactMarkdown from "react-markdown";
+import { useLocation, useNavigate } from "react-router-dom";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { SettingsLayer } from "./components/SettingsLayer";
+import { AuthPanel } from "./components/AuthPanel";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { TopToast, type TopToastVariant } from "./components/TopToast";
-import { ConflictError, getDataGateway, type CreateNodeResult } from "./data-access";
+import { ConflictError, getDataGateway, type AuthSession, type CreateNodeResult } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
   FALLBACK_CONTENT,
@@ -113,6 +116,67 @@ const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY = "workspace.sidebar.collapsed";
 const WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY = "workspace.activeSpaceId";
 const WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY = "workspace.activeDocId";
 const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode";
+const LOGIN_ROUTE_PATH = "/login";
+const EDITOR_ROUTE_BASE_PATH = "/editor";
+
+type AppRoute =
+  | { kind: "login" }
+  | { kind: "editor-root" }
+  | { kind: "editor-space"; spaceId: string }
+  | { kind: "editor-doc"; spaceId: string; docId: string }
+  | { kind: "unknown" };
+
+function normalizeRoutePath(pathname: string): string {
+  const normalized = pathname.replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function decodeRoutePart(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+function parseAppRoute(pathname: string): AppRoute {
+  const normalizedPathname = normalizeRoutePath(pathname);
+  if (normalizedPathname === LOGIN_ROUTE_PATH) {
+    return { kind: "login" };
+  }
+  if (normalizedPathname === EDITOR_ROUTE_BASE_PATH) {
+    return { kind: "editor-root" };
+  }
+  if (!normalizedPathname.startsWith(`${EDITOR_ROUTE_BASE_PATH}/`)) {
+    return { kind: "unknown" };
+  }
+
+  const routeParts = normalizedPathname.split("/").filter(Boolean);
+  if (routeParts.length === 2) {
+    const spaceId = decodeRoutePart(routeParts[1]);
+    return spaceId ? { kind: "editor-space", spaceId } : { kind: "unknown" };
+  }
+  if (routeParts.length === 3) {
+    const spaceId = decodeRoutePart(routeParts[1]);
+    const docId = decodeRoutePart(routeParts[2]);
+    if (!spaceId || !docId) {
+      return { kind: "unknown" };
+    }
+    return { kind: "editor-doc", spaceId, docId };
+  }
+  return { kind: "unknown" };
+}
+
+function buildEditorRoutePath(spaceId: string | null, docId: string | null): string {
+  if (!spaceId) {
+    return EDITOR_ROUTE_BASE_PATH;
+  }
+  const encodedSpaceID = encodeURIComponent(spaceId);
+  if (!docId) {
+    return `${EDITOR_ROUTE_BASE_PATH}/${encodedSpaceID}`;
+  }
+  return `${EDITOR_ROUTE_BASE_PATH}/${encodedSpaceID}/${encodeURIComponent(docId)}`;
+}
 
 // 统一钳制侧栏宽度，避免本地脏值导致布局异常。
 function clampWorkspaceSidebarWidth(width: number): number {
@@ -237,6 +301,20 @@ function insertImageMarkdown(view: EditorView, markdownLines: string[]): void {
 export default function App() {
   // 数据网关单例。
   const dataGateway = useMemo(() => getDataGateway(), []);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const route = useMemo(() => parseAppRoute(location.pathname), [location.pathname]);
+  const isEditorRoute =
+    route.kind === "editor-root" || route.kind === "editor-space" || route.kind === "editor-doc";
+  const routeSpaceId = route.kind === "editor-space" || route.kind === "editor-doc" ? route.spaceId : null;
+  const routeDocId = route.kind === "editor-doc" ? route.docId : null;
+  // 会话状态：登录态用户、校验中状态与提交中状态。
+  const [authSession, setAuthSession] = useState<AuthSession>({ user: null });
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+  const activeUser = authSession.user;
+  const userConfigUserID = activeUser?.id ?? TEMP_USER_ID;
   // 工作区状态层：统一管理空间/目录树/文档加载，减少 App 根组件职责。
   const {
     activeSpaceId,
@@ -336,6 +414,89 @@ export default function App() {
       customPreviewStyleText,
       previewViewportMode
     });
+
+  const routeDocExistsInTree = useMemo(() => {
+    if (!routeDocId) {
+      return false;
+    }
+    const stack = [...workspaceTree];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (node.id === routeDocId && node.type === "doc") {
+        return true;
+      }
+      if (node.children.length) {
+        stack.push(...node.children);
+      }
+    }
+    return false;
+  }, [routeDocId, workspaceTree]);
+
+  // 启动时先校验会话，避免未登录就触发工作区加载请求。
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkSession = async () => {
+      setIsAuthChecking(true);
+      setAuthErrorMessage(null);
+      try {
+        const session = await dataGateway.auth.getSession();
+        if (cancelled) {
+          return;
+        }
+        setAuthSession(session);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        console.error("[auth] 会话检查失败", error);
+        setAuthSession({ user: null });
+        setAuthErrorMessage(`会话检查失败：${formatError(error)}`);
+      } finally {
+        if (!cancelled) {
+          setIsAuthChecking(false);
+        }
+      }
+    };
+
+    void checkSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataGateway]);
+
+  // 登录态与路由守卫：未登录固定到 /login，已登录固定到 /editor 系列路由。
+  useEffect(() => {
+    if (isAuthChecking) {
+      return;
+    }
+
+    if (!activeUser) {
+      if (route.kind !== "login") {
+        navigate(LOGIN_ROUTE_PATH, { replace: true });
+      }
+      return;
+    }
+
+    if (!isEditorRoute) {
+      const nextPath = buildEditorRoutePath(activeSpaceId, activeDocId);
+      if (location.pathname !== nextPath) {
+        navigate(nextPath, { replace: true });
+      }
+    }
+  }, [
+    activeDocId,
+    activeSpaceId,
+    activeUser,
+    isAuthChecking,
+    isEditorRoute,
+    location.pathname,
+    navigate,
+    route.kind
+  ]);
 
   // 加载并监听外部自定义样式：支持 window 变量、localStorage 与自定义事件三种入口。
   useEffect(() => {
@@ -465,7 +626,7 @@ export default function App() {
       setImageHostingConfigError(null);
       try {
         const storedConfig = await dataGateway.userConfig.getValue<unknown>({
-          userId: TEMP_USER_ID,
+          userId: userConfigUserID,
           key: IMAGE_HOSTING_CONFIG_KEY
         });
         if (cancelled) {
@@ -494,7 +655,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [dataGateway]);
+  }, [dataGateway, userConfigUserID]);
 
   const extensions = useMemo(
     () => [
@@ -673,38 +834,6 @@ export default function App() {
     return `图片上传中（${Math.min(imageUploadCompletedCount, imageUploadTotalCount)}/${imageUploadTotalCount}）...`;
   }, [imageUploadCompletedCount, imageUploadTotalCount, isImageUploading]);
 
-  // 首次启动：加载空间、文档树与默认文档内容。
-  useEffect(() => {
-    let cancelled = false;
-
-    const bootstrap = async () => {
-      try {
-        const bootstrapResult = await bootstrapWorkspace({
-          preferredSpaceId: readStoredWorkspaceActiveSpaceId(),
-          preferredDocId: readStoredWorkspaceActiveDocId()
-        });
-        if (cancelled) {
-          return;
-        }
-
-        setSaveStatus("ready");
-        setStatusMessage(`已加载文档 v${bootstrapResult.documentVersion}`);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setSaveStatus("error");
-        setStatusMessage(`加载失败：${formatError(error)}`);
-      }
-    };
-
-    void bootstrap();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [bootstrapWorkspace]);
-
   // 持久化当前激活空间：刷新后尽量恢复到上次知识本上下文。
   useEffect(() => {
     try {
@@ -756,14 +885,101 @@ export default function App() {
         const result = await openDocument(docId);
         setSaveStatus("ready");
         setStatusMessage(`已切换文档 v${result.version}`);
+        if (activeSpaceId) {
+          const targetPath = buildEditorRoutePath(activeSpaceId, result.id);
+          if (location.pathname !== targetPath) {
+            navigate(targetPath);
+          }
+        }
       } catch (error) {
         setSaveStatus("error");
         setStatusMessage(`切换文档失败：${formatError(error)}`);
         throw error;
       }
     },
-    [activeDocId, confirmLeaveForDocumentSwitch, openDocument]
+    [activeDocId, activeSpaceId, confirmLeaveForDocumentSwitch, location.pathname, navigate, openDocument]
   );
+
+  // 路由与工作区同步：支持 /editor、/editor/:spaceId、/editor/:spaceId/:docId 深链接。
+  useEffect(() => {
+    if (isAuthChecking || !activeUser || !isEditorRoute) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncWorkspaceByRoute = async () => {
+      try {
+        // 未初始化或目标空间变更时，按路由参数重建工作区上下文。
+        if (!activeSpaceId || (routeSpaceId && routeSpaceId !== activeSpaceId)) {
+          setSaveStatus("loading");
+          setStatusMessage("加载文档中...");
+
+          const bootstrapResult = await bootstrapWorkspace({
+            preferredSpaceId: routeSpaceId ?? readStoredWorkspaceActiveSpaceId(),
+            preferredDocId: routeSpaceId ? routeDocId : readStoredWorkspaceActiveDocId()
+          });
+          if (cancelled) {
+            return;
+          }
+
+          setSaveStatus("ready");
+          setStatusMessage(`已加载文档 v${bootstrapResult.documentVersion}`);
+          const targetPath = buildEditorRoutePath(bootstrapResult.spaceId, bootstrapResult.docId);
+          if (location.pathname !== targetPath) {
+            navigate(targetPath, { replace: true });
+          }
+          return;
+        }
+
+        // 同空间下，URL 显式指定了新文档时，按 URL 切文档（支持浏览器前进/后退）。
+        if (routeDocId && routeDocId !== activeDocId) {
+          // 若 URL 指向已失效文档（例如被删除），回退到当前激活文档路径。
+          if (activeDocId && !routeDocExistsInTree) {
+            const fallbackPath = buildEditorRoutePath(activeSpaceId, activeDocId);
+            if (location.pathname !== fallbackPath) {
+              navigate(fallbackPath, { replace: true });
+            }
+            return;
+          }
+          await handleOpenWorkspaceDocument(routeDocId);
+          return;
+        }
+
+        // /editor 或 /editor/:spaceId 路由统一规范化到带 docId 的可分享链接。
+        if (activeSpaceId && activeDocId && (!routeSpaceId || !routeDocId)) {
+          const targetPath = buildEditorRoutePath(activeSpaceId, activeDocId);
+          if (location.pathname !== targetPath) {
+            navigate(targetPath, { replace: true });
+          }
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setSaveStatus("error");
+        setStatusMessage(`加载失败：${formatError(error)}`);
+      }
+    };
+
+    void syncWorkspaceByRoute();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeDocId,
+    activeSpaceId,
+    activeUser,
+    bootstrapWorkspace,
+    handleOpenWorkspaceDocument,
+    isAuthChecking,
+    isEditorRoute,
+    location.pathname,
+    navigate,
+    routeDocExistsInTree,
+    routeDocId,
+    routeSpaceId
+  ]);
 
   // 目录树菜单动作：创建节点后若为文档则自动打开，保持编辑流连续。
   const handleCreateWorkspaceNode = useCallback(
@@ -1044,7 +1260,7 @@ export default function App() {
       try {
         const normalizedConfig = normalizeImageHostingConfig(nextConfig);
         await dataGateway.userConfig.setValue({
-          userId: TEMP_USER_ID,
+          userId: userConfigUserID,
           key: IMAGE_HOSTING_CONFIG_KEY,
           value: normalizedConfig
         });
@@ -1064,7 +1280,7 @@ export default function App() {
         setIsImageHostingConfigSaving(false);
       }
     },
-    [dataGateway]
+    [dataGateway, userConfigUserID]
   );
 
   // 手动同步到最新版本，用于冲突后的回拉。
@@ -1081,6 +1297,82 @@ export default function App() {
       setStatusMessage(`同步失败：${formatError(error)}`);
     }
   };
+
+  // 登录动作：认证成功后切换到工作区，并触发工作区启动流程。
+  const handleAuthLogin = useCallback(
+    async (input: { email: string; password: string }) => {
+      setIsAuthSubmitting(true);
+      setAuthErrorMessage(null);
+      try {
+        const session = await dataGateway.auth.login(input);
+        if (!session.user) {
+          setAuthErrorMessage("登录失败：服务端未返回用户信息");
+          return;
+        }
+        setAuthSession(session);
+        setSaveStatus("loading");
+        setStatusMessage(`欢迎回来，${session.user.name}`);
+      } catch (error) {
+        setAuthErrorMessage(`登录失败：${formatError(error)}`);
+      } finally {
+        setIsAuthSubmitting(false);
+      }
+    },
+    [dataGateway]
+  );
+
+  // 注册动作：注册成功后直接进入登录态。
+  const handleAuthRegister = useCallback(
+    async (input: { name: string; email: string; password: string }) => {
+      setIsAuthSubmitting(true);
+      setAuthErrorMessage(null);
+      try {
+        const session = await dataGateway.auth.register(input);
+        if (!session.user) {
+          setAuthErrorMessage("注册失败：服务端未返回用户信息");
+          return;
+        }
+        setAuthSession(session);
+        setSaveStatus("loading");
+        setStatusMessage(`欢迎使用，${session.user.name}`);
+      } catch (error) {
+        setAuthErrorMessage(`注册失败：${formatError(error)}`);
+      } finally {
+        setIsAuthSubmitting(false);
+      }
+    },
+    [dataGateway]
+  );
+
+  // 退出登录：清除会话并返回登录页。
+  const handleAuthLogout = useCallback(async () => {
+    setIsAuthSubmitting(true);
+    setAuthErrorMessage(null);
+    try {
+      await dataGateway.auth.logout();
+      setAuthSession({ user: null });
+      setSaveStatus("loading");
+      setStatusMessage("已退出登录");
+      setLastSavedAt(null);
+    } catch (error) {
+      setAuthErrorMessage(`退出失败：${formatError(error)}`);
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }, [dataGateway, setLastSavedAt]);
+
+  // 登录前只展示认证面板，不渲染编辑器布局。
+  if (isAuthChecking || !activeUser) {
+    return (
+      <AuthPanel
+        checking={isAuthChecking}
+        submitting={isAuthSubmitting}
+        errorMessage={authErrorMessage}
+        onLogin={handleAuthLogin}
+        onRegister={handleAuthRegister}
+      />
+    );
+  }
 
   return (
     // 主页面容器。
@@ -1125,6 +1417,20 @@ export default function App() {
       <header className="header">
         <h1>PlainDoc</h1>
         <div className="header-actions">
+          <span className="auth-user-pill" title={activeUser.email}>
+            {activeUser.name}
+          </span>
+          <button
+            type="button"
+            className="auth-logout-button"
+            onClick={() => void handleAuthLogout()}
+            disabled={isAuthSubmitting}
+            title="退出当前账号"
+            aria-label="退出当前账号"
+          >
+            <LogOut size={14} />
+            <span>{isAuthSubmitting ? "退出中..." : "退出"}</span>
+          </button>
           {/* 目录菜单：展示标题结构并支持快速跳转。 */}
           {hasTocMarker ? <TocMenu items={tocItems} onSelectItem={handleTocNavigate} /> : null}
           {/* 复制到公众号：将当前预览导出为内联样式 HTML。 */}

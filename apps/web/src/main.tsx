@@ -2,6 +2,7 @@ import googleSansCodeLatinStyleText from "@fontsource/google-sans-code/latin.css
 import katexStyleText from "katex/dist/katex.min.css?inline";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import appStyleText from "./styles.css?inline";
 
@@ -31,10 +32,14 @@ ensureInlineStyleTag("plaindoc-google-sans-code-style", googleSansCodeLatinStyle
 
 // 开发模式关闭 StrictMode 双挂载，避免编辑器滚动容器在调试时反复重建。
 const appRoot = import.meta.env.DEV ? (
-  <App />
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>
 ) : (
   <StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </StrictMode>
 );
 

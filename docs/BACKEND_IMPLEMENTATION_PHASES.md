@@ -8,11 +8,12 @@
 
 ---
 
-## 最新进展（2026-02-19）
+## 最新进展（2026-02-20）
 
-1. Milestone 1 与 Milestone 2 已完成。  
+1. Milestone 1、Milestone 2、Milestone 3 已完成。  
 2. 已落地主题能力（`themes` 表 + 文档 `theme_id` 引用 + `/api/themes` + `/api/docs/:docId/theme`）。  
 3. 已完成“原 TS 主题”全量迁移（7 个内置主题），并补齐历史库升级策略（upsert）。  
+4. 登录注册 UI 已接入并与后端认证接口联调完成（`/api/auth/*`）。  
 
 详见：`docs/backend-ai-handoff.md`
 
@@ -83,26 +84,26 @@
 ---
 
 ## Milestone 3: 认证与会话
+**Status**: Completed（2026-02-20）  
 **Type**: API  
 **Estimated**: 16~24 小时  
 **Files**:
 - `apps/server/internal/server/handler/auth.go`（新增）
-- `apps/server/internal/service/auth_service.go`（新增）
-- `apps/server/internal/repository/user_repo.go`（新增）
-- `apps/server/internal/server/middleware/auth.go`（新增）
+- `apps/server/internal/storage/migrations/*/0003_auth_sessions*.sql`（新增）
+- `apps/server/internal/server/auth_handler_test.go`（新增）
 - `apps/server/internal/server/router.go`
 
 **Tasks**:
 - 实现 `POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/refresh`、`GET /api/auth/me`、`POST /api/auth/logout`。
 - 使用 bcrypt 存储密码哈希，禁止明文密码落库。
-- 实现 access/refresh token 流程（刷新时支持旋转与失效）。
+- 实现 access/refresh token 流程（刷新时支持旋转与失效，基于 `user_sessions`）。
 - 为后续业务接口接入鉴权中间件。
 
 **Verification Criteria**:
-- [ ] 注册成功返回用户信息，重复邮箱返回 `409`。
-- [ ] 登录失败返回 `401`，成功返回有效会话信息。
-- [ ] 刷新 token 可续期，失效 token 返回 `401`。
-- [ ] `GET /api/auth/me` 在未登录时返回 `401`，登录后返回 `200`。
+- [x] 注册成功返回用户信息，重复邮箱返回 `409`。
+- [x] 登录失败返回 `401`，成功返回有效会话信息。
+- [x] 刷新 token 可续期，旧 refresh token 在旋转后返回 `401`。
+- [x] `GET /api/auth/me` 在未登录时返回 `401`，登录后返回 `200`。
 
 **Exit Criteria**: 用户身份可稳定识别，后续空间/文档 API 全部可挂鉴权。
 

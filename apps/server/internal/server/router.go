@@ -9,6 +9,8 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
@@ -30,6 +32,18 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 	api := router.Group("/api")
 	{
 		api.GET("/healthz", handler.Health)
+		authService := service.NewAuthService(
+			repository.NewGormUserRepository(db),
+			repository.NewGormUserSessionRepository(db),
+			cfg.JWT,
+		)
+		authHandler := handler.NewAuthHandler(authService)
+		api.POST("/auth/register", authHandler.Register)
+		api.POST("/auth/login", authHandler.Login)
+		api.POST("/auth/refresh", authHandler.Refresh)
+		api.GET("/auth/me", authHandler.Me)
+		api.POST("/auth/logout", authHandler.Logout)
+
 		themeHandler := handler.NewThemeHandler(db)
 		documentThemeHandler := handler.NewDocumentThemeHandler(db)
 		api.GET("/themes", themeHandler.List)

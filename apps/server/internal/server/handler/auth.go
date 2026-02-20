@@ -1,0 +1,264 @@
+package handler
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+)
+
+type authHandler struct {
+	authService *service.AuthService
+}
+
+type registerRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+type authUserResponse struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+type authSessionResponse struct {
+	User         authUserResponse `json:"user"`
+	Token        string           `json:"token,omitempty"`
+	RefreshToken string           `json:"refreshToken,omitempty"`
+}
+
+// NewAuthHandler 创建认证处理器，负责注册、登录、会话校验和 token 刷新。
+func NewAuthHandler(authService *service.AuthService) *authHandler {
+	return &authHandler{
+		authService: authService,
+	}
+}
+
+// Register 创建账号并返回会话 token。
+func (h *authHandler) Register(c *gin.Context) {
+	if h == nil || h.authService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	var req registerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	email := normalizeEmail(req.Email)
+	name := strings.TrimSpace(req.Name)
+	password := req.Password
+	if email == "" || !strings.Contains(email, "@") {
+		response.Error(c, http.StatusBadRequest, "INVALID_EMAIL", "email is invalid")
+		return
+	}
+	if len(password) < 6 {
+		response.Error(c, http.StatusBadRequest, "INVALID_PASSWORD", "password must be at least 6 characters")
+		return
+	}
+	if name == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_NAME", "name is required")
+		return
+	}
+
+	session, err := h.authService.Register(c.Request.Context(), email, password, name)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrEmailAlreadyExists):
+			response.Error(c, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email already exists")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, authSessionResponse{
+		User: authUserResponse{
+			ID:    session.User.ID,
+			Email: session.User.Email,
+			Name:  session.User.Name,
+		},
+		Token:        session.Token,
+		RefreshToken: session.RefreshToken,
+	})
+}
+
+// Login 校验账号密码并返回会话 token。
+func (h *authHandler) Login(c *gin.Context) {
+	if h == nil || h.authService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	var req loginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	email := normalizeEmail(req.Email)
+	if email == "" || req.Password == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "email and password are required")
+		return
+	}
+
+	session, err := h.authService.Login(c.Request.Context(), email, req.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidCredentials):
+			response.Error(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, authSessionResponse{
+		User: authUserResponse{
+			ID:    session.User.ID,
+			Email: session.User.Email,
+			Name:  session.User.Name,
+		},
+		Token:        session.Token,
+		RefreshToken: session.RefreshToken,
+	})
+}
+
+// Refresh 使用 refresh token 换发新 token。
+func (h *authHandler) Refresh(c *gin.Context) {
+	if h == nil || h.authService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	refreshToken := strings.TrimSpace(c.GetHeader("X-Refresh-Token"))
+	if refreshToken == "" {
+		var req refreshRequest
+		if err := c.ShouldBindJSON(&req); err == nil {
+			refreshToken = strings.TrimSpace(req.RefreshToken)
+		}
+	}
+	if refreshToken == "" {
+		tokenFromHeader, ok := bearerTokenFromRequest(c)
+		if ok {
+			refreshToken = tokenFromHeader
+		}
+	}
+	if refreshToken == "" {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "refresh token is required")
+		return
+	}
+
+	session, err := h.authService.Refresh(c.Request.Context(), refreshToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidRefreshToken):
+			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid refresh token")
+		case errors.Is(err, service.ErrUnauthorized):
+			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, authSessionResponse{
+		User: authUserResponse{
+			ID:    session.User.ID,
+			Email: session.User.Email,
+			Name:  session.User.Name,
+		},
+		Token:        session.Token,
+		RefreshToken: session.RefreshToken,
+	})
+}
+
+// Me 返回当前登录用户信息。
+func (h *authHandler) Me(c *gin.Context) {
+	if h == nil || h.authService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	accessToken, ok := bearerTokenFromRequest(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "authorization token is required")
+		return
+	}
+
+	session, err := h.authService.Me(c.Request.Context(), accessToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUnauthorized):
+			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, authSessionResponse{
+		User: authUserResponse{
+			ID:    session.User.ID,
+			Email: session.User.Email,
+			Name:  session.User.Name,
+		},
+		Token: session.Token,
+	})
+}
+
+// Logout 退出当前会话：有 token 时尽力吊销会话，无 token 时直接返回 204。
+func (h *authHandler) Logout(c *gin.Context) {
+	if h == nil || h.authService == nil {
+		c.Status(http.StatusNoContent)
+		return
+	}
+
+	accessToken, ok := bearerTokenFromRequest(c)
+	if !ok {
+		c.Status(http.StatusNoContent)
+		return
+	}
+
+	_ = h.authService.Logout(c.Request.Context(), accessToken)
+	c.Status(http.StatusNoContent)
+}
+
+func normalizeEmail(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func bearerTokenFromRequest(c *gin.Context) (string, bool) {
+	rawAuthorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	if rawAuthorization == "" {
+		return "", false
+	}
+	parts := strings.SplitN(rawAuthorization, " ", 2)
+	if len(parts) != 2 {
+		return "", false
+	}
+	if !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", false
+	}
+	return token, true
+}
