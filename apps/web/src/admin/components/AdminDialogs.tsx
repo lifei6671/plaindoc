@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEventHandler, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { Select } from "../../components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 
 type AdminDialogTone = "default" | "warning" | "danger";
@@ -196,7 +196,7 @@ export function useAdminDialogs() {
     });
   }, []);
 
-  const handlePromptSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
+  const handlePromptSubmit = useCallback<FormEventHandler<HTMLFormElement>>((event) => {
     event.preventDefault();
     if (!promptState) {
       return;
@@ -295,9 +295,15 @@ export function useAdminDialogs() {
                     />
                   ) : field.type === "select" ? (
                     <Select
-                      value={value}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
+                      value={
+                        value === ""
+                          ? (field.options ?? []).some((option) => option.value === "")
+                            ? "__PD_EMPTY_VALUE__"
+                            : undefined
+                          : value
+                      }
+                      onValueChange={(nextRawValue) => {
+                        const nextValue = nextRawValue === "__PD_EMPTY_VALUE__" ? "" : nextRawValue;
                         setPromptValues((previousValues) => ({
                           ...previousValues,
                           [field.key]: nextValue
@@ -312,11 +318,19 @@ export function useAdminDialogs() {
                         });
                       }}
                     >
-                      {(field.options ?? []).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
+                      <SelectTrigger>
+                        <SelectValue placeholder={field.placeholder || `请选择${field.label}`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(field.options ?? []).map((option) => (
+                          <SelectItem
+                            key={option.value || "__PD_EMPTY_VALUE__"}
+                            value={option.value === "" ? "__PD_EMPTY_VALUE__" : option.value}
+                          >
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
                   ) : (
                     <Input

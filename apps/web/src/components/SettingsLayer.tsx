@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, type FormEvent } from "react";
+import { memo, useCallback, useEffect, useState, type FormEventHandler } from "react";
 import {
   cloneImageHostingConfig,
   type AliyunOssConfig,
@@ -126,8 +126,8 @@ export const SettingsLayer = memo(function SettingsLayer({
   }, []);
 
   // 提交保存：将当前草稿交给父组件持久化。
-  const handleSave = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
+  const handleSave = useCallback<FormEventHandler<HTMLFormElement>>(
+    async (event) => {
       event.preventDefault();
       await onSaveImageHostingConfig(draftImageHostingConfig);
     },

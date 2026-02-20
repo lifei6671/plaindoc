@@ -1,10 +1,10 @@
 import { LoaderCircle, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
-import { Select } from "../../components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { showToast } from "../../components/ui/toast";
 import {
   type AdminAuditAction,
   type AdminAuditListResult,
@@ -12,7 +12,7 @@ import {
   type AdminAuditModule,
   type DataGateway
 } from "../../data-access";
-import { TopToast, type TopToastVariant } from "../../components/TopToast";
+import { AdminPageCard, AdminPaginationFooter, AdminTableContainer, AdminToolbarActions } from "../components/AdminPageLayout";
 import { formatError } from "../../editor/status-utils";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -162,41 +162,9 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
 
   const [auditsState, setAuditsState] = useState<AdminAuditsState>(() => emptyAuditsState());
   const [loading, setLoading] = useState(false);
-  const [toastState, setToastState] = useState<{
-    open: boolean;
-    message: string;
-    variant: TopToastVariant;
-    triggerKey: number;
-  }>({
-    open: false,
-    message: "",
-    variant: "error",
-    triggerKey: 0
-  });
 
-  const openToast = useCallback((message: string, variant: TopToastVariant = "error") => {
-    const normalizedMessage = message.trim();
-    if (!normalizedMessage) {
-      return;
-    }
-    setToastState((previousState) => ({
-      open: true,
-      message: normalizedMessage,
-      variant,
-      triggerKey: previousState.triggerKey + 1
-    }));
-  }, []);
-
-  const closeToast = useCallback(() => {
-    setToastState((previousState) => {
-      if (!previousState.open) {
-        return previousState;
-      }
-      return {
-        ...previousState,
-        open: false
-      };
-    });
+  const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
+    showToast(message, variant);
   }, []);
 
   const loadAudits = useCallback(async () => {
@@ -242,8 +210,8 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
     return Math.max(1, Math.ceil(total / pageSize));
   }, [auditsState.pagination.pageSize, auditsState.pagination.total]);
 
-  const handleSearchSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+  const handleSearchSubmit = useCallback<FormEventHandler<HTMLFormElement>>(
+    (event) => {
       event.preventDefault();
 
       const parsedFrom = toRFC3339(fromInput);
@@ -296,16 +264,7 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
 
   return (
     <section aria-label="审计日志查询">
-      <TopToast
-        open={toastState.open}
-        message={toastState.message}
-        variant={toastState.variant}
-        triggerKey={toastState.triggerKey}
-        durationMs={2800}
-        onClose={closeToast}
-      />
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardContent className="space-y-4 p-5">
+      <AdminPageCard>
           <form className="grid gap-3 xl:grid-cols-4" onSubmit={handleSearchSubmit}>
             <label className="space-y-1.5 xl:col-span-2">
               <span className="text-xs font-semibold tracking-wide text-slate-600">关键字</span>
@@ -319,23 +278,41 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
 
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">模块</span>
-              <Select value={moduleFilter} onChange={(event) => setModuleFilter(event.target.value as typeof moduleFilter)} disabled={loading}>
-                <option value="">全部模块</option>
-                <option value="user">user</option>
-                <option value="space">space</option>
-                <option value="document">document</option>
-                <option value="theme">theme</option>
-                <option value="system_config">system_config</option>
+              <Select
+                value={moduleFilter || "default"}
+                onValueChange={(value) => setModuleFilter((value === "default" ? "" : value) as typeof moduleFilter)}
+                disabled={loading}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">全部模块</SelectItem>
+                  <SelectItem value="user">user</SelectItem>
+                  <SelectItem value="space">space</SelectItem>
+                  <SelectItem value="document">document</SelectItem>
+                  <SelectItem value="theme">theme</SelectItem>
+                  <SelectItem value="system_config">system_config</SelectItem>
+                </SelectContent>
               </Select>
             </label>
 
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">动作</span>
-              <Select value={actionFilter} onChange={(event) => setActionFilter(event.target.value as typeof actionFilter)} disabled={loading}>
-                <option value="">全部动作</option>
-                <option value="create">create</option>
-                <option value="update">update</option>
-                <option value="delete">delete</option>
+              <Select
+                value={actionFilter || "default"}
+                onValueChange={(value) => setActionFilter((value === "default" ? "" : value) as typeof actionFilter)}
+                disabled={loading}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">全部动作</SelectItem>
+                  <SelectItem value="create">create</SelectItem>
+                  <SelectItem value="update">update</SelectItem>
+                  <SelectItem value="delete">delete</SelectItem>
+                </SelectContent>
               </Select>
             </label>
 
@@ -374,23 +351,22 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
               />
             </label>
 
-            <div className="flex flex-wrap items-end gap-2 xl:col-span-3">
-              <Button type="submit" size="sm" disabled={loading}>
-                <Search size={14} />
-                <span>查询</span>
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={handleReset}>
-                重置
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadAudits()}>
-                <RefreshCw size={14} />
-                <span>刷新</span>
-              </Button>
-            </div>
+            <AdminToolbarActions className="xl:col-span-3">
+                <Button type="submit" disabled={loading}>
+                  <Search size={14} />
+                  <span>查询</span>
+                </Button>
+                <Button type="button" variant="outline" disabled={loading} onClick={handleReset}>
+                  重置
+                </Button>
+                <Button type="button" variant="outline" disabled={loading} onClick={() => void loadAudits()}>
+                  <RefreshCw size={14} />
+                  <span>刷新</span>
+                </Button>
+            </AdminToolbarActions>
           </form>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <div className="max-h-[56vh] overflow-auto">
+          <AdminTableContainer>
               <table className="w-full min-w-[1280px] border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                   <tr className="text-xs uppercase tracking-wide text-slate-600">
@@ -483,36 +459,20 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
+          </AdminTableContainer>
 
-          <footer className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-600">
+          <AdminPaginationFooter
+            summary={
+              <>
               共 {auditsState.pagination.total} 条，当前第 {auditsState.pagination.page} / {totalPages} 页
-            </p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={loading || page <= 1}
-                onClick={() => setPage((previousPage) => Math.max(1, previousPage - 1))}
-              >
-                上一页
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={loading || page >= totalPages}
-                onClick={() => setPage((previousPage) => Math.min(totalPages, previousPage + 1))}
-              >
-                下一页
-              </Button>
-            </div>
-          </footer>
-        </CardContent>
-      </Card>
+              </>
+            }
+            previousDisabled={loading || page <= 1}
+            nextDisabled={loading || page >= totalPages}
+            onPrevious={() => setPage((previousPage) => Math.max(1, previousPage - 1))}
+            onNext={() => setPage((previousPage) => Math.min(totalPages, previousPage + 1))}
+          />
+      </AdminPageCard>
     </section>
   );
 }

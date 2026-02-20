@@ -1,11 +1,11 @@
 import { LoaderCircle, RefreshCw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
-import { Select } from "../../components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
+import { showToast } from "../../components/ui/toast";
 import { type AdminSystemConfig, type DataGateway } from "../../data-access";
-import { TopToast, type TopToastVariant } from "../../components/TopToast";
+import { AdminPageCard, AdminTableContainer, AdminToolbarActions } from "../components/AdminPageLayout";
 import { formatError } from "../../editor/status-utils";
 
 type SystemConfigKey = "site" | "editor" | "security";
@@ -52,41 +52,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [toastState, setToastState] = useState<{
-    open: boolean;
-    message: string;
-    variant: TopToastVariant;
-    triggerKey: number;
-  }>({
-    open: false,
-    message: "",
-    variant: "error",
-    triggerKey: 0
-  });
 
-  const openToast = useCallback((message: string, variant: TopToastVariant = "error") => {
-    const normalizedMessage = message.trim();
-    if (!normalizedMessage) {
-      return;
-    }
-    setToastState((previousState) => ({
-      open: true,
-      message: normalizedMessage,
-      variant,
-      triggerKey: previousState.triggerKey + 1
-    }));
-  }, []);
-
-  const closeToast = useCallback(() => {
-    setToastState((previousState) => {
-      if (!previousState.open) {
-        return previousState;
-      }
-      return {
-        ...previousState,
-        open: false
-      };
-    });
+  const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
+    showToast(message, variant);
   }, []);
 
   const loadConfigs = useCallback(async () => {
@@ -168,51 +136,47 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
   return (
     <section aria-label="系统配置管理">
-      <TopToast
-        open={toastState.open}
-        message={toastState.message}
-        variant={toastState.variant}
-        triggerKey={toastState.triggerKey}
-        durationMs={2800}
-        onClose={closeToast}
-      />
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardContent className="space-y-4 p-5">
+      <AdminPageCard>
           <div className="flex flex-wrap items-end gap-3">
             <label className="w-full space-y-1.5 sm:w-[220px]">
               <span className="text-xs font-semibold tracking-wide text-slate-600">配置键</span>
               <Select
                 value={selectedKey}
-                onChange={(event) => {
-                  setSelectedKey(event.target.value as SystemConfigKey);
+                onValueChange={(value) => {
+                  setSelectedKey(value as SystemConfigKey);
                   setIsEditorDirty(false);
                 }}
                 disabled={loading || saving}
               >
-                <option value="site">site</option>
-                <option value="editor">editor</option>
-                <option value="security">security</option>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="site">site</SelectItem>
+                  <SelectItem value="editor">editor</SelectItem>
+                  <SelectItem value="security">security</SelectItem>
+                </SelectContent>
               </Select>
             </label>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={handleResetTemplate}>
-                模板填充
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={handleLoadCurrent}>
-                载入线上值
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={() => void loadConfigs()}>
-                <RefreshCw size={14} />
-                <span>刷新</span>
-              </Button>
-              <Button type="button" size="sm" disabled={loading || saving} onClick={() => void handleSave()}>
-                <Save size={14} />
-                <span>{saving ? "保存中..." : "保存配置"}</span>
-              </Button>
-            </div>
+            <AdminToolbarActions>
+                <Button type="button" variant="outline" disabled={loading || saving} onClick={handleResetTemplate}>
+                  模板填充
+                </Button>
+                <Button type="button" variant="outline" disabled={loading || saving} onClick={handleLoadCurrent}>
+                  载入线上值
+                </Button>
+                <Button type="button" variant="outline" disabled={loading || saving} onClick={() => void loadConfigs()}>
+                  <RefreshCw size={14} />
+                  <span>刷新</span>
+                </Button>
+                <Button type="button" disabled={loading || saving} onClick={() => void handleSave()}>
+                  <Save size={14} />
+                  <span>{saving ? "保存中..." : "保存配置"}</span>
+                </Button>
+            </AdminToolbarActions>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="rounded-sm bg-slate-50 p-3">
             <p className="mb-2 text-xs text-slate-600">
               当前键：<strong>{selectedKey}</strong>
               {selectedConfig ? `，当前版本：v${selectedConfig.version}` : "，当前版本：未创建"}
@@ -229,8 +193,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
             />
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <div className="max-h-[48vh] overflow-auto">
+          <AdminTableContainer>
               <table className="w-full min-w-[920px] border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                   <tr className="text-xs uppercase tracking-wide text-slate-600">
@@ -278,12 +241,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
+          </AdminTableContainer>
 
           <footer className="text-xs text-slate-600">共 {configs.length} 条配置</footer>
-        </CardContent>
-      </Card>
+      </AdminPageCard>
     </section>
   );
 }

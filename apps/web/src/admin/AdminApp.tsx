@@ -1,10 +1,14 @@
 import {
+  ChevronRight,
+  CircleDot,
   FileText,
   FolderKanban,
   History,
   LayoutDashboard,
   LoaderCircle,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   type LucideIcon,
   Palette,
   Settings2,
@@ -19,6 +23,7 @@ import { AdminAuthPanel } from "../components/AdminAuthPanel";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./routes";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AdminSpacesPage } from "./pages/AdminSpacesPage";
@@ -136,17 +141,6 @@ function resolveActiveMenu(menuItems: AdminMenuItem[], pathname: string): AdminM
   return prefixCandidates[0] ?? null;
 }
 
-function renderRoleLabel(role: AdminRole): string {
-  switch (role) {
-    case "platform_admin":
-      return "全站管理员";
-    case "space_admin":
-      return "空间管理员";
-    default:
-      return role;
-  }
-}
-
 function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string; description: string; todo: string[] } {
   switch (activeMenuKey) {
     case "dashboard":
@@ -200,6 +194,246 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
   }
 }
 
+interface DashboardMetric {
+  label: string;
+  value: string;
+  delta: string;
+  detail: string;
+  tone: "positive" | "negative" | "neutral";
+}
+
+interface DashboardTimelinePoint {
+  label: string;
+  primary: number;
+  secondary: number;
+}
+
+interface DashboardTodo {
+  item: string;
+  module: string;
+  owner: string;
+  status: "processing" | "done";
+}
+
+interface AdminMenuGroup {
+  label: string;
+  keys: AdminMenuKey[];
+}
+
+const DASHBOARD_METRICS: readonly DashboardMetric[] = [
+  {
+    label: "平台用户",
+    value: "1,264",
+    delta: "+12%",
+    detail: "较上周新增 136 人",
+    tone: "positive"
+  },
+  {
+    label: "空间数量",
+    value: "328",
+    delta: "+6%",
+    detail: "新增 21 个协作空间",
+    tone: "positive"
+  },
+  {
+    label: "文档总量",
+    value: "9,842",
+    delta: "+18%",
+    detail: "近 7 天新增 1,532 篇",
+    tone: "positive"
+  },
+  {
+    label: "高风险审计",
+    value: "17",
+    delta: "-9%",
+    detail: "已较昨日下降 2 条",
+    tone: "negative"
+  }
+];
+
+const DASHBOARD_TREND: readonly DashboardTimelinePoint[] = [
+  { label: "Mon", primary: 42, secondary: 35 },
+  { label: "Tue", primary: 54, secondary: 41 },
+  { label: "Wed", primary: 38, secondary: 33 },
+  { label: "Thu", primary: 67, secondary: 49 },
+  { label: "Fri", primary: 58, secondary: 45 },
+  { label: "Sat", primary: 48, secondary: 37 },
+  { label: "Sun", primary: 63, secondary: 47 }
+];
+
+const DASHBOARD_TODO: readonly DashboardTodo[] = [
+  { item: "完成用户封禁策略校验", module: "用户管理", owner: "平台管理员", status: "processing" },
+  { item: "处理违规空间申诉", module: "空间管理", owner: "空间管理员", status: "processing" },
+  { item: "同步主题变量到前端", module: "主题管理", owner: "设计系统", status: "done" },
+  { item: "更新 access token 过期策略", module: "系统配置", owner: "安全负责人", status: "done" }
+];
+
+const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
+  { label: "总览", keys: ["dashboard"] },
+  { label: "内容管理", keys: ["users", "spaces", "documents"] },
+  { label: "系统治理", keys: ["themes", "system", "audits"] }
+];
+const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
+
+function buildMenuGroups(menuItems: AdminMenuItem[]): Array<{ label: string; items: AdminMenuItem[] }> {
+  return ADMIN_MENU_GROUPS
+    .map((group) => ({
+      label: group.label,
+      items: group.keys
+        .map((key) => menuItems.find((item) => item.key === key))
+        .filter((item): item is AdminMenuItem => item !== undefined)
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+function renderMetricToneClass(tone: DashboardMetric["tone"]): string {
+  switch (tone) {
+    case "positive":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "negative":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-600";
+  }
+}
+
+function AdminDashboardPreview({
+  menuItems,
+  onNavigate
+}: {
+  menuItems: AdminMenuItem[];
+  onNavigate: (path: string) => void;
+}) {
+  const quickEntries = menuItems.filter((item) => item.key !== "dashboard").slice(0, 6);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+        {DASHBOARD_METRICS.map((metric) => (
+          <Card key={metric.label} className="border-slate-200 bg-white shadow-sm">
+            <CardHeader className="space-y-2 pb-2">
+              <CardDescription className="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
+                {metric.label}
+              </CardDescription>
+              <CardTitle className="text-3xl font-semibold tracking-tight">{metric.value}</CardTitle>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between gap-2 pt-0">
+              <p className="text-xs text-slate-500">{metric.detail}</p>
+              <Badge variant="outline" className={renderMetricToneClass(metric.tone)}>
+                {metric.delta}
+              </Badge>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl">最近 7 天内容趋势</CardTitle>
+            <CardDescription>主色柱为文档更新量，浅色柱为审计动作量</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex h-44 items-end gap-2">
+                {DASHBOARD_TREND.map((point) => (
+                  <div key={point.label} className="flex flex-1 flex-col items-center gap-1">
+                    <div className="relative w-full">
+                      <div
+                        className="absolute bottom-0 left-0 right-0 rounded-t bg-slate-300"
+                        style={{ height: `${point.secondary}%` }}
+                      />
+                      <div
+                        className="absolute bottom-0 left-0 right-0 rounded-t bg-slate-600/85"
+                        style={{ height: `${point.primary}%` }}
+                      />
+                      <div className="h-36" />
+                    </div>
+                    <span className="text-[11px] text-slate-500">{point.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl">快捷入口</CardTitle>
+            <CardDescription>快速进入常用管理模块</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 pt-0">
+            {quickEntries.map((entry) => {
+              const EntryIcon = entry.icon;
+              return (
+                <Button
+                  key={entry.key}
+                  type="button"
+                  variant="ghost"
+                  className="h-auto w-full items-center justify-between rounded-sm border border-slate-200 bg-slate-50 px-3 py-2.5 text-left font-normal transition-colors hover:bg-white"
+                  onClick={() => onNavigate(entry.path)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <EntryIcon size={15} className="text-slate-600" />
+                    <span className="truncate text-sm text-slate-800">{entry.label}</span>
+                  </span>
+                  <ChevronRight size={15} className="text-slate-400" />
+                </Button>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardHeader className="flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-xl">待处理事项</CardTitle>
+            <CardDescription>来自用户、空间、主题与配置模块的待办</CardDescription>
+          </div>
+          <div className="hidden sm:flex items-center gap-2">
+            <Badge variant="secondary">处理中</Badge>
+            <Badge variant="outline">已完成</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="overflow-hidden rounded-sm border border-slate-200">
+            <table className="w-full border-collapse text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th className="border-b border-slate-200 px-3 py-2 font-semibold">事项</th>
+                  <th className="border-b border-slate-200 px-3 py-2 font-semibold">模块</th>
+                  <th className="border-b border-slate-200 px-3 py-2 font-semibold">负责人</th>
+                  <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {DASHBOARD_TODO.map((todo) => (
+                  <tr key={todo.item} className="border-b border-slate-100 text-slate-700">
+                    <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{todo.item}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-600">{todo.module}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-600">{todo.owner}</td>
+                    <td className="px-3 py-2.5">
+                      <Badge
+                        variant="outline"
+                        className={todo.status === "done"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"}
+                      >
+                        {todo.status === "done" ? "已完成" : "处理中"}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export function AdminApp({
   authSession,
   checking,
@@ -216,6 +450,7 @@ export function AdminApp({
   const [adminIdentity, setAdminIdentity] = useState<AdminIdentity | null>(null);
   const [isAdminIdentityLoading, setIsAdminIdentityLoading] = useState(false);
   const [adminIdentityError, setAdminIdentityError] = useState<string | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (checking || !activeUser) {
@@ -286,10 +521,10 @@ export function AdminApp({
 
   if (checking || isAdminIdentityLoading) {
     return (
-      <div className="admin-loading-page bg-[radial-gradient(circle_at_top_left,#dbeafe_0%,transparent_42%),radial-gradient(circle_at_top_right,#cffafe_0%,transparent_38%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
-        <Card className="admin-loading-card border-slate-200 shadow-xl">
+      <div className="flex min-h-dvh items-center justify-center p-6" style={{ backgroundColor: ADMIN_PAGE_BACKGROUND }}>
+        <Card className="w-full max-w-md border-slate-200 shadow-sm">
           <CardContent className="flex min-h-[88px] items-center justify-center gap-2 p-6 text-slate-600">
-            <LoaderCircle className="admin-loading-card__icon" size={18} />
+            <LoaderCircle className="animate-spin" size={18} />
             <span className="text-sm font-medium">正在加载管理后台...</span>
           </CardContent>
         </Card>
@@ -310,10 +545,10 @@ export function AdminApp({
 
   if (adminIdentityError || !adminIdentity || adminMenuItems.length === 0) {
     return (
-      <div className="admin-forbidden-page">
-        <Card className="admin-forbidden-card border-rose-100 shadow-xl">
+      <div className="flex min-h-dvh items-center justify-center p-6" style={{ backgroundColor: ADMIN_PAGE_BACKGROUND }}>
+        <Card className="w-full max-w-lg border-rose-200 shadow-sm">
           <CardHeader className="pb-2">
-            <div className="admin-forbidden-card__icon">
+            <div className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-rose-50 text-rose-600">
               <ShieldAlert size={18} />
             </div>
             <CardTitle className="mt-3 text-2xl">无管理后台权限</CardTitle>
@@ -322,7 +557,7 @@ export function AdminApp({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="admin-forbidden-card__actions">
+            <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" onClick={() => navigate("/editor", { replace: true })}>
                 返回编辑器
               </Button>
@@ -337,91 +572,160 @@ export function AdminApp({
   }
 
   const activeContent = renderPlaceholderContent(activeMenuItem?.key ?? adminMenuItems[0].key);
+  const currentMenuPath = activeMenuItem?.path ?? adminMenuItems[0].path;
+  const groupedMenuItems = buildMenuGroups(adminMenuItems);
 
   return (
-    <div className="admin-shell bg-[radial-gradient(circle_at_top_left,#e0f2fe_0%,transparent_35%),radial-gradient(circle_at_95%_5%,#dcfce7_0%,transparent_28%),linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]">
-      <aside className="admin-shell__sidebar border-r border-slate-200/80 bg-white/80 backdrop-blur">
-        <Card className="border-slate-200 bg-white/80 shadow-sm">
-          <CardHeader className="pb-4">
-            <p className="admin-brand text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">PlainDoc</p>
-            <CardTitle className="text-2xl tracking-tight">管理后台</CardTitle>
-            <CardDescription className="text-xs text-slate-500">Admin Console • shadcn/ui</CardDescription>
-          </CardHeader>
-        </Card>
-        <nav className="admin-menu" aria-label="后台菜单">
-          {adminMenuItems.map((item) => {
-            const ItemIcon = item.icon;
-            const isActive = item.key === (activeMenuItem?.key ?? adminMenuItems[0].key);
-            return (
-              <Button
-                key={item.key}
-                type="button"
-                variant={isActive ? "secondary" : "ghost"}
-                className="admin-menu__item h-auto min-h-14 w-full justify-start border border-slate-200 px-3 py-2 text-left hover:border-slate-300 hover:bg-slate-50"
-                onClick={() => handleNavigateMenu(item.path)}
-              >
-                <span className="admin-menu__item-icon">
-                  <ItemIcon size={16} />
-                </span>
-                <span className="admin-menu__item-labels">
-                  <span>{item.label}</span>
-                  <small>{item.description}</small>
-                </span>
-              </Button>
-            );
-          })}
-        </nav>
-      </aside>
-      <section className="admin-shell__main">
-        <header className="admin-header border-b border-slate-200/80 bg-white/70 backdrop-blur">
-          <div className="admin-header__title">
-            <h2>{activeContent.title}</h2>
-            <p>{activeContent.description}</p>
+    <div className="h-dvh overflow-hidden text-slate-900" style={{ backgroundColor: ADMIN_PAGE_BACKGROUND }}>
+      <div className="flex h-full">
+        <aside
+          className={`hidden shrink-0 flex-col bg-transparent transition-[width,padding,opacity] duration-200 lg:flex ${
+            isSidebarCollapsed ? "w-0 overflow-hidden p-0 opacity-0 pointer-events-none" : "w-62 p-2"
+          }`}
+        >
+          <div className="flex items-center gap-2 px-2 py-1">
+            <CircleDot size={18} className="text-slate-700" />
+            <p className="text-sm font-semibold tracking-tight">PlainDoc 管理后台</p>
           </div>
-          <div className="admin-header__actions">
-            <div className="admin-role-badges">
-              {adminIdentity.roles.map((role) => (
-                <Badge key={role} variant="outline" className="admin-role-badge border-cyan-200 bg-cyan-50 text-cyan-700">
-                  {renderRoleLabel(role)}
-                </Badge>
-              ))}
+
+          <div className="mt-6 flex-1 space-y-5 overflow-auto px-1">
+            {groupedMenuItems.map((group) => (
+              <section key={group.label}>
+                <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                  {group.label}
+                </p>
+                <nav className="mt-2 space-y-0.5" aria-label={`${group.label}菜单`}>
+                  {group.items.map((item) => {
+                    const ItemIcon = item.icon;
+                    const isActive = item.key === (activeMenuItem?.key ?? adminMenuItems[0].key);
+                    return (
+                      <Button
+                        key={item.key}
+                        type="button"
+                        variant="ghost"
+                        className={
+                          isActive
+                            ? "admin-nav-item-button admin-nav-item-button--active h-auto w-full items-center justify-start gap-3 rounded-sm px-3 py-1.5 text-left text-sm font-medium text-slate-50"
+                            : "admin-nav-item-button h-auto w-full items-center justify-start gap-3 rounded-sm px-3 py-1.5 text-left text-sm text-slate-700"
+                        }
+                        onClick={() => handleNavigateMenu(item.path)}
+                      >
+                        <ItemIcon size={15} />
+                        <span className="truncate">{item.label}</span>
+                      </Button>
+                    );
+                  })}
+                </nav>
+              </section>
+            ))}
+          </div>
+
+          <div className="mt-4 border-t border-slate-200/80 px-2 pt-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="truncate text-sm font-semibold text-slate-900">{activeUser.name || "管理员"}</p>
+                <p className="truncate text-xs text-slate-500">{activeUser.email}</p>
+              </div>
+              <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-600">
+                Admin
+              </Badge>
             </div>
-            <Button type="button" variant="outline" className="admin-logout-button border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void onLogout()}>
-              <LogOut size={14} />
-              <span>退出</span>
-            </Button>
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="admin-sidebar-footer-button flex-1 justify-start text-slate-700 hover:bg-slate-50"
+                onClick={() => navigate("/editor", { replace: true })}
+              >
+                返回编辑器
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="admin-sidebar-footer-button admin-sidebar-footer-button--icon text-slate-700 hover:bg-slate-50"
+                onClick={() => void onLogout()}
+              >
+                <LogOut size={14} />
+                <span className="sr-only">退出</span>
+              </Button>
+            </div>
           </div>
-        </header>
-        <main className="admin-content">
-          {activeMenuItem?.key === "users" ? (
-            <AdminUsersPage currentUserID={adminIdentity.userId} dataGateway={dataGateway} />
-          ) : activeMenuItem?.key === "spaces" ? (
-            <AdminSpacesPage dataGateway={dataGateway} />
-          ) : activeMenuItem?.key === "documents" ? (
-            <AdminDocumentsPage dataGateway={dataGateway} />
-          ) : activeMenuItem?.key === "themes" ? (
-            <AdminThemesPage dataGateway={dataGateway} />
-          ) : activeMenuItem?.key === "system" ? (
-            <AdminSystemConfigsPage dataGateway={dataGateway} />
-          ) : activeMenuItem?.key === "audits" ? (
-            <AdminAuditsPage dataGateway={dataGateway} />
-          ) : (
-            <Card className="admin-placeholder-card border-slate-200 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle>{activeContent.title}</CardTitle>
-                <CardDescription>{activeContent.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul>
-                  {activeContent.todo.map((todo) => (
-                    <li key={todo}>{todo}</li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-        </main>
-      </section>
+        </aside>
+
+        <section className="min-w-0 flex-1 p-2 lg:p-2">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+            <header className="flex h-14 items-center px-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="admin-header-sidebar-toggle h-8 w-8 rounded-sm p-0 text-slate-500 hover:bg-transparent hover:text-slate-700"
+                  onClick={() => setIsSidebarCollapsed((previousState) => !previousState)}
+                  aria-label={isSidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+                >
+                  {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                </Button>
+                <div className="h-5 w-px bg-slate-200" />
+                <h2 className="truncate text-xl font-semibold tracking-tight">{activeContent.title}</h2>
+                <div className="lg:hidden">
+                  <Select
+                    value={currentMenuPath}
+                    onValueChange={handleNavigateMenu}
+                  >
+                    <SelectTrigger className="h-8 w-[148px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {adminMenuItems.map((item) => (
+                        <SelectItem key={item.key} value={item.path}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </header>
+
+            <div className="border-t border-slate-200/80" />
+
+            <main className="min-h-0 flex-1 overflow-auto overscroll-none px-4 pb-4 pt-2 lg:px-6 lg:pb-6 lg:pt-3">
+              <div className="mx-auto max-w-[1500px]">
+              {activeMenuItem?.key === "users" ? (
+                <AdminUsersPage currentUserID={adminIdentity.userId} dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "spaces" ? (
+                <AdminSpacesPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "documents" ? (
+                <AdminDocumentsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "themes" ? (
+                <AdminThemesPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "system" ? (
+                <AdminSystemConfigsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "audits" ? (
+                <AdminAuditsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "dashboard" ? (
+                <AdminDashboardPreview menuItems={adminMenuItems} onNavigate={handleNavigateMenu} />
+              ) : (
+                <Card className="border-slate-200 bg-white shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle>{activeContent.title}</CardTitle>
+                    <CardDescription>{activeContent.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm text-slate-600">
+                    {activeContent.todo.map((todo) => (
+                      <p key={todo}>- {todo}</p>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+              </div>
+            </main>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

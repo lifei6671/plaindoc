@@ -41,7 +41,7 @@ import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { useConfirmDialog } from "./components/ConfirmDialog";
-import { TopToast, type TopToastVariant } from "./components/TopToast";
+import { Toaster } from "./components/ui/sonner";
 import { AdminApp } from "./admin/AdminApp";
 import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./admin/routes";
 import { ConflictError, getDataGateway, type AuthSession, type CreateNodeResult } from "./data-access";
@@ -86,6 +86,7 @@ import {
   resolvePreviewTheme,
   toPreviewThemeTemplate
 } from "./preview-themes";
+import { toast } from "sonner";
 import {
   DEFAULT_IMAGE_HOSTING_CONFIG,
   cloneImageHostingConfig,
@@ -100,13 +101,6 @@ declare global {
   interface Window {
     __PLAINDOC_PREVIEW_STYLE__?: string;
   }
-}
-
-interface AppToastState {
-  isOpen: boolean;
-  message: string;
-  variant: TopToastVariant;
-  triggerKey: number;
 }
 
 const TEMP_USER_ID = 1;
@@ -382,13 +376,6 @@ export default function App() {
   // 当前上传任务总数与已处理数量：用于展示实时上传进度。
   const [imageUploadTotalCount, setImageUploadTotalCount] = useState(0);
   const [imageUploadCompletedCount, setImageUploadCompletedCount] = useState(0);
-  // 顶部提示状态：用于复制成功等短时反馈。
-  const [appToast, setAppToast] = useState<AppToastState>({
-    isOpen: false,
-    message: "",
-    variant: "success",
-    triggerKey: 0
-  });
   const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
   // 设置面板开关状态。
   const [isSettingsLayerOpen, setIsSettingsLayerOpen] = useState(false);
@@ -732,12 +719,7 @@ export default function App() {
               if (successMarkdownLines.length) {
                 insertImageMarkdown(view, successMarkdownLines);
                 setStatusMessage(`已上传 ${successMarkdownLines.length} 张图片并插入链接`);
-                setAppToast((previousToast) => ({
-                  isOpen: true,
-                  message: `图片上传成功（${successMarkdownLines.length}/${imageFiles.length}）`,
-                  variant: "success",
-                  triggerKey: previousToast.triggerKey + 1
-                }));
+                toast.success(`图片上传成功（${successMarkdownLines.length}/${imageFiles.length}）`);
               }
 
               if (failedMessages.length) {
@@ -747,22 +729,12 @@ export default function App() {
                   errors: failedMessages
                 });
                 setStatusMessage(`图片上传失败：${firstError}`);
-                setAppToast((previousToast) => ({
-                  isOpen: true,
-                  message: `部分图片上传失败：${firstError}`,
-                  variant: "error",
-                  triggerKey: previousToast.triggerKey + 1
-                }));
+                toast.error(`部分图片上传失败：${firstError}`);
               }
             } catch (error) {
               console.error("[editor][paste-image] 粘贴图片上传流程异常", error);
               setStatusMessage(`图片上传异常：${formatError(error)}`);
-              setAppToast((previousToast) => ({
-                isOpen: true,
-                message: `图片上传异常：${formatError(error)}`,
-                variant: "error",
-                triggerKey: previousToast.triggerKey + 1
-              }));
+              toast.error(`图片上传异常：${formatError(error)}`);
             } finally {
               isImageUploadingRef.current = false;
               setIsImageUploading(false);
@@ -858,6 +830,19 @@ export default function App() {
     }
     return `图片上传中（${Math.min(imageUploadCompletedCount, imageUploadTotalCount)}/${imageUploadTotalCount}）...`;
   }, [imageUploadCompletedCount, imageUploadTotalCount, isImageUploading]);
+
+  // 粘贴图片上传期间展示 sonner loading，结束后自动关闭。
+  useEffect(() => {
+    const toastID = "plaindoc-image-upload-progress";
+    if (isImageUploading) {
+      toast.loading(imageUploadLoadingMessage || "图片上传中...", {
+        id: toastID,
+        duration: Infinity
+      });
+      return;
+    }
+    toast.dismiss(toastID);
+  }, [imageUploadLoadingMessage, isImageUploading]);
 
   // 持久化当前激活空间：刷新后尽量恢复到上次知识本上下文。
   useEffect(() => {
@@ -1246,31 +1231,13 @@ export default function App() {
         linkRenderMode: previewLinkRenderMode
       });
       setStatusMessage("已复制预览内容，可直接粘贴到微信公众号编辑器");
-      setAppToast((previousToast) => ({
-        isOpen: true,
-        message: "复制成功，可直接粘贴到微信公众号编辑器",
-        variant: "success",
-        triggerKey: previousToast.triggerKey + 1
-      }));
+      toast.success("复制成功，可直接粘贴到微信公众号编辑器");
     } catch (error) {
       setStatusMessage(`复制失败：${formatError(error)}`);
     } finally {
       setIsWechatCopying(false);
     }
   }, [isWechatCopying, previewLinkRenderMode]);
-
-  // 关闭顶部提示：供自动计时与后续手动关闭复用。
-  const closeAppToast = useCallback(() => {
-    setAppToast((previousToast) => {
-      if (!previousToast.isOpen) {
-        return previousToast;
-      }
-      return {
-        ...previousToast,
-        isOpen: false
-      };
-    });
-  }, []);
 
   // 打开设置浮层。
   const openSettingsLayer = useCallback(() => {
@@ -1296,12 +1263,7 @@ export default function App() {
         });
         setImageHostingConfig(normalizedConfig);
         setStatusMessage("图床配置已保存");
-        setAppToast((previousToast) => ({
-          isOpen: true,
-          message: "图床配置已保存",
-          variant: "success",
-          triggerKey: previousToast.triggerKey + 1
-        }));
+        toast.success("图床配置已保存");
         setIsSettingsLayerOpen(false);
       } catch (error) {
         console.error("[settings][image-hosting] 保存图床配置失败", error);
@@ -1393,49 +1355,41 @@ export default function App() {
 
   if (isAdminRoute) {
     return (
-      <AdminApp
-        authSession={authSession}
-        checking={isAuthChecking}
-        submitting={isAuthSubmitting}
-        errorMessage={authErrorMessage}
-        dataGateway={dataGateway}
-        onLogin={handleAuthLogin}
-        onLogout={handleAuthLogout}
-      />
+      <>
+        <Toaster />
+        <AdminApp
+          authSession={authSession}
+          checking={isAuthChecking}
+          submitting={isAuthSubmitting}
+          errorMessage={authErrorMessage}
+          dataGateway={dataGateway}
+          onLogin={handleAuthLogin}
+          onLogout={handleAuthLogout}
+        />
+      </>
     );
   }
 
   // 登录前只展示认证面板，不渲染编辑器布局。
   if (isAuthChecking || !activeUser) {
     return (
-      <AuthPanel
-        checking={isAuthChecking}
-        submitting={isAuthSubmitting}
-        errorMessage={authErrorMessage}
-        onLogin={handleAuthLogin}
-        onRegister={handleAuthRegister}
-      />
+      <>
+        <Toaster />
+        <AuthPanel
+          checking={isAuthChecking}
+          submitting={isAuthSubmitting}
+          errorMessage={authErrorMessage}
+          onLogin={handleAuthLogin}
+          onRegister={handleAuthRegister}
+        />
+      </>
     );
   }
 
   return (
     // 主页面容器。
     <div className="page">
-      <TopToast
-        open={appToast.isOpen}
-        message={appToast.message}
-        variant={appToast.variant}
-        triggerKey={appToast.triggerKey}
-        durationMs={2600}
-        onClose={closeAppToast}
-        icon={<CheckCircle2 size={16} />}
-      />
-      <TopToast
-        open={isImageUploading}
-        message={imageUploadLoadingMessage}
-        variant="info"
-        icon={<LoaderCircle className="top-toast__loader" size={16} />}
-      />
+      <Toaster />
       {confirmDialog}
       {/* 当前主题样式：先注入内置模板变量，后续允许外部样式继续覆盖。 */}
       {activePreviewThemeStyleText ? (

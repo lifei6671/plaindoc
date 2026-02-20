@@ -1,13 +1,20 @@
 import { LoaderCircle, PencilLine, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
+import { Checkbox } from "../../components/ui/checkbox";
 import { Input } from "../../components/ui/input";
-import { Select } from "../../components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { showToast } from "../../components/ui/toast";
 import { type AdminSpace, type AdminSpaceListResult, type DataGateway, type Visibility } from "../../data-access";
 import { useAdminDialogs } from "../components/AdminDialogs";
-import { TopToast, type TopToastVariant } from "../../components/TopToast";
+import {
+  AdminBulkActionBar,
+  AdminPageCard,
+  AdminPaginationFooter,
+  AdminTableContainer,
+  AdminToolbarActions
+} from "../components/AdminPageLayout";
 import { formatError } from "../../editor/status-utils";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -118,41 +125,9 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
 
   const [actioningSpaceID, setActioningSpaceID] = useState<string | null>(null);
   const [batchActioning, setBatchActioning] = useState(false);
-  const [toastState, setToastState] = useState<{
-    open: boolean;
-    message: string;
-    variant: TopToastVariant;
-    triggerKey: number;
-  }>({
-    open: false,
-    message: "",
-    variant: "error",
-    triggerKey: 0
-  });
 
-  const openToast = useCallback((message: string, variant: TopToastVariant = "error") => {
-    const normalizedMessage = message.trim();
-    if (!normalizedMessage) {
-      return;
-    }
-    setToastState((previousState) => ({
-      open: true,
-      message: normalizedMessage,
-      variant,
-      triggerKey: previousState.triggerKey + 1
-    }));
-  }, []);
-
-  const closeToast = useCallback(() => {
-    setToastState((previousState) => {
-      if (!previousState.open) {
-        return previousState;
-      }
-      return {
-        ...previousState,
-        open: false
-      };
-    });
+  const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
+    showToast(message, variant);
   }, []);
 
   const loadSpaces = useCallback(async () => {
@@ -200,8 +175,8 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     return Math.max(1, Math.ceil(total / pageSize));
   }, [spacesState.pagination.pageSize, spacesState.pagination.total]);
 
-  const handleSearchSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+  const handleSearchSubmit = useCallback<FormEventHandler<HTMLFormElement>>(
+    (event) => {
       event.preventDefault();
       setPage(1);
       setKeyword(keywordInput.trim());
@@ -499,17 +474,8 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
 
   return (
     <section aria-label="空间管理">
-      <TopToast
-        open={toastState.open}
-        message={toastState.message}
-        variant={toastState.variant}
-        triggerKey={toastState.triggerKey}
-        durationMs={2800}
-        onClose={closeToast}
-      />
       {dialogs}
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardContent className="space-y-4 p-5">
+      <AdminPageCard>
           <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_190px_auto]" onSubmit={handleSearchSubmit}>
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
@@ -523,59 +489,66 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">状态</span>
               <Select
-                value={statusFilter}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value as "" | "all" | "active" | "banned" | "deleted");
+                value={statusFilter || "default"}
+                onValueChange={(value) => {
+                  setStatusFilter((value === "default" ? "" : value) as "" | "all" | "active" | "banned" | "deleted");
                   setPage(1);
                 }}
               >
-                <option value="">未删除（默认）</option>
-                <option value="all">全部</option>
-                <option value="active">正常</option>
-                <option value="banned">封禁</option>
-                <option value="deleted">已删除</option>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">未删除（默认）</SelectItem>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="active">正常</SelectItem>
+                  <SelectItem value="banned">封禁</SelectItem>
+                  <SelectItem value="deleted">已删除</SelectItem>
+                </SelectContent>
               </Select>
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">可见性</span>
               <Select
-                value={visibilityFilter}
-                onChange={(event) => {
-                  setVisibilityFilter(event.target.value as "" | "all" | "public" | "authenticated" | "member");
+                value={visibilityFilter || "default"}
+                onValueChange={(value) => {
+                  setVisibilityFilter((value === "default" ? "" : value) as "" | "all" | "public" | "authenticated" | "member");
                   setPage(1);
                 }}
               >
-                <option value="">全部可见性（默认）</option>
-                <option value="all">全部</option>
-                <option value="public">完全公开</option>
-                <option value="authenticated">登录可见</option>
-                <option value="member">成员可见</option>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">全部可见性（默认）</SelectItem>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="public">完全公开</SelectItem>
+                  <SelectItem value="authenticated">登录可见</SelectItem>
+                  <SelectItem value="member">成员可见</SelectItem>
+                </SelectContent>
               </Select>
             </label>
-            <div className="flex flex-wrap items-end gap-2">
-              <Button type="submit" size="sm" disabled={loading || batchActioning}>
-                <Search size={14} />
-                <span>查询</span>
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading || batchActioning} onClick={handleReset}>
-                重置
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={loading || batchActioning}
-                onClick={() => void loadSpaces()}
-              >
-                <RefreshCw size={14} />
-                <span>刷新</span>
-              </Button>
-            </div>
+            <AdminToolbarActions>
+                <Button type="submit" disabled={loading || batchActioning}>
+                  <Search size={14} />
+                  <span>查询</span>
+                </Button>
+                <Button type="button" variant="outline" disabled={loading || batchActioning} onClick={handleReset}>
+                  重置
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading || batchActioning}
+                  onClick={() => void loadSpaces()}
+                >
+                  <RefreshCw size={14} />
+                  <span>刷新</span>
+                </Button>
+            </AdminToolbarActions>
           </form>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-medium text-slate-600">已选 {selectedSpaceIDs.length} 项</p>
-            <div className="flex flex-wrap gap-2">
+          <AdminBulkActionBar selectedCount={selectedSpaceIDs.length}>
               <Button
                 type="button"
                 size="sm"
@@ -613,21 +586,17 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
               >
                 清空选择
               </Button>
-            </div>
-          </div>
+          </AdminBulkActionBar>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <div className="max-h-[56vh] overflow-auto">
+          <AdminTableContainer>
               <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                   <tr className="text-xs uppercase tracking-wide text-slate-600">
                     <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700"
+                      <Checkbox
                         checked={allSelectableChecked}
                         disabled={selectionDisabled || selectableSpaceIDs.length === 0}
-                        onChange={(event) => handleToggleSelectAll(event.target.checked)}
+                        onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
                         aria-label="全选空间"
                       />
                     </th>
@@ -663,12 +632,10 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                       return (
                         <tr key={space.spaceId} className="border-b border-slate-100 align-top text-slate-700">
                           <td className="px-3 py-3">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-slate-300 text-slate-700"
+                            <Checkbox
                               checked={selectedSpaceSet.has(space.spaceId)}
                               disabled={selectionDisabled || isDeleted}
-                              onChange={(event) => handleToggleSelectOne(space.spaceId, event.target.checked)}
+                              onCheckedChange={(checked) => handleToggleSelectOne(space.spaceId, checked === true)}
                               aria-label={`选择空间 ${space.name || space.spaceId}`}
                             />
                           </td>
@@ -757,36 +724,20 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
+          </AdminTableContainer>
 
-          <footer className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-600">
+          <AdminPaginationFooter
+            summary={
+              <>
               当前第 {spacesState.pagination.page} / {totalPages} 页，共 {spacesState.pagination.total} 条
-            </p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setPage((value) => Math.max(1, value - 1))}
-                disabled={loading || spacesState.pagination.page <= 1}
-              >
-                上一页
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-                disabled={loading || spacesState.pagination.page >= totalPages}
-              >
-                下一页
-              </Button>
-            </div>
-          </footer>
-        </CardContent>
-      </Card>
+              </>
+            }
+            previousDisabled={loading || spacesState.pagination.page <= 1}
+            nextDisabled={loading || spacesState.pagination.page >= totalPages}
+            onPrevious={() => setPage((value) => Math.max(1, value - 1))}
+            onNext={() => setPage((value) => Math.min(totalPages, value + 1))}
+          />
+      </AdminPageCard>
     </section>
   );
 }

@@ -1,12 +1,12 @@
 import { LoaderCircle, PencilLine, Plus, Power, PowerOff, RefreshCw, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { showToast } from "../../components/ui/toast";
 import { type AdminTheme, type DataGateway } from "../../data-access";
 import { useAdminDialogs } from "../components/AdminDialogs";
-import { TopToast, type TopToastVariant } from "../../components/TopToast";
+import { AdminPageCard, AdminTableContainer, AdminToolbarActions } from "../components/AdminPageLayout";
 import { formatError } from "../../editor/status-utils";
 
 interface AdminThemesPageProps {
@@ -48,41 +48,9 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
   const [loading, setLoading] = useState(false);
 
   const [actioningThemeID, setActioningThemeID] = useState<string | null>(null);
-  const [toastState, setToastState] = useState<{
-    open: boolean;
-    message: string;
-    variant: TopToastVariant;
-    triggerKey: number;
-  }>({
-    open: false,
-    message: "",
-    variant: "error",
-    triggerKey: 0
-  });
 
-  const openToast = useCallback((message: string, variant: TopToastVariant = "error") => {
-    const normalizedMessage = message.trim();
-    if (!normalizedMessage) {
-      return;
-    }
-    setToastState((previousState) => ({
-      open: true,
-      message: normalizedMessage,
-      variant,
-      triggerKey: previousState.triggerKey + 1
-    }));
-  }, []);
-
-  const closeToast = useCallback(() => {
-    setToastState((previousState) => {
-      if (!previousState.open) {
-        return previousState;
-      }
-      return {
-        ...previousState,
-        open: false
-      };
-    });
+  const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
+    showToast(message, variant);
   }, []);
 
   const loadThemes = useCallback(async () => {
@@ -129,8 +97,8 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
     [loadThemes, openToast]
   );
 
-  const handleSearchSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+  const handleSearchSubmit = useCallback<FormEventHandler<HTMLFormElement>>(
+    (event) => {
       event.preventDefault();
       setKeyword(keywordInput.trim());
     },
@@ -338,17 +306,8 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
 
   return (
     <section aria-label="主题管理">
-      <TopToast
-        open={toastState.open}
-        message={toastState.message}
-        variant={toastState.variant}
-        triggerKey={toastState.triggerKey}
-        durationMs={2800}
-        onClose={closeToast}
-      />
       {dialogs}
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardContent className="space-y-4 p-5">
+      <AdminPageCard>
           <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" onSubmit={handleSearchSubmit}>
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
@@ -359,27 +318,26 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
                 onChange={(event) => setKeywordInput(event.target.value)}
               />
             </label>
-            <div className="flex flex-wrap items-end gap-2">
-              <Button type="submit" size="sm" disabled={loading}>
-                <Search size={14} />
-                <span>查询</span>
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={handleResetSearch}>
-                重置
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadThemes()}>
-                <RefreshCw size={14} />
-                <span>刷新</span>
-              </Button>
-              <Button type="button" size="sm" onClick={() => void handleCreateTheme()} disabled={loading}>
-                <Plus size={14} />
-                <span>新建主题</span>
-              </Button>
-            </div>
+            <AdminToolbarActions>
+                <Button type="submit" disabled={loading}>
+                  <Search size={14} />
+                  <span>查询</span>
+                </Button>
+                <Button type="button" variant="outline" disabled={loading} onClick={handleResetSearch}>
+                  重置
+                </Button>
+                <Button type="button" variant="outline" disabled={loading} onClick={() => void loadThemes()}>
+                  <RefreshCw size={14} />
+                  <span>刷新</span>
+                </Button>
+                <Button type="button" onClick={() => void handleCreateTheme()} disabled={loading}>
+                  <Plus size={14} />
+                  <span>新建主题</span>
+                </Button>
+            </AdminToolbarActions>
           </form>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <div className="max-h-[56vh] overflow-auto">
+          <AdminTableContainer>
               <table className="w-full min-w-[980px] border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                   <tr className="text-xs uppercase tracking-wide text-slate-600">
@@ -475,12 +433,10 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
+          </AdminTableContainer>
 
           <footer className="text-xs text-slate-600">共 {filteredThemes.length} 条（总计 {themes.length} 条）</footer>
-        </CardContent>
-      </Card>
+      </AdminPageCard>
     </section>
   );
 }
