@@ -1,5 +1,10 @@
 import { LoaderCircle, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { Input } from "../../components/ui/input";
+import { Select } from "../../components/ui/select";
 import { type AdminUser, type AdminUserListResult, type DataGateway } from "../../data-access";
 import { useAdminDialogs } from "../components/AdminDialogs";
 import { TopToast, type TopToastVariant } from "../../components/TopToast";
@@ -49,6 +54,19 @@ function renderStatusLabel(status: AdminUser["status"]): string {
       return "已删除";
     default:
       return status;
+  }
+}
+
+function renderStatusBadgeClass(status: AdminUser["status"]): string {
+  switch (status) {
+    case "active":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "banned":
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    case "deleted":
+      return "border-slate-200 bg-slate-100 text-slate-600";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-600";
   }
 }
 
@@ -245,7 +263,7 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
   );
 
   return (
-    <section className="admin-users-panel" aria-label="用户管理">
+    <section aria-label="用户管理">
       <TopToast
         open={toastState.open}
         message={toastState.message}
@@ -255,154 +273,173 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
         onClose={closeToast}
       />
       {dialogs}
-      <form className="admin-users-toolbar" onSubmit={handleSearchSubmit}>
-        <label className="admin-users-toolbar__field admin-users-toolbar__field--keyword">
-          <span>关键词</span>
-          <input
-            type="search"
-            value={keywordInput}
-            placeholder="邮箱 / 用户 ID / 名称"
-            onChange={(event) => setKeywordInput(event.target.value)}
-          />
-        </label>
-        <label className="admin-users-toolbar__field admin-users-toolbar__field--status">
-          <span>状态</span>
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value as "" | "all" | "active" | "banned" | "deleted");
-              setPage(1);
-            }}
-          >
-            <option value="">未删除（默认）</option>
-            <option value="all">全部</option>
-            <option value="active">正常</option>
-            <option value="banned">封禁</option>
-            <option value="deleted">已删除</option>
-          </select>
-        </label>
-        <div className="admin-users-toolbar__actions">
-          <button type="submit" disabled={loading}>
-            <Search size={14} />
-            <span>查询</span>
-          </button>
-          <button type="button" disabled={loading} onClick={handleReset}>
-            重置
-          </button>
-          <button type="button" disabled={loading} onClick={() => void loadUsers()}>
-            <RefreshCw size={14} />
-            <span>刷新</span>
-          </button>
-        </div>
-      </form>
+      <Card className="border-slate-200/80 shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto]" onSubmit={handleSearchSubmit}>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
+              <Input
+                type="search"
+                value={keywordInput}
+                placeholder="邮箱 / 用户 ID / 名称"
+                onChange={(event) => setKeywordInput(event.target.value)}
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">状态</span>
+              <Select
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as "" | "all" | "active" | "banned" | "deleted");
+                  setPage(1);
+                }}
+              >
+                <option value="">未删除（默认）</option>
+                <option value="all">全部</option>
+                <option value="active">正常</option>
+                <option value="banned">封禁</option>
+                <option value="deleted">已删除</option>
+              </Select>
+            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button type="submit" size="sm" disabled={loading}>
+                <Search size={14} />
+                <span>查询</span>
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={handleReset}>
+                重置
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadUsers()}>
+                <RefreshCw size={14} />
+                <span>刷新</span>
+              </Button>
+            </div>
+          </form>
 
-      <div className="admin-users-table-wrap">
-        <table className="admin-users-table">
-          <thead>
-            <tr>
-              <th>用户</th>
-              <th>状态</th>
-              <th>封禁原因</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="admin-users-loading-row">
-                    <LoaderCircle size={15} className="admin-users-loading-row__icon" />
-                    <span>正在加载用户列表...</span>
-                  </div>
-                </td>
-              </tr>
-            ) : usersState.items.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="admin-users-empty-row">暂无符合条件的数据</div>
-                </td>
-              </tr>
-            ) : (
-              usersState.items.map((user) => {
-                const isActioning = actioningUserID === user.userId;
-                const statusClassName = `admin-users-status admin-users-status--${user.status}`;
-                return (
-                  <tr key={user.userId}>
-                    <td>
-                      <div className="admin-users-user-cell">
-                        <strong>{user.name || "未命名用户"}</strong>
-                        <span>{user.email}</span>
-                        <code>{user.userId}</code>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={statusClassName}>{renderStatusLabel(user.status)}</span>
-                    </td>
-                    <td>
-                      <p className="admin-users-ban-reason">{user.bannedReason || "-"}</p>
-                    </td>
-                    <td>
-                      <div className="admin-users-time-cell">
-                        <span>更新: {formatDateTime(user.updatedAt)}</span>
-                        <span>删除: {formatDateTime(user.deletedAt)}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="admin-users-actions">
-                        {user.status === "banned" ? (
-                          <button type="button" disabled={isActioning} onClick={() => void handleUnban(user)}>
-                            <ShieldCheck size={14} />
-                            <span>解封</span>
-                          </button>
-                        ) : user.status === "active" ? (
-                          <button type="button" disabled={isActioning} onClick={() => void handleBan(user)}>
-                            <ShieldBan size={14} />
-                            <span>封禁</span>
-                          </button>
-                        ) : (
-                          <span className="admin-users-actions__disabled">-</span>
-                        )}
-                        <button
-                          type="button"
-                          className="danger"
-                          disabled={isActioning || user.status === "deleted"}
-                          onClick={() => void handleDelete(user)}
-                        >
-                          <Trash2 size={14} />
-                          <span>删除</span>
-                        </button>
-                      </div>
-                    </td>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="max-h-[56vh] overflow-auto">
+              <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                  <tr className="text-xs uppercase tracking-wide text-slate-600">
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">用户</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">封禁原因</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-12">
+                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                          <LoaderCircle size={15} className="animate-spin" />
+                          <span>正在加载用户列表...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : usersState.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-12 text-center text-sm text-slate-500">
+                        暂无符合条件的数据
+                      </td>
+                    </tr>
+                  ) : (
+                    usersState.items.map((user) => {
+                      const isActioning = actioningUserID === user.userId;
+                      return (
+                        <tr key={user.userId} className="border-b border-slate-100 align-top text-slate-700">
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1">
+                              <strong className="text-sm font-semibold text-slate-900">{user.name || "未命名用户"}</strong>
+                              <span className="text-xs text-slate-600">{user.email}</span>
+                              <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
+                                {user.userId}
+                              </code>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <Badge variant="outline" className={renderStatusBadgeClass(user.status)}>
+                              {renderStatusLabel(user.status)}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3 text-xs text-slate-600">{user.bannedReason || "-"}</td>
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1 text-xs text-slate-500">
+                              <span>更新: {formatDateTime(user.updatedAt)}</span>
+                              <span>删除: {formatDateTime(user.deletedAt)}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {user.status === "banned" ? (
+                                <Button type="button" size="sm" variant="secondary" disabled={isActioning} onClick={() => void handleUnban(user)}>
+                                  <ShieldCheck size={14} />
+                                  <span>解封</span>
+                                </Button>
+                              ) : user.status === "active" ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                  disabled={isActioning}
+                                  onClick={() => void handleBan(user)}
+                                >
+                                  <ShieldBan size={14} />
+                                  <span>封禁</span>
+                                </Button>
+                              ) : (
+                                <span className="text-xs font-medium text-slate-400">-</span>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={isActioning || user.status === "deleted"}
+                                onClick={() => void handleDelete(user)}
+                              >
+                                <Trash2 size={14} />
+                                <span>删除</span>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <footer className="admin-users-footer">
-        <p>
-          当前第 {usersState.pagination.page} / {totalPages} 页，共 {usersState.pagination.total} 条
-        </p>
-        <div className="admin-users-pagination">
-          <button
-            type="button"
-            onClick={() => setPage((value) => Math.max(1, value - 1))}
-            disabled={loading || usersState.pagination.page <= 1}
-          >
-            上一页
-          </button>
-          <button
-            type="button"
-            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-            disabled={loading || usersState.pagination.page >= totalPages}
-          >
-            下一页
-          </button>
-        </div>
-      </footer>
+          <footer className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-600">
+              当前第 {usersState.pagination.page} / {totalPages} 页，共 {usersState.pagination.total} 条
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                disabled={loading || usersState.pagination.page <= 1}
+              >
+                上一页
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                disabled={loading || usersState.pagination.page >= totalPages}
+              >
+                下一页
+              </Button>
+            </div>
+          </footer>
+        </CardContent>
+      </Card>
     </section>
   );
 }

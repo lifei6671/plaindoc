@@ -1,5 +1,9 @@
 import { LoaderCircle, PencilLine, Plus, Power, PowerOff, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { Input } from "../../components/ui/input";
 import { type AdminTheme, type DataGateway } from "../../data-access";
 import { useAdminDialogs } from "../components/AdminDialogs";
 import { TopToast, type TopToastVariant } from "../../components/TopToast";
@@ -25,6 +29,13 @@ function renderSyntaxLabel(value: AdminTheme["syntaxTheme"]): string {
     return "深色语法";
   }
   return "浅色语法";
+}
+
+function renderSyntaxBadgeClass(value: AdminTheme["syntaxTheme"]): string {
+  if (value === "one-dark") {
+    return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  }
+  return "border-sky-200 bg-sky-50 text-sky-700";
 }
 
 export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
@@ -326,7 +337,7 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
   );
 
   return (
-    <section className="admin-spaces-panel" aria-label="主题管理">
+    <section aria-label="主题管理">
       <TopToast
         open={toastState.open}
         message={toastState.message}
@@ -336,129 +347,140 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
         onClose={closeToast}
       />
       {dialogs}
-      <form className="admin-spaces-toolbar admin-themes-toolbar" onSubmit={handleSearchSubmit}>
-        <label className="admin-spaces-toolbar__field">
-          <span>关键词</span>
-          <input
-            type="search"
-            value={keywordInput}
-            placeholder="主题 ID / 名称 / 描述"
-            onChange={(event) => setKeywordInput(event.target.value)}
-          />
-        </label>
-        <div className="admin-spaces-toolbar__actions">
-          <button type="submit" disabled={loading}>
-            <Search size={14} />
-            <span>查询</span>
-          </button>
-          <button type="button" disabled={loading} onClick={handleResetSearch}>
-            重置
-          </button>
-          <button type="button" disabled={loading} onClick={() => void loadThemes()}>
-            <RefreshCw size={14} />
-            <span>刷新</span>
-          </button>
-          <button type="button" disabled={loading} onClick={() => void handleCreateTheme()}>
-            <Plus size={14} />
-            <span>新建主题</span>
-          </button>
-        </div>
-      </form>
+      <Card className="border-slate-200/80 shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" onSubmit={handleSearchSubmit}>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
+              <Input
+                type="search"
+                value={keywordInput}
+                placeholder="主题 ID / 名称 / 描述"
+                onChange={(event) => setKeywordInput(event.target.value)}
+              />
+            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button type="submit" size="sm" disabled={loading}>
+                <Search size={14} />
+                <span>查询</span>
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={handleResetSearch}>
+                重置
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadThemes()}>
+                <RefreshCw size={14} />
+                <span>刷新</span>
+              </Button>
+              <Button type="button" size="sm" onClick={() => void handleCreateTheme()} disabled={loading}>
+                <Plus size={14} />
+                <span>新建主题</span>
+              </Button>
+            </div>
+          </form>
 
-      <div className="admin-spaces-table-wrap">
-        <table className="admin-spaces-table admin-themes-table">
-          <thead>
-            <tr>
-              <th>主题</th>
-              <th>语法</th>
-              <th>类型/状态</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="admin-spaces-loading-row">
-                    <LoaderCircle size={15} className="admin-spaces-loading-row__icon" />
-                    <span>正在加载主题列表...</span>
-                  </div>
-                </td>
-              </tr>
-            ) : filteredThemes.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="admin-spaces-empty-row">暂无符合条件的数据</div>
-                </td>
-              </tr>
-            ) : (
-              filteredThemes.map((theme) => {
-                const isActioning = actioningThemeID === theme.themeId;
-                return (
-                  <tr key={theme.themeId}>
-                    <td>
-                      <div className="admin-theme-cell">
-                        <strong>{theme.name}</strong>
-                        <code>{theme.themeId}</code>
-                        <span>{theme.description || "-"}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="admin-spaces-visibility">{renderSyntaxLabel(theme.syntaxTheme)}</span>
-                    </td>
-                    <td>
-                      <div className="admin-theme-status-cell">
-                        <span className={`admin-theme-kind ${theme.builtin ? "admin-theme-kind--builtin" : "admin-theme-kind--custom"}`}>
-                          {theme.builtin ? "内置" : "自定义"}
-                        </span>
-                        <span className={`admin-spaces-status ${theme.enabled ? "admin-spaces-status--active" : "admin-spaces-status--deleted"}`}>
-                          {theme.enabled ? "已启用" : "已停用"}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatDateTime(theme.updatedAt)}</td>
-                    <td>
-                      <div className="admin-spaces-actions">
-                        <button
-                          type="button"
-                          disabled={isActioning}
-                          onClick={() => void handleEditTheme(theme)}
-                        >
-                          <PencilLine size={13} />
-                          <span>编辑</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isActioning}
-                          className="warning"
-                          onClick={() => void handleToggleTheme(theme)}
-                        >
-                          {theme.enabled ? <PowerOff size={13} /> : <Power size={13} />}
-                          <span>{theme.enabled ? "停用" : "启用"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="danger"
-                          disabled={isActioning}
-                          onClick={() => void handleDeleteTheme(theme)}
-                        >
-                          <Trash2 size={13} />
-                          <span>删除</span>
-                        </button>
-                      </div>
-                    </td>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="max-h-[56vh] overflow-auto">
+              <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                  <tr className="text-xs uppercase tracking-wide text-slate-600">
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">主题</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">语法</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">类型/状态</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-12">
+                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                          <LoaderCircle size={15} className="animate-spin" />
+                          <span>正在加载主题列表...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredThemes.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-12 text-center text-sm text-slate-500">
+                        暂无符合条件的数据
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredThemes.map((theme) => {
+                      const isActioning = actioningThemeID === theme.themeId;
+                      return (
+                        <tr key={theme.themeId} className="border-b border-slate-100 align-top text-slate-700">
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1">
+                              <strong className="text-sm font-semibold text-slate-900">{theme.name}</strong>
+                              <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
+                                {theme.themeId}
+                              </code>
+                              <span className="text-xs text-slate-600">{theme.description || "-"}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <Badge variant="outline" className={renderSyntaxBadgeClass(theme.syntaxTheme)}>
+                              {renderSyntaxLabel(theme.syntaxTheme)}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className={theme.builtin ? "border-purple-200 bg-purple-50 text-purple-700" : "border-slate-200 bg-slate-100 text-slate-700"}
+                              >
+                                {theme.builtin ? "内置" : "自定义"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={theme.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-600"}
+                              >
+                                {theme.enabled ? "已启用" : "已停用"}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(theme.updatedAt)}</td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button type="button" size="sm" variant="outline" disabled={isActioning} onClick={() => void handleEditTheme(theme)}>
+                                <PencilLine size={13} />
+                                <span>编辑</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className={
+                                  theme.enabled
+                                    ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                }
+                                disabled={isActioning}
+                                onClick={() => void handleToggleTheme(theme)}
+                              >
+                                {theme.enabled ? <PowerOff size={13} /> : <Power size={13} />}
+                                <span>{theme.enabled ? "停用" : "启用"}</span>
+                              </Button>
+                              <Button type="button" size="sm" variant="destructive" disabled={isActioning} onClick={() => void handleDeleteTheme(theme)}>
+                                <Trash2 size={13} />
+                                <span>删除</span>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <footer className="admin-spaces-footer">
-        <p>共 {filteredThemes.length} 条（总计 {themes.length} 条）</p>
-      </footer>
+          <footer className="text-xs text-slate-600">共 {filteredThemes.length} 条（总计 {themes.length} 条）</footer>
+        </CardContent>
+      </Card>
     </section>
   );
 }

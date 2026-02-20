@@ -1,5 +1,10 @@
 import { LoaderCircle, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { Input } from "../../components/ui/input";
+import { Select } from "../../components/ui/select";
 import { type AdminDocument, type AdminDocumentListResult, type DataGateway, type Visibility } from "../../data-access";
 import { useAdminDialogs } from "../components/AdminDialogs";
 import { TopToast, type TopToastVariant } from "../../components/TopToast";
@@ -61,6 +66,32 @@ function renderStatusLabel(value: AdminDocument["status"]): string {
       return "已删除";
     default:
       return value;
+  }
+}
+
+function renderStatusBadgeClass(value: AdminDocument["status"]): string {
+  switch (value) {
+    case "active":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "banned":
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    case "deleted":
+      return "border-slate-200 bg-slate-100 text-slate-600";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-600";
+  }
+}
+
+function renderVisibilityBadgeClass(value: Visibility): string {
+  switch (value) {
+    case "public":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "authenticated":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "member":
+      return "border-slate-200 bg-slate-100 text-slate-700";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-700";
   }
 }
 
@@ -409,7 +440,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
   const selectionDisabled = loading || batchActioning || actioningDocumentID !== null;
 
   return (
-    <section className="admin-spaces-panel" aria-label="文档管理">
+    <section aria-label="文档管理">
       <TopToast
         open={toastState.open}
         message={toastState.message}
@@ -419,251 +450,290 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
         onClose={closeToast}
       />
       {dialogs}
-      <form className="admin-spaces-toolbar admin-documents-toolbar" onSubmit={handleSearchSubmit}>
-        <label className="admin-spaces-toolbar__field">
-          <span>关键词</span>
-          <input
-            type="search"
-            value={keywordInput}
-            placeholder="文档标题 / 文档 ID / 节点 ID"
-            onChange={(event) => setKeywordInput(event.target.value)}
-          />
-        </label>
-        <label className="admin-spaces-toolbar__field">
-          <span>空间 ID</span>
-          <input
-            type="search"
-            value={spaceIdInput}
-            placeholder="按空间过滤"
-            onChange={(event) => setSpaceIdInput(event.target.value)}
-          />
-        </label>
-        <label className="admin-spaces-toolbar__field">
-          <span>状态</span>
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value as "" | "all" | "active" | "banned" | "deleted");
-              setPage(1);
-            }}
-          >
-            <option value="">未删除（默认）</option>
-            <option value="all">全部</option>
-            <option value="active">正常</option>
-            <option value="banned">封禁</option>
-            <option value="deleted">已删除</option>
-          </select>
-        </label>
-        <label className="admin-spaces-toolbar__field">
-          <span>可见性</span>
-          <select
-            value={visibilityFilter}
-            onChange={(event) => {
-              setVisibilityFilter(event.target.value as "" | "all" | "public" | "authenticated" | "member");
-              setPage(1);
-            }}
-          >
-            <option value="">全部可见性（默认）</option>
-            <option value="all">全部</option>
-            <option value="public">完全公开</option>
-            <option value="authenticated">登录可见</option>
-            <option value="member">成员可见</option>
-          </select>
-        </label>
-        <div className="admin-spaces-toolbar__actions">
-          <button type="submit" disabled={loading || batchActioning}>
-            <Search size={14} />
-            <span>查询</span>
-          </button>
-          <button type="button" disabled={loading || batchActioning} onClick={handleReset}>
-            重置
-          </button>
-          <button type="button" disabled={loading || batchActioning} onClick={() => void loadDocuments()}>
-            <RefreshCw size={14} />
-            <span>刷新</span>
-          </button>
-        </div>
-      </form>
+      <Card className="border-slate-200/80 shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_170px_190px_auto]" onSubmit={handleSearchSubmit}>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
+              <Input
+                type="search"
+                value={keywordInput}
+                placeholder="文档标题 / 文档 ID / 节点 ID"
+                onChange={(event) => setKeywordInput(event.target.value)}
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">空间 ID</span>
+              <Input
+                type="search"
+                value={spaceIdInput}
+                placeholder="按空间过滤"
+                onChange={(event) => setSpaceIdInput(event.target.value)}
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">状态</span>
+              <Select
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as "" | "all" | "active" | "banned" | "deleted");
+                  setPage(1);
+                }}
+              >
+                <option value="">未删除（默认）</option>
+                <option value="all">全部</option>
+                <option value="active">正常</option>
+                <option value="banned">封禁</option>
+                <option value="deleted">已删除</option>
+              </Select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">可见性</span>
+              <Select
+                value={visibilityFilter}
+                onChange={(event) => {
+                  setVisibilityFilter(event.target.value as "" | "all" | "public" | "authenticated" | "member");
+                  setPage(1);
+                }}
+              >
+                <option value="">全部可见性（默认）</option>
+                <option value="all">全部</option>
+                <option value="public">完全公开</option>
+                <option value="authenticated">登录可见</option>
+                <option value="member">成员可见</option>
+              </Select>
+            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button type="submit" size="sm" disabled={loading || batchActioning}>
+                <Search size={14} />
+                <span>查询</span>
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading || batchActioning} onClick={handleReset}>
+                重置
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={loading || batchActioning}
+                onClick={() => void loadDocuments()}
+              >
+                <RefreshCw size={14} />
+                <span>刷新</span>
+              </Button>
+            </div>
+          </form>
 
-      <div className="admin-bulk-bar">
-        <p>已选 {selectedDocumentIDs.length} 项</p>
-        <div className="admin-bulk-bar__actions">
-          <button
-            type="button"
-            disabled={selectionDisabled || selectedDocumentIDs.length === 0}
-            onClick={() => void handleBatchBan()}
-          >
-            批量封禁
-          </button>
-          <button
-            type="button"
-            disabled={selectionDisabled || selectedDocumentIDs.length === 0}
-            onClick={() => void handleBatchUnban()}
-          >
-            批量解封
-          </button>
-          <button
-            type="button"
-            className="danger"
-            disabled={selectionDisabled || selectedDocumentIDs.length === 0}
-            onClick={() => void handleBatchDelete()}
-          >
-            批量删除
-          </button>
-          <button
-            type="button"
-            disabled={selectionDisabled || selectedDocumentIDs.length === 0}
-            onClick={() => setSelectedDocumentIDs([])}
-          >
-            清空选择
-          </button>
-        </div>
-      </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-medium text-slate-600">已选 {selectedDocumentIDs.length} 项</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                disabled={selectionDisabled || selectedDocumentIDs.length === 0}
+                onClick={() => void handleBatchBan()}
+              >
+                批量封禁
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={selectionDisabled || selectedDocumentIDs.length === 0}
+                onClick={() => void handleBatchUnban()}
+              >
+                批量解封
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                disabled={selectionDisabled || selectedDocumentIDs.length === 0}
+                onClick={() => void handleBatchDelete()}
+              >
+                批量删除
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={selectionDisabled || selectedDocumentIDs.length === 0}
+                onClick={() => setSelectedDocumentIDs([])}
+              >
+                清空选择
+              </Button>
+            </div>
+          </div>
 
-      <div className="admin-spaces-table-wrap">
-        <table className="admin-spaces-table admin-documents-table">
-          <thead>
-            <tr>
-              <th className="admin-select-cell">
-                <input
-                  type="checkbox"
-                  checked={allSelectableChecked}
-                  disabled={selectionDisabled || selectableDocumentIDs.length === 0}
-                  onChange={(event) => handleToggleSelectAll(event.target.checked)}
-                  aria-label="全选文档"
-                />
-              </th>
-              <th>文档信息</th>
-              <th>所属空间</th>
-              <th>可见性</th>
-              <th>状态</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7}>
-                  <div className="admin-spaces-loading-row">
-                    <LoaderCircle size={15} className="admin-spaces-loading-row__icon" />
-                    <span>正在加载文档列表...</span>
-                  </div>
-                </td>
-              </tr>
-            ) : documentsState.items.length === 0 ? (
-              <tr>
-                <td colSpan={7}>
-                  <div className="admin-spaces-empty-row">暂无符合条件的数据</div>
-                </td>
-              </tr>
-            ) : (
-              documentsState.items.map((document) => {
-                const isActioning = actioningDocumentID === document.documentId || batchActioning;
-                const isDeleted = document.status === "deleted";
-                return (
-                  <tr key={document.documentId}>
-                    <td className="admin-select-cell">
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="max-h-[56vh] overflow-auto">
+              <table className="w-full min-w-[1240px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                  <tr className="text-xs uppercase tracking-wide text-slate-600">
+                    <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
                       <input
                         type="checkbox"
-                        checked={selectedDocumentSet.has(document.documentId)}
-                        disabled={selectionDisabled || isDeleted}
-                        onChange={(event) => handleToggleSelectOne(document.documentId, event.target.checked)}
-                        aria-label={`选择文档 ${document.title || document.documentId}`}
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700"
+                        checked={allSelectableChecked}
+                        disabled={selectionDisabled || selectableDocumentIDs.length === 0}
+                        onChange={(event) => handleToggleSelectAll(event.target.checked)}
+                        aria-label="全选文档"
                       />
-                    </td>
-                    <td>
-                      <div className="admin-spaces-space-cell">
-                        <strong>{document.title || "未命名文档"}</strong>
-                        <code>{document.documentId}</code>
-                        <code>{document.nodeId}</code>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="admin-spaces-owner-cell">
-                        <strong>{document.spaceName || "-"}</strong>
-                        <span>{document.spaceOwnerName || "-"} / {document.spaceOwnerEmail || "-"}</span>
-                        <span>{document.spaceId}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="admin-spaces-visibility">{renderVisibilityLabel(document.visibility)}</span>
-                    </td>
-                    <td>
-                      <div className="admin-spaces-status-cell">
-                        <span className={`admin-spaces-status admin-spaces-status--${document.status}`}>
-                          {renderStatusLabel(document.status)}
-                        </span>
-                        {document.status === "banned" && document.bannedReason ? (
-                          <small className="admin-spaces-ban-reason">{document.bannedReason}</small>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>{formatDateTime(document.updatedAt)}</td>
-                    <td>
-                      <div className="admin-spaces-actions">
-                        {document.status === "banned" ? (
-                          <button
-                            type="button"
-                            disabled={isActioning || isDeleted}
-                            onClick={() => void handleUpdateStatus(document, "active")}
-                          >
-                            <ShieldCheck size={14} />
-                            <span>解封</span>
-                          </button>
-                        ) : document.status === "active" ? (
-                          <button
-                            type="button"
-                            className="warning"
-                            disabled={isActioning || isDeleted}
-                            onClick={() => void handleUpdateStatus(document, "banned")}
-                          >
-                            <ShieldBan size={14} />
-                            <span>封禁</span>
-                          </button>
-                        ) : (
-                          <span className="admin-users-actions__disabled">-</span>
-                        )}
-                        <button
-                          type="button"
-                          className="danger"
-                          disabled={isActioning || isDeleted}
-                          onClick={() => void handleDelete(document)}
-                        >
-                          <Trash2 size={14} />
-                          <span>删除</span>
-                        </button>
-                      </div>
-                    </td>
+                    </th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">文档信息</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">所属空间</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-12">
+                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                          <LoaderCircle size={15} className="animate-spin" />
+                          <span>正在加载文档列表...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : documentsState.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-12 text-center text-sm text-slate-500">
+                        暂无符合条件的数据
+                      </td>
+                    </tr>
+                  ) : (
+                    documentsState.items.map((document) => {
+                      const isActioning = actioningDocumentID === document.documentId || batchActioning;
+                      const isDeleted = document.status === "deleted";
+                      return (
+                        <tr key={document.documentId} className="border-b border-slate-100 align-top text-slate-700">
+                          <td className="px-3 py-3">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-slate-700"
+                              checked={selectedDocumentSet.has(document.documentId)}
+                              disabled={selectionDisabled || isDeleted}
+                              onChange={(event) => handleToggleSelectOne(document.documentId, event.target.checked)}
+                              aria-label={`选择文档 ${document.title || document.documentId}`}
+                            />
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1">
+                              <strong className="text-sm font-semibold text-slate-900">{document.title || "未命名文档"}</strong>
+                              <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
+                                {document.documentId}
+                              </code>
+                              <code className="w-fit rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                                {document.nodeId}
+                              </code>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1 text-xs text-slate-600">
+                              <strong className="font-semibold text-slate-800">{document.spaceName || "-"}</strong>
+                              <span>
+                                {document.spaceOwnerName || "-"} / {document.spaceOwnerEmail || "-"}
+                              </span>
+                              <span>{document.spaceId}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <Badge variant="outline" className={renderVisibilityBadgeClass(document.visibility)}>
+                              {renderVisibilityLabel(document.visibility)}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1.5">
+                              <Badge variant="outline" className={renderStatusBadgeClass(document.status)}>
+                                {renderStatusLabel(document.status)}
+                              </Badge>
+                              {document.status === "banned" && document.bannedReason ? (
+                                <small className="text-xs text-rose-600">{document.bannedReason}</small>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(document.updatedAt)}</td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {document.status === "banned" ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={isActioning || isDeleted}
+                                  onClick={() => void handleUpdateStatus(document, "active")}
+                                >
+                                  <ShieldCheck size={14} />
+                                  <span>解封</span>
+                                </Button>
+                              ) : document.status === "active" ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                  disabled={isActioning || isDeleted}
+                                  onClick={() => void handleUpdateStatus(document, "banned")}
+                                >
+                                  <ShieldBan size={14} />
+                                  <span>封禁</span>
+                                </Button>
+                              ) : (
+                                <span className="text-xs font-medium text-slate-400">-</span>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={isActioning || isDeleted}
+                                onClick={() => void handleDelete(document)}
+                              >
+                                <Trash2 size={14} />
+                                <span>删除</span>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <footer className="admin-spaces-footer">
-        <p>
-          当前第 {documentsState.pagination.page} / {totalPages} 页，共 {documentsState.pagination.total} 条
-        </p>
-        <div className="admin-spaces-pagination">
-          <button
-            type="button"
-            onClick={() => setPage((value) => Math.max(1, value - 1))}
-            disabled={loading || documentsState.pagination.page <= 1}
-          >
-            上一页
-          </button>
-          <button
-            type="button"
-            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-            disabled={loading || documentsState.pagination.page >= totalPages}
-          >
-            下一页
-          </button>
-        </div>
-      </footer>
+          <footer className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-600">
+              当前第 {documentsState.pagination.page} / {totalPages} 页，共 {documentsState.pagination.total} 条
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                disabled={loading || documentsState.pagination.page <= 1}
+              >
+                上一页
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                disabled={loading || documentsState.pagination.page >= totalPages}
+              >
+                下一页
+              </Button>
+            </div>
+          </footer>
+        </CardContent>
+      </Card>
     </section>
   );
 }

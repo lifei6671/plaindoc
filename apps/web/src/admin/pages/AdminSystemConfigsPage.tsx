@@ -1,5 +1,9 @@
 import { LoaderCircle, RefreshCw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { Select } from "../../components/ui/select";
+import { Textarea } from "../../components/ui/textarea";
 import { type AdminSystemConfig, type DataGateway } from "../../data-access";
 import { TopToast, type TopToastVariant } from "../../components/TopToast";
 import { formatError } from "../../editor/status-utils";
@@ -163,7 +167,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   }, [dataGateway.admin, editorText, loadConfigs, openToast, selectedConfig?.version, selectedKey]);
 
   return (
-    <section className="admin-spaces-panel" aria-label="系统配置管理">
+    <section aria-label="系统配置管理">
       <TopToast
         open={toastState.open}
         message={toastState.message}
@@ -172,106 +176,114 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         durationMs={2800}
         onClose={closeToast}
       />
-      <div className="admin-system-config-toolbar">
-        <label className="admin-spaces-toolbar__field">
-          <span>配置键</span>
-          <select
-            value={selectedKey}
-            onChange={(event) => {
-              setSelectedKey(event.target.value as SystemConfigKey);
-              setIsEditorDirty(false);
-            }}
-            disabled={loading || saving}
-          >
-            <option value="site">site</option>
-            <option value="editor">editor</option>
-            <option value="security">security</option>
-          </select>
-        </label>
-        <div className="admin-spaces-toolbar__actions">
-          <button type="button" disabled={loading || saving} onClick={handleResetTemplate}>
-            模板填充
-          </button>
-          <button type="button" disabled={loading || saving} onClick={handleLoadCurrent}>
-            载入线上值
-          </button>
-          <button type="button" disabled={loading || saving} onClick={() => void loadConfigs()}>
-            <RefreshCw size={14} />
-            <span>刷新</span>
-          </button>
-          <button type="button" disabled={loading || saving} onClick={() => void handleSave()}>
-            <Save size={14} />
-            <span>{saving ? "保存中..." : "保存配置"}</span>
-          </button>
-        </div>
-      </div>
+      <Card className="border-slate-200/80 shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="w-full space-y-1.5 sm:w-[220px]">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">配置键</span>
+              <Select
+                value={selectedKey}
+                onChange={(event) => {
+                  setSelectedKey(event.target.value as SystemConfigKey);
+                  setIsEditorDirty(false);
+                }}
+                disabled={loading || saving}
+              >
+                <option value="site">site</option>
+                <option value="editor">editor</option>
+                <option value="security">security</option>
+              </Select>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={handleResetTemplate}>
+                模板填充
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={handleLoadCurrent}>
+                载入线上值
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={() => void loadConfigs()}>
+                <RefreshCw size={14} />
+                <span>刷新</span>
+              </Button>
+              <Button type="button" size="sm" disabled={loading || saving} onClick={() => void handleSave()}>
+                <Save size={14} />
+                <span>{saving ? "保存中..." : "保存配置"}</span>
+              </Button>
+            </div>
+          </div>
 
-      <div className="admin-system-config-editor-wrap">
-        <p className="admin-system-config-editor__meta">
-          当前键：<strong>{selectedKey}</strong>
-          {selectedConfig ? `，当前版本：v${selectedConfig.version}` : "，当前版本：未创建"}
-        </p>
-        <textarea
-          className="admin-system-config-editor"
-          value={editorText}
-          onChange={(event) => {
-            setEditorText(event.target.value);
-            setIsEditorDirty(true);
-          }}
-          spellCheck={false}
-          disabled={loading || saving}
-        />
-      </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-xs text-slate-600">
+              当前键：<strong>{selectedKey}</strong>
+              {selectedConfig ? `，当前版本：v${selectedConfig.version}` : "，当前版本：未创建"}
+            </p>
+            <Textarea
+              className="min-h-[320px] font-mono text-xs leading-relaxed"
+              value={editorText}
+              onChange={(event) => {
+                setEditorText(event.target.value);
+                setIsEditorDirty(true);
+              }}
+              spellCheck={false}
+              disabled={loading || saving}
+            />
+          </div>
 
-      <div className="admin-spaces-table-wrap">
-        <table className="admin-spaces-table admin-system-config-table">
-          <thead>
-            <tr>
-              <th>配置键</th>
-              <th>版本</th>
-              <th>更新人</th>
-              <th>更新时间</th>
-              <th>配置值</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="admin-spaces-loading-row">
-                    <LoaderCircle size={15} className="admin-spaces-loading-row__icon" />
-                    <span>正在加载系统配置...</span>
-                  </div>
-                </td>
-              </tr>
-            ) : configs.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="admin-spaces-empty-row">暂无系统配置</div>
-                </td>
-              </tr>
-            ) : (
-              configs.map((item) => (
-                <tr key={item.configKey}>
-                  <td>
-                    <code>{item.configKey}</code>
-                  </td>
-                  <td>v{item.version}</td>
-                  <td>{item.updatedByUserId || "-"}</td>
-                  <td>{formatDateTime(item.updatedAt)}</td>
-                  <td>
-                    <pre className="admin-system-config-value">{stringifyConfigValue(item.value)}</pre>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="max-h-[48vh] overflow-auto">
+              <table className="w-full min-w-[920px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                  <tr className="text-xs uppercase tracking-wide text-slate-600">
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">配置键</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">版本</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新人</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">配置值</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-12">
+                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                          <LoaderCircle size={15} className="animate-spin" />
+                          <span>正在加载系统配置...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : configs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-12 text-center text-sm text-slate-500">
+                        暂无系统配置
+                      </td>
+                    </tr>
+                  ) : (
+                    configs.map((item) => (
+                      <tr key={item.configKey} className="border-b border-slate-100 align-top text-slate-700">
+                        <td className="px-3 py-3">
+                          <code className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
+                            {item.configKey}
+                          </code>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-slate-600">v{item.version}</td>
+                        <td className="px-3 py-3 text-xs text-slate-600">{item.updatedByUserId || "-"}</td>
+                        <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(item.updatedAt)}</td>
+                        <td className="px-3 py-3">
+                          <pre className="max-h-40 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-relaxed text-slate-700">
+                            {stringifyConfigValue(item.value)}
+                          </pre>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <footer className="admin-spaces-footer">
-        <p>共 {configs.length} 条配置</p>
-      </footer>
+          <footer className="text-xs text-slate-600">共 {configs.length} 条配置</footer>
+        </CardContent>
+      </Card>
     </section>
   );
 }

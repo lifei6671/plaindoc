@@ -1,5 +1,10 @@
 import { LoaderCircle, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { Input } from "../../components/ui/input";
+import { Select } from "../../components/ui/select";
 import {
   type AdminAuditAction,
   type AdminAuditListResult,
@@ -82,6 +87,36 @@ function renderActionLabel(value: AdminAuditAction): string {
       return "删除";
     default:
       return value;
+  }
+}
+
+function renderModuleBadgeClass(value: AdminAuditModule): string {
+  switch (value) {
+    case "user":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "space":
+      return "border-indigo-200 bg-indigo-50 text-indigo-700";
+    case "document":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "theme":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "system_config":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-700";
+  }
+}
+
+function renderActionBadgeClass(value: AdminAuditAction): string {
+  switch (value) {
+    case "create":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "update":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "delete":
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-700";
   }
 }
 
@@ -260,7 +295,7 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
   }, []);
 
   return (
-    <section className="admin-spaces-panel" aria-label="审计日志查询">
+    <section aria-label="审计日志查询">
       <TopToast
         open={toastState.open}
         message={toastState.message}
@@ -269,188 +304,215 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
         durationMs={2800}
         onClose={closeToast}
       />
+      <Card className="border-slate-200/80 shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <form className="grid gap-3 xl:grid-cols-4" onSubmit={handleSearchSubmit}>
+            <label className="space-y-1.5 xl:col-span-2">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">关键字</span>
+              <Input
+                value={keywordInput}
+                onChange={(event) => setKeywordInput(event.target.value)}
+                placeholder="摘要/目标 ID/操作者"
+                disabled={loading}
+              />
+            </label>
 
-      <form className="admin-spaces-toolbar admin-audits-toolbar" onSubmit={handleSearchSubmit}>
-        <label className="admin-spaces-toolbar__field">
-          <span>关键字</span>
-          <input
-            value={keywordInput}
-            onChange={(event) => setKeywordInput(event.target.value)}
-            placeholder="摘要/目标 ID/操作者"
-            disabled={loading}
-          />
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">模块</span>
+              <Select value={moduleFilter} onChange={(event) => setModuleFilter(event.target.value as typeof moduleFilter)} disabled={loading}>
+                <option value="">全部模块</option>
+                <option value="user">user</option>
+                <option value="space">space</option>
+                <option value="document">document</option>
+                <option value="theme">theme</option>
+                <option value="system_config">system_config</option>
+              </Select>
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>模块</span>
-          <select value={moduleFilter} onChange={(event) => setModuleFilter(event.target.value as typeof moduleFilter)} disabled={loading}>
-            <option value="">全部模块</option>
-            <option value="user">user</option>
-            <option value="space">space</option>
-            <option value="document">document</option>
-            <option value="theme">theme</option>
-            <option value="system_config">system_config</option>
-          </select>
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">动作</span>
+              <Select value={actionFilter} onChange={(event) => setActionFilter(event.target.value as typeof actionFilter)} disabled={loading}>
+                <option value="">全部动作</option>
+                <option value="create">create</option>
+                <option value="update">update</option>
+                <option value="delete">delete</option>
+              </Select>
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>动作</span>
-          <select value={actionFilter} onChange={(event) => setActionFilter(event.target.value as typeof actionFilter)} disabled={loading}>
-            <option value="">全部动作</option>
-            <option value="create">create</option>
-            <option value="update">update</option>
-            <option value="delete">delete</option>
-          </select>
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">操作者 ID</span>
+              <Input value={actorUserIDInput} onChange={(event) => setActorUserIDInput(event.target.value)} disabled={loading} />
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>操作者 ID</span>
-          <input value={actorUserIDInput} onChange={(event) => setActorUserIDInput(event.target.value)} disabled={loading} />
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">目标 ID</span>
+              <Input value={targetIDInput} onChange={(event) => setTargetIDInput(event.target.value)} disabled={loading} />
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>目标 ID</span>
-          <input value={targetIDInput} onChange={(event) => setTargetIDInput(event.target.value)} disabled={loading} />
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">请求 ID</span>
+              <Input value={requestIDInput} onChange={(event) => setRequestIDInput(event.target.value)} disabled={loading} />
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>请求 ID</span>
-          <input value={requestIDInput} onChange={(event) => setRequestIDInput(event.target.value)} disabled={loading} />
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">开始时间</span>
+              <Input
+                type="datetime-local"
+                value={fromInput}
+                onChange={(event) => setFromInput(event.target.value)}
+                disabled={loading}
+              />
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>开始时间</span>
-          <input
-            type="datetime-local"
-            value={fromInput}
-            onChange={(event) => setFromInput(event.target.value)}
-            disabled={loading}
-          />
-        </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">结束时间</span>
+              <Input
+                type="datetime-local"
+                value={toInput}
+                onChange={(event) => setToInput(event.target.value)}
+                disabled={loading}
+              />
+            </label>
 
-        <label className="admin-spaces-toolbar__field">
-          <span>结束时间</span>
-          <input type="datetime-local" value={toInput} onChange={(event) => setToInput(event.target.value)} disabled={loading} />
-        </label>
+            <div className="flex flex-wrap items-end gap-2 xl:col-span-3">
+              <Button type="submit" size="sm" disabled={loading}>
+                <Search size={14} />
+                <span>查询</span>
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={handleReset}>
+                重置
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadAudits()}>
+                <RefreshCw size={14} />
+                <span>刷新</span>
+              </Button>
+            </div>
+          </form>
 
-        <div className="admin-spaces-toolbar__actions">
-          <button type="submit" disabled={loading}>
-            <Search size={14} />
-            <span>查询</span>
-          </button>
-          <button type="button" disabled={loading} onClick={handleReset}>
-            重置
-          </button>
-          <button type="button" disabled={loading} onClick={() => void loadAudits()}>
-            <RefreshCw size={14} />
-            <span>刷新</span>
-          </button>
-        </div>
-      </form>
-
-      <div className="admin-spaces-table-wrap">
-        <table className="admin-spaces-table admin-audits-table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>模块/动作</th>
-              <th>目标</th>
-              <th>操作者</th>
-              <th>摘要</th>
-              <th>请求 ID</th>
-              <th>详情</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7}>
-                  <div className="admin-spaces-loading-row">
-                    <LoaderCircle size={15} className="admin-spaces-loading-row__icon" />
-                    <span>正在加载审计日志...</span>
-                  </div>
-                </td>
-              </tr>
-            ) : auditsState.items.length === 0 ? (
-              <tr>
-                <td colSpan={7}>
-                  <div className="admin-spaces-empty-row">暂无审计日志</div>
-                </td>
-              </tr>
-            ) : (
-              auditsState.items.map((item) => {
-                const isExpanded = expandedAuditID === item.id;
-                return (
-                  <tr key={item.id}>
-                    <td>
-                      <div className="admin-users-time-cell">
-                        <span>{formatDateTime(item.createdAt)}</span>
-                        <code className="admin-audits-id">#{item.id}</code>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="admin-audits-module-cell">
-                        <span className="admin-theme-kind admin-theme-kind--custom">{renderModuleLabel(item.module)}</span>
-                        <span className="admin-spaces-visibility">{renderActionLabel(item.action)}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="admin-theme-cell">
-                        <strong>{item.targetType || "-"}</strong>
-                        <code>{item.targetId || "-"}</code>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="admin-spaces-owner-cell">
-                        <strong>{formatActorIdentity(item)}</strong>
-                        <span>{item.actorUserId || "-"}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <p className="admin-audits-summary">{item.summary || "-"}</p>
-                    </td>
-                    <td>
-                      <code className="admin-audits-request-id">{item.requestId || "-"}</code>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="admin-audits-detail-button"
-                        onClick={() => setExpandedAuditID(isExpanded ? null : item.id)}
-                      >
-                        {isExpanded ? "收起" : "查看"}
-                      </button>
-                      {isExpanded ? (
-                        <pre className="admin-system-config-value admin-audits-detail-json">
-                          {JSON.stringify(item.detail ?? {}, null, 2)}
-                        </pre>
-                      ) : null}
-                    </td>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="max-h-[56vh] overflow-auto">
+              <table className="w-full min-w-[1280px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                  <tr className="text-xs uppercase tracking-wide text-slate-600">
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">时间</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">模块/动作</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">目标</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作者</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">摘要</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">请求 ID</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">详情</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-12">
+                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                          <LoaderCircle size={15} className="animate-spin" />
+                          <span>正在加载审计日志...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : auditsState.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-12 text-center text-sm text-slate-500">
+                        暂无审计日志
+                      </td>
+                    </tr>
+                  ) : (
+                    auditsState.items.map((item) => {
+                      const isExpanded = expandedAuditID === item.id;
+                      return (
+                        <tr key={item.id} className="border-b border-slate-100 align-top text-slate-700">
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1">
+                              <span className="text-xs text-slate-600">{formatDateTime(item.createdAt)}</span>
+                              <code className="w-fit rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                                #{item.id}
+                              </code>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className={renderModuleBadgeClass(item.module)}>
+                                {renderModuleLabel(item.module)}
+                              </Badge>
+                              <Badge variant="outline" className={renderActionBadgeClass(item.action)}>
+                                {renderActionLabel(item.action)}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1">
+                              <strong className="text-xs font-semibold text-slate-900">{item.targetType || "-"}</strong>
+                              <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
+                                {item.targetId || "-"}
+                              </code>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1 text-xs text-slate-600">
+                              <strong className="font-semibold text-slate-800">{formatActorIdentity(item)}</strong>
+                              <span>{item.actorUserId || "-"}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-xs text-slate-600">{item.summary || "-"}</td>
+                          <td className="px-3 py-3">
+                            <code className="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                              {item.requestId || "-"}
+                            </code>
+                          </td>
+                          <td className="px-3 py-3">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setExpandedAuditID(isExpanded ? null : item.id)}
+                            >
+                              {isExpanded ? "收起" : "查看"}
+                            </Button>
+                            {isExpanded ? (
+                              <pre className="mt-2 max-h-44 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-relaxed text-slate-700">
+                                {JSON.stringify(item.detail ?? {}, null, 2)}
+                              </pre>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <footer className="admin-spaces-footer">
-        <p>
-          共 {auditsState.pagination.total} 条，当前第 {auditsState.pagination.page} / {totalPages} 页
-        </p>
-        <div className="admin-spaces-pagination">
-          <button type="button" disabled={loading || page <= 1} onClick={() => setPage((previousPage) => Math.max(1, previousPage - 1))}>
-            上一页
-          </button>
-          <button
-            type="button"
-            disabled={loading || page >= totalPages}
-            onClick={() => setPage((previousPage) => Math.min(totalPages, previousPage + 1))}
-          >
-            下一页
-          </button>
-        </div>
-      </footer>
+          <footer className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-600">
+              共 {auditsState.pagination.total} 条，当前第 {auditsState.pagination.page} / {totalPages} 页
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={loading || page <= 1}
+                onClick={() => setPage((previousPage) => Math.max(1, previousPage - 1))}
+              >
+                上一页
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={loading || page >= totalPages}
+                onClick={() => setPage((previousPage) => Math.min(totalPages, previousPage + 1))}
+              >
+                下一页
+              </Button>
+            </div>
+          </footer>
+        </CardContent>
+      </Card>
     </section>
   );
 }
