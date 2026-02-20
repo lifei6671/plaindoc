@@ -27,6 +27,8 @@ var (
 	ErrInvalidCredentials  = errors.New("invalid credentials")
 	ErrUnauthorized        = errors.New("unauthorized")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	ErrUserBanned          = errors.New("user banned")
+	ErrUserDeleted         = errors.New("user deleted")
 )
 
 type authTokenClaims struct {
@@ -100,6 +102,7 @@ func (s *AuthService) Register(ctx context.Context, email string, password strin
 		Email:        normalizedEmail,
 		PasswordHash: string(passwordHash),
 		Name:         strings.TrimSpace(name),
+		Status:       models.EntityStatusActive,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		if isUniqueConstraintError(err) {
@@ -141,6 +144,9 @@ func (s *AuthService) Login(ctx context.Context, email string, password string) 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return AuthSession{}, ErrInvalidCredentials
 	}
+	if err := ensureAuthUserActive(user); err != nil {
+		return AuthSession{}, err
+	}
 
 	accessToken, refreshToken, err := s.issueSessionTokens(ctx, user.UserID)
 	if err != nil {
@@ -171,6 +177,12 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (AuthSes
 	user, err := s.userRepo.GetByUserID(ctx, token.UserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AuthSession{}, ErrUnauthorized
+		}
+		return AuthSession{}, err
+	}
+	if err := ensureAuthUserActive(user); err != nil {
+		if errors.Is(err, ErrUserBanned) || errors.Is(err, ErrUserDeleted) {
 			return AuthSession{}, ErrUnauthorized
 		}
 		return AuthSession{}, err
@@ -208,6 +220,12 @@ func (s *AuthService) Me(ctx context.Context, accessToken string) (AuthSession, 
 	user, err := s.userRepo.GetByUserID(ctx, token.UserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AuthSession{}, ErrUnauthorized
+		}
+		return AuthSession{}, err
+	}
+	if err := ensureAuthUserActive(user); err != nil {
+		if errors.Is(err, ErrUserBanned) || errors.Is(err, ErrUserDeleted) {
 			return AuthSession{}, ErrUnauthorized
 		}
 		return AuthSession{}, err
@@ -371,4 +389,20 @@ func isUniqueConstraintError(err error) bool {
 	return strings.Contains(message, "duplicate") ||
 		strings.Contains(message, "unique constraint") ||
 		strings.Contains(message, "unique failed")
+}
+
+func ensureAuthUserActive(user *models.User) error {
+	if user == nil {
+		return ErrUnauthorized
+	}
+	switch EnsureEntityActive(user.Status, user.BannedAt, user.DeletedAt) {
+	case nil:
+		return nil
+	case ErrEntityBanned:
+		return ErrUserBanned
+	case ErrEntityDeleted:
+		return ErrUserDeleted
+	default:
+		return ErrUnauthorized
+	}
 }

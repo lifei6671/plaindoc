@@ -34,7 +34,9 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 	requiredTables := []string{
 		"users",
 		"user_sessions",
+		"user_admin_roles",
 		"spaces",
+		"space_admin_scopes",
 		"space_members",
 		"nodes",
 		"themes",
@@ -97,6 +99,7 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 		Email:        "tester@example.com",
 		PasswordHash: "hashed",
 		Name:         "tester",
+		Status:       models.EntityStatusActive,
 	}
 	if err := orm.WithContext(ctx).Create(user).Error; err != nil {
 		return err
@@ -106,6 +109,8 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 		SpaceID:     spaceID,
 		Name:        "default",
 		OwnerUserID: userID,
+		Visibility:  models.VisibilityMember,
+		Status:      models.EntityStatusActive,
 	}
 	if err := orm.WithContext(ctx).Create(space).Error; err != nil {
 		return err
@@ -143,6 +148,8 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 		DocumentID:      documentID,
 		NodeID:          nodeID,
 		ThemeID:         themeID,
+		Visibility:      models.VisibilityMember,
+		Status:          models.EntityStatusActive,
 		Title:           "hello",
 		ContentMD:       "# hello",
 		Version:         1,

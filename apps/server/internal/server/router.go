@@ -32,17 +32,40 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 	api := router.Group("/api")
 	{
 		api.GET("/healthz", handler.Health)
-		authService := service.NewAuthService(
-			repository.NewGormUserRepository(db),
-			repository.NewGormUserSessionRepository(db),
-			cfg.JWT,
-		)
+		userRepo := repository.NewGormUserRepository(db)
+		userSessionRepo := repository.NewGormUserSessionRepository(db)
+		spaceRepo := repository.NewGormSpaceRepository(db)
+		documentRepo := repository.NewGormDocumentRepository(db)
+		adminRoleRepo := repository.NewGormAdminRoleRepository(db)
+		spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
+
+		authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
 		authHandler := handler.NewAuthHandler(authService)
 		api.POST("/auth/register", authHandler.Register)
 		api.POST("/auth/login", authHandler.Login)
 		api.POST("/auth/refresh", authHandler.Refresh)
 		api.GET("/auth/me", authHandler.Me)
 		api.POST("/auth/logout", authHandler.Logout)
+
+		visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
+		accessHandler := handler.NewAccessHandler(authService, visibilityService)
+		api.GET("/spaces/:spaceId", accessHandler.GetSpace)
+		api.PUT("/spaces/:spaceId/visibility", accessHandler.UpdateSpaceVisibility)
+		api.GET("/docs/:docId", accessHandler.GetDocument)
+		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
+
+		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo)
+		adminHandler := handler.NewAdminHandler(adminAccessService)
+		adminAPI := api.Group("/admin")
+		adminAPI.Use(middleware.RequireAdmin(authService, adminAccessService))
+		{
+			adminAPI.GET("/me", adminHandler.Me)
+			adminAPI.GET(
+				"/spaces/:spaceId/check",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminHandler.CheckSpace,
+			)
+		}
 
 		themeHandler := handler.NewThemeHandler(db)
 		documentThemeHandler := handler.NewDocumentThemeHandler(db)

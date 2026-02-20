@@ -123,6 +123,10 @@ func (h *authHandler) Login(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrInvalidCredentials):
 			response.Error(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
+		case errors.Is(err, service.ErrUserBanned):
+			response.Error(c, http.StatusForbidden, "USER_BANNED", "user has been banned")
+		case errors.Is(err, service.ErrUserDeleted):
+			response.Error(c, http.StatusForbidden, "USER_DELETED", "user has been deleted")
 		default:
 			response.InternalError(c)
 		}

@@ -21,6 +21,11 @@ func (r *gormUserRepository) Create(ctx context.Context, user *models.User) erro
 	if r == nil || r.db == nil {
 		return fmt.Errorf("user repository db is nil")
 	}
+	if user != nil {
+		if !models.IsValidEntityStatus(user.Status) {
+			user.Status = models.EntityStatusActive
+		}
+	}
 	return r.db.WithContext(ctx).Create(user).Error
 }
 
@@ -30,10 +35,13 @@ func (r *gormUserRepository) GetByUserID(ctx context.Context, userID string) (*m
 	}
 	var user models.User
 	if err := r.db.WithContext(ctx).
-		Select("id", "user_id", "email", "password_hash", "name").
+		Select("id", "user_id", "email", "password_hash", "name", "status", "banned_reason", "banned_at", "deleted_at").
 		Where("user_id = ?", userID).
 		Take(&user).Error; err != nil {
 		return nil, err
+	}
+	if !models.IsValidEntityStatus(user.Status) {
+		user.Status = models.EntityStatusActive
 	}
 	return &user, nil
 }
@@ -44,10 +52,13 @@ func (r *gormUserRepository) GetByEmail(ctx context.Context, email string) (*mod
 	}
 	var user models.User
 	if err := r.db.WithContext(ctx).
-		Select("id", "user_id", "email", "password_hash", "name").
+		Select("id", "user_id", "email", "password_hash", "name", "status", "banned_reason", "banned_at", "deleted_at").
 		Where("email = ?", email).
 		Take(&user).Error; err != nil {
 		return nil, err
+	}
+	if !models.IsValidEntityStatus(user.Status) {
+		user.Status = models.EntityStatusActive
 	}
 	return &user, nil
 }
