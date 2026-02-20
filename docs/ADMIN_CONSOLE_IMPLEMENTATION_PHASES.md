@@ -10,10 +10,13 @@
 ## 最新进展（2026-02-20）
 
 1. Milestone 1 已完成（RBAC + Scope + 状态迁移 + admin 鉴权中间件）。  
-2. 已新增后台基础接口：
+2. Milestone 2 已完成（后台路由壳 + 角色菜单显示 + admin 身份联调）。  
+3. 已新增后台基础接口：
    - `GET /api/admin/me`
    - `GET /api/admin/spaces/:spaceId/check`
-3. 已完成后台权限矩阵基础测试（`platform_admin`、`space_admin`、非管理员）。  
+4. 已完成后台权限矩阵基础测试（`platform_admin`、`space_admin`、非管理员）。  
+5. Milestone 3 已完成核心能力（用户列表/封禁/解封/软删除 + 管理端用户页联调）。  
+6. Milestone 4 已完成（空间与文档管理能力 + 批量操作 + scope 权限校验 + 空间删除后文档级联软删除 + 业务端封禁/删除拦截）。  
 
 ---
 
@@ -120,6 +123,7 @@
 ---
 
 ## Milestone 2: 管理后台前端壳与路由
+**Status**: Completed（2026-02-20）  
 **Type**: UI  
 **Estimated**: 1~2 天  
 **Files**:
@@ -130,49 +134,78 @@
 - `apps/web/src/data-access/http/adapter.ts`（补 admin session/me）
 
 **Tasks**:
-- [ ] 新增后台入口路由：`/admin/login`、`/admin`。
-- [ ] 新增后台基础布局：侧边菜单、顶部用户区、面包屑。
-- [ ] 按角色动态渲染菜单（platform_admin vs space_admin）。
-- [ ] 未登录/无权限时跳转与错误页处理（401/403）。
+- [x] 新增后台入口路由：`/admin/login`、`/admin`。
+- [x] 新增后台基础布局：侧边菜单、顶部用户区、面包屑。
+- [x] 按角色动态渲染菜单（platform_admin vs space_admin）。
+- [x] 未登录/无权限时跳转与错误页处理（401/403）。
 
 **Verification Criteria**:
-- [ ] 平台管理员登录后看到全菜单。
-- [ ] 空间管理员登录后只看到授权菜单。
-- [ ] 普通用户访问后台路由被拒绝。
-- [ ] 刷新页面后角色和菜单状态可恢复。
+- [x] 平台管理员登录后看到全菜单。
+- [x] 空间管理员登录后只看到授权菜单。
+- [x] 普通用户访问后台路由被拒绝。
+- [x] 刷新页面后角色和菜单状态可恢复。
 
 **Exit Criteria**: 后台页面框架可承载各业务模块，路由守卫稳定。
 
 ---
 
 ## Milestone 3: 用户管理（含封禁/删除）
+**Status**: In Progress（2026-02-20，核心能力已落地，审计写入待 Milestone 6 审计中心统一接入）  
 **Type**: API + UI  
 **Estimated**: 2~3 天  
 **Files**:
 - `apps/server/internal/server/handler/admin_user.go`（新增）
 - `apps/server/internal/service/admin_user_service.go`（新增）
-- `apps/server/internal/storage/repository/gorm_user_repository.go`（扩展）
-- `apps/web/src/admin/pages/users/*.tsx`（新增）
-- `apps/web/src/data-access/types.ts`、`apps/web/src/data-access/http/adapter.ts`
+- `apps/server/internal/server/middleware/admin_auth.go`（扩展 `RequirePlatformAdmin`）
+- `apps/server/internal/storage/repository/interfaces.go`（扩展 User / Session 仓储契约）
+- `apps/server/internal/storage/repository/gorm_user_repository.go`（扩展列表/状态更新/软删除）
+- `apps/server/internal/storage/repository/gorm_user_session_repository.go`（扩展按用户批量吊销会话）
+- `apps/server/internal/server/router.go`（接入 `/api/admin/users*` 路由）
+- `apps/server/internal/server/admin_handler_test.go`（新增用户管理集成测试）
+- `apps/web/src/admin/pages/AdminUsersPage.tsx`（新增）
+- `apps/web/src/admin/AdminApp.tsx`（接入用户管理页面）
+- `apps/web/src/data-access/types.ts`、`apps/web/src/data-access/http/adapter.ts`、`apps/web/src/data-access/local/adapter.ts`
 
 **Tasks**:
-- [ ] 实现用户列表、搜索、分页接口。
-- [ ] 实现用户封禁/解封接口（记录原因与操作者）。
-- [ ] 实现用户删除接口（首版软删除，保留审计）。
-- [ ] 前端实现用户管理列表页和操作确认弹窗。
-- [ ] 所有关键动作写入审计日志。
+- [x] 实现用户列表、搜索、分页接口。
+- [x] 实现用户封禁/解封接口（记录原因与操作者）。
+- [x] 实现用户删除接口（首版软删除，保留审计）。
+- [x] 前端实现用户管理列表页和操作确认弹窗。
+- [ ] 所有关键动作写入审计日志（待审计中心统一接入）。
 
 **Verification Criteria**:
-- [ ] 封禁用户后该用户无法登录业务端。
-- [ ] 删除用户后默认列表不可见（按策略可查历史）。
-- [ ] 非平台管理员不可调用用户管理写接口。
-- [ ] 审计日志可看到操作者、动作、目标与时间。
+- [x] 封禁用户后该用户无法登录业务端。
+- [x] 删除用户后默认列表不可见（按策略可查历史）。
+- [x] 非平台管理员不可调用用户管理写接口。
+- [ ] 审计日志可看到操作者、动作、目标与时间（待审计中心统一接入）。
 
 **Exit Criteria**: 用户全生命周期管理能力可用并可追溯。
+
+### Milestone 3 实现补充（2026-02-20）
+
+1. 已新增接口：
+   - `GET /api/admin/users`
+   - `PATCH /api/admin/users/:userId/status`
+   - `DELETE /api/admin/users/:userId`
+2. 权限策略：
+   - 用户管理全部接口仅允许 `platform_admin` 访问。
+   - 拦截管理员自封禁、自删除操作。
+3. 会话策略：
+   - 封禁、删除用户时立即调用 `RevokeAllByUserID` 吊销全部未吊销会话。
+4. 前端能力：
+   - `/admin/users` 已支持查询、状态过滤、分页、封禁/解封、删除。
+   - 默认筛选不展示已删除用户，可切换到 `deleted` 或 `all` 查看历史记录。
+
+### Milestone 3 踩坑记录（2026-02-20）
+
+1. SQLite `users.created_at/updated_at` 在当前迁移中是 `TEXT`，直接扫描到 `time.Time` 会触发 `unsupported Scan`。  
+2. 解决方式：用户列表改为先按字符串读取，再在仓储层统一解析时间，避免仅在 SQLite 下出现 500。  
+3. 结论：后续新迁移中建议统一时间字段类型声明（优先 `TIMESTAMP/DATETIME`），并在跨数据库仓储层避免对时间格式做隐式假设。  
 
 ---
 
 ## Milestone 4: 空间与文档管理（含封禁/删除）
+**Status**: Completed（2026-02-20，空间/文档管理含批量、权限边界、删除级联与业务端访问拦截均已验收）  
 **Type**: API + UI  
 **Estimated**: 3~4 天  
 **Files**:
@@ -180,27 +213,66 @@
 - `apps/server/internal/server/handler/admin_document.go`（新增）
 - `apps/server/internal/service/admin_space_service.go`（新增）
 - `apps/server/internal/service/admin_document_service.go`（新增）
-- `apps/web/src/admin/pages/spaces/*.tsx`（新增）
+- `apps/web/src/admin/pages/AdminSpacesPage.tsx`（新增）
 - `apps/web/src/admin/pages/documents/*.tsx`（新增）
 
 **Tasks**:
-- [ ] 实现空间列表/搜索/过滤（含 status、visibility）。
-- [ ] 实现空间封禁/解封、删除接口（space_admin 限授权范围）。
-- [ ] 实现文档列表/搜索/过滤（按空间、状态、可见性）。
-- [ ] 实现文档封禁/解封、删除接口。
-- [ ] 前端实现空间与文档管理页，支持批量操作。
+- [x] 实现空间列表/搜索/过滤（含 status、visibility）。
+- [x] 实现空间封禁/解封接口（space_admin 限授权范围）。
+- [x] 实现空间删除接口（space_admin 限授权范围）。
+- [x] 实现空间元数据设置（名称、可见性）。
+- [x] 实现文档列表/搜索/过滤（按空间、状态、可见性）。
+- [x] 实现文档封禁/解封、删除接口。
+- [x] 前端实现空间与文档管理页，支持批量操作。
 
 **Verification Criteria**:
-- [ ] `space_admin` 只能操作授权空间和其文档。
-- [ ] `platform_admin` 可跨空间操作。
-- [ ] 删除空间后符合级联策略（节点/文档状态一致）。
-- [ ] 封禁中的空间/文档在业务端访问被拒绝（403）。
+- [x] `space_admin` 只能操作授权空间和其文档。
+- [x] `platform_admin` 可跨空间操作。
+- [x] 删除空间后符合级联策略（空间软删除时，其下文档同步软删除）。
+- [x] 封禁中的空间/文档在业务端访问被拒绝（403）。
 
 **Exit Criteria**: 空间/文档后台治理能力可用，权限边界正确。
+
+### Milestone 4 空间管理补充（2026-02-20）
+
+1. 已新增接口：
+   - `GET /api/admin/spaces`
+   - `PATCH /api/admin/spaces/:spaceId/status`
+   - `PATCH /api/admin/spaces/:spaceId/metadata`
+   - `DELETE /api/admin/spaces/:spaceId`
+2. 权限策略：
+   - `platform_admin` 可管理全站空间。
+   - `space_admin` 仅可管理 `space_admin_scopes` 授权空间。
+3. 页面能力：
+   - `/admin/spaces` 已支持空间列表、创建者（姓名/邮箱）展示、创建时间/更新时间展示。
+   - 支持空间封禁/解封（封禁原因必填）与状态原因展示。
+   - 支持空间元数据设置（名称、可见性）与软删除。
+   - 支持空间多选与批量封禁/解封/删除。
+4. 测试覆盖：
+   - 已新增后台集成测试覆盖空间封禁/解封、scope 越权拦截、封禁原因校验。
+   - 已补充空间删除后的文档级联软删除验证，以及删除后业务端文档访问 `403` 验证。
+
+### Milestone 4 文档管理补充（2026-02-20）
+
+1. 已新增接口：
+   - `GET /api/admin/documents`
+   - `PATCH /api/admin/documents/:documentId/status`
+   - `DELETE /api/admin/documents/:documentId`
+2. 权限策略：
+   - `platform_admin` 可管理全站文档。
+   - `space_admin` 仅可管理授权空间内文档。
+3. 页面能力：
+   - `/admin/documents` 已支持文档列表、关键词检索、按空间/状态/可见性筛选。
+   - 支持文档封禁/解封（封禁原因必填）与软删除。
+   - 支持文档多选与批量封禁/解封/删除。
+4. 测试覆盖：
+   - 已新增后台集成测试覆盖文档列表 scope 过滤、封禁原因校验、越权拦截、软删除状态落库。
+   - 已补充文档封禁后业务端访问 `403` 验证。
 
 ---
 
 ## Milestone 5: 主题管理 + 系统配置
+**Status**: In Progress（2026-02-20，主题与系统配置前后端已完成，审计接入待 Milestone 6 统一完成）  
 **Type**: API + UI  
 **Estimated**: 2~3 天  
 **Files**:
@@ -212,18 +284,47 @@
 - `apps/web/src/admin/pages/system-config/*.tsx`（新增）
 
 **Tasks**:
-- [ ] 实现主题的增删改查与启停用（区分 builtin 与 custom）。
-- [ ] 实现系统配置读写接口（JSON schema 校验 + 版本号）。
-- [ ] 前端实现主题管理页和系统配置页。
+- [x] 实现主题的增删改查与启停用（区分 builtin 与 custom）。
+- [x] 实现系统配置读写接口（JSON schema 校验 + 版本号）。
+- [x] 前端实现主题管理页和系统配置页。
 - [ ] 系统配置变更写审计，并支持查看最近版本。
 
 **Verification Criteria**:
-- [ ] 主题更新后业务端可读取最新主题数据。
-- [ ] 非平台管理员不可修改系统配置。
-- [ ] 配置非法值被后端校验拒绝（400）。
+- [x] 主题更新后业务端可读取最新主题数据。
+- [x] 非平台管理员不可修改系统配置。
+- [x] 配置非法值被后端校验拒绝（400）。
 - [ ] 关键操作均有审计记录。
 
 **Exit Criteria**: 管理后台可独立维护主题和系统配置，不依赖手工改库。
+
+### Milestone 5 后端实现补充（2026-02-20）
+
+1. 迁移与数据结构：
+   - 新增 `0006_admin_theme_system_configs`（sqlite/postgres/mysql）。
+   - `themes` 增加 `is_enabled` 字段，支持主题启停。
+   - 新增 `system_configs` 表（`config_key`、`config_value_json`、`version`、`updated_by_user_id`）。
+2. 新增后台主题接口：
+   - `GET /api/admin/themes`
+   - `POST /api/admin/themes`
+   - `PUT /api/admin/themes/:themeId`
+   - `DELETE /api/admin/themes/:themeId`
+3. 新增后台系统配置接口：
+   - `GET /api/admin/system-configs`
+   - `PUT /api/admin/system-configs/:key`
+4. 策略与约束：
+   - `themes`：区分 `builtin/custom`，内置主题不可修改、不可删除；`enabled=false` 不在业务端 `GET /api/themes` 返回结果中。
+   - `system-configs`：仅 `platform_admin` 可写；按 `expectedVersion` 做乐观锁版本控制，冲突返回 `409`。
+   - 当前预置配置键：`site`、`editor`、`security`，均执行服务端 schema 校验。
+
+### Milestone 5 前端实现补充（2026-02-20）
+
+1. 已接入后台主题管理页 `/admin/themes`：
+   - 支持主题列表、关键词过滤、新建、编辑、启停、删除。
+   - 对内置主题在 UI 层限制修改/删除/启停，避免误操作。
+2. 已接入系统配置页 `/admin/system-configs`：
+   - 支持 `site/editor/security` 三类配置键切换。
+   - 提供 JSON 编辑器、模板填充、载入线上值、保存配置。
+   - 保存时携带 `expectedVersion`，对后端版本冲突（409）直接反馈错误。
 
 ---
 
@@ -302,3 +403,15 @@
 3. 封禁与删除能力在线上可执行，且具备完整审计追踪。  
 4. 所有越权访问被拦截，关键接口覆盖集成测试。  
 5. 具备上线与回滚预案，可在生产环境灰度发布。  
+
+---
+
+## 九、前端确认交互规范（2026-02-20）
+
+1. 禁止在前端代码中使用浏览器原生确认/输入弹框（`window.confirm`、`window.prompt`）。  
+2. 确认类交互必须使用项目模态窗能力：
+   - 通用编辑器与工作区：`apps/web/src/components/ConfirmDialog.tsx`（`useConfirmDialog`）。
+   - 管理后台：`apps/web/src/admin/components/AdminDialogs.tsx`（`useAdminDialogs`）。  
+3. 高风险动作（删除、封禁）必须使用 `danger` 视觉语义，并写明影响范围（例如“会删除子节点”）。  
+4. 业务流程中必须以 `await confirm(...)` 控制后续动作，未确认直接 `return`，避免误触发写操作。  
+5. 新增功能若涉及确认交互，默认复用上述组件，不得引入新的浏览器原生弹框实现。  

@@ -40,6 +40,7 @@ type themeResponse struct {
 	InlineCodeStyle    map[string]any    `json:"inlineCodeStyle"`
 	CustomCSS          string            `json:"customCss"`
 	Builtin            bool              `json:"builtin"`
+	Enabled            bool              `json:"enabled"`
 }
 
 type updateDocumentThemeRequest struct {
@@ -57,6 +58,7 @@ type themeRow struct {
 	InlineCodeStyleJSON    string `gorm:"column:inline_code_style_json"`
 	CustomCSS              string `gorm:"column:custom_css"`
 	IsBuiltin              bool   `gorm:"column:is_builtin"`
+	IsEnabled              bool   `gorm:"column:is_enabled"`
 }
 
 type documentRow struct {
@@ -88,7 +90,8 @@ func (h *themeHandler) List(c *gin.Context) {
 	var themes []themeRow
 	if err := h.db.WithContext(c.Request.Context()).
 		Table("themes").
-		Select("theme_id", "name", "description", "variables_json", "syntax_theme", "code_block_style_json", "code_block_code_style_json", "inline_code_style_json", "custom_css", "is_builtin").
+		Select("theme_id", "name", "description", "variables_json", "syntax_theme", "code_block_style_json", "code_block_code_style_json", "inline_code_style_json", "custom_css", "is_builtin", "is_enabled").
+		Where("is_enabled = ?", true).
 		Order("is_builtin DESC").
 		Order("updated_at DESC").
 		Find(&themes).Error; err != nil {
@@ -136,7 +139,7 @@ func (h *documentThemeHandler) UpdateTheme(c *gin.Context) {
 	var themeCount int64
 	if err := h.db.WithContext(c.Request.Context()).
 		Table("themes").
-		Where("theme_id = ?", req.ThemeID).
+		Where("theme_id = ? AND is_enabled = ?", req.ThemeID, true).
 		Count(&themeCount).Error; err != nil {
 		response.InternalError(c)
 		return
@@ -209,6 +212,7 @@ func toThemeResponse(theme themeRow) (themeResponse, error) {
 		InlineCodeStyle:    inlineCodeStyle,
 		CustomCSS:          theme.CustomCSS,
 		Builtin:            theme.IsBuiltin,
+		Enabled:            theme.IsEnabled,
 	}, nil
 }
 

@@ -35,6 +35,8 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		"users",
 		"user_sessions",
 		"user_admin_roles",
+		"system_configs",
+		"audit_logs",
 		"spaces",
 		"space_admin_scopes",
 		"space_members",

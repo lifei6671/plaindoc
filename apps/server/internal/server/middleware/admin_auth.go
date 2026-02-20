@@ -94,6 +94,34 @@ func RequireSpaceManagement(
 	}
 }
 
+// RequirePlatformAdmin 确保管理员具备平台管理权限。
+func RequirePlatformAdmin(adminAccessService *service.AdminAccessService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if adminAccessService == nil {
+			response.InternalError(c)
+			return
+		}
+
+		actorUserID, err := AdminActorUserID(c)
+		if err != nil {
+			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+			return
+		}
+
+		allowed, err := adminAccessService.IsPlatformAdmin(c.Request.Context(), actorUserID)
+		if err != nil {
+			response.InternalError(c)
+			return
+		}
+		if !allowed {
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // AdminActorUserID 读取管理员 actor user id。
 func AdminActorUserID(c *gin.Context) (string, error) {
 	rawValue, exists := c.Get(adminActorUserIDContextKey)

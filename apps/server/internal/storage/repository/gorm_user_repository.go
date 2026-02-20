@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
@@ -61,4 +63,205 @@ func (r *gormUserRepository) GetByEmail(ctx context.Context, email string) (*mod
 		user.Status = models.EntityStatusActive
 	}
 	return &user, nil
+}
+
+func (r *gormUserRepository) List(
+	ctx context.Context,
+	params ListUsersParams,
+) ([]models.User, int64, error) {
+	if r == nil || r.db == nil {
+		return nil, 0, fmt.Errorf("user repository db is nil")
+	}
+
+	baseQuery := r.db.WithContext(ctx).Model(&models.User{})
+
+	keyword := strings.ToLower(strings.TrimSpace(params.Keyword))
+	if keyword != "" {
+		likeKeyword := "%" + keyword + "%"
+		baseQuery = baseQuery.Where(
+			"LOWER(user_id) LIKE ? OR LOWER(email) LIKE ? OR LOWER(name) LIKE ?",
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+		)
+	}
+
+	statuses := normalizeStatuses(params.Statuses)
+	if len(statuses) > 0 {
+		baseQuery = baseQuery.Where("status IN ?", statuses)
+	}
+
+	var total int64
+	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	type userListRow struct {
+		ID           int64               `gorm:"column:id"`
+		UserID       string              `gorm:"column:user_id"`
+		Email        string              `gorm:"column:email"`
+		PasswordHash string              `gorm:"column:password_hash"`
+		Name         string              `gorm:"column:name"`
+		Status       models.EntityStatus `gorm:"column:status"`
+		BannedReason string              `gorm:"column:banned_reason"`
+		BannedAt     *time.Time          `gorm:"column:banned_at"`
+		DeletedAt    *time.Time          `gorm:"column:deleted_at"`
+		CreatedAtRaw string              `gorm:"column:created_at"`
+		UpdatedAtRaw string              `gorm:"column:updated_at"`
+	}
+
+	var rows []userListRow
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select("id", "user_id", "email", "password_hash", "name", "status", "banned_reason", "banned_at", "deleted_at", "created_at", "updated_at").
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	users := make([]models.User, 0, len(rows))
+	for _, row := range rows {
+		users = append(users, models.User{
+			ID:           row.ID,
+			UserID:       row.UserID,
+			Email:        row.Email,
+			PasswordHash: row.PasswordHash,
+			Name:         row.Name,
+			Status:       row.Status,
+			BannedReason: row.BannedReason,
+			BannedAt:     row.BannedAt,
+			DeletedAt:    row.DeletedAt,
+			CreatedAt:    parseRecordTime(row.CreatedAtRaw),
+			UpdatedAt:    parseRecordTime(row.UpdatedAtRaw),
+		})
+	}
+
+	for idx := range users {
+		if !models.IsValidEntityStatus(users[idx].Status) {
+			users[idx].Status = models.EntityStatusActive
+		}
+	}
+
+	return users, total, nil
+}
+
+func (r *gormUserRepository) UpdateStatus(ctx context.Context, params UpdateUserStatusParams) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("user repository db is nil")
+	}
+	if params.UserID == "" {
+		return false, nil
+	}
+	if !models.IsValidEntityStatus(params.Status) {
+		return false, nil
+	}
+
+	updatedAt := params.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	updateValues := map[string]any{
+		"status":        params.Status,
+		"updated_at":    updatedAt,
+		"banned_reason": "",
+		"banned_at":     nil,
+	}
+	if params.Status == models.EntityStatusBanned {
+		updateValues["banned_reason"] = strings.TrimSpace(params.BannedReason)
+		updateValues["banned_at"] = params.BannedAt
+	}
+
+	tx := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", params.UserID).
+		Updates(updateValues)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+
+	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormUserRepository) SoftDelete(ctx context.Context, userID string, deletedAt time.Time) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("user repository db is nil")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return false, nil
+	}
+	if deletedAt.IsZero() {
+		deletedAt = time.Now().UTC()
+	}
+
+	tx := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ? AND status <> ?", userID, models.EntityStatusDeleted).
+		Updates(map[string]any{
+			"status":        models.EntityStatusDeleted,
+			"deleted_at":    deletedAt,
+			"banned_reason": "",
+			"banned_at":     nil,
+			"updated_at":    deletedAt,
+		})
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+
+	return tx.RowsAffected > 0, nil
+}
+
+func normalizeStatuses(input []models.EntityStatus) []models.EntityStatus {
+	if len(input) == 0 {
+		return nil
+	}
+	statuses := make([]models.EntityStatus, 0, len(input))
+	exists := make(map[models.EntityStatus]struct{}, len(input))
+	for _, status := range input {
+		if !models.IsValidEntityStatus(status) {
+			continue
+		}
+		if _, ok := exists[status]; ok {
+			continue
+		}
+		exists[status] = struct{}{}
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
+func parseRecordTime(raw string) time.Time {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsedAt, err := time.Parse(layout, value); err == nil {
+			return parsedAt.UTC()
+		}
+	}
+	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
+		return parsedAt.UTC()
+	}
+	return time.Time{}
 }

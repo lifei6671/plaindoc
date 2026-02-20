@@ -21,6 +21,7 @@ import {
 } from "react-complex-tree";
 import type { CreateNodeResult, NodeType, TreeNode } from "../data-access";
 import { formatError } from "../editor/status-utils";
+import { useConfirmDialog } from "./ConfirmDialog";
 
 const WORKSPACE_TREE_ID = "workspace-doc-tree";
 const WORKSPACE_TREE_ROOT_ID = "__workspace_doc_tree_root__";
@@ -143,6 +144,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   onRenameNode,
   onDeleteNode
 }: WorkspaceTreeProps) {
+  const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
   const { items, nodeById } = useMemo(() => buildTreeItems(nodes), [nodes]);
   const expandableNodeIds = useMemo(() => collectExpandableNodeIds(nodes), [nodes]);
   const knownExpandableNodeIdsRef = useRef<Set<string>>(new Set());
@@ -427,12 +429,18 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         descendantCount > 0
           ? `确认删除「${baseTitle}」吗？该操作会同时移除 ${descendantCount} 个子节点。`
           : `确认删除「${baseTitle}」吗？`;
-      if (!window.confirm(confirmMessage)) {
+      const confirmed = await confirmByModal({
+        title: "删除节点确认",
+        description: confirmMessage,
+        confirmText: "确认删除",
+        tone: "danger"
+      });
+      if (!confirmed) {
         return;
       }
       await onDeleteNode(nodeId);
     },
-    [nodeById, onDeleteNode]
+    [confirmByModal, nodeById, onDeleteNode]
   );
 
   const renderTreeItem = useCallback(
@@ -647,44 +655,52 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   );
 
   if (nodes.length === 0) {
-    return <p className="mt-2.5 mr-2 mb-0 ml-2 text-[14px] text-[#8a8d90]">当前空间暂无文档。</p>;
+    return (
+      <>
+        {confirmDialog}
+        <p className="mt-2.5 mr-2 mb-0 ml-2 text-[14px] text-[#8a8d90]">当前空间暂无文档。</p>
+      </>
+    );
   }
 
   return (
-    <ControlledTreeEnvironment<WorkspaceTreeItemData>
-      items={items}
-      getItemTitle={(item) => item.data.title}
-      viewState={viewState}
-      defaultInteractionMode={InteractionMode.ClickArrowToExpand}
-      canDragAndDrop={false}
-      canDropOnFolder={false}
-      canReorderItems={false}
-      canSearch={false}
-      canRename={false}
-      // 允许“可展开文档”点击触发主动作，避免仅叶子文档可打开。
-      canInvokePrimaryActionOnItemContainer
-      onExpandItem={handleExpandNode}
-      onCollapseItem={handleCollapseNode}
-      onPrimaryAction={handlePrimaryAction}
-      renderTreeContainer={({ children, containerProps }) => (
-        <div {...containerProps} className={mergeClassNames("min-h-0", containerProps.className)}>
-          {children}
-        </div>
-      )}
-      renderItemsContainer={({ children, containerProps, depth }) => (
-        <ul
-          {...containerProps}
-          className={mergeClassNames(
-            depth > 0 ? "mt-px m-0 list-none p-0" : "m-0 list-none p-0",
-            containerProps.className
-          )}
-        >
-          {children}
-        </ul>
-      )}
-      renderItem={renderTreeItem}
-    >
-      <Tree treeId={WORKSPACE_TREE_ID} rootItem={WORKSPACE_TREE_ROOT_ID} treeLabel="工作区目录树" />
-    </ControlledTreeEnvironment>
+    <>
+      {confirmDialog}
+      <ControlledTreeEnvironment<WorkspaceTreeItemData>
+        items={items}
+        getItemTitle={(item) => item.data.title}
+        viewState={viewState}
+        defaultInteractionMode={InteractionMode.ClickArrowToExpand}
+        canDragAndDrop={false}
+        canDropOnFolder={false}
+        canReorderItems={false}
+        canSearch={false}
+        canRename={false}
+        // 允许“可展开文档”点击触发主动作，避免仅叶子文档可打开。
+        canInvokePrimaryActionOnItemContainer
+        onExpandItem={handleExpandNode}
+        onCollapseItem={handleCollapseNode}
+        onPrimaryAction={handlePrimaryAction}
+        renderTreeContainer={({ children, containerProps }) => (
+          <div {...containerProps} className={mergeClassNames("min-h-0", containerProps.className)}>
+            {children}
+          </div>
+        )}
+        renderItemsContainer={({ children, containerProps, depth }) => (
+          <ul
+            {...containerProps}
+            className={mergeClassNames(
+              depth > 0 ? "mt-px m-0 list-none p-0" : "m-0 list-none p-0",
+              containerProps.className
+            )}
+          >
+            {children}
+          </ul>
+        )}
+        renderItem={renderTreeItem}
+      >
+        <Tree treeId={WORKSPACE_TREE_ID} rootItem={WORKSPACE_TREE_ROOT_ID} treeLabel="工作区目录树" />
+      </ControlledTreeEnvironment>
+    </>
   );
 });

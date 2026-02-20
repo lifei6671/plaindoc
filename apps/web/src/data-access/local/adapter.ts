@@ -1,4 +1,5 @@
 import {
+  type AdminGateway,
   ConflictError,
   type AuthGateway,
   type CreateNodeInput,
@@ -405,6 +406,66 @@ const themeGateway: ThemeGateway = {
   }
 };
 
+const adminGateway: AdminGateway = {
+  async getMe() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async canManageSpace() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async listUsers() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async updateUserStatus() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async deleteUser() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async listSpaces() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async updateSpaceStatus() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async updateSpaceMetadata() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async deleteSpace() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async listDocuments() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async updateDocumentStatus() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async deleteDocument() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async listThemes() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async createTheme() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async updateTheme() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async deleteTheme() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async listSystemConfigs() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async upsertSystemConfig() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async listAudits() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  }
+};
+
 // 本地模式下，用户配置统一使用 IndexedDB user_config 表。
 const userConfigGateway = createIndexedDbUserConfigGateway();
 
@@ -414,6 +475,7 @@ export function createLocalAdapter(): DataGateway {
     workspace: workspaceGateway,
     document: documentGateway,
     theme: themeGateway,
+    admin: adminGateway,
     userConfig: userConfigGateway
   };
 }

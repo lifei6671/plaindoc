@@ -101,3 +101,27 @@ func (r *gormUserSessionRepository) Revoke(
 			"updated_at": revokedAt,
 		}).Error
 }
+
+func (r *gormUserSessionRepository) RevokeAllByUserID(
+	ctx context.Context,
+	userID string,
+	revokedAt time.Time,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("user session repository db is nil")
+	}
+	if userID == "" {
+		return nil
+	}
+	if revokedAt.IsZero() {
+		revokedAt = time.Now().UTC()
+	}
+
+	return r.db.WithContext(ctx).
+		Model(&models.UserSession{}).
+		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Updates(map[string]any{
+			"revoked_at": revokedAt,
+			"updated_at": revokedAt,
+		}).Error
+}

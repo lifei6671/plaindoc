@@ -36,6 +36,9 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		userSessionRepo := repository.NewGormUserSessionRepository(db)
 		spaceRepo := repository.NewGormSpaceRepository(db)
 		documentRepo := repository.NewGormDocumentRepository(db)
+		themeRepo := repository.NewGormThemeRepository(db)
+		systemConfigRepo := repository.NewGormSystemConfigRepository(db)
+		auditLogRepo := repository.NewGormAuditLogRepository(db)
 		adminRoleRepo := repository.NewGormAdminRoleRepository(db)
 		spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
 
@@ -56,6 +59,18 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 
 		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo)
 		adminHandler := handler.NewAdminHandler(adminAccessService)
+		adminAuditService := service.NewAdminAuditService(auditLogRepo, adminAccessService)
+		adminAuditHandler := handler.NewAdminAuditHandler(adminAuditService)
+		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminAccessService, adminAuditService)
+		adminUserHandler := handler.NewAdminUserHandler(adminUserService)
+		adminSpaceService := service.NewAdminSpaceService(spaceRepo, userRepo, adminAccessService, adminAuditService)
+		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
+		adminDocumentService := service.NewAdminDocumentService(documentRepo, userRepo, adminAccessService, adminAuditService)
+		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
+		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
+		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
+		adminSystemConfigService := service.NewAdminSystemConfigService(systemConfigRepo, adminAccessService, adminAuditService)
+		adminSystemConfigHandler := handler.NewAdminSystemConfigHandler(adminSystemConfigService)
 		adminAPI := api.Group("/admin")
 		adminAPI.Use(middleware.RequireAdmin(authService, adminAccessService))
 		{
@@ -65,6 +80,61 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
 				adminHandler.CheckSpace,
 			)
+			adminAPI.GET(
+				"/users",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminUserHandler.ListUsers,
+			)
+			adminAPI.PATCH(
+				"/users/:userId/status",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminUserHandler.UpdateStatus,
+			)
+			adminAPI.DELETE(
+				"/users/:userId",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminUserHandler.DeleteUser,
+			)
+			adminAPI.GET("/spaces", adminSpaceHandler.ListSpaces)
+			adminAPI.PATCH(
+				"/spaces/:spaceId/status",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.UpdateStatus,
+			)
+			adminAPI.PATCH(
+				"/spaces/:spaceId/metadata",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.UpdateMetadata,
+			)
+			adminAPI.DELETE(
+				"/spaces/:spaceId",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.DeleteSpace,
+			)
+			adminAPI.GET("/documents", adminDocumentHandler.ListDocuments)
+			adminAPI.PATCH(
+				"/documents/:documentId/status",
+				adminDocumentHandler.UpdateStatus,
+			)
+			adminAPI.DELETE(
+				"/documents/:documentId",
+				adminDocumentHandler.DeleteDocument,
+			)
+			adminAPI.GET("/themes", adminThemeHandler.ListThemes)
+			adminAPI.POST("/themes", adminThemeHandler.CreateTheme)
+			adminAPI.PUT("/themes/:themeId", adminThemeHandler.UpdateTheme)
+			adminAPI.DELETE("/themes/:themeId", adminThemeHandler.DeleteTheme)
+			adminAPI.GET(
+				"/system-configs",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSystemConfigHandler.ListConfigs,
+			)
+			adminAPI.PUT(
+				"/system-configs/:key",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSystemConfigHandler.UpsertConfig,
+			)
+			adminAPI.GET("/audits", adminAuditHandler.ListAudits)
 		}
 
 		themeHandler := handler.NewThemeHandler(db)

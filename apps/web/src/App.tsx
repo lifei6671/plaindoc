@@ -40,7 +40,10 @@ import { AuthPanel } from "./components/AuthPanel";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
+import { useConfirmDialog } from "./components/ConfirmDialog";
 import { TopToast, type TopToastVariant } from "./components/TopToast";
+import { AdminApp } from "./admin/AdminApp";
+import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./admin/routes";
 import { ConflictError, getDataGateway, type AuthSession, type CreateNodeResult } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
@@ -119,11 +122,14 @@ const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode"
 const LOGIN_ROUTE_PATH = "/login";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
 
-type AppRoute =
+export type AppRoute =
   | { kind: "login" }
   | { kind: "editor-root" }
   | { kind: "editor-space"; spaceId: string }
   | { kind: "editor-doc"; spaceId: string; docId: string }
+  | { kind: "admin-login" }
+  | { kind: "admin-root" }
+  | { kind: "admin-page"; pagePath: string }
   | { kind: "unknown" };
 
 function normalizeRoutePath(pathname: string): string {
@@ -143,6 +149,15 @@ function parseAppRoute(pathname: string): AppRoute {
   const normalizedPathname = normalizeRoutePath(pathname);
   if (normalizedPathname === LOGIN_ROUTE_PATH) {
     return { kind: "login" };
+  }
+  if (normalizedPathname === ADMIN_LOGIN_ROUTE_PATH) {
+    return { kind: "admin-login" };
+  }
+  if (normalizedPathname === ADMIN_ROUTE_BASE_PATH) {
+    return { kind: "admin-root" };
+  }
+  if (normalizedPathname.startsWith(`${ADMIN_ROUTE_BASE_PATH}/`)) {
+    return { kind: "admin-page", pagePath: normalizedPathname.slice(ADMIN_ROUTE_BASE_PATH.length + 1) };
   }
   if (normalizedPathname === EDITOR_ROUTE_BASE_PATH) {
     return { kind: "editor-root" };
@@ -306,6 +321,8 @@ export default function App() {
   const route = useMemo(() => parseAppRoute(location.pathname), [location.pathname]);
   const isEditorRoute =
     route.kind === "editor-root" || route.kind === "editor-space" || route.kind === "editor-doc";
+  const isAdminRoute =
+    route.kind === "admin-login" || route.kind === "admin-root" || route.kind === "admin-page";
   const routeSpaceId = route.kind === "editor-space" || route.kind === "editor-doc" ? route.spaceId : null;
   const routeDocId = route.kind === "editor-doc" ? route.docId : null;
   // 会话状态：登录态用户、校验中状态与提交中状态。
@@ -372,6 +389,7 @@ export default function App() {
     variant: "success",
     triggerKey: 0
   });
+  const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
   // 设置面板开关状态。
   const [isSettingsLayerOpen, setIsSettingsLayerOpen] = useState(false);
   // 图床配置读取状态。
@@ -475,13 +493,19 @@ export default function App() {
     }
 
     if (!activeUser) {
+      if (isAdminRoute) {
+        if (route.kind !== "admin-login") {
+          navigate(ADMIN_LOGIN_ROUTE_PATH, { replace: true });
+        }
+        return;
+      }
       if (route.kind !== "login") {
         navigate(LOGIN_ROUTE_PATH, { replace: true });
       }
       return;
     }
 
-    if (!isEditorRoute) {
+    if (!isEditorRoute && !isAdminRoute) {
       const nextPath = buildEditorRoutePath(activeSpaceId, activeDocId);
       if (location.pathname !== nextPath) {
         navigate(nextPath, { replace: true });
@@ -492,6 +516,7 @@ export default function App() {
     activeSpaceId,
     activeUser,
     isAuthChecking,
+    isAdminRoute,
     isEditorRoute,
     location.pathname,
     navigate,
@@ -861,14 +886,19 @@ export default function App() {
   }, [activeDocId]);
 
   // 在离开当前文档前确认未保存修改，避免目录切换导致内容丢失。
-  const confirmLeaveForDocumentSwitch = useCallback((): boolean => {
+  const confirmLeaveForDocumentSwitch = useCallback(async (): Promise<boolean> => {
     const hasUnsavedChanges =
       content !== lastSavedContent && saveStatus !== "loading" && saveStatus !== "saving";
     if (!hasUnsavedChanges) {
       return true;
     }
-    return window.confirm("当前文档仍有未保存修改，切换文档后这些修改将丢失。是否继续？");
-  }, [content, lastSavedContent, saveStatus]);
+    return confirmByModal({
+      title: "切换文档确认",
+      description: "当前文档仍有未保存修改，切换后这些修改将丢失。",
+      confirmText: "继续切换",
+      tone: "warning"
+    });
+  }, [confirmByModal, content, lastSavedContent, saveStatus]);
 
   // 从侧边栏打开目标文档：保持保存状态与状态栏提示一致。
   const handleOpenWorkspaceDocument = useCallback(
@@ -876,7 +906,7 @@ export default function App() {
       if (docId === activeDocId) {
         return;
       }
-      if (!confirmLeaveForDocumentSwitch()) {
+      if (!(await confirmLeaveForDocumentSwitch())) {
         return;
       }
       setSaveStatus("loading");
@@ -1361,6 +1391,20 @@ export default function App() {
     }
   }, [dataGateway, setLastSavedAt]);
 
+  if (isAdminRoute) {
+    return (
+      <AdminApp
+        authSession={authSession}
+        checking={isAuthChecking}
+        submitting={isAuthSubmitting}
+        errorMessage={authErrorMessage}
+        dataGateway={dataGateway}
+        onLogin={handleAuthLogin}
+        onLogout={handleAuthLogout}
+      />
+    );
+  }
+
   // 登录前只展示认证面板，不渲染编辑器布局。
   if (isAuthChecking || !activeUser) {
     return (
@@ -1392,6 +1436,7 @@ export default function App() {
         variant="info"
         icon={<LoaderCircle className="top-toast__loader" size={16} />}
       />
+      {confirmDialog}
       {/* 当前主题样式：先注入内置模板变量，后续允许外部样式继续覆盖。 */}
       {activePreviewThemeStyleText ? (
         <style id="plaindoc-preview-theme-style">{activePreviewThemeStyleText}</style>

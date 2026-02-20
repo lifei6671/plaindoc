@@ -1,7 +1,22 @@
 import {
+  type AdminAuditListInput,
+  type AdminAuditListResult,
+  type AdminGateway,
+  type AdminSystemConfig,
+  type AdminTheme,
+  type AdminDocument,
+  type AdminDocumentListInput,
+  type AdminDocumentListResult,
+  type AdminIdentity,
+  type AdminSpace,
+  type AdminSpaceListInput,
+  type AdminSpaceListResult,
+  type AdminUser,
+  type AdminUserListInput,
+  type AdminUserListResult,
   type AuthSession,
-  ConflictError,
   type AuthGateway,
+  ConflictError,
   type CreateNodeInput,
   type CreateNodeResult,
   type CreateSpaceInput,
@@ -297,6 +312,320 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     }
   };
 
+  const admin: AdminGateway = {
+    async getMe() {
+      return request<AdminIdentity>("/admin/me");
+    },
+    async canManageSpace(spaceId: string) {
+      const payload = await request<{ canManage: boolean }>(`/admin/spaces/${spaceId}/check`);
+      return payload.canManage;
+    },
+    async listUsers(input: AdminUserListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status);
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+
+      const queryText = query.toString();
+      const path = queryText ? `/admin/users?${queryText}` : "/admin/users";
+      return request<AdminUserListResult>(path);
+    },
+    async updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }) {
+      const targetUserID = input.userId.trim();
+      if (!targetUserID) {
+        throw new Error("用户 ID 不能为空");
+      }
+      return request<AdminUser>(`/admin/users/${encodeURIComponent(targetUserID)}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: input.status,
+          reason: input.reason ?? ""
+        })
+      });
+    },
+    async deleteUser(userId: string) {
+      const targetUserID = userId.trim();
+      if (!targetUserID) {
+        throw new Error("用户 ID 不能为空");
+      }
+      await request<void>(`/admin/users/${encodeURIComponent(targetUserID)}`, {
+        method: "DELETE"
+      });
+    },
+    async listSpaces(input: AdminSpaceListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status);
+      }
+      if (typeof input.visibility === "string" && input.visibility.trim()) {
+        query.set("visibility", input.visibility);
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/admin/spaces?${queryText}` : "/admin/spaces";
+      return request<AdminSpaceListResult>(path);
+    },
+    async updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }) {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+
+      return request<AdminSpace>(
+        `/admin/spaces/${encodeURIComponent(targetSpaceID)}/status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: input.status,
+            reason: input.reason ?? ""
+          })
+        }
+      );
+    },
+    async updateSpaceMetadata(input: { spaceId: string; name?: string; visibility?: "public" | "authenticated" | "member" }) {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+
+      const payload: Record<string, string> = {};
+      if (typeof input.name === "string") {
+        payload.name = input.name.trim();
+      }
+      if (typeof input.visibility === "string" && input.visibility.trim()) {
+        payload.visibility = input.visibility;
+      }
+
+      return request<AdminSpace>(
+        `/admin/spaces/${encodeURIComponent(targetSpaceID)}/metadata`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        }
+      );
+    },
+    async deleteSpace(spaceId: string) {
+      const targetSpaceID = spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      await request<void>(`/admin/spaces/${encodeURIComponent(targetSpaceID)}`, {
+        method: "DELETE"
+      });
+    },
+    async listDocuments(input: AdminDocumentListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.spaceId === "string" && input.spaceId.trim()) {
+        query.set("spaceId", input.spaceId.trim());
+      }
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status);
+      }
+      if (typeof input.visibility === "string" && input.visibility.trim()) {
+        query.set("visibility", input.visibility);
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+
+      const queryText = query.toString();
+      const path = queryText ? `/admin/documents?${queryText}` : "/admin/documents";
+      return request<AdminDocumentListResult>(path);
+    },
+    async updateDocumentStatus(input: { documentId: string; status: "active" | "banned"; reason?: string }) {
+      const targetDocumentID = input.documentId.trim();
+      if (!targetDocumentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+
+      return request<AdminDocument>(
+        `/admin/documents/${encodeURIComponent(targetDocumentID)}/status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: input.status,
+            reason: input.reason ?? ""
+          })
+        }
+      );
+    },
+    async deleteDocument(documentId: string) {
+      const targetDocumentID = documentId.trim();
+      if (!targetDocumentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      await request<void>(`/admin/documents/${encodeURIComponent(targetDocumentID)}`, {
+        method: "DELETE"
+      });
+    },
+    async listThemes() {
+      return request<AdminTheme[]>("/admin/themes");
+    },
+    async createTheme(input) {
+      const themeID = input.themeId.trim();
+      if (!themeID) {
+        throw new Error("主题 ID 不能为空");
+      }
+      const themeName = input.name.trim();
+      if (!themeName) {
+        throw new Error("主题名称不能为空");
+      }
+
+      return request<AdminTheme>("/admin/themes", {
+        method: "POST",
+        body: JSON.stringify({
+          themeId: themeID,
+          name: themeName,
+          description: input.description ?? "",
+          variables: input.variables ?? {},
+          syntaxTheme: input.syntaxTheme ?? "one-light",
+          codeBlockStyle: input.codeBlockStyle ?? {},
+          codeBlockCodeStyle: input.codeBlockCodeStyle ?? {},
+          inlineCodeStyle: input.inlineCodeStyle ?? {},
+          customCss: input.customCss ?? "",
+          enabled: input.enabled ?? true
+        })
+      });
+    },
+    async updateTheme(input) {
+      const themeID = input.themeId.trim();
+      if (!themeID) {
+        throw new Error("主题 ID 不能为空");
+      }
+      const payload: Record<string, unknown> = {};
+      if (typeof input.name === "string") {
+        payload.name = input.name.trim();
+      }
+      if (typeof input.description === "string") {
+        payload.description = input.description;
+      }
+      if (input.variables && typeof input.variables === "object") {
+        payload.variables = input.variables;
+      }
+      if (typeof input.syntaxTheme === "string") {
+        payload.syntaxTheme = input.syntaxTheme;
+      }
+      if (input.codeBlockStyle && typeof input.codeBlockStyle === "object") {
+        payload.codeBlockStyle = input.codeBlockStyle;
+      }
+      if (input.codeBlockCodeStyle && typeof input.codeBlockCodeStyle === "object") {
+        payload.codeBlockCodeStyle = input.codeBlockCodeStyle;
+      }
+      if (input.inlineCodeStyle && typeof input.inlineCodeStyle === "object") {
+        payload.inlineCodeStyle = input.inlineCodeStyle;
+      }
+      if (typeof input.customCss === "string") {
+        payload.customCss = input.customCss;
+      }
+      if (typeof input.enabled === "boolean") {
+        payload.enabled = input.enabled;
+      }
+      return request<AdminTheme>(`/admin/themes/${encodeURIComponent(themeID)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+    },
+    async deleteTheme(themeId: string) {
+      const themeID = themeId.trim();
+      if (!themeID) {
+        throw new Error("主题 ID 不能为空");
+      }
+      await request<void>(`/admin/themes/${encodeURIComponent(themeID)}`, {
+        method: "DELETE"
+      });
+    },
+    async listSystemConfigs() {
+      return request<AdminSystemConfig[]>("/admin/system-configs");
+    },
+    async upsertSystemConfig(input: {
+      configKey: "site" | "editor" | "security";
+      value: Record<string, unknown>;
+      expectedVersion?: number;
+    }) {
+      const configKey = input.configKey.trim();
+      if (!configKey) {
+        throw new Error("配置键不能为空");
+      }
+      const payload: {
+        value: Record<string, unknown>;
+        expectedVersion?: number;
+      } = { value: input.value ?? {} };
+      if (
+        typeof input.expectedVersion === "number" &&
+        Number.isFinite(input.expectedVersion) &&
+        input.expectedVersion >= 0
+      ) {
+        payload.expectedVersion = Math.trunc(input.expectedVersion);
+      }
+      return request<AdminSystemConfig>(`/admin/system-configs/${encodeURIComponent(configKey)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+    },
+    async listAudits(input: AdminAuditListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.module === "string" && input.module !== "all" && input.module.trim()) {
+        query.set("module", input.module.trim());
+      }
+      if (typeof input.action === "string" && input.action !== "all" && input.action.trim()) {
+        query.set("action", input.action.trim());
+      }
+      if (typeof input.actorUserId === "string" && input.actorUserId.trim()) {
+        query.set("actorUserId", input.actorUserId.trim());
+      }
+      if (typeof input.targetType === "string" && input.targetType.trim()) {
+        query.set("targetType", input.targetType.trim());
+      }
+      if (typeof input.targetId === "string" && input.targetId.trim()) {
+        query.set("targetId", input.targetId.trim());
+      }
+      if (typeof input.requestId === "string" && input.requestId.trim()) {
+        query.set("requestId", input.requestId.trim());
+      }
+      if (typeof input.from === "string" && input.from.trim()) {
+        query.set("from", input.from.trim());
+      }
+      if (typeof input.to === "string" && input.to.trim()) {
+        query.set("to", input.to.trim());
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/admin/audits?${queryText}` : "/admin/audits";
+      return request<AdminAuditListResult>(path);
+    }
+  };
+
   // 远端驱动下仍复用本地 user_config：用于保存本机偏好配置（如图床参数）。
   const userConfig = createIndexedDbUserConfigGateway();
 
@@ -305,6 +634,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     workspace,
     document,
     theme,
+    admin,
     userConfig
   };
 }

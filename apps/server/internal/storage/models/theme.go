@@ -15,6 +15,7 @@ type Theme struct {
 	InlineCodeStyleJSON    string    `gorm:"column:inline_code_style_json"`
 	CustomCSS              string    `gorm:"column:custom_css"`
 	IsBuiltin              bool      `gorm:"column:is_builtin"`
+	IsEnabled              bool      `gorm:"column:is_enabled"`
 	CreatedAt              time.Time `gorm:"column:created_at"`
 	UpdatedAt              time.Time `gorm:"column:updated_at"`
 }

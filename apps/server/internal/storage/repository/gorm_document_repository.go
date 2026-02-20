@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
@@ -28,6 +29,7 @@ type documentAccessRow struct {
 	Version           int                 `gorm:"column:version"`
 	UpdatedByUserID   *string             `gorm:"column:updated_by_user_id"`
 	SpaceID           string              `gorm:"column:space_id"`
+	SpaceName         string              `gorm:"column:space_name"`
 	SpaceVis          models.Visibility   `gorm:"column:space_visibility"`
 	SpaceStatus       models.EntityStatus `gorm:"column:space_status"`
 	SpaceBanReason    string              `gorm:"column:space_banned_reason"`
@@ -117,6 +119,7 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			"d.version AS version",
 			"d.updated_by_user_id AS updated_by_user_id",
 			"s.space_id AS space_id",
+			"s.name AS space_name",
 			"s.visibility AS space_visibility",
 			"s.status AS space_status",
 			"s.banned_reason AS space_banned_reason",
@@ -161,6 +164,7 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			UpdatedByUserID: row.UpdatedByUserID,
 		},
 		SpaceID:           row.SpaceID,
+		SpaceName:         row.SpaceName,
 		SpaceVisibility:   row.SpaceVis,
 		SpaceStatus:       row.SpaceStatus,
 		SpaceBannedAt:     row.SpaceBannedAt,
@@ -168,6 +172,164 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 		SpaceOwnerUserID:  row.SpaceOwnerUser,
 		SpaceBannedReason: row.SpaceBanReason,
 	}, nil
+}
+
+func (r *gormDocumentRepository) ListForAdmin(
+	ctx context.Context,
+	params ListAdminDocumentsParams,
+) ([]AdminDocumentListRecord, int64, error) {
+	if r == nil || r.db == nil {
+		return nil, 0, fmt.Errorf("document repository db is nil")
+	}
+
+	baseQuery := r.db.WithContext(ctx).
+		Table("documents AS d").
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
+		Joins("JOIN users AS u ON u.user_id = s.owner_user_id")
+
+	if params.RestrictToScopes {
+		baseQuery = baseQuery.Joins(
+			"JOIN space_admin_scopes AS sas ON sas.space_id = s.space_id AND sas.user_id = ?",
+			strings.TrimSpace(params.ActorUserID),
+		)
+	}
+
+	keyword := strings.ToLower(strings.TrimSpace(params.Keyword))
+	if keyword != "" {
+		likeKeyword := "%" + keyword + "%"
+		baseQuery = baseQuery.Where(
+			"LOWER(d.document_id) LIKE ? OR LOWER(d.node_id) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(u.user_id) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.name) LIKE ?",
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+		)
+	}
+
+	spaceID := strings.TrimSpace(params.SpaceID)
+	if spaceID != "" {
+		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
+	}
+
+	statuses := normalizeDocumentStatuses(params.Statuses)
+	if len(statuses) > 0 {
+		baseQuery = baseQuery.Where("d.status IN ?", statuses)
+	}
+
+	visibilities := normalizeDocumentVisibilities(params.Visibilities)
+	if len(visibilities) > 0 {
+		baseQuery = baseQuery.Where("d.visibility IN ?", visibilities)
+	}
+
+	var total int64
+	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	type adminDocumentListRow struct {
+		ID              int64               `gorm:"column:id"`
+		DocumentID      string              `gorm:"column:document_id"`
+		NodeID          string              `gorm:"column:node_id"`
+		ThemeID         string              `gorm:"column:theme_id"`
+		Visibility      models.Visibility   `gorm:"column:visibility"`
+		Status          models.EntityStatus `gorm:"column:status"`
+		BannedReason    string              `gorm:"column:banned_reason"`
+		BannedAt        *time.Time          `gorm:"column:banned_at"`
+		DeletedAt       *time.Time          `gorm:"column:deleted_at"`
+		Title           string              `gorm:"column:title"`
+		ContentMD       string              `gorm:"column:content_md"`
+		Version         int                 `gorm:"column:version"`
+		UpdatedByUserID *string             `gorm:"column:updated_by_user_id"`
+		CreatedAtRaw    string              `gorm:"column:created_at"`
+		UpdatedAtRaw    string              `gorm:"column:updated_at"`
+		SpaceID         string              `gorm:"column:space_id"`
+		SpaceName       string              `gorm:"column:space_name"`
+		SpaceOwnerID    string              `gorm:"column:space_owner_user_id"`
+		SpaceOwnerName  string              `gorm:"column:space_owner_name"`
+		SpaceOwnerEmail string              `gorm:"column:space_owner_email"`
+	}
+
+	var rows []adminDocumentListRow
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select(
+			"d.id",
+			"d.document_id",
+			"d.node_id",
+			"d.theme_id",
+			"d.visibility",
+			"d.status",
+			"d.banned_reason",
+			"d.banned_at",
+			"d.deleted_at",
+			"d.title",
+			"d.content_md",
+			"d.version",
+			"d.updated_by_user_id",
+			"d.created_at",
+			"d.updated_at",
+			"s.space_id AS space_id",
+			"s.name AS space_name",
+			"s.owner_user_id AS space_owner_user_id",
+			"u.name AS space_owner_name",
+			"u.email AS space_owner_email",
+		).
+		Order("d.created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]AdminDocumentListRecord, 0, len(rows))
+	for _, row := range rows {
+		document := models.Document{
+			ID:              row.ID,
+			DocumentID:      row.DocumentID,
+			NodeID:          row.NodeID,
+			ThemeID:         row.ThemeID,
+			Visibility:      row.Visibility,
+			Status:          row.Status,
+			BannedReason:    row.BannedReason,
+			BannedAt:        row.BannedAt,
+			DeletedAt:       row.DeletedAt,
+			Title:           row.Title,
+			ContentMD:       row.ContentMD,
+			Version:         row.Version,
+			UpdatedByUserID: row.UpdatedByUserID,
+			CreatedAt:       parseDocumentRecordTime(row.CreatedAtRaw),
+			UpdatedAt:       parseDocumentRecordTime(row.UpdatedAtRaw),
+		}
+		if !models.IsValidVisibility(document.Visibility) {
+			document.Visibility = models.VisibilityMember
+		}
+		if !models.IsValidEntityStatus(document.Status) {
+			document.Status = models.EntityStatusActive
+		}
+		result = append(result, AdminDocumentListRecord{
+			Document:        document,
+			SpaceID:         row.SpaceID,
+			SpaceName:       row.SpaceName,
+			SpaceOwnerID:    row.SpaceOwnerID,
+			SpaceOwnerName:  row.SpaceOwnerName,
+			SpaceOwnerEmail: row.SpaceOwnerEmail,
+		})
+	}
+
+	return result, total, nil
 }
 
 func (r *gormDocumentRepository) UpdateTheme(
@@ -222,6 +384,70 @@ func (r *gormDocumentRepository) UpdateVisibility(
 	return r.GetByDocumentID(ctx, documentID)
 }
 
+func (r *gormDocumentRepository) UpdateStatus(ctx context.Context, params UpdateDocumentStatusParams) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("document repository db is nil")
+	}
+	if strings.TrimSpace(params.DocumentID) == "" {
+		return false, nil
+	}
+	if !models.IsValidEntityStatus(params.Status) {
+		return false, nil
+	}
+
+	updatedAt := params.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	updateValues := map[string]any{
+		"status":        params.Status,
+		"updated_at":    updatedAt,
+		"banned_reason": "",
+		"banned_at":     nil,
+	}
+	if params.Status == models.EntityStatusBanned {
+		updateValues["banned_reason"] = strings.TrimSpace(params.BannedReason)
+		updateValues["banned_at"] = params.BannedAt
+	}
+
+	tx := r.db.WithContext(ctx).
+		Model(&models.Document{}).
+		Where("document_id = ? AND status <> ?", params.DocumentID, models.EntityStatusDeleted).
+		Updates(updateValues)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormDocumentRepository) SoftDelete(ctx context.Context, documentID string, deletedAt time.Time) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("document repository db is nil")
+	}
+	if strings.TrimSpace(documentID) == "" {
+		return false, nil
+	}
+	if deletedAt.IsZero() {
+		deletedAt = time.Now().UTC()
+	}
+
+	tx := r.db.WithContext(ctx).
+		Model(&models.Document{}).
+		Where("document_id = ? AND status <> ?", documentID, models.EntityStatusDeleted).
+		Updates(map[string]any{
+			"status":        models.EntityStatusDeleted,
+			"deleted_at":    deletedAt,
+			"banned_reason": "",
+			"banned_at":     nil,
+			"updated_at":    deletedAt,
+		})
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
 func (r *gormDocumentRepository) UpdateWithVersion(
 	ctx context.Context,
 	document *models.Document,
@@ -260,4 +486,68 @@ func (r *gormDocumentRepository) UpdateWithVersion(
 		return false, updateTx.Error
 	}
 	return updateTx.RowsAffected == 1, nil
+}
+
+func normalizeDocumentStatuses(input []models.EntityStatus) []models.EntityStatus {
+	if len(input) == 0 {
+		return nil
+	}
+	statuses := make([]models.EntityStatus, 0, len(input))
+	seen := make(map[models.EntityStatus]struct{}, len(input))
+	for _, status := range input {
+		if !models.IsValidEntityStatus(status) {
+			continue
+		}
+		if _, ok := seen[status]; ok {
+			continue
+		}
+		seen[status] = struct{}{}
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
+func normalizeDocumentVisibilities(input []models.Visibility) []models.Visibility {
+	if len(input) == 0 {
+		return nil
+	}
+	visibilities := make([]models.Visibility, 0, len(input))
+	seen := make(map[models.Visibility]struct{}, len(input))
+	for _, visibility := range input {
+		if !models.IsValidVisibility(visibility) {
+			continue
+		}
+		if _, ok := seen[visibility]; ok {
+			continue
+		}
+		seen[visibility] = struct{}{}
+		visibilities = append(visibilities, visibility)
+	}
+	return visibilities
+}
+
+func parseDocumentRecordTime(raw string) time.Time {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsedAt, err := time.Parse(layout, value); err == nil {
+			return parsedAt.UTC()
+		}
+	}
+	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
+		return parsedAt.UTC()
+	}
+	return time.Time{}
 }

@@ -44,7 +44,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Env:       getenv("APP_ENV", "development"),
 		Addr:      getenv("APP_ADDR", ":8080"),
-		WebOrigin: getenv("WEB_ORIGIN", "http://localhost:5173"),
+		WebOrigin: getenv("WEB_ORIGIN", "http://localhost:3001"),
 		Database: DatabaseConfig{
 			Driver: getenv("DB_DRIVER", "sqlite"),
 			DSN:    getenv("DB_DSN", "file:plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"),
