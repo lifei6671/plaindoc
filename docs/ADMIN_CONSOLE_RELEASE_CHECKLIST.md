@@ -20,7 +20,7 @@
 - [ ] `JWT_ACCESS_TOKEN_TTL` 与 `JWT_REFRESH_TOKEN_TTL` 符合安全策略
 - [ ] 数据库连接配置（SQLite/PostgreSQL/MySQL）指向生产实例
 - [ ] 存储目录/权限（若启用 SQLite）可写且已备份策略
-- [ ] 管理员初始化流程已执行（至少 1 个 `platform_admin`）
+- [ ] 默认管理员账号已验证并完成改密（默认：`admin@iminho.me` / `123456`）
 
 ---
 

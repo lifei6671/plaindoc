@@ -57,6 +57,29 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		}
 	}
 
+	// 中文注释：校验 0008 种子已创建默认管理员账号，且重复迁移不会产生重复记录。
+	var seededAdminCount int64
+	if err := database.ORM.WithContext(ctx).
+		Table("users").
+		Where("email = ?", "admin@iminho.me").
+		Count(&seededAdminCount).Error; err != nil {
+		t.Fatalf("count seeded admin user failed: %v", err)
+	}
+	if seededAdminCount != 1 {
+		t.Fatalf("expected seeded admin user count 1, got %d", seededAdminCount)
+	}
+
+	var seededAdminRoleCount int64
+	if err := database.ORM.WithContext(ctx).
+		Table("user_admin_roles").
+		Where("user_id = ? AND role = ?", "01k5aa0bb1cc2dd3ee4ff5gg6h", "platform_admin").
+		Count(&seededAdminRoleCount).Error; err != nil {
+		t.Fatalf("count seeded admin role failed: %v", err)
+	}
+	if seededAdminRoleCount != 1 {
+		t.Fatalf("expected seeded admin role count 1, got %d", seededAdminRoleCount)
+	}
+
 	if err := smokeInsertGraph(ctx, database.ORM); err != nil {
 		t.Fatalf("smokeInsertGraph failed: %v", err)
 	}
