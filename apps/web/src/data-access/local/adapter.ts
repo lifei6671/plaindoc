@@ -416,6 +416,12 @@ const adminGateway: AdminGateway = {
   async listUsers() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },
+  async createUser() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async updateUserRole() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
   async updateUserStatus() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },

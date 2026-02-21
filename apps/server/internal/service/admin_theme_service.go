@@ -208,13 +208,11 @@ func (s *AdminThemeService) CreateTheme(
 	}
 
 	if err := s.recordThemeAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: input.ActorUserID,
-		Module:      AdminAuditModuleTheme,
-		Action:      AdminAuditActionCreate,
-		TargetType:  "theme",
-		TargetID:    record.ThemeID,
-		Summary:     "theme created: " + record.ThemeID,
-		RequestID:   input.RequestID,
+		Module:     AdminAuditModuleTheme,
+		Action:     AdminAuditActionCreate,
+		TargetType: "theme",
+		TargetID:   record.ThemeID,
+		Summary:    "theme created: " + record.ThemeID,
 		Detail: map[string]any{
 			"name":        record.Name,
 			"enabled":     record.Enabled,
@@ -356,13 +354,11 @@ func (s *AdminThemeService) UpdateTheme(
 	}
 
 	if err := s.recordThemeAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: input.ActorUserID,
-		Module:      AdminAuditModuleTheme,
-		Action:      AdminAuditActionUpdate,
-		TargetType:  "theme",
-		TargetID:    record.ThemeID,
-		Summary:     "theme updated: " + record.ThemeID,
-		RequestID:   input.RequestID,
+		Module:     AdminAuditModuleTheme,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "theme",
+		TargetID:   record.ThemeID,
+		Summary:    "theme updated: " + record.ThemeID,
 		Detail: map[string]any{
 			"changedFields": changedFields,
 		},
@@ -380,6 +376,8 @@ func (s *AdminThemeService) DeleteTheme(
 	themeID string,
 	requestID string,
 ) error {
+	_ = requestID
+
 	if s == nil || s.themeRepo == nil || s.adminAccessService == nil {
 		return errors.New("admin theme service dependencies are nil")
 	}
@@ -420,13 +418,11 @@ func (s *AdminThemeService) DeleteTheme(
 	}
 
 	if err := s.recordThemeAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: actorUserID,
-		Module:      AdminAuditModuleTheme,
-		Action:      AdminAuditActionDelete,
-		TargetType:  "theme",
-		TargetID:    normalizedThemeID,
-		Summary:     "theme deleted: " + normalizedThemeID,
-		RequestID:   requestID,
+		Module:     AdminAuditModuleTheme,
+		Action:     AdminAuditActionDelete,
+		TargetType: "theme",
+		TargetID:   normalizedThemeID,
+		Summary:    "theme deleted: " + normalizedThemeID,
 		Detail: map[string]any{
 			"themeId": normalizedThemeID,
 		},

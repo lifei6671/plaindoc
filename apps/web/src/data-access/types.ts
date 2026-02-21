@@ -171,6 +171,8 @@ export interface AdminUser {
   userId: string;
   email: string;
   name: string;
+  role: "user" | AdminRole;
+  canEditRole: boolean;
   status: EntityStatus;
   bannedReason: string;
   bannedAt: string | null;
@@ -339,6 +341,8 @@ export interface AdminGateway {
   getMe(): Promise<AdminIdentity>;
   canManageSpace(spaceId: string): Promise<boolean>;
   listUsers(input?: AdminUserListInput): Promise<AdminUserListResult>;
+  createUser(input: { email: string; name: string; password: string; role: "user" | AdminRole }): Promise<AdminUser>;
+  updateUserRole(input: { userId: string; role: "user" | AdminRole }): Promise<AdminUser>;
   updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }): Promise<AdminUser>;
   deleteUser(userId: string): Promise<void>;
   listSpaces(input?: AdminSpaceListInput): Promise<AdminSpaceListResult>;

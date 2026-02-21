@@ -1,4 +1,4 @@
-import { LoaderCircle, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
+import { LoaderCircle, PencilLine, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -11,6 +11,11 @@ import { AdminPageCard, AdminPaginationFooter, AdminTableContainer, AdminToolbar
 import { formatError } from "../../editor/status-utils";
 
 const DEFAULT_PAGE_SIZE = 20;
+const USER_ROLE_OPTIONS = [
+  { value: "user", label: "普通用户" },
+  { value: "space_admin", label: "空间管理员" },
+  { value: "platform_admin", label: "全站管理员" }
+] as const;
 
 interface AdminUsersPageProps {
   currentUserID: string;
@@ -70,6 +75,39 @@ function renderStatusBadgeClass(status: AdminUser["status"]): string {
   }
 }
 
+function normalizeUserRole(value: string | null | undefined): "user" | "space_admin" | "platform_admin" {
+  const normalized = (value ?? "").trim();
+  if (normalized === "platform_admin") {
+    return "platform_admin";
+  }
+  if (normalized === "space_admin") {
+    return "space_admin";
+  }
+  return "user";
+}
+
+function renderRoleLabel(role: AdminUser["role"]): string {
+  const normalizedRole = normalizeUserRole(role);
+  if (normalizedRole === "platform_admin") {
+    return "全站管理员";
+  }
+  if (normalizedRole === "space_admin") {
+    return "空间管理员";
+  }
+  return "普通用户";
+}
+
+function renderRoleBadgeClass(role: AdminUser["role"]): string {
+  const normalizedRole = normalizeUserRole(role);
+  if (normalizedRole === "platform_admin") {
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+  if (normalizedRole === "space_admin") {
+    return "border-cyan-200 bg-cyan-50 text-cyan-700";
+  }
+  return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
 export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
 
@@ -80,6 +118,7 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
 
   const [usersState, setUsersState] = useState<AdminUsersState>(() => emptyUsersState());
   const [loading, setLoading] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
   const [actioningUserID, setActioningUserID] = useState<string | null>(null);
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
@@ -130,6 +169,99 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
     setPage(1);
   }, []);
 
+  const handleCreateUser = useCallback(async () => {
+    const promptResult = await prompt({
+      title: "新增用户",
+      description: "创建一个新用户账号，创建后可直接使用邮箱和密码登录。",
+      confirmText: "确认创建",
+      fields: [
+        {
+          key: "name",
+          label: "昵称",
+          required: true,
+          placeholder: "输入用户昵称"
+        },
+        {
+          key: "email",
+          label: "邮箱",
+          required: true,
+          placeholder: "name@example.com"
+        },
+        {
+          key: "password",
+          label: "密码",
+          type: "password",
+          required: true,
+          placeholder: "至少 6 位"
+        },
+        {
+          key: "confirmPassword",
+          label: "确认密码",
+          type: "password",
+          required: true,
+          placeholder: "再次输入密码"
+        },
+        {
+          key: "role",
+          label: "角色",
+          type: "select",
+          required: true,
+          defaultValue: "user",
+          options: USER_ROLE_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label
+          }))
+        }
+      ]
+    });
+    if (!promptResult) {
+      return;
+    }
+
+    const name = (promptResult.name ?? "").trim();
+    const email = (promptResult.email ?? "").trim();
+    const password = promptResult.password ?? "";
+    const confirmPassword = promptResult.confirmPassword ?? "";
+    const role = normalizeUserRole(promptResult.role);
+
+    if (!name) {
+      openToast("昵称不能为空");
+      return;
+    }
+    if (!email) {
+      openToast("邮箱不能为空");
+      return;
+    }
+    if (password.length < 6) {
+      openToast("密码长度至少为 6 位");
+      return;
+    }
+    if (password !== confirmPassword) {
+      openToast("两次输入的密码不一致");
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      const createdUser = await dataGateway.admin.createUser({
+        email,
+        name,
+        password,
+        role
+      });
+      openToast(`用户已创建：${createdUser.email}（${renderRoleLabel(createdUser.role)}）`, "success");
+      const shouldReloadImmediately = page === 1;
+      setPage(1);
+      if (shouldReloadImmediately) {
+        await loadUsers();
+      }
+    } catch (error) {
+      openToast(`创建用户失败：${formatError(error)}`);
+    } finally {
+      setCreatingUser(false);
+    }
+  }, [dataGateway.admin, loadUsers, openToast, page, prompt]);
+
   const runUserAction = useCallback(
     async (targetUserID: string, callback: () => Promise<void>) => {
       setActioningUserID(targetUserID);
@@ -143,6 +275,51 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
       }
     },
     [loadUsers, openToast]
+  );
+
+  const handleUpdateRole = useCallback(
+    async (user: AdminUser) => {
+      if (!user.canEditRole) {
+        openToast("不能编辑比自己角色高的用户，或不能编辑当前登录账号");
+        return;
+      }
+
+      const promptResult = await prompt({
+        title: `编辑角色：${user.email}`,
+        description: "修改用户的后台管理角色。",
+        confirmText: "保存角色",
+        fields: [
+          {
+            key: "role",
+            label: "用户角色",
+            type: "select",
+            required: true,
+            defaultValue: normalizeUserRole(user.role),
+            options: USER_ROLE_OPTIONS.map((option) => ({
+              value: option.value,
+              label: option.label
+            }))
+          }
+        ]
+      });
+      if (!promptResult) {
+        return;
+      }
+
+      const nextRole = normalizeUserRole(promptResult.role);
+      if (nextRole === normalizeUserRole(user.role)) {
+        openToast("角色未变更", "info");
+        return;
+      }
+
+      await runUserAction(user.userId, async () => {
+        await dataGateway.admin.updateUserRole({
+          userId: user.userId,
+          role: nextRole
+        });
+      });
+    },
+    [dataGateway.admin, openToast, prompt, runUserAction]
   );
 
   const handleBan = useCallback(
@@ -266,16 +443,20 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
               </Select>
             </label>
             <AdminToolbarActions className="self-stretch">
-                <Button type="submit" disabled={loading}>
+                <Button type="submit" disabled={loading || creatingUser}>
                   <Search size={14} />
                   <span>查询</span>
                 </Button>
-                <Button type="button" variant="outline" disabled={loading} onClick={handleReset}>
+                <Button type="button" variant="outline" disabled={loading || creatingUser} onClick={handleReset}>
                   重置
                 </Button>
-                <Button type="button" variant="outline" disabled={loading} onClick={() => void loadUsers()}>
+                <Button type="button" variant="outline" disabled={loading || creatingUser} onClick={() => void loadUsers()}>
                   <RefreshCw size={14} />
                   <span>刷新</span>
+                </Button>
+                <Button type="button" disabled={loading || creatingUser} onClick={() => void handleCreateUser()}>
+                  <UserPlus size={14} />
+                  <span>{creatingUser ? "创建中..." : "新增用户"}</span>
                 </Button>
             </AdminToolbarActions>
           </form>
@@ -285,6 +466,7 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                   <tr className="text-xs uppercase tracking-wide text-slate-600">
                     <th className="border-b border-slate-200 px-3 py-2 font-semibold">用户</th>
+                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">角色</th>
                     <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
                     <th className="border-b border-slate-200 px-3 py-2 font-semibold">封禁原因</th>
                     <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
@@ -294,7 +476,7 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="px-3 py-12">
+                      <td colSpan={6} className="px-3 py-12">
                         <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
                           <LoaderCircle size={15} className="animate-spin" />
                           <span>正在加载用户列表...</span>
@@ -303,7 +485,7 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
                     </tr>
                   ) : usersState.items.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-3 py-12 text-center text-sm text-slate-500">
+                      <td colSpan={6} className="px-3 py-12 text-center text-sm text-slate-500">
                         暂无符合条件的数据
                       </td>
                     </tr>
@@ -322,6 +504,11 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
                             </div>
                           </td>
                           <td className="px-3 py-3">
+                            <Badge variant="outline" className={renderRoleBadgeClass(user.role)}>
+                              {renderRoleLabel(user.role)}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3">
                             <Badge variant="outline" className={renderStatusBadgeClass(user.status)}>
                               {renderStatusLabel(user.status)}
                             </Badge>
@@ -335,6 +522,16 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
                           </td>
                           <td className="px-3 py-3">
                             <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={isActioning || !user.canEditRole}
+                                onClick={() => void handleUpdateRole(user)}
+                              >
+                                <PencilLine size={14} />
+                                <span>角色</span>
+                              </Button>
                               {user.status === "banned" ? (
                                 <Button type="button" size="sm" variant="secondary" disabled={isActioning} onClick={() => void handleUnban(user)}>
                                   <ShieldCheck size={14} />

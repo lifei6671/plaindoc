@@ -18,9 +18,30 @@ export function findFirstDocId(nodes: TreeNode[]): string | null {
 // 将 unknown 错误转换为可展示文案。
 export function formatError(error: unknown): string {
   if (error instanceof Error) {
+    const message = parseJSONErrorMessage(error.message);
+    if (message) {
+      return message;
+    }
     return error.message;
   }
   return "未知错误";
+}
+
+function parseJSONErrorMessage(raw: string): string | null {
+  const value = raw.trim();
+  if (value === "" || !value.startsWith("{") || !value.endsWith("}")) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(value) as { message?: unknown };
+    if (typeof payload.message === "string" && payload.message.trim() !== "") {
+      return payload.message.trim();
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 // 将 ISO 时间格式化为“时:分:秒”。

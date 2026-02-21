@@ -11,7 +11,8 @@ import (
 )
 
 type authHandler struct {
-	authService *service.AuthService
+	authService                   *service.AuthService
+	authRegistrationPolicyService *service.AuthRegistrationPolicyService
 }
 
 type registerRequest struct {
@@ -42,9 +43,13 @@ type authSessionResponse struct {
 }
 
 // NewAuthHandler 创建认证处理器，负责注册、登录、会话校验和 token 刷新。
-func NewAuthHandler(authService *service.AuthService) *authHandler {
+func NewAuthHandler(
+	authService *service.AuthService,
+	authRegistrationPolicyService *service.AuthRegistrationPolicyService,
+) *authHandler {
 	return &authHandler{
-		authService: authService,
+		authService:                   authService,
+		authRegistrationPolicyService: authRegistrationPolicyService,
 	}
 }
 
@@ -53,6 +58,17 @@ func (h *authHandler) Register(c *gin.Context) {
 	if h == nil || h.authService == nil {
 		response.InternalError(c)
 		return
+	}
+	if h.authRegistrationPolicyService != nil {
+		allowRegistration, err := h.authRegistrationPolicyService.AllowRegistration(c.Request.Context())
+		if err != nil {
+			response.InternalError(c)
+			return
+		}
+		if !allowRegistration {
+			response.Error(c, http.StatusForbidden, "REGISTRATION_DISABLED", "registration is disabled")
+			return
+		}
 	}
 
 	var req registerRequest

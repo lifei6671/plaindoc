@@ -23,7 +23,7 @@ export interface AdminPromptFieldOption {
 export interface AdminPromptField {
   key: string;
   label: string;
-  type?: "text" | "textarea" | "select";
+  type?: "text" | "password" | "textarea" | "select";
   placeholder?: string;
   required?: boolean;
   description?: string;
@@ -113,7 +113,24 @@ function AdminDialogLayer({ open, title, description, onClose, footer, children 
 function createPromptInitialValues(fields: AdminPromptField[]): Record<string, string> {
   const values: Record<string, string> = {};
   for (const field of fields) {
-    values[field.key] = field.defaultValue ?? "";
+    const rawDefaultValue = field.defaultValue ?? "";
+    if (field.type !== "select") {
+      values[field.key] = rawDefaultValue;
+      continue;
+    }
+
+    const options = field.options ?? [];
+    const hasEmptyOption = options.some((option) => option.value === "");
+    const hasDefaultOption = options.some((option) => option.value === rawDefaultValue);
+    if (hasDefaultOption) {
+      values[field.key] = rawDefaultValue;
+      continue;
+    }
+    if (field.required && !hasEmptyOption && options.length > 0) {
+      values[field.key] = options[0].value;
+      continue;
+    }
+    values[field.key] = rawDefaultValue;
   }
   return values;
 }
@@ -125,16 +142,6 @@ export function useAdminDialogs() {
 
   const [promptValues, setPromptValues] = useState<Record<string, string>>({});
   const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!promptState) {
-      setPromptValues({});
-      setPromptErrors({});
-      return;
-    }
-    setPromptValues(createPromptInitialValues(promptState.fields));
-    setPromptErrors({});
-  }, [promptState]);
 
   const closeConfirm = useCallback((result: boolean) => {
     setConfirmState((previousState) => {
@@ -154,6 +161,8 @@ export function useAdminDialogs() {
       previousState.resolve(result);
       return null;
     });
+    setPromptValues({});
+    setPromptErrors({});
   }, []);
 
   const confirm = useCallback((options: AdminConfirmOptions) => {
@@ -177,6 +186,9 @@ export function useAdminDialogs() {
   const prompt = useCallback((options: AdminPromptOptions) => {
     const nextRequestKey = promptRequestCounter.current + 1;
     promptRequestCounter.current = nextRequestKey;
+    const initialValues = createPromptInitialValues(options.fields);
+    setPromptValues(initialValues);
+    setPromptErrors({});
     return new Promise<Record<string, string> | null>((resolve) => {
       setPromptState((previousState) => {
         if (previousState) {
@@ -319,9 +331,11 @@ export function useAdminDialogs() {
                       }}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder={field.placeholder || `请选择${field.label}`} />
+                        <SelectValue placeholder={field.placeholder || `请选择${field.label}`}>
+                          {(field.options ?? []).find((option) => option.value === value)?.label}
+                        </SelectValue>
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[2700]">
                         {(field.options ?? []).map((option) => (
                           <SelectItem
                             key={option.value || "__PD_EMPTY_VALUE__"}
@@ -334,7 +348,8 @@ export function useAdminDialogs() {
                     </Select>
                   ) : (
                     <Input
-                      type="text"
+                      type={field.type === "password" ? "password" : "text"}
+                      autoComplete={field.type === "password" ? "new-password" : undefined}
                       value={value}
                       placeholder={field.placeholder}
                       onChange={(event) => {

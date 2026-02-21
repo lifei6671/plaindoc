@@ -137,6 +137,9 @@ func (s *AdminAuditService) Record(ctx context.Context, input RecordAdminAuditIn
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
+		actorUserID = adminAuditActorUserIDFromContext(ctx)
+	}
+	if actorUserID == "" {
 		return ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
@@ -180,6 +183,9 @@ func (s *AdminAuditService) Record(ctx context.Context, input RecordAdminAuditIn
 	}
 
 	requestID := strings.TrimSpace(input.RequestID)
+	if requestID == "" {
+		requestID = adminAuditRequestIDFromContext(ctx)
+	}
 	auditLog := &models.AuditLog{
 		ActorUserID: &actorUserID,
 		Module:      module,

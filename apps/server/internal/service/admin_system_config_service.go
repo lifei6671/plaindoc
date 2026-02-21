@@ -164,12 +164,10 @@ func (s *AdminSystemConfigService) UpsertConfig(
 
 		if err := s.recordSystemConfigAudit(
 			ctx,
-			actorUserID,
 			AdminAuditActionCreate,
 			record,
 			input.ExpectedVersion,
 			valueMap,
-			input.RequestID,
 		); err != nil {
 			return AdminSystemConfigRecord{}, err
 		}
@@ -214,12 +212,10 @@ func (s *AdminSystemConfigService) UpsertConfig(
 
 	if err := s.recordSystemConfigAudit(
 		ctx,
-		actorUserID,
 		AdminAuditActionUpdate,
 		record,
 		&expectedVersion,
 		valueMap,
-		input.RequestID,
 	); err != nil {
 		return AdminSystemConfigRecord{}, err
 	}
@@ -256,12 +252,10 @@ func resolveSystemConfigValidator(
 
 func (s *AdminSystemConfigService) recordSystemConfigAudit(
 	ctx context.Context,
-	actorUserID string,
 	action AdminAuditAction,
 	record AdminSystemConfigRecord,
 	expectedVersion *int,
 	valueMap map[string]any,
-	requestID string,
 ) error {
 	if s == nil || s.adminAuditService == nil {
 		return nil
@@ -282,14 +276,12 @@ func (s *AdminSystemConfigService) recordSystemConfigAudit(
 	}
 
 	return s.adminAuditService.Record(ctx, RecordAdminAuditInput{
-		ActorUserID: actorUserID,
-		Module:      AdminAuditModuleSystemConfig,
-		Action:      action,
-		TargetType:  "system_config",
-		TargetID:    record.ConfigKey,
-		Summary:     summaryPrefix + record.ConfigKey,
-		Detail:      detail,
-		RequestID:   requestID,
+		Module:     AdminAuditModuleSystemConfig,
+		Action:     action,
+		TargetType: "system_config",
+		TargetID:   record.ConfigKey,
+		Summary:    summaryPrefix + record.ConfigKey,
+		Detail:     detail,
 	})
 }
 

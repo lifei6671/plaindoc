@@ -149,3 +149,4 @@ bin/
 *.db-wal
 *.log
 *.cache
+.DS_Store

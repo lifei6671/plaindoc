@@ -43,7 +43,8 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
 
 		authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
-		authHandler := handler.NewAuthHandler(authService)
+		authRegistrationPolicyService := service.NewAuthRegistrationPolicyService(systemConfigRepo)
+		authHandler := handler.NewAuthHandler(authService, authRegistrationPolicyService)
 		api.POST("/auth/register", authHandler.Register)
 		api.POST("/auth/login", authHandler.Login)
 		api.POST("/auth/refresh", authHandler.Refresh)
@@ -59,9 +60,11 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 
 		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo)
 		adminHandler := handler.NewAdminHandler(adminAccessService)
+		adminOperationTokenService := service.NewAdminOperationTokenService(adminAccessService, 0)
+		adminOperationTokenHandler := handler.NewAdminOperationTokenHandler(adminOperationTokenService)
 		adminAuditService := service.NewAdminAuditService(auditLogRepo, adminAccessService)
 		adminAuditHandler := handler.NewAdminAuditHandler(adminAuditService)
-		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminAccessService, adminAuditService)
+		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminRoleRepo, adminAccessService, adminAuditService)
 		adminUserHandler := handler.NewAdminUserHandler(adminUserService)
 		adminSpaceService := service.NewAdminSpaceService(spaceRepo, userRepo, adminAccessService, adminAuditService)
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
@@ -73,8 +76,10 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		adminSystemConfigHandler := handler.NewAdminSystemConfigHandler(adminSystemConfigService)
 		adminAPI := api.Group("/admin")
 		adminAPI.Use(middleware.RequireAdmin(authService, adminAccessService))
+		adminAPI.Use(middleware.AttachAdminAuditContext())
 		{
 			adminAPI.GET("/me", adminHandler.Me)
+			adminAPI.POST("/operation-tokens", adminOperationTokenHandler.Issue)
 			adminAPI.GET(
 				"/spaces/:spaceId/check",
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
@@ -85,20 +90,62 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 				middleware.RequirePlatformAdmin(adminAccessService),
 				adminUserHandler.ListUsers,
 			)
+			adminAPI.POST(
+				"/users",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminUserHandler.CreateUser,
+			)
+			adminAPI.PATCH(
+				"/users/:userId/role",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "user.update_role",
+						TargetType:    "user",
+						TargetIDParam: "userId",
+					},
+				),
+				adminUserHandler.UpdateRole,
+			)
 			adminAPI.PATCH(
 				"/users/:userId/status",
 				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "user.update_status",
+						TargetType:    "user",
+						TargetIDParam: "userId",
+					},
+				),
 				adminUserHandler.UpdateStatus,
 			)
 			adminAPI.DELETE(
 				"/users/:userId",
 				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "user.delete",
+						TargetType:    "user",
+						TargetIDParam: "userId",
+					},
+				),
 				adminUserHandler.DeleteUser,
 			)
 			adminAPI.GET("/spaces", adminSpaceHandler.ListSpaces)
 			adminAPI.PATCH(
 				"/spaces/:spaceId/status",
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "space.update_status",
+						TargetType:    "space",
+						TargetIDParam: "spaceId",
+					},
+				),
 				adminSpaceHandler.UpdateStatus,
 			)
 			adminAPI.PATCH(
@@ -109,21 +156,67 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 			adminAPI.DELETE(
 				"/spaces/:spaceId",
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "space.delete",
+						TargetType:    "space",
+						TargetIDParam: "spaceId",
+					},
+				),
 				adminSpaceHandler.DeleteSpace,
 			)
 			adminAPI.GET("/documents", adminDocumentHandler.ListDocuments)
 			adminAPI.PATCH(
 				"/documents/:documentId/status",
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document.update_status",
+						TargetType:    "document",
+						TargetIDParam: "documentId",
+					},
+				),
 				adminDocumentHandler.UpdateStatus,
 			)
 			adminAPI.DELETE(
 				"/documents/:documentId",
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document.delete",
+						TargetType:    "document",
+						TargetIDParam: "documentId",
+					},
+				),
 				adminDocumentHandler.DeleteDocument,
 			)
 			adminAPI.GET("/themes", adminThemeHandler.ListThemes)
 			adminAPI.POST("/themes", adminThemeHandler.CreateTheme)
-			adminAPI.PUT("/themes/:themeId", adminThemeHandler.UpdateTheme)
-			adminAPI.DELETE("/themes/:themeId", adminThemeHandler.DeleteTheme)
+			adminAPI.PUT(
+				"/themes/:themeId",
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "theme.update",
+						TargetType:    "theme",
+						TargetIDParam: "themeId",
+					},
+				),
+				adminThemeHandler.UpdateTheme,
+			)
+			adminAPI.DELETE(
+				"/themes/:themeId",
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "theme.delete",
+						TargetType:    "theme",
+						TargetIDParam: "themeId",
+					},
+				),
+				adminThemeHandler.DeleteTheme,
+			)
 			adminAPI.GET(
 				"/system-configs",
 				middleware.RequirePlatformAdmin(adminAccessService),
@@ -132,6 +225,14 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 			adminAPI.PUT(
 				"/system-configs/:key",
 				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "system_config.upsert",
+						TargetType:    "system_config",
+						TargetIDParam: "key",
+					},
+				),
 				adminSystemConfigHandler.UpsertConfig,
 			)
 			adminAPI.GET("/audits", adminAuditHandler.ListAudits)

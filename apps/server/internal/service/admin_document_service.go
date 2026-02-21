@@ -236,13 +236,11 @@ func (s *AdminDocumentService) UpdateStatus(
 	}
 	record := s.buildRecordFromAccess(ctx, latestAccessInfo)
 	if err := s.recordDocumentAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: input.ActorUserID,
-		Module:      AdminAuditModuleDocument,
-		Action:      AdminAuditActionUpdate,
-		TargetType:  "document",
-		TargetID:    record.DocumentID,
-		Summary:     "document status updated: " + record.DocumentID,
-		RequestID:   input.RequestID,
+		Module:     AdminAuditModuleDocument,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "document",
+		TargetID:   record.DocumentID,
+		Summary:    "document status updated: " + record.DocumentID,
 		Detail: map[string]any{
 			"spaceId":      record.SpaceID,
 			"statusBefore": accessInfo.Document.Status,
@@ -263,6 +261,8 @@ func (s *AdminDocumentService) DeleteDocument(
 	documentID string,
 	requestID string,
 ) error {
+	_ = requestID
+
 	if s == nil || s.documentRepo == nil || s.adminAccessService == nil {
 		return errors.New("admin document service dependencies are nil")
 	}
@@ -296,13 +296,11 @@ func (s *AdminDocumentService) DeleteDocument(
 	}
 
 	if err := s.recordDocumentAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: actorUserID,
-		Module:      AdminAuditModuleDocument,
-		Action:      AdminAuditActionDelete,
-		TargetType:  "document",
-		TargetID:    targetDocumentID,
-		Summary:     "document deleted: " + targetDocumentID,
-		RequestID:   requestID,
+		Module:     AdminAuditModuleDocument,
+		Action:     AdminAuditActionDelete,
+		TargetType: "document",
+		TargetID:   targetDocumentID,
+		Summary:    "document deleted: " + targetDocumentID,
 		Detail: map[string]any{
 			"spaceId":      accessInfo.SpaceID,
 			"statusBefore": accessInfo.Document.Status,

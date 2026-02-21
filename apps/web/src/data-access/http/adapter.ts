@@ -11,6 +11,7 @@ import {
   type AdminSpace,
   type AdminSpaceListInput,
   type AdminSpaceListResult,
+  type AdminRole,
   type AdminUser,
   type AdminUserListInput,
   type AdminUserListResult,
@@ -312,6 +313,32 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     }
   };
 
+  const issueAdminOperationToken = async (input: {
+    operation: string;
+    targetType?: string;
+    targetId?: string;
+  }): Promise<string> => {
+    const payload = await request<{ token: string }>("/admin/operation-tokens", {
+      method: "POST",
+      body: JSON.stringify({
+        operation: input.operation,
+        targetType: input.targetType ?? "",
+        targetId: input.targetId ?? ""
+      })
+    });
+    const token = typeof payload.token === "string" ? payload.token.trim() : "";
+    if (!token) {
+      throw new Error("高风险操作令牌签发失败");
+    }
+    return token;
+  };
+
+  const buildAdminOperationTokenHeaders = (operationToken: string): Headers => {
+    const headers = new Headers();
+    headers.set("X-Admin-Operation-Token", operationToken);
+    return headers;
+  };
+
   const admin: AdminGateway = {
     async getMe() {
       return request<AdminIdentity>("/admin/me");
@@ -339,13 +366,67 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       const path = queryText ? `/admin/users?${queryText}` : "/admin/users";
       return request<AdminUserListResult>(path);
     },
+    async createUser(input: { email: string; name: string; password: string; role: "user" | AdminRole }) {
+      const email = input.email.trim();
+      const name = input.name.trim();
+      const role = input.role;
+      if (!email) {
+        throw new Error("邮箱不能为空");
+      }
+      if (!name) {
+        throw new Error("昵称不能为空");
+      }
+      if (!input.password) {
+        throw new Error("密码不能为空");
+      }
+      if (role !== "user" && role !== "space_admin" && role !== "platform_admin") {
+        throw new Error("用户角色非法");
+      }
+      return request<AdminUser>("/admin/users", {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          name,
+          password: input.password,
+          role
+        })
+      });
+    },
+    async updateUserRole(input: { userId: string; role: "user" | AdminRole }) {
+      const targetUserID = input.userId.trim();
+      if (!targetUserID) {
+        throw new Error("用户 ID 不能为空");
+      }
+      const role = input.role;
+      if (role !== "user" && role !== "space_admin" && role !== "platform_admin") {
+        throw new Error("用户角色非法");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "user.update_role",
+        targetType: "user",
+        targetId: targetUserID
+      });
+      return request<AdminUser>(`/admin/users/${encodeURIComponent(targetUserID)}/role`, {
+        method: "PATCH",
+        headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify({
+          role
+        })
+      });
+    },
     async updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }) {
       const targetUserID = input.userId.trim();
       if (!targetUserID) {
         throw new Error("用户 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "user.update_status",
+        targetType: "user",
+        targetId: targetUserID
+      });
       return request<AdminUser>(`/admin/users/${encodeURIComponent(targetUserID)}/status`, {
         method: "PATCH",
+        headers: buildAdminOperationTokenHeaders(operationToken),
         body: JSON.stringify({
           status: input.status,
           reason: input.reason ?? ""
@@ -357,8 +438,14 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!targetUserID) {
         throw new Error("用户 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "user.delete",
+        targetType: "user",
+        targetId: targetUserID
+      });
       await request<void>(`/admin/users/${encodeURIComponent(targetUserID)}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
     async listSpaces(input: AdminSpaceListInput = {}) {
@@ -387,11 +474,17 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!targetSpaceID) {
         throw new Error("空间 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "space.update_status",
+        targetType: "space",
+        targetId: targetSpaceID
+      });
 
       return request<AdminSpace>(
         `/admin/spaces/${encodeURIComponent(targetSpaceID)}/status`,
         {
           method: "PATCH",
+          headers: buildAdminOperationTokenHeaders(operationToken),
           body: JSON.stringify({
             status: input.status,
             reason: input.reason ?? ""
@@ -426,8 +519,14 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!targetSpaceID) {
         throw new Error("空间 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "space.delete",
+        targetType: "space",
+        targetId: targetSpaceID
+      });
       await request<void>(`/admin/spaces/${encodeURIComponent(targetSpaceID)}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
     async listDocuments(input: AdminDocumentListInput = {}) {
@@ -460,11 +559,17 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!targetDocumentID) {
         throw new Error("文档 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document.update_status",
+        targetType: "document",
+        targetId: targetDocumentID
+      });
 
       return request<AdminDocument>(
         `/admin/documents/${encodeURIComponent(targetDocumentID)}/status`,
         {
           method: "PATCH",
+          headers: buildAdminOperationTokenHeaders(operationToken),
           body: JSON.stringify({
             status: input.status,
             reason: input.reason ?? ""
@@ -477,8 +582,14 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!targetDocumentID) {
         throw new Error("文档 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document.delete",
+        targetType: "document",
+        targetId: targetDocumentID
+      });
       await request<void>(`/admin/documents/${encodeURIComponent(targetDocumentID)}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
     async listThemes() {
@@ -515,6 +626,11 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!themeID) {
         throw new Error("主题 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "theme.update",
+        targetType: "theme",
+        targetId: themeID
+      });
       const payload: Record<string, unknown> = {};
       if (typeof input.name === "string") {
         payload.name = input.name.trim();
@@ -545,6 +661,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
       return request<AdminTheme>(`/admin/themes/${encodeURIComponent(themeID)}`, {
         method: "PUT",
+        headers: buildAdminOperationTokenHeaders(operationToken),
         body: JSON.stringify(payload)
       });
     },
@@ -553,8 +670,14 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!themeID) {
         throw new Error("主题 ID 不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "theme.delete",
+        targetType: "theme",
+        targetId: themeID
+      });
       await request<void>(`/admin/themes/${encodeURIComponent(themeID)}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
     async listSystemConfigs() {
@@ -569,6 +692,11 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!configKey) {
         throw new Error("配置键不能为空");
       }
+      const operationToken = await issueAdminOperationToken({
+        operation: "system_config.upsert",
+        targetType: "system_config",
+        targetId: configKey
+      });
       const payload: {
         value: Record<string, unknown>;
         expectedVersion?: number;
@@ -582,6 +710,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
       return request<AdminSystemConfig>(`/admin/system-configs/${encodeURIComponent(configKey)}`, {
         method: "PUT",
+        headers: buildAdminOperationTokenHeaders(operationToken),
         body: JSON.stringify(payload)
       });
     },

@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 )
 
 func setupAuthTestRouter(t *testing.T) (*storage.Database, func(*http.Request) *httptest.ResponseRecorder) {
@@ -225,5 +227,41 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	refreshRec := serve(refreshReq)
 	if refreshRec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected revoked session refresh token to be rejected with 401, got %d, body=%s", refreshRec.Code, refreshRec.Body.String())
+	}
+}
+
+func TestRouter_AuthRegisterDisabledBySiteConfig(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	now := time.Now().UTC()
+	if err := database.ORM.WithContext(context.Background()).Create(&models.SystemConfig{
+		ConfigKey:       "site",
+		ConfigValueJSON: `{"allowRegistration":false,"defaultSpaceVisibility":"member"}`,
+		Version:         1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error; err != nil {
+		t.Fatalf("seed site config failed: %v", err)
+	}
+
+	registerBody := []byte(`{"email":"closed@example.com","password":"123456","name":"Closed User"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode register disabled response failed: %v", err)
+	}
+	if payload.Code != "REGISTRATION_DISABLED" {
+		t.Fatalf("expected error code REGISTRATION_DISABLED, got %s", payload.Code)
 	}
 }

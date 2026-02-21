@@ -285,14 +285,12 @@ func (s *AdminSpaceService) UpdateMetadata(
 		"visibilityAfter":  record.Visibility,
 	}
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: input.ActorUserID,
-		Module:      AdminAuditModuleSpace,
-		Action:      AdminAuditActionUpdate,
-		TargetType:  "space",
-		TargetID:    record.SpaceID,
-		Summary:     "space metadata updated: " + record.SpaceID,
-		RequestID:   input.RequestID,
-		Detail:      detail,
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "space",
+		TargetID:   record.SpaceID,
+		Summary:    "space metadata updated: " + record.SpaceID,
+		Detail:     detail,
 	}); err != nil {
 		return AdminSpaceRecord{}, err
 	}
@@ -389,13 +387,11 @@ func (s *AdminSpaceService) UpdateStatus(
 	}
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: input.ActorUserID,
-		Module:      AdminAuditModuleSpace,
-		Action:      AdminAuditActionUpdate,
-		TargetType:  "space",
-		TargetID:    record.SpaceID,
-		Summary:     "space status updated: " + record.SpaceID,
-		RequestID:   input.RequestID,
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "space",
+		TargetID:   record.SpaceID,
+		Summary:    "space status updated: " + record.SpaceID,
 		Detail: map[string]any{
 			"statusBefore": snapshot.Status,
 			"statusAfter":  record.Status,
@@ -415,6 +411,8 @@ func (s *AdminSpaceService) DeleteSpace(
 	spaceID string,
 	requestID string,
 ) error {
+	_ = requestID
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return errors.New("admin space service dependencies are nil")
 	}
@@ -449,13 +447,11 @@ func (s *AdminSpaceService) DeleteSpace(
 	}
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
-		ActorUserID: actorUserID,
-		Module:      AdminAuditModuleSpace,
-		Action:      AdminAuditActionDelete,
-		TargetType:  "space",
-		TargetID:    targetSpaceID,
-		Summary:     "space deleted: " + targetSpaceID,
-		RequestID:   requestID,
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionDelete,
+		TargetType: "space",
+		TargetID:   targetSpaceID,
+		Summary:    "space deleted: " + targetSpaceID,
 		Detail: map[string]any{
 			"statusBefore": snapshot.Status,
 			"statusAfter":  models.EntityStatusDeleted,

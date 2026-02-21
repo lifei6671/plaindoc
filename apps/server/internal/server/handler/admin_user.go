@@ -19,15 +19,17 @@ type adminUserHandler struct {
 }
 
 type adminUserResponse struct {
-	UserID       string              `json:"userId"`
-	Email        string              `json:"email"`
-	Name         string              `json:"name"`
-	Status       models.EntityStatus `json:"status"`
-	BannedReason string              `json:"bannedReason"`
-	BannedAt     *time.Time          `json:"bannedAt"`
-	DeletedAt    *time.Time          `json:"deletedAt"`
-	CreatedAt    time.Time           `json:"createdAt"`
-	UpdatedAt    time.Time           `json:"updatedAt"`
+	UserID       string                `json:"userId"`
+	Email        string                `json:"email"`
+	Name         string                `json:"name"`
+	Role         service.AdminUserRole `json:"role"`
+	CanEditRole  bool                  `json:"canEditRole"`
+	Status       models.EntityStatus   `json:"status"`
+	BannedReason string                `json:"bannedReason"`
+	BannedAt     *time.Time            `json:"bannedAt"`
+	DeletedAt    *time.Time            `json:"deletedAt"`
+	CreatedAt    time.Time             `json:"createdAt"`
+	UpdatedAt    time.Time             `json:"updatedAt"`
 }
 
 type adminUserListResponse struct {
@@ -41,14 +43,77 @@ type adminUserPaginationPayload struct {
 	Total    int64 `json:"total"`
 }
 
+type createAdminUserRequest struct {
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+}
+
 type updateAdminUserStatusRequest struct {
 	Status string `json:"status"`
 	Reason string `json:"reason"`
 }
 
+type updateAdminUserRoleRequest struct {
+	Role string `json:"role"`
+}
+
 // NewAdminUserHandler 创建后台用户管理处理器。
 func NewAdminUserHandler(adminUserService *service.AdminUserService) *adminUserHandler {
 	return &adminUserHandler{adminUserService: adminUserService}
+}
+
+// CreateUser 后台新增用户。
+func (h *adminUserHandler) CreateUser(c *gin.Context) {
+	if h == nil || h.adminUserService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	var req createAdminUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	payload, err := h.adminUserService.CreateUser(c.Request.Context(), service.CreateAdminUserInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		Email:       req.Email,
+		Name:        req.Name,
+		Password:    req.Password,
+		Role:        service.AdminUserRole(strings.ToLower(strings.TrimSpace(req.Role))),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
+		case errors.Is(err, service.ErrAdminUserInvalidEmail):
+			response.Error(c, http.StatusBadRequest, "INVALID_EMAIL", "email is invalid")
+		case errors.Is(err, service.ErrAdminUserInvalidName):
+			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "name is required")
+		case errors.Is(err, service.ErrAdminUserInvalidPassword):
+			response.Error(c, http.StatusBadRequest, "INVALID_PASSWORD", "password must be at least 6 characters")
+		case errors.Is(err, service.ErrAdminUserEmailAlreadyExists):
+			response.Error(c, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email already exists")
+		case errors.Is(err, service.ErrAdminUserInvalidRole):
+			response.Error(c, http.StatusBadRequest, "INVALID_ROLE", "role must be user or space_admin or platform_admin")
+		case errors.Is(err, service.ErrAdminUserRoleForbidden):
+			response.Error(c, http.StatusForbidden, "ROLE_FORBIDDEN", "can not set role higher than actor role")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, mapAdminUserResponse(payload))
 }
 
 // ListUsers 返回后台用户列表，支持关键词、状态、分页查询。
@@ -164,6 +229,62 @@ func (h *adminUserHandler) UpdateStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, mapAdminUserResponse(payload))
 }
 
+// UpdateRole 更新后台目标用户角色（user/space_admin/platform_admin）。
+func (h *adminUserHandler) UpdateRole(c *gin.Context) {
+	if h == nil || h.adminUserService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	targetUserID := strings.TrimSpace(c.Param("userId"))
+	if targetUserID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is required")
+		return
+	}
+
+	var req updateAdminUserRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	payload, err := h.adminUserService.UpdateUserRole(c.Request.Context(), service.UpdateAdminUserRoleInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		UserID:      targetUserID,
+		Role:        service.AdminUserRole(strings.ToLower(strings.TrimSpace(req.Role))),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
+		case errors.Is(err, service.ErrAdminUserNotFound):
+			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
+		case errors.Is(err, service.ErrAdminUserInvalidUserID):
+			response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is invalid")
+		case errors.Is(err, service.ErrAdminUserInvalidRole):
+			response.Error(c, http.StatusBadRequest, "INVALID_ROLE", "role must be user or space_admin or platform_admin")
+		case errors.Is(err, service.ErrAdminUserRoleForbidden):
+			response.Error(c, http.StatusForbidden, "ROLE_FORBIDDEN", "can not edit higher role user")
+		case errors.Is(err, service.ErrAdminUserSelfOperationBlocked):
+			response.Error(c, http.StatusBadRequest, "SELF_OPERATION_FORBIDDEN", "self operation is not allowed")
+		case errors.Is(err, service.ErrAdminUserAlreadyDeleted):
+			response.Error(c, http.StatusBadRequest, "USER_DELETED", "user has been deleted")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, mapAdminUserResponse(payload))
+}
+
 // DeleteUser 软删除后台目标用户。
 func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 	if h == nil || h.adminUserService == nil {
@@ -224,6 +345,8 @@ func mapAdminUserResponse(value service.AdminUserRecord) adminUserResponse {
 		UserID:       value.UserID,
 		Email:        value.Email,
 		Name:         value.Name,
+		Role:         value.Role,
+		CanEditRole:  value.CanEditRole,
 		Status:       value.Status,
 		BannedReason: value.BannedReason,
 		BannedAt:     value.BannedAt,

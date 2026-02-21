@@ -182,6 +182,218 @@ func TestRouter_AdminUserListRequiresPlatformAdmin(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminUserCreateByPlatformAdmin(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "create-users-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "create-users-platform-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	createBody := []byte(`{"email":"created-user@example.com","name":"Created User","password":"123456","role":"space_admin"}`)
+	spaceAdminCreateReq := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewReader(createBody))
+	spaceAdminCreateReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminCreateReq.Header.Set("Content-Type", "application/json")
+	spaceAdminCreateRec := serve(spaceAdminCreateReq)
+	if spaceAdminCreateRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected status 403 for space_admin creating user, got %d body=%s",
+			spaceAdminCreateRec.Code,
+			spaceAdminCreateRec.Body.String(),
+		)
+	}
+
+	platformCreateReq := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewReader(createBody))
+	platformCreateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	platformCreateReq.Header.Set("Content-Type", "application/json")
+	platformCreateRec := serve(platformCreateReq)
+	if platformCreateRec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status 201 for platform_admin creating user, got %d body=%s",
+			platformCreateRec.Code,
+			platformCreateRec.Body.String(),
+		)
+	}
+
+	var createPayload struct {
+		UserID string `json:"userId"`
+		Email  string `json:"email"`
+		Name   string `json:"name"`
+		Role   string `json:"role"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(platformCreateRec.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create user response failed: %v", err)
+	}
+	if createPayload.UserID == "" {
+		t.Fatalf("expected created user id, body=%s", platformCreateRec.Body.String())
+	}
+	if createPayload.Email != "created-user@example.com" || createPayload.Name != "Created User" {
+		t.Fatalf("unexpected create payload: %+v", createPayload)
+	}
+	if createPayload.Status != "active" {
+		t.Fatalf("expected created user status active, got %s", createPayload.Status)
+	}
+	if createPayload.Role != "space_admin" {
+		t.Fatalf("expected created user role space_admin, got %s", createPayload.Role)
+	}
+
+	var userRoleCount int64
+	if err := database.ORM.Table("user_admin_roles").
+		Where("user_id = ? AND role = ?", createPayload.UserID, "space_admin").
+		Count(&userRoleCount).Error; err != nil {
+		t.Fatalf("query created user role failed: %v", err)
+	}
+	if userRoleCount == 0 {
+		t.Fatal("expected created user role space_admin persisted")
+	}
+
+	loginBody := []byte(`{"email":"created-user@example.com","password":"123456"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := serve(loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected created user login status 200, got %d body=%s", loginRec.Code, loginRec.Body.String())
+	}
+
+	duplicateCreateReq := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewReader(createBody))
+	duplicateCreateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	duplicateCreateReq.Header.Set("Content-Type", "application/json")
+	duplicateCreateRec := serve(duplicateCreateReq)
+	if duplicateCreateRec.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate create status 409, got %d body=%s", duplicateCreateRec.Code, duplicateCreateRec.Body.String())
+	}
+
+	var userCreateAuditCount int64
+	if err := database.ORM.Table("audit_logs").
+		Where("module = ? AND action = ? AND target_type = ? AND target_id = ?", "user", "create", "user", createPayload.UserID).
+		Count(&userCreateAuditCount).Error; err != nil {
+		t.Fatalf("query user create audit logs failed: %v", err)
+	}
+	if userCreateAuditCount == 0 {
+		t.Fatal("expected at least one user create audit log")
+	}
+}
+
+func TestRouter_AdminUserRoleUpdateByPlatformAdmin(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "role-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "role-platform-admin@example.com")
+	targetUserID, _, _ := registerAccessUser(t, serve, "role-target@example.com")
+
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	spaceAdminUpdateReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/users/"+targetUserID+"/role",
+		bytes.NewReader([]byte(`{"role":"space_admin"}`)),
+	)
+	spaceAdminUpdateReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminUpdateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		spaceAdminUpdateReq,
+		spaceAdminToken,
+		"user.update_role",
+		"user",
+		targetUserID,
+	)
+	spaceAdminUpdateRec := serve(spaceAdminUpdateReq)
+	if spaceAdminUpdateRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space_admin update role status 403, got %d body=%s",
+			spaceAdminUpdateRec.Code,
+			spaceAdminUpdateRec.Body.String(),
+		)
+	}
+
+	updateReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/users/"+targetUserID+"/role",
+		bytes.NewReader([]byte(`{"role":"space_admin"}`)),
+	)
+	updateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	updateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		updateReq,
+		platformAdminToken,
+		"user.update_role",
+		"user",
+		targetUserID,
+	)
+	updateRec := serve(updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected update role status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	var updatePayload struct {
+		UserID string `json:"userId"`
+		Role   string `json:"role"`
+	}
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updatePayload); err != nil {
+		t.Fatalf("decode update role payload failed: %v", err)
+	}
+	if updatePayload.UserID != targetUserID {
+		t.Fatalf("expected update payload user id %s, got %s", targetUserID, updatePayload.UserID)
+	}
+	if updatePayload.Role != "space_admin" {
+		t.Fatalf("expected update payload role space_admin, got %s", updatePayload.Role)
+	}
+
+	var targetRoleCount int64
+	if err := database.ORM.Table("user_admin_roles").
+		Where("user_id = ? AND role = ?", targetUserID, "space_admin").
+		Count(&targetRoleCount).Error; err != nil {
+		t.Fatalf("query updated user role failed: %v", err)
+	}
+	if targetRoleCount == 0 {
+		t.Fatal("expected target user role updated to space_admin")
+	}
+
+	selfUpdateReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/users/"+platformAdminUserID+"/role",
+		bytes.NewReader([]byte(`{"role":"user"}`)),
+	)
+	selfUpdateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	selfUpdateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		selfUpdateReq,
+		platformAdminToken,
+		"user.update_role",
+		"user",
+		platformAdminUserID,
+	)
+	selfUpdateRec := serve(selfUpdateReq)
+	if selfUpdateRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected self update role status 400, got %d body=%s", selfUpdateRec.Code, selfUpdateRec.Body.String())
+	}
+
+	var userRoleAuditCount int64
+	if err := database.ORM.Table("audit_logs").
+		Where("module = ? AND action = ? AND target_type = ? AND target_id = ?", "user", "update", "user", targetUserID).
+		Where("summary LIKE ?", "user role updated:%").
+		Count(&userRoleAuditCount).Error; err != nil {
+		t.Fatalf("query user role update audit logs failed: %v", err)
+	}
+	if userRoleAuditCount == 0 {
+		t.Fatal("expected at least one user role update audit log")
+	}
+}
+
 func TestRouter_AdminUserBanRevokesSessionAndAccess(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
@@ -203,6 +415,15 @@ func TestRouter_AdminUserBanRevokesSessionAndAccess(t *testing.T) {
 	banReq := httptest.NewRequest(http.MethodPatch, "/api/admin/users/"+targetUserID+"/status", bytes.NewReader(banBody))
 	banReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	banReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		banReq,
+		platformAdminToken,
+		"user.update_status",
+		"user",
+		targetUserID,
+	)
 	banRec := serve(banReq)
 	if banRec.Code != http.StatusOK {
 		t.Fatalf("expected ban user status 200, got %d body=%s", banRec.Code, banRec.Body.String())
@@ -256,6 +477,15 @@ func TestRouter_AdminUserDeleteSoftDeleteAndHideFromDefaultList(t *testing.T) {
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+targetUserID, nil)
 	deleteReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		deleteReq,
+		platformAdminToken,
+		"user.delete",
+		"user",
+		targetUserID,
+	)
 	deleteRec := serve(deleteReq)
 	if deleteRec.Code != http.StatusNoContent {
 		t.Fatalf("expected delete user status 204, got %d body=%s", deleteRec.Code, deleteRec.Body.String())
@@ -349,6 +579,15 @@ func TestRouter_AdminUserSelfOperationBlocked(t *testing.T) {
 	)
 	banReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	banReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		banReq,
+		platformAdminToken,
+		"user.update_status",
+		"user",
+		platformAdminUserID,
+	)
 	banRec := serve(banReq)
 	if banRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected self ban status 400, got %d body=%s", banRec.Code, banRec.Body.String())
@@ -356,6 +595,15 @@ func TestRouter_AdminUserSelfOperationBlocked(t *testing.T) {
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+platformAdminUserID, nil)
 	deleteReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		deleteReq,
+		platformAdminToken,
+		"user.delete",
+		"user",
+		platformAdminUserID,
+	)
 	deleteRec := serve(deleteReq)
 	if deleteRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected self delete status 400, got %d body=%s", deleteRec.Code, deleteRec.Body.String())
@@ -505,6 +753,15 @@ func TestRouter_AdminSpaceUpdateDeleteAndScopeGuard(t *testing.T) {
 
 	deleteAllowedReq := httptest.NewRequest(http.MethodDelete, "/api/admin/spaces/"+spaceIDA, nil)
 	deleteAllowedReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		deleteAllowedReq,
+		spaceAdminToken,
+		"space.delete",
+		"space",
+		spaceIDA,
+	)
 	deleteAllowedRec := serve(deleteAllowedReq)
 	if deleteAllowedRec.Code != http.StatusNoContent {
 		t.Fatalf("expected scoped admin delete allowed space status 204, got %d body=%s", deleteAllowedRec.Code, deleteAllowedRec.Body.String())
@@ -512,6 +769,15 @@ func TestRouter_AdminSpaceUpdateDeleteAndScopeGuard(t *testing.T) {
 
 	deleteDeniedReq := httptest.NewRequest(http.MethodDelete, "/api/admin/spaces/"+spaceIDB, nil)
 	deleteDeniedReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		deleteDeniedReq,
+		spaceAdminToken,
+		"space.delete",
+		"space",
+		spaceIDB,
+	)
 	deleteDeniedRec := serve(deleteDeniedReq)
 	if deleteDeniedRec.Code != http.StatusForbidden {
 		t.Fatalf("expected scoped admin delete unscoped space status 403, got %d body=%s", deleteDeniedRec.Code, deleteDeniedRec.Body.String())
@@ -616,6 +882,15 @@ func TestRouter_AdminSpaceStatusUpdateAndScopeGuard(t *testing.T) {
 	)
 	invalidBanReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	invalidBanReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		invalidBanReq,
+		spaceAdminToken,
+		"space.update_status",
+		"space",
+		spaceIDA,
+	)
 	invalidBanRec := serve(invalidBanReq)
 	if invalidBanRec.Code != http.StatusBadRequest {
 		t.Fatalf(
@@ -632,6 +907,15 @@ func TestRouter_AdminSpaceStatusUpdateAndScopeGuard(t *testing.T) {
 	)
 	scopedBanReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	scopedBanReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		scopedBanReq,
+		spaceAdminToken,
+		"space.update_status",
+		"space",
+		spaceIDA,
+	)
 	scopedBanRec := serve(scopedBanReq)
 	if scopedBanRec.Code != http.StatusOK {
 		t.Fatalf("expected scoped admin ban space status 200, got %d body=%s", scopedBanRec.Code, scopedBanRec.Body.String())
@@ -668,6 +952,15 @@ func TestRouter_AdminSpaceStatusUpdateAndScopeGuard(t *testing.T) {
 	)
 	unscopedBanReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	unscopedBanReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		unscopedBanReq,
+		spaceAdminToken,
+		"space.update_status",
+		"space",
+		spaceIDB,
+	)
 	unscopedBanRec := serve(unscopedBanReq)
 	if unscopedBanRec.Code != http.StatusForbidden {
 		t.Fatalf(
@@ -684,6 +977,15 @@ func TestRouter_AdminSpaceStatusUpdateAndScopeGuard(t *testing.T) {
 	)
 	platformBanReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformBanReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformBanReq,
+		platformAdminToken,
+		"space.update_status",
+		"space",
+		spaceIDB,
+	)
 	platformBanRec := serve(platformBanReq)
 	if platformBanRec.Code != http.StatusOK {
 		t.Fatalf("expected platform admin ban space status 200, got %d body=%s", platformBanRec.Code, platformBanRec.Body.String())
@@ -696,6 +998,15 @@ func TestRouter_AdminSpaceStatusUpdateAndScopeGuard(t *testing.T) {
 	)
 	platformUnbanReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformUnbanReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformUnbanReq,
+		platformAdminToken,
+		"space.update_status",
+		"space",
+		spaceIDB,
+	)
 	platformUnbanRec := serve(platformUnbanReq)
 	if platformUnbanRec.Code != http.StatusOK {
 		t.Fatalf("expected platform admin unban space status 200, got %d body=%s", platformUnbanRec.Code, platformUnbanRec.Body.String())
@@ -770,6 +1081,15 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	)
 	banWithoutReasonReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	banWithoutReasonReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		banWithoutReasonReq,
+		spaceAdminToken,
+		"document.update_status",
+		"document",
+		docIDA,
+	)
 	banWithoutReasonRec := serve(banWithoutReasonReq)
 	if banWithoutReasonRec.Code != http.StatusBadRequest {
 		t.Fatalf(
@@ -786,6 +1106,15 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	)
 	banScopedReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	banScopedReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		banScopedReq,
+		spaceAdminToken,
+		"document.update_status",
+		"document",
+		docIDA,
+	)
 	banScopedRec := serve(banScopedReq)
 	if banScopedRec.Code != http.StatusOK {
 		t.Fatalf("expected scoped admin ban document status 200, got %d body=%s", banScopedRec.Code, banScopedRec.Body.String())
@@ -822,6 +1151,15 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	)
 	banUnscopedReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	banUnscopedReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		banUnscopedReq,
+		spaceAdminToken,
+		"document.update_status",
+		"document",
+		docIDB,
+	)
 	banUnscopedRec := serve(banUnscopedReq)
 	if banUnscopedRec.Code != http.StatusForbidden {
 		t.Fatalf(
@@ -833,6 +1171,15 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 
 	platformDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/documents/"+docIDB, nil)
 	platformDeleteReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformDeleteReq,
+		platformAdminToken,
+		"document.delete",
+		"document",
+		docIDB,
+	)
 	platformDeleteRec := serve(platformDeleteReq)
 	if platformDeleteRec.Code != http.StatusNoContent {
 		t.Fatalf("expected platform admin delete document status 204, got %d body=%s", platformDeleteRec.Code, platformDeleteRec.Body.String())
@@ -943,6 +1290,15 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	)
 	disableThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
 	disableThemeReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		disableThemeReq,
+		spaceAdminToken,
+		"theme.update",
+		"theme",
+		themeID,
+	)
 	disableThemeRec := serve(disableThemeReq)
 	if disableThemeRec.Code != http.StatusOK {
 		t.Fatalf("expected disable theme status 200, got %d body=%s", disableThemeRec.Code, disableThemeRec.Body.String())
@@ -959,6 +1315,15 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 
 	deleteThemeReq := httptest.NewRequest(http.MethodDelete, "/api/admin/themes/"+themeID, nil)
 	deleteThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		deleteThemeReq,
+		spaceAdminToken,
+		"theme.delete",
+		"theme",
+		themeID,
+	)
 	deleteThemeRec := serve(deleteThemeReq)
 	if deleteThemeRec.Code != http.StatusNoContent {
 		t.Fatalf("expected delete theme status 204, got %d body=%s", deleteThemeRec.Code, deleteThemeRec.Body.String())
@@ -980,6 +1345,15 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 
 	deleteBuiltinThemeReq := httptest.NewRequest(http.MethodDelete, "/api/admin/themes/default", nil)
 	deleteBuiltinThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		deleteBuiltinThemeReq,
+		spaceAdminToken,
+		"theme.delete",
+		"theme",
+		"default",
+	)
 	deleteBuiltinThemeRec := serve(deleteBuiltinThemeReq)
 	if deleteBuiltinThemeRec.Code != http.StatusBadRequest {
 		t.Fatalf(
@@ -1084,6 +1458,15 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	)
 	platformCreateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformCreateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformCreateReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"site",
+	)
 	platformCreateRec := serve(platformCreateReq)
 	if platformCreateRec.Code != http.StatusOK {
 		t.Fatalf(
@@ -1120,6 +1503,15 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	)
 	platformUpdateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformUpdateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformUpdateReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"site",
+	)
 	platformUpdateRec := serve(platformUpdateReq)
 	if platformUpdateRec.Code != http.StatusOK {
 		t.Fatalf(
@@ -1145,6 +1537,15 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	)
 	platformConflictReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformConflictReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformConflictReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"site",
+	)
 	platformConflictRec := serve(platformConflictReq)
 	if platformConflictRec.Code != http.StatusConflict {
 		t.Fatalf(
@@ -1161,6 +1562,15 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	)
 	platformInvalidValueReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformInvalidValueReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		platformInvalidValueReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"site",
+	)
 	platformInvalidValueRec := serve(platformInvalidValueReq)
 	if platformInvalidValueRec.Code != http.StatusBadRequest {
 		t.Fatalf(
@@ -1214,6 +1624,279 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminOperationTokenRequiredAndReplayGuard(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "op-token-platform-admin@example.com")
+	targetUserIDA, _, _ := registerAccessUserWithRefresh(t, serve, "op-token-target-a@example.com")
+	targetUserIDB, _, _ := registerAccessUserWithRefresh(t, serve, "op-token-target-b@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	withoutTokenReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+targetUserIDA, nil)
+	withoutTokenReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	withoutTokenRec := serve(withoutTokenReq)
+	if withoutTokenRec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected delete user without operation token status 400, got %d body=%s",
+			withoutTokenRec.Code,
+			withoutTokenRec.Body.String(),
+		)
+	}
+	if !strings.Contains(withoutTokenRec.Body.String(), "OPERATION_TOKEN_REQUIRED") {
+		t.Fatalf("expected operation token required error code, body=%s", withoutTokenRec.Body.String())
+	}
+
+	scopeMismatchReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+targetUserIDB, nil)
+	scopeMismatchReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	scopeMismatchToken := issueAdminOperationToken(
+		t,
+		serve,
+		platformAdminToken,
+		"user.delete",
+		"user",
+		targetUserIDA,
+	)
+	scopeMismatchReq.Header.Set("X-Admin-Operation-Token", scopeMismatchToken)
+	scopeMismatchRec := serve(scopeMismatchReq)
+	if scopeMismatchRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected scope mismatch operation token status 409, got %d body=%s",
+			scopeMismatchRec.Code,
+			scopeMismatchRec.Body.String(),
+		)
+	}
+	if !strings.Contains(scopeMismatchRec.Body.String(), "OPERATION_TOKEN_SCOPE_MISMATCH") {
+		t.Fatalf("expected operation token scope mismatch code, body=%s", scopeMismatchRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+targetUserIDA, nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	replayToken := issueAdminOperationToken(
+		t,
+		serve,
+		platformAdminToken,
+		"user.delete",
+		"user",
+		targetUserIDA,
+	)
+	deleteReq.Header.Set("X-Admin-Operation-Token", replayToken)
+	deleteRec := serve(deleteReq)
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("expected delete user with operation token status 204, got %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	replayReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+targetUserIDA, nil)
+	replayReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	replayReq.Header.Set("X-Admin-Operation-Token", replayToken)
+	replayRec := serve(replayReq)
+	if replayRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected replayed operation token status 409, got %d body=%s",
+			replayRec.Code,
+			replayRec.Body.String(),
+		)
+	}
+	if !strings.Contains(replayRec.Body.String(), "OPERATION_TOKEN_REPLAYED") {
+		t.Fatalf("expected operation token replayed error code, body=%s", replayRec.Body.String())
+	}
+}
+
+func TestRouter_AdminOperationTokenIssuePermissionMatrix(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	_, _, normalUserToken := registerAccessUser(t, serve, "op-token-normal-user@example.com")
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "op-token-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "op-token-platform-admin-2@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	noTokenReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/operation-tokens",
+		bytes.NewReader([]byte(`{"operation":"space.delete","targetType":"space","targetId":"space-1"}`)),
+	)
+	noTokenReq.Header.Set("Content-Type", "application/json")
+	noTokenRec := serve(noTokenReq)
+	if noTokenRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected issue operation token without auth status 401, got %d body=%s", noTokenRec.Code, noTokenRec.Body.String())
+	}
+
+	normalUserReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/operation-tokens",
+		bytes.NewReader([]byte(`{"operation":"space.delete","targetType":"space","targetId":"space-1"}`)),
+	)
+	normalUserReq.Header.Set("Authorization", "Bearer "+normalUserToken)
+	normalUserReq.Header.Set("Content-Type", "application/json")
+	normalUserRec := serve(normalUserReq)
+	if normalUserRec.Code != http.StatusForbidden {
+		t.Fatalf("expected issue operation token by normal user status 403, got %d body=%s", normalUserRec.Code, normalUserRec.Body.String())
+	}
+
+	invalidOperationReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/operation-tokens",
+		bytes.NewReader([]byte(`{"operation":"","targetType":"space","targetId":"space-1"}`)),
+	)
+	invalidOperationReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	invalidOperationReq.Header.Set("Content-Type", "application/json")
+	invalidOperationRec := serve(invalidOperationReq)
+	if invalidOperationRec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected issue operation token with invalid operation status 400, got %d body=%s",
+			invalidOperationRec.Code,
+			invalidOperationRec.Body.String(),
+		)
+	}
+
+	spaceAdminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/operation-tokens",
+		bytes.NewReader([]byte(`{"operation":"space.delete","targetType":"space","targetId":"space-1"}`)),
+	)
+	spaceAdminReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminReq.Header.Set("Content-Type", "application/json")
+	spaceAdminRec := serve(spaceAdminReq)
+	if spaceAdminRec.Code != http.StatusOK {
+		t.Fatalf("expected issue operation token by space admin status 200, got %d body=%s", spaceAdminRec.Code, spaceAdminRec.Body.String())
+	}
+	if !strings.Contains(spaceAdminRec.Body.String(), `"token":"`) {
+		t.Fatalf("expected issue operation token response contains token, body=%s", spaceAdminRec.Body.String())
+	}
+
+	platformAdminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/operation-tokens",
+		bytes.NewReader([]byte(`{"operation":"user.delete","targetType":"user","targetId":"user-1"}`)),
+	)
+	platformAdminReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	platformAdminReq.Header.Set("Content-Type", "application/json")
+	platformAdminRec := serve(platformAdminReq)
+	if platformAdminRec.Code != http.StatusOK {
+		t.Fatalf("expected issue operation token by platform admin status 200, got %d body=%s", platformAdminRec.Code, platformAdminRec.Body.String())
+	}
+}
+
+func TestRouter_AdminOperationTokenActorBinding(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, _ := registerAccessUser(t, serve, "op-token-owner@example.com")
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "op-token-actor-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "op-token-actor-platform-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	spaceID := "01h1admintokenactor000000000001"
+	insertAdminTestSpace(t, database, spaceID, "Token Actor Space", ownerUserID, "member")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("space_admin_scopes").Create(map[string]any{
+		"user_id":    spaceAdminUserID,
+		"space_id":   spaceID,
+		"created_at": now,
+		"updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("insert space admin scope failed: %v", err)
+	}
+
+	spaceAdminTokenForDelete := issueAdminOperationToken(
+		t,
+		serve,
+		spaceAdminToken,
+		"space.delete",
+		"space",
+		spaceID,
+	)
+
+	platformDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/spaces/"+spaceID, nil)
+	platformDeleteReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	platformDeleteReq.Header.Set("X-Admin-Operation-Token", spaceAdminTokenForDelete)
+	platformDeleteRec := serve(platformDeleteReq)
+	if platformDeleteRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected cross actor operation token usage status 409, got %d body=%s",
+			platformDeleteRec.Code,
+			platformDeleteRec.Body.String(),
+		)
+	}
+	if !strings.Contains(platformDeleteRec.Body.String(), "OPERATION_TOKEN_INVALID") {
+		t.Fatalf(
+			"expected cross actor operation token invalid error code, body=%s",
+			platformDeleteRec.Body.String(),
+		)
+	}
+
+	spaceAdminDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/spaces/"+spaceID, nil)
+	spaceAdminDeleteReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminDeleteReq.Header.Set("X-Admin-Operation-Token", spaceAdminTokenForDelete)
+	spaceAdminDeleteRec := serve(spaceAdminDeleteReq)
+	if spaceAdminDeleteRec.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected space admin consume own operation token delete status 204, got %d body=%s",
+			spaceAdminDeleteRec.Code,
+			spaceAdminDeleteRec.Body.String(),
+		)
+	}
+}
+
+func TestRouter_AdminAuditRequestIDFromContext(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "audit-requestid-admin@example.com")
+	targetUserID, _, _ := registerAccessUserWithRefresh(t, serve, "audit-requestid-target@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	operationToken := issueAdminOperationToken(
+		t,
+		serve,
+		platformAdminToken,
+		"user.update_status",
+		"user",
+		targetUserID,
+	)
+
+	requestID := "ctx-request-id-001"
+	updateReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/users/"+targetUserID+"/status",
+		bytes.NewReader([]byte(`{"status":"banned","reason":"request id audit check"}`)),
+	)
+	updateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateReq.Header.Set("X-Request-Id", requestID)
+	updateReq.Header.Set("X-Admin-Operation-Token", operationToken)
+	updateRec := serve(updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected update user status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	var latestAudit struct {
+		RequestID string `gorm:"column:request_id"`
+	}
+	if err := database.ORM.Table("audit_logs").
+		Select("request_id").
+		Where("module = ? AND action = ? AND target_type = ? AND target_id = ?", "user", "update", "user", targetUserID).
+		Order("id DESC").
+		Limit(1).
+		Scan(&latestAudit).Error; err != nil {
+		t.Fatalf("query audit request id failed: %v", err)
+	}
+	if latestAudit.RequestID != requestID {
+		t.Fatalf("expected audit request id %s, got %s", requestID, latestAudit.RequestID)
+	}
+}
+
 func registerAccessUserWithRefresh(
 	t *testing.T,
 	serve func(*http.Request) *httptest.ResponseRecorder,
@@ -1244,6 +1927,63 @@ func registerAccessUserWithRefresh(
 	}
 
 	return payload.User.ID, payload.Token, payload.RefreshToken
+}
+
+func attachAdminOperationToken(
+	t *testing.T,
+	serve func(*http.Request) *httptest.ResponseRecorder,
+	req *http.Request,
+	actorToken string,
+	operation string,
+	targetType string,
+	targetID string,
+) {
+	t.Helper()
+	token := issueAdminOperationToken(t, serve, actorToken, operation, targetType, targetID)
+	req.Header.Set("X-Admin-Operation-Token", token)
+}
+
+func issueAdminOperationToken(
+	t *testing.T,
+	serve func(*http.Request) *httptest.ResponseRecorder,
+	actorToken string,
+	operation string,
+	targetType string,
+	targetID string,
+) string {
+	t.Helper()
+
+	requestBody, err := json.Marshal(map[string]string{
+		"operation":  operation,
+		"targetType": targetType,
+		"targetId":   targetID,
+	})
+	if err != nil {
+		t.Fatalf("marshal operation token request failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/operation-tokens", bytes.NewReader(requestBody))
+	req.Header.Set("Authorization", "Bearer "+actorToken)
+	req.Header.Set("Content-Type", "application/json")
+	rec := serve(req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"issue operation token failed, status=%d body=%s",
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode operation token response failed: %v", err)
+	}
+	if strings.TrimSpace(payload.Token) == "" {
+		t.Fatalf("operation token response missing token, body=%s", rec.Body.String())
+	}
+	return payload.Token
 }
 
 func grantAdminRole(t *testing.T, database *storage.Database, userID string, role string) {

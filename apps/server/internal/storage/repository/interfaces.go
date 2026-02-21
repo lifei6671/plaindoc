@@ -63,6 +63,8 @@ type UserSessionRepository interface {
 type AdminRoleRepository interface {
 	HasRole(ctx context.Context, userID string, role models.AdminRole) (bool, error)
 	ListByUserID(ctx context.Context, userID string) ([]models.AdminRole, error)
+	ListByUserIDs(ctx context.Context, userIDs []string) (map[string][]models.AdminRole, error)
+	ReplaceByUserID(ctx context.Context, userID string, roles []models.AdminRole) error
 }
 
 // SpaceAdminScopeRepository 空间管理范围仓储接口。

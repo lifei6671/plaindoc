@@ -1,6 +1,7 @@
 import { LoaderCircle, RefreshCw, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { showToast } from "../../components/ui/toast";
@@ -9,6 +10,18 @@ import { AdminPageCard, AdminTableContainer, AdminToolbarActions } from "../comp
 import { formatError } from "../../editor/status-utils";
 
 type SystemConfigKey = "site" | "editor" | "security";
+type SpaceVisibility = "public" | "authenticated" | "member";
+
+interface SiteSystemConfigValue {
+  allowRegistration: boolean;
+  defaultSpaceVisibility: SpaceVisibility;
+}
+
+const SPACE_VISIBILITY_OPTIONS: Array<{ value: SpaceVisibility; label: string }> = [
+  { value: "public", label: "完全公开（未登录可见）" },
+  { value: "authenticated", label: "登录可见（需登录）" },
+  { value: "member", label: "成员可见（阅读者及以上）" }
+];
 
 interface AdminSystemConfigsPageProps {
   dataGateway: DataGateway;
@@ -29,6 +42,11 @@ const SYSTEM_CONFIG_TEMPLATES: Record<SystemConfigKey, Record<string, unknown>> 
   }
 };
 
+const SITE_CONFIG_TEMPLATE: SiteSystemConfigValue = {
+  allowRegistration: true,
+  defaultSpaceVisibility: "member"
+};
+
 function formatDateTime(value: string | null): string {
   if (!value) {
     return "-";
@@ -42,6 +60,28 @@ function formatDateTime(value: string | null): string {
 
 function stringifyConfigValue(value: Record<string, unknown>): string {
   return JSON.stringify(value, null, 2);
+}
+
+function parseSiteSystemConfig(value: string): SiteSystemConfigValue | null {
+  try {
+    const payload = JSON.parse(value) as Record<string, unknown>;
+    const allowRegistration = payload.allowRegistration;
+    const defaultSpaceVisibility = payload.defaultSpaceVisibility;
+    if (
+      typeof allowRegistration !== "boolean" ||
+      (defaultSpaceVisibility !== "public" &&
+        defaultSpaceVisibility !== "authenticated" &&
+        defaultSpaceVisibility !== "member")
+    ) {
+      return null;
+    }
+    return {
+      allowRegistration,
+      defaultSpaceVisibility: defaultSpaceVisibility as SpaceVisibility
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPageProps) {
@@ -78,6 +118,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     () => configs.find((item) => item.configKey === selectedKey) ?? null,
     [configs, selectedKey]
   );
+  const siteDraftConfig = useMemo(() => {
+    if (selectedKey !== "site") {
+      return null;
+    }
+    return parseSiteSystemConfig(editorText);
+  }, [editorText, selectedKey]);
 
   useEffect(() => {
     if (isEditorDirty) {
@@ -134,6 +180,22 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     }
   }, [dataGateway.admin, editorText, loadConfigs, openToast, selectedConfig?.version, selectedKey]);
 
+  const updateSiteDraftConfig = useCallback(
+    (patch: Partial<SiteSystemConfigValue>) => {
+      if (selectedKey !== "site") {
+        return;
+      }
+      const currentValue = parseSiteSystemConfig(editorText) ?? SITE_CONFIG_TEMPLATE;
+      const nextValue: SiteSystemConfigValue = {
+        ...currentValue,
+        ...patch
+      };
+      setEditorText(stringifyConfigValue({ ...nextValue }));
+      setIsEditorDirty(true);
+    },
+    [editorText, selectedKey]
+  );
+
   return (
     <section aria-label="系统配置管理">
       <AdminPageCard>
@@ -181,6 +243,53 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
               当前键：<strong>{selectedKey}</strong>
               {selectedConfig ? `，当前版本：v${selectedConfig.version}` : "，当前版本：未创建"}
             </p>
+            {selectedKey === "site" ? (
+              <div className="mb-3 rounded-sm border border-slate-200 bg-white p-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex items-center gap-2.5">
+                    <Checkbox
+                      checked={siteDraftConfig?.allowRegistration ?? false}
+                      onCheckedChange={(checked) =>
+                        updateSiteDraftConfig({
+                          allowRegistration: checked === true
+                        })
+                      }
+                      disabled={loading || saving || siteDraftConfig === null}
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-sm font-medium text-slate-700">允许新用户注册</span>
+                      <p className="text-xs text-slate-500">关闭后前台注册接口会被拒绝。</p>
+                    </div>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-semibold tracking-wide text-slate-600">默认空间可见性</span>
+                    <Select
+                      value={siteDraftConfig?.defaultSpaceVisibility ?? SITE_CONFIG_TEMPLATE.defaultSpaceVisibility}
+                      onValueChange={(value) =>
+                        updateSiteDraftConfig({
+                          defaultSpaceVisibility: value as SpaceVisibility
+                        })
+                      }
+                      disabled={loading || saving || siteDraftConfig === null}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SPACE_VISIBILITY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                </div>
+                {siteDraftConfig === null ? (
+                  <p className="mt-2 text-xs text-rose-600">site 配置 JSON 格式不合法，快捷开关已禁用。</p>
+                ) : null}
+              </div>
+            ) : null}
             <Textarea
               className="min-h-[320px] font-mono text-xs leading-relaxed"
               value={editorText}

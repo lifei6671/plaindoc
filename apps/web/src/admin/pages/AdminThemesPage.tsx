@@ -13,6 +13,19 @@ interface AdminThemesPageProps {
   dataGateway: DataGateway;
 }
 
+function normalizeSyntaxTheme(value: string | null | undefined): "one-light" | "one-dark" {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (
+    normalized === "one-dark" ||
+    normalized === "one_dark" ||
+    normalized === "dark" ||
+    normalized.includes("dark")
+  ) {
+    return "one-dark";
+  }
+  return "one-light";
+}
+
 function formatDateTime(value: string | null): string {
   if (!value) {
     return "-";
@@ -25,14 +38,14 @@ function formatDateTime(value: string | null): string {
 }
 
 function renderSyntaxLabel(value: AdminTheme["syntaxTheme"]): string {
-  if (value === "one-dark") {
+  if (normalizeSyntaxTheme(value) === "one-dark") {
     return "深色语法";
   }
   return "浅色语法";
 }
 
 function renderSyntaxBadgeClass(value: AdminTheme["syntaxTheme"]): string {
-  if (value === "one-dark") {
+  if (normalizeSyntaxTheme(value) === "one-dark") {
     return "border-indigo-200 bg-indigo-50 text-indigo-700";
   }
   return "border-sky-200 bg-sky-50 text-sky-700";
@@ -211,7 +224,7 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
             label: "语法主题",
             type: "select",
             required: true,
-            defaultValue: theme.syntaxTheme,
+            defaultValue: normalizeSyntaxTheme(theme.syntaxTheme),
             options: [
               { value: "one-light", label: "one-light（浅色）" },
               { value: "one-dark", label: "one-dark（深色）" }

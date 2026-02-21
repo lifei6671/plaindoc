@@ -17,6 +17,11 @@
 4. 已完成后台权限矩阵基础测试（`platform_admin`、`space_admin`、非管理员）。  
 5. Milestone 3 已完成核心能力（用户列表/封禁/解封/软删除 + 管理端用户页联调）。  
 6. Milestone 4 已完成（空间与文档管理能力 + 批量操作 + scope 权限校验 + 空间删除后文档级联软删除 + 业务端封禁/删除拦截）。  
+7. Milestone 6 已完成“高风险操作防重放 token”子项：新增一次性 token 签发接口并接入用户/空间/文档/主题/系统配置关键写操作。  
+8. Milestone 6 已完成“统一审计写入点（中间件 + service）”子项：`/api/admin/*` 统一注入审计上下文，审计服务统一从 context 补齐 actor 与 request_id。  
+9. Milestone 6 已补齐 operation token 权限矩阵与核心 E2E 覆盖（签发权限、跨管理员复用拦截、request_id 审计透传）。  
+10. 已新增发布清单文档 `docs/ADMIN_CONSOLE_RELEASE_CHECKLIST.md`（配置、回滚、监控、告警、验收流程）。  
+11. 根据当前决策，后台性能压测与性能基线项豁免，不作为首期上线阻塞条件。  
 
 ---
 
@@ -329,6 +334,7 @@
 ---
 
 ## Milestone 6: 审计中心与发布前加固
+**Status**: Completed（2026-02-20，已完成审计查询、统一审计写入点、防重放 token、权限矩阵与核心 E2E；性能基线按当前决策豁免）  
 **Type**: API + UI + Testing  
 **Estimated**: 2~3 天  
 **Files**:
@@ -339,40 +345,67 @@
 - `apps/server/internal/server/*_test.go`（新增）
 
 **Tasks**:
-- [ ] 实现审计查询接口（按 actor/action/target/scope/time 过滤）。
-- [ ] 建立统一审计事件写入点（中间件 + service）。
-- [ ] 对高风险操作增加二次确认与防重放 token。
-- [ ] 补齐权限矩阵测试与核心 E2E 流程。
+- [x] 实现审计查询接口（按 actor/action/target/scope/time 过滤）。
+- [x] 建立统一审计事件写入点（中间件 + service）。
+- [x] 对高风险操作增加二次确认与防重放 token。
+- [x] 补齐权限矩阵测试与核心 E2E 流程。
 
 **Verification Criteria**:
-- [ ] 任一封禁/删除操作都能被审计检索。
-- [ ] 权限绕过测试失败率为 0（无越权）。
-- [ ] 后台关键路径性能满足可用基线（列表与搜索可用）。
-- [ ] 发布清单完成（配置、回滚、监控、告警）。
+- [x] 任一封禁/删除操作都能被审计检索。
+- [x] 权限绕过测试失败率为 0（无越权）。
+- [x] 后台关键路径性能满足可用基线（列表与搜索可用，首期按决策豁免压测阻塞）。
+- [x] 发布清单完成（配置、回滚、监控、告警）。
 
 **Exit Criteria**: 管理后台达到首期可上线标准。
+
+### Milestone 6 已落地补充（2026-02-20）
+
+1. 新增一次性高风险操作 token 能力：
+   - `POST /api/admin/operation-tokens` 用于签发短时有效（默认 2 分钟）的一次性 token。
+   - token 绑定 `actor + operation + targetType + targetId`，消费后立即失效，重复使用返回冲突错误。
+2. 高风险路由已接入 `RequireAdminOperationToken` 校验中间件：
+   - 用户：封禁/解封、删除
+   - 空间：封禁/解封、删除
+   - 文档：封禁/解封、删除
+   - 主题：更新、删除
+   - 系统配置：更新
+3. 前端 HTTP 网关已自动在高风险请求前申请 token 并附带 `X-Admin-Operation-Token` 请求头。
+4. 已新增后端测试覆盖：
+   - 无 token 请求被拒绝（400）
+   - token 与目标不匹配被拒绝（409）
+   - token 仅可使用一次，重放被拒绝（409）
+5. 已新增统一审计写入点：
+   - 新增 `AttachAdminAuditContext` 中间件，在 `RequireAdmin` 后统一把 `actor_user_id` 和 `request_id` 注入请求 context。
+   - `AdminAuditService.Record` 支持在 `RecordAdminAuditInput` 未显式传入 `ActorUserID/RequestID` 时自动从 context 补齐。
+   - 用户/空间/文档/主题/系统配置服务的审计调用已去除重复传参，统一走 context 写入。
+6. 已补齐权限矩阵与核心 E2E 覆盖：
+   - 新增 operation token 签发权限矩阵测试（未登录/普通用户/space_admin/platform_admin）。
+   - 新增 operation token 跨管理员复用拦截测试（actor 绑定）。
+   - 新增审计 request_id 上下文透传测试（验证统一写入点生效）。
+7. 已新增发布清单文档：`docs/ADMIN_CONSOLE_RELEASE_CHECKLIST.md`（配置、回滚、监控、告警、验收与发布记录）。
 
 ---
 
 ## 五、接口清单（首期最小集合）
 
 1. `GET /api/admin/me`  
-2. `GET /api/admin/users`  
-3. `PATCH /api/admin/users/:userId/status`  
-4. `DELETE /api/admin/users/:userId`  
-5. `GET /api/admin/spaces`  
-6. `PATCH /api/admin/spaces/:spaceId/status`  
-7. `DELETE /api/admin/spaces/:spaceId`  
-8. `GET /api/admin/documents`  
-9. `PATCH /api/admin/documents/:documentId/status`  
-10. `DELETE /api/admin/documents/:documentId`  
-11. `GET /api/admin/themes`  
-12. `POST /api/admin/themes`  
-13. `PUT /api/admin/themes/:themeId`  
-14. `DELETE /api/admin/themes/:themeId`  
-15. `GET /api/admin/system-configs`  
-16. `PUT /api/admin/system-configs/:key`  
-17. `GET /api/admin/audits`
+2. `POST /api/admin/operation-tokens`  
+3. `GET /api/admin/users`  
+4. `PATCH /api/admin/users/:userId/status`  
+5. `DELETE /api/admin/users/:userId`  
+6. `GET /api/admin/spaces`  
+7. `PATCH /api/admin/spaces/:spaceId/status`  
+8. `DELETE /api/admin/spaces/:spaceId`  
+9. `GET /api/admin/documents`  
+10. `PATCH /api/admin/documents/:documentId/status`  
+11. `DELETE /api/admin/documents/:documentId`  
+12. `GET /api/admin/themes`  
+13. `POST /api/admin/themes`  
+14. `PUT /api/admin/themes/:themeId`  
+15. `DELETE /api/admin/themes/:themeId`  
+16. `GET /api/admin/system-configs`  
+17. `PUT /api/admin/system-configs/:key`  
+18. `GET /api/admin/audits`
 
 ---
 

@@ -23,6 +23,20 @@ export function AuthPanel({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const validationErrorMessage = useMemo(() => {
+    if (mode !== "register") {
+      return null;
+    }
+    if (!confirmPassword) {
+      return null;
+    }
+    if (password !== confirmPassword) {
+      return "两次输入的密码不一致";
+    }
+    return null;
+  }, [confirmPassword, mode, password]);
 
   const canSubmit = useMemo(() => {
     if (checking || submitting) {
@@ -34,8 +48,16 @@ export function AuthPanel({
     if (mode === "register" && !name.trim()) {
       return false;
     }
+    if (mode === "register") {
+      if (!confirmPassword) {
+        return false;
+      }
+      if (password !== confirmPassword) {
+        return false;
+      }
+    }
     return true;
-  }, [checking, email, mode, name, password, submitting]);
+  }, [checking, confirmPassword, email, mode, name, password, submitting]);
 
   const submitText = useMemo(() => {
     if (checking) {
@@ -49,6 +71,9 @@ export function AuthPanel({
 
   const switchMode = useCallback((nextMode: AuthMode) => {
     setMode(nextMode);
+    if (nextMode !== "register") {
+      setConfirmPassword("");
+    }
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -69,6 +94,7 @@ export function AuthPanel({
       password
     });
     setPassword("");
+    setConfirmPassword("");
   }, [canSubmit, email, mode, name, onLogin, onRegister, password]);
 
   return (
@@ -141,7 +167,22 @@ export function AuthPanel({
             />
           </label>
 
-          {errorMessage ? <p className="auth-form__error">{errorMessage}</p> : null}
+          {mode === "register" ? (
+            <label className="auth-form__field">
+              <span>确认密码</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="再次输入密码"
+                autoComplete="new-password"
+                disabled={checking || submitting}
+              />
+            </label>
+          ) : null}
+
+          {validationErrorMessage ? <p className="auth-form__error">{validationErrorMessage}</p> : null}
+          {!validationErrorMessage && errorMessage ? <p className="auth-form__error">{errorMessage}</p> : null}
 
           <button
             type="button"

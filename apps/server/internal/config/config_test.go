@@ -20,8 +20,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Addr != ":8080" {
 		t.Fatalf("expected default addr :8080, got %s", cfg.Addr)
 	}
-	if cfg.WebOrigin != "http://localhost:5173" {
-		t.Fatalf("expected default origin http://localhost:5173, got %s", cfg.WebOrigin)
+	if cfg.WebOrigin != "http://localhost:3001" {
+		t.Fatalf("expected default origin http://localhost:3001, got %s", cfg.WebOrigin)
 	}
 }
 
