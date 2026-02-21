@@ -3,19 +3,19 @@
 **Project Type**: 现有项目前后端联调（后端从健康检查扩展到业务 API）  
 **Scope**: `auth` + `spaces/tree` + `documents/revisions` + `ACL` + 冲突检测  
 **Stack**: Go + Gin + GORM + SQL Migrations（SQLite 起步，兼容 PostgreSQL/MySQL）  
-**Current Baseline**: `apps/server` 当前仅有 `/api/healthz` 与 CORS  
+**Current Baseline（2026-02-21）**: 已具备 `healthz`、`/api/auth/*`、`/api/themes`、`/api/docs/:docId/theme` 及 `/api/admin/*` 首期治理接口；核心工作区后端链路（spaces/tree/docs/revisions/acl）仍待完成。  
 **Estimated Total**: 6~8 周（约 160~220 工时）
 
 ---
 
-## 最新进展（2026-02-20）
+## 最新进展（2026-02-21）
 
 1. Milestone 1、Milestone 2、Milestone 3 已完成。  
 2. 已落地主题能力（`themes` 表 + 文档 `theme_id` 引用 + `/api/themes` + `/api/docs/:docId/theme`）。  
 3. 已完成“原 TS 主题”全量迁移（7 个内置主题），并补齐历史库升级策略（upsert）。  
 4. 登录注册 UI 已接入并与后端认证接口联调完成（`/api/auth/*`）。  
 5. 管理后台规划文档已建立：`docs/ADMIN_CONSOLE_IMPLEMENTATION_PHASES.md`（含全站/空间双管理模型与任务清单）。  
-6. 管理后台 Milestone 1 已完成：`0005_admin_rbac` 迁移、`/api/admin/*` 基础鉴权、RBAC + Scope 权限求值。  
+6. 管理后台已推进到 Milestone 6（进行中）；主题/系统配置能力已接入，审计中心与发布前加固待收口，详见 `docs/ADMIN_CONSOLE_IMPLEMENTATION_PHASES.md`。  
 
 详见：`docs/backend-ai-handoff.md`
 
@@ -112,6 +112,7 @@
 ---
 
 ## Milestone 4: 空间与目录树读取链路
+**Status**: Pending  
 **Type**: API  
 **Estimated**: 12~18 小时  
 **Files**:
@@ -138,6 +139,7 @@
 ---
 
 ## Milestone 5: 目录树写操作与级联删除
+**Status**: Pending  
 **Type**: API  
 **Estimated**: 16~24 小时  
 **Files**:
@@ -164,6 +166,7 @@
 ---
 
 ## Milestone 6: 文档保存、版本历史与冲突检测
+**Status**: Pending  
 **Type**: API  
 **Estimated**: 18~26 小时  
 **Files**:
@@ -190,6 +193,7 @@
 ---
 
 ## Milestone 7: ACL 权限管理（目录继承 + 文档覆盖）
+**Status**: Pending  
 **Type**: API  
 **Estimated**: 20~28 小时  
 **Files**:
@@ -216,6 +220,7 @@
 ---
 
 ## Milestone 8: 联调、测试基线与发布准备
+**Status**: Pending  
 **Type**: Integration / Testing  
 **Estimated**: 18~30 小时  
 **Files**:
@@ -251,13 +256,19 @@
 
 ---
 
-## 本期建议首个冲刺（本周）
+## 首个冲刺复盘（已完成）
 
 1. 完成 Milestone 1（配置、错误模型、中间件骨架）。  
 2. 完成 Milestone 2 的迁移骨架与 SQLite 跑通。  
 3. 拉通 Milestone 3 的最小认证闭环（register/login/me）。  
 
-这样在第一个冲刺结束时，你就能拿到“可登录 + 可鉴权 + 可扩展业务 API”的后端骨架。
+复盘结论：首个冲刺目标已达成（Milestone 1~3 完成）。
+
+## 下一冲刺建议（当前）
+
+1. 启动 Milestone 4：先打通 `GET/POST /api/spaces` 与 `GET /api/spaces/:spaceId/tree` 最小可用链路。  
+2. 并行准备 Milestone 5 所需仓储与事务封装，避免节点写入阶段返工。  
+3. 为 Milestone 6 提前固化 `409 Conflict` 响应契约，确保与前端 `ConflictError` 对齐。  
 
 ---
 
