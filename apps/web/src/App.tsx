@@ -13,7 +13,6 @@ import {
   Monitor,
   PanelLeftClose,
   PanelLeftOpen,
-  Settings2,
   Smartphone
 } from "lucide-react";
 import MarkdownIt from "markdown-it";
@@ -35,7 +34,6 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { SettingsLayer } from "./components/SettingsLayer";
 import { AuthPanel } from "./components/AuthPanel";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
@@ -89,7 +87,6 @@ import {
 import { toast } from "sonner";
 import {
   DEFAULT_IMAGE_HOSTING_CONFIG,
-  cloneImageHostingConfig,
   normalizeImageHostingConfig,
   type ImageHostingConfig
 } from "./settings/image-hosting";
@@ -103,8 +100,6 @@ declare global {
   }
 }
 
-const TEMP_USER_ID = 1;
-const IMAGE_HOSTING_CONFIG_KEY = "image_hosting";
 const WORKSPACE_SIDEBAR_MIN_WIDTH = 240;
 const WORKSPACE_SIDEBAR_MAX_WIDTH = 560;
 const WORKSPACE_SIDEBAR_DEFAULT_WIDTH = 320;
@@ -325,7 +320,6 @@ export default function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
   const activeUser = authSession.user;
-  const userConfigUserID = activeUser?.id ?? TEMP_USER_ID;
   // 工作区状态层：统一管理空间/目录树/文档加载，减少 App 根组件职责。
   const {
     activeSpaceId,
@@ -377,12 +371,8 @@ export default function App() {
   const [imageUploadTotalCount, setImageUploadTotalCount] = useState(0);
   const [imageUploadCompletedCount, setImageUploadCompletedCount] = useState(0);
   const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
-  // 设置面板开关状态。
-  const [isSettingsLayerOpen, setIsSettingsLayerOpen] = useState(false);
   // 图床配置读取状态。
   const [isImageHostingConfigLoading, setIsImageHostingConfigLoading] = useState(true);
-  // 图床配置保存状态。
-  const [isImageHostingConfigSaving, setIsImageHostingConfigSaving] = useState(false);
   // 图床配置错误文案。
   const [imageHostingConfigError, setImageHostingConfigError] = useState<string | null>(null);
   // 图床配置数据。
@@ -391,6 +381,8 @@ export default function App() {
   );
   // 图床配置引用：供异步粘贴上传逻辑读取最新值，避免闭包拿到旧配置。
   const imageHostingConfigRef = useRef(imageHostingConfig);
+  const isImageHostingConfigLoadingRef = useRef(isImageHostingConfigLoading);
+  const imageHostingConfigErrorRef = useRef(imageHostingConfigError);
   // 上传中引用：用于 paste 事件同步分支判断，避免并发上传。
   const isImageUploadingRef = useRef(isImageUploading);
   // 工作区宽度与折叠状态：支持侧栏拖拽调宽与隐藏。
@@ -629,32 +621,43 @@ export default function App() {
     isImageUploadingRef.current = isImageUploading;
   }, [isImageUploading]);
 
-  // 首次加载图床配置：默认从 IndexedDB 的 user_config 表读取。
+  // 同步图床配置加载状态引用，避免 paste 事件读取过期值。
   useEffect(() => {
+    isImageHostingConfigLoadingRef.current = isImageHostingConfigLoading;
+  }, [isImageHostingConfigLoading]);
+
+  // 同步图床配置错误引用，便于上传时给出即时提示。
+  useEffect(() => {
+    imageHostingConfigErrorRef.current = imageHostingConfigError;
+  }, [imageHostingConfigError]);
+
+  // 登录后加载后台图床配置：由管理后台统一维护。
+  useEffect(() => {
+    if (!activeUser) {
+      setImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG);
+      setImageHostingConfigError(null);
+      setIsImageHostingConfigLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     const loadImageHostingConfig = async () => {
       setIsImageHostingConfigLoading(true);
       setImageHostingConfigError(null);
       try {
-        const storedConfig = await dataGateway.userConfig.getValue<unknown>({
-          userId: userConfigUserID,
-          key: IMAGE_HOSTING_CONFIG_KEY
-        });
+        const systemConfig = await dataGateway.imageHosting.getConfig();
         if (cancelled) {
           return;
         }
-        if (!storedConfig) {
-          setImageHostingConfig(cloneImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG));
-          return;
-        }
-        setImageHostingConfig(normalizeImageHostingConfig(storedConfig));
+        setImageHostingConfig(normalizeImageHostingConfig(systemConfig));
       } catch (error) {
         if (cancelled) {
           return;
         }
-        console.error("[settings][image-hosting] 读取图床配置失败", error);
-        setImageHostingConfigError(`读取图床配置失败：${formatError(error)}`);
+        console.error("[settings][image-hosting] 读取后台图床配置失败", error);
+        setImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG);
+        setImageHostingConfigError(`读取后台图床配置失败：${formatError(error)}`);
       } finally {
         if (!cancelled) {
           setIsImageHostingConfigLoading(false);
@@ -667,7 +670,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [dataGateway, userConfigUserID]);
+  }, [activeUser, dataGateway]);
 
   const extensions = useMemo(
     () => [
@@ -683,6 +686,15 @@ export default function App() {
 
           event.preventDefault();
           void (async () => {
+            if (isImageHostingConfigLoadingRef.current) {
+              setStatusMessage("图床配置加载中，请稍后再试");
+              return;
+            }
+            if (imageHostingConfigErrorRef.current) {
+              setStatusMessage(imageHostingConfigErrorRef.current);
+              toast.error(imageHostingConfigErrorRef.current);
+              return;
+            }
             if (isImageUploadingRef.current) {
               setStatusMessage("图片上传中，请稍候...");
               return;
@@ -701,7 +713,14 @@ export default function App() {
                 try {
                   const uploadedImage = await uploadImageToDefaultHosting(
                     imageHostingConfigRef.current,
-                    imageFile
+                    imageFile,
+                    {
+                      uploadLocalImage: (file) =>
+                        dataGateway.imageHosting.uploadLocalImage(
+                          file,
+                          imageHostingConfigRef.current.local.uploadEndpoint
+                        )
+                    }
                   );
                   successMarkdownLines.push(buildImageMarkdownLine(imageFile, uploadedImage.url, index));
                 } catch (error) {
@@ -751,7 +770,7 @@ export default function App() {
         codeLanguages: languages
       })
     ],
-    []
+    [dataGateway]
   );
   // remark 插件顺序：先 GFM/数学公式，再规整样式 span 容器，再按链接模式处理脚注，最后注入锚点属性。
   const remarkPlugins = useMemo(() => {
@@ -1239,42 +1258,6 @@ export default function App() {
     }
   }, [isWechatCopying, previewLinkRenderMode]);
 
-  // 打开设置浮层。
-  const openSettingsLayer = useCallback(() => {
-    setIsSettingsLayerOpen(true);
-  }, []);
-
-  // 关闭设置浮层。
-  const closeSettingsLayer = useCallback(() => {
-    setIsSettingsLayerOpen(false);
-  }, []);
-
-  // 保存图床配置到数据抽象层。
-  const saveImageHostingConfig = useCallback(
-    async (nextConfig: ImageHostingConfig) => {
-      setIsImageHostingConfigSaving(true);
-      setImageHostingConfigError(null);
-      try {
-        const normalizedConfig = normalizeImageHostingConfig(nextConfig);
-        await dataGateway.userConfig.setValue({
-          userId: userConfigUserID,
-          key: IMAGE_HOSTING_CONFIG_KEY,
-          value: normalizedConfig
-        });
-        setImageHostingConfig(normalizedConfig);
-        setStatusMessage("图床配置已保存");
-        toast.success("图床配置已保存");
-        setIsSettingsLayerOpen(false);
-      } catch (error) {
-        console.error("[settings][image-hosting] 保存图床配置失败", error);
-        setImageHostingConfigError(`保存图床配置失败：${formatError(error)}`);
-      } finally {
-        setIsImageHostingConfigSaving(false);
-      }
-    },
-    [dataGateway, userConfigUserID]
-  );
-
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
     if (!activeDocId) {
@@ -1403,15 +1386,6 @@ export default function App() {
       {customPreviewStyleText ? (
         <style id="plaindoc-preview-custom-style">{customPreviewStyleText}</style>
       ) : null}
-      <SettingsLayer
-        open={isSettingsLayerOpen}
-        initialImageHostingConfig={imageHostingConfig}
-        isLoading={isImageHostingConfigLoading}
-        isSaving={isImageHostingConfigSaving}
-        errorMessage={imageHostingConfigError}
-        onClose={closeSettingsLayer}
-        onSaveImageHostingConfig={saveImageHostingConfig}
-      />
       {/* 顶部状态栏。 */}
       <header className="header">
         <h1>PlainDoc</h1>
@@ -1486,16 +1460,6 @@ export default function App() {
             onSelectTheme={handleThemeChange}
             customPreviewStyleText={customPreviewStyleText}
           />
-          <button
-            type="button"
-            className="settings-trigger"
-            onClick={openSettingsLayer}
-            title="打开设置面板"
-            aria-label="打开设置面板"
-          >
-            <Settings2 size={14} />
-            <span>设置</span>
-          </button>
         </div>
       </header>
       {/* 工作区主区域：左侧边栏 + 中间编辑器 + 右侧预览。 */}

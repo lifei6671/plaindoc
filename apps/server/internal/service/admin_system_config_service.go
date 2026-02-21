@@ -22,9 +22,10 @@ var (
 )
 
 var systemConfigValidators = map[string]func(map[string]any) error{
-	"site":     validateSiteConfig,
-	"editor":   validateEditorConfig,
-	"security": validateSecurityConfig,
+	"site":          validateSiteConfig,
+	"editor":        validateEditorConfig,
+	"security":      validateSecurityConfig,
+	"image-hosting": validateImageHostingConfig,
 }
 
 // AdminSystemConfigRecord 后台系统配置记录。
@@ -388,6 +389,146 @@ func validateSecurityConfig(payload map[string]any) error {
 	return nil
 }
 
+func validateImageHostingConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"defaultProvider": {},
+		"cloudflareR2":    {},
+		"aliyunOss":       {},
+		"local":           {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+
+	defaultProvider, err := getRequiredString(payload, "defaultProvider")
+	if err != nil {
+		return err
+	}
+	switch defaultProvider {
+	case string(ImageHostingProviderLocal),
+		string(ImageHostingProviderCloudflareR2),
+		string(ImageHostingProviderAliyunOSS):
+	default:
+		return fmt.Errorf("defaultProvider must be local/cloudflare-r2/aliyun-oss")
+	}
+
+	cloudflareR2, err := getRequiredObject(payload, "cloudflareR2")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(cloudflareR2, map[string]struct{}{
+		"accountId":       {},
+		"bucket":          {},
+		"accessKeyId":     {},
+		"secretAccessKey": {},
+		"publicBaseUrl":   {},
+	}); err != nil {
+		return fmt.Errorf("cloudflareR2 %w", err)
+	}
+	cloudflareAccountID, err := getRequiredStringAllowEmpty(cloudflareR2, "accountId")
+	if err != nil {
+		return err
+	}
+	cloudflareBucket, err := getRequiredStringAllowEmpty(cloudflareR2, "bucket")
+	if err != nil {
+		return err
+	}
+	cloudflareAccessKeyID, err := getRequiredStringAllowEmpty(cloudflareR2, "accessKeyId")
+	if err != nil {
+		return err
+	}
+	cloudflareSecretAccessKey, err := getRequiredStringAllowEmpty(cloudflareR2, "secretAccessKey")
+	if err != nil {
+		return err
+	}
+	cloudflarePublicBaseURL, err := getRequiredStringAllowEmpty(cloudflareR2, "publicBaseUrl")
+	if err != nil {
+		return err
+	}
+
+	aliyunOSS, err := getRequiredObject(payload, "aliyunOss")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(aliyunOSS, map[string]struct{}{
+		"region":          {},
+		"bucket":          {},
+		"endpoint":        {},
+		"accessKeyId":     {},
+		"accessKeySecret": {},
+		"publicBaseUrl":   {},
+	}); err != nil {
+		return fmt.Errorf("aliyunOss %w", err)
+	}
+	aliyunRegion, err := getRequiredStringAllowEmpty(aliyunOSS, "region")
+	if err != nil {
+		return err
+	}
+	aliyunBucket, err := getRequiredStringAllowEmpty(aliyunOSS, "bucket")
+	if err != nil {
+		return err
+	}
+	aliyunEndpoint, err := getRequiredStringAllowEmpty(aliyunOSS, "endpoint")
+	if err != nil {
+		return err
+	}
+	aliyunAccessKeyID, err := getRequiredStringAllowEmpty(aliyunOSS, "accessKeyId")
+	if err != nil {
+		return err
+	}
+	aliyunAccessKeySecret, err := getRequiredStringAllowEmpty(aliyunOSS, "accessKeySecret")
+	if err != nil {
+		return err
+	}
+	aliyunPublicBaseURL, err := getRequiredStringAllowEmpty(aliyunOSS, "publicBaseUrl")
+	if err != nil {
+		return err
+	}
+
+	local, err := getRequiredObject(payload, "local")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(local, map[string]struct{}{
+		"uploadEndpoint": {},
+		"publicBaseUrl":  {},
+	}); err != nil {
+		return fmt.Errorf("local %w", err)
+	}
+	localUploadEndpoint, err := getRequiredString(local, "uploadEndpoint")
+	if err != nil {
+		return err
+	}
+	localPublicBaseURL, err := getRequiredString(local, "publicBaseUrl")
+	if err != nil {
+		return err
+	}
+
+	switch defaultProvider {
+	case string(ImageHostingProviderCloudflareR2):
+		if cloudflareAccountID == "" ||
+			cloudflareBucket == "" ||
+			cloudflareAccessKeyID == "" ||
+			cloudflareSecretAccessKey == "" ||
+			cloudflarePublicBaseURL == "" {
+			return fmt.Errorf("cloudflareR2 is incomplete for default provider")
+		}
+	case string(ImageHostingProviderAliyunOSS):
+		if aliyunBucket == "" || aliyunAccessKeyID == "" || aliyunAccessKeySecret == "" || aliyunPublicBaseURL == "" {
+			return fmt.Errorf("aliyunOss is incomplete for default provider")
+		}
+		if aliyunRegion == "" && aliyunEndpoint == "" {
+			return fmt.Errorf("aliyunOss requires endpoint or region for default provider")
+		}
+	case string(ImageHostingProviderLocal):
+		if localUploadEndpoint == "" || localPublicBaseURL == "" {
+			return fmt.Errorf("local is incomplete for default provider")
+		}
+	}
+
+	return nil
+}
+
 func validateNoUnknownKeys(payload map[string]any, allowed map[string]struct{}) error {
 	if len(payload) != len(allowed) {
 		return fmt.Errorf("unexpected config keys")
@@ -424,6 +565,30 @@ func getRequiredString(payload map[string]any, key string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", fmt.Errorf("%s must not be empty", key)
+	}
+	return value, nil
+}
+
+func getRequiredStringAllowEmpty(payload map[string]any, key string) (string, error) {
+	rawValue, ok := payload[key]
+	if !ok {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	value, ok := rawValue.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be string", key)
+	}
+	return strings.TrimSpace(value), nil
+}
+
+func getRequiredObject(payload map[string]any, key string) (map[string]any, error) {
+	rawValue, ok := payload[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	value, ok := rawValue.(map[string]any)
+	if !ok || value == nil {
+		return nil, fmt.Errorf("%s must be object", key)
 	}
 	return value, nil
 }

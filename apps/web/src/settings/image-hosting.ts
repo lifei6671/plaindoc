@@ -1,4 +1,4 @@
-export type ImageHostingProvider = "cloudflare-r2" | "aliyun-oss";
+export type ImageHostingProvider = "cloudflare-r2" | "aliyun-oss" | "local";
 
 export interface CloudflareR2Config {
   accountId: string;
@@ -17,15 +17,21 @@ export interface AliyunOssConfig {
   publicBaseUrl: string;
 }
 
+export interface LocalImageHostingConfig {
+  uploadEndpoint: string;
+  publicBaseUrl: string;
+}
+
 export interface ImageHostingConfig {
   // 默认图床提供商：粘贴图片时按该设置自动上传。
   defaultProvider: ImageHostingProvider;
   cloudflareR2: CloudflareR2Config;
   aliyunOss: AliyunOssConfig;
+  local: LocalImageHostingConfig;
 }
 
 export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
-  defaultProvider: "cloudflare-r2",
+  defaultProvider: "local",
   cloudflareR2: {
     accountId: "",
     accessKeyId: "",
@@ -40,6 +46,10 @@ export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
     bucket: "",
     endpoint: "",
     publicBaseUrl: ""
+  },
+  local: {
+    uploadEndpoint: "/api/uploads/images",
+    publicBaseUrl: "/api/uploads/local"
   }
 };
 
@@ -66,6 +76,9 @@ export function cloneImageHostingConfig(config: ImageHostingConfig): ImageHostin
     },
     aliyunOss: {
       ...config.aliyunOss
+    },
+    local: {
+      ...config.local
     }
   };
 }
@@ -76,16 +89,21 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
   const defaultProviderRaw = root?.defaultProvider;
   const activeProviderRaw = root?.activeProvider;
   const defaultProviderCandidate =
-    defaultProviderRaw === "cloudflare-r2" || defaultProviderRaw === "aliyun-oss"
+    defaultProviderRaw === "cloudflare-r2" ||
+    defaultProviderRaw === "aliyun-oss" ||
+    defaultProviderRaw === "local"
       ? defaultProviderRaw
       : activeProviderRaw;
   const defaultProvider: ImageHostingProvider =
-    defaultProviderCandidate === "cloudflare-r2" || defaultProviderCandidate === "aliyun-oss"
+    defaultProviderCandidate === "cloudflare-r2" ||
+    defaultProviderCandidate === "aliyun-oss" ||
+    defaultProviderCandidate === "local"
       ? defaultProviderCandidate
-      : "cloudflare-r2";
+      : "local";
 
   const cloudflareR2 = asRecord(root?.cloudflareR2);
   const aliyunOss = asRecord(root?.aliyunOss);
+  const local = asRecord(root?.local);
 
   return {
     defaultProvider,
@@ -103,6 +121,12 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
       bucket: readString(aliyunOss, "bucket"),
       endpoint: readString(aliyunOss, "endpoint"),
       publicBaseUrl: readString(aliyunOss, "publicBaseUrl")
+    },
+    local: {
+      uploadEndpoint:
+        readString(local, "uploadEndpoint") || DEFAULT_IMAGE_HOSTING_CONFIG.local.uploadEndpoint,
+      publicBaseUrl:
+        readString(local, "publicBaseUrl") || DEFAULT_IMAGE_HOSTING_CONFIG.local.publicBaseUrl
     }
   };
 }

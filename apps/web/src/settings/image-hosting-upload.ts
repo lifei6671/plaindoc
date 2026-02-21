@@ -12,12 +12,19 @@ interface UploadContext {
   config: ImageHostingConfig;
   file: File;
   objectKey: string;
+  uploadLocalImage?: (file: File) => Promise<{ key: string; url: string }>;
+}
+
+interface UploadImageToDefaultHostingOptions {
+  // 本地上传回调：由 DataGateway 注入，避免该模块直接依赖具体数据驱动实现。
+  uploadLocalImage?: (file: File) => Promise<{ key: string; url: string }>;
 }
 
 // 入口函数：按“默认图床”路由到对应上传实现。
 export async function uploadImageToDefaultHosting(
   config: ImageHostingConfig,
-  file: File
+  file: File,
+  options: UploadImageToDefaultHostingOptions = {}
 ): Promise<UploadImageResult> {
   try {
     if (!file.type.startsWith("image/")) {
@@ -28,8 +35,13 @@ export async function uploadImageToDefaultHosting(
     const context: UploadContext = {
       config,
       file,
-      objectKey
+      objectKey,
+      uploadLocalImage: options.uploadLocalImage
     };
+
+    if (config.defaultProvider === "local") {
+      return uploadToLocal(context);
+    }
 
     if (config.defaultProvider === "cloudflare-r2") {
       return uploadToCloudflareR2(context);
@@ -45,6 +57,23 @@ export async function uploadImageToDefaultHosting(
     });
     throw error;
   }
+}
+
+// 本地上传：由后端统一接收并落盘，前端只负责发送文件并回填 URL。
+async function uploadToLocal(context: UploadContext): Promise<UploadImageResult> {
+  if (!context.uploadLocalImage) {
+    throw new Error("未配置本地上传能力，请检查 HTTP 数据驱动与上传接口");
+  }
+  const uploaded = await context.uploadLocalImage(context.file);
+  const imageURL = uploaded.url.trim();
+  if (!imageURL) {
+    throw new Error("本地上传返回的图片地址为空");
+  }
+  return {
+    provider: "local",
+    key: uploaded.key?.trim() || context.objectKey,
+    url: imageURL
+  };
 }
 
 // Cloudflare R2 上传：使用 S3 兼容 API 进行 PUT Object。

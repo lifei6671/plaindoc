@@ -380,11 +380,23 @@ export interface AdminGateway {
   deleteTheme(themeId: string): Promise<void>;
   listSystemConfigs(): Promise<AdminSystemConfig[]>;
   upsertSystemConfig(input: {
-    configKey: "site" | "editor" | "security";
+    configKey: "site" | "editor" | "security" | "image-hosting";
     value: Record<string, unknown>;
     expectedVersion?: number;
   }): Promise<AdminSystemConfig>;
   listAudits(input?: AdminAuditListInput): Promise<AdminAuditListResult>;
+}
+
+export interface UploadLocalImageResult {
+  key: string;
+  url: string;
+}
+
+export interface ImageHostingGateway {
+  // 获取当前生效的图床配置（由后端系统配置统一管理）。
+  getConfig(): Promise<Record<string, unknown>>;
+  // 上传到本地图片存储（由后端接收 multipart/form-data 文件）。
+  uploadLocalImage(file: File, uploadEndpoint?: string): Promise<UploadLocalImageResult>;
 }
 
 export interface UserConfigGateway {
@@ -400,5 +412,6 @@ export interface DataGateway {
   document: DocumentGateway;
   theme: ThemeGateway;
   admin: AdminGateway;
+  imageHosting: ImageHostingGateway;
   userConfig: UserConfigGateway;
 }

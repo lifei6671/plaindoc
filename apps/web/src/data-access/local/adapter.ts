@@ -15,10 +15,15 @@ import {
   type Theme,
   type ThemeGateway,
   type TreeNode,
+  type UploadLocalImageResult,
   type UpdateNodeInput,
   type WorkspaceGateway
 } from "../types";
 import { createIndexedDbUserConfigGateway } from "../user-config/indexeddb-gateway";
+import {
+  cloneImageHostingConfig,
+  DEFAULT_IMAGE_HOSTING_CONFIG
+} from "../../settings/image-hosting";
 import {
   LOCAL_SESSION_USER_META_KEY,
   DEFAULT_THEME_ID,
@@ -475,6 +480,39 @@ const adminGateway: AdminGateway = {
 // 本地模式下，用户配置统一使用 IndexedDB user_config 表。
 const userConfigGateway = createIndexedDbUserConfigGateway();
 
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result);
+        return;
+      }
+      reject(new Error("读取图片内容失败"));
+    };
+    reader.onerror = () => {
+      reject(reader.error ?? new Error("读取图片内容失败"));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const imageHostingGateway = {
+  async getConfig(): Promise<Record<string, unknown>> {
+    // 中文注释：本地驱动没有管理后台系统配置，返回默认模板保证编辑器链路可用。
+    return cloneImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG) as unknown as Record<string, unknown>;
+  },
+  async uploadLocalImage(file: File): Promise<UploadLocalImageResult> {
+    // 中文注释：本地驱动下使用 data URL 兜底，便于离线体验粘贴上传流程。
+    const dataURL = await readFileAsDataURL(file);
+    return {
+      key: `local-inline/${Date.now()}`,
+      url: dataURL
+    };
+  }
+};
+
 export function createLocalAdapter(): DataGateway {
   return {
     auth: authGateway,
@@ -482,6 +520,7 @@ export function createLocalAdapter(): DataGateway {
     document: documentGateway,
     theme: themeGateway,
     admin: adminGateway,
+    imageHosting: imageHostingGateway,
     userConfig: userConfigGateway
   };
 }

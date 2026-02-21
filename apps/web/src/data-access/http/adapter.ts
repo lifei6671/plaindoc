@@ -25,12 +25,14 @@ import {
   type Document,
   type DocumentGateway,
   type DocumentRevision,
+  type ImageHostingGateway,
   type SaveDocumentInput,
   type SaveDocumentResult,
   type Space,
   type Theme,
   type ThemeGateway,
   type TreeNode,
+  type UploadLocalImageResult,
   type UpdateNodeInput,
   type WorkspaceGateway
 } from "../types";
@@ -88,6 +90,42 @@ function toRequestError(status: number, body: string): HttpRequestError {
   return new HttpRequestError(status, body);
 }
 
+function isAbsoluteUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function normalizeUploadEndpoint(uploadEndpoint: string | undefined, apiBaseUrl: string): string {
+  const raw = (uploadEndpoint ?? "").trim();
+  if (!raw) {
+    return "/uploads/images";
+  }
+  if (isAbsoluteUrl(raw)) {
+    return raw;
+  }
+
+  const endpointPath = raw.startsWith("/") ? raw : `/${raw}`;
+
+  try {
+    const basePath = isAbsoluteUrl(apiBaseUrl)
+      ? new URL(apiBaseUrl).pathname
+      : apiBaseUrl.startsWith("/")
+        ? apiBaseUrl
+        : `/${apiBaseUrl}`;
+    const normalizedBasePath = basePath.replace(/\/+$/, "");
+    if (
+      normalizedBasePath &&
+      normalizedBasePath !== "/" &&
+      endpointPath.startsWith(`${normalizedBasePath}/`)
+    ) {
+      return endpointPath.slice(normalizedBasePath.length) || "/";
+    }
+  } catch {
+    // 忽略解析失败，保留原始路径。
+  }
+
+  return endpointPath;
+}
+
 export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   let accessToken: string | null = readStoredValue(ACCESS_TOKEN_STORAGE_KEY);
   let refreshToken: string | null = readStoredValue(REFRESH_TOKEN_STORAGE_KEY);
@@ -129,12 +167,17 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     const skipAuth = optionsOverride?.skipAuth ?? false;
     const retryOnUnauthorized = optionsOverride?.retryOnUnauthorized ?? true;
     const headers = new Headers(init?.headers);
-    headers.set("Content-Type", "application/json");
+    const isFormDataBody =
+      typeof FormData !== "undefined" && init?.body instanceof FormData;
+    if (!isFormDataBody && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     if (!skipAuth && accessToken) {
       headers.set("Authorization", `Bearer ${accessToken}`);
     }
 
-    const response = await fetch(`${options.baseUrl}${path}`, {
+    const requestUrl = isAbsoluteUrl(path) ? path : `${options.baseUrl}${path}`;
+    const response = await fetch(requestUrl, {
       ...init,
       headers
     });
@@ -684,7 +727,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig[]>("/admin/system-configs");
     },
     async upsertSystemConfig(input: {
-      configKey: "site" | "editor" | "security";
+      configKey: "site" | "editor" | "security" | "image-hosting";
       value: Record<string, unknown>;
       expectedVersion?: number;
     }) {
@@ -755,7 +798,24 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     }
   };
 
-  // 远端驱动下仍复用本地 user_config：用于保存本机偏好配置（如图床参数）。
+  const imageHosting: ImageHostingGateway = {
+    async getConfig() {
+      return request<Record<string, unknown>>("/image-hosting");
+    },
+    async uploadLocalImage(file: File, uploadEndpoint?: string) {
+      const formData = new FormData();
+      formData.append("file", file);
+      return request<UploadLocalImageResult>(
+        normalizeUploadEndpoint(uploadEndpoint, options.baseUrl),
+        {
+          method: "POST",
+          body: formData
+        }
+      );
+    }
+  };
+
+  // 远端驱动下仍复用本地 user_config：用于保存本机偏好配置。
   const userConfig = createIndexedDbUserConfigGateway();
 
   return {
@@ -764,6 +824,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     document,
     theme,
     admin,
+    imageHosting,
     userConfig
   };
 }
