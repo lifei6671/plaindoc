@@ -253,10 +253,19 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 				),
 				adminDocumentHandler.DeleteDocument,
 			)
-			adminAPI.GET("/themes", adminThemeHandler.ListThemes)
-			adminAPI.POST("/themes", adminThemeHandler.CreateTheme)
+			adminAPI.GET(
+				"/themes",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminThemeHandler.ListThemes,
+			)
+			adminAPI.POST(
+				"/themes",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminThemeHandler.CreateTheme,
+			)
 			adminAPI.PUT(
 				"/themes/:themeId",
+				middleware.RequirePlatformAdmin(adminAccessService),
 				middleware.RequireAdminOperationToken(
 					adminOperationTokenService,
 					middleware.AdminOperationTokenBinding{
@@ -269,6 +278,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 			)
 			adminAPI.DELETE(
 				"/themes/:themeId",
+				middleware.RequirePlatformAdmin(adminAccessService),
 				middleware.RequireAdminOperationToken(
 					adminOperationTokenService,
 					middleware.AdminOperationTokenBinding{
@@ -297,7 +307,11 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 				),
 				adminSystemConfigHandler.UpsertConfig,
 			)
-			adminAPI.GET("/audits", adminAuditHandler.ListAudits)
+			adminAPI.GET(
+				"/audits",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminAuditHandler.ListAudits,
+			)
 		}
 
 		themeHandler := handler.NewThemeHandler(db)

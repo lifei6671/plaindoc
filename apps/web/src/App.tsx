@@ -520,22 +520,24 @@ export default function App() {
       return;
     }
 
+    // 编辑器必须绑定具体空间，禁止直接打开 /editor 根路径。
+    if (route.kind === "editor-root") {
+      window.location.replace("/");
+      return;
+    }
+
     if (!isEditorRoute && !isAdminRoute) {
-      const nextPath = buildEditorRoutePath(activeSpaceId, activeDocId);
-      if (location.pathname !== nextPath) {
-        navigate(nextPath, { replace: true });
+      if (location.pathname !== "/") {
+        window.location.replace("/");
       }
     }
   }, [
-    activeDocId,
-    activeSpaceId,
     activeUser,
     authRedirectTarget,
     isAuthChecking,
     isAdminRoute,
     isEditorRoute,
     location.pathname,
-    navigate,
     route.kind
   ]);
 

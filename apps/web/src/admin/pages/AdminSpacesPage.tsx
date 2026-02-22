@@ -1,5 +1,6 @@
 import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -124,6 +125,7 @@ function renderVisibilityBadgeClass(value: Visibility): string {
 // 空间管理页面：承载列表筛选、批量操作与空间设置入口。
 export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
+  const navigate = useNavigate();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [categoriesDialogOpen, setCategoriesDialogOpen] = useState(false);
@@ -149,6 +151,17 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
   }, []);
+
+  const handleOpenSpaceEditor = useCallback(
+    (space: AdminSpace) => {
+      const targetSpaceID = space.spaceId.trim();
+      if (!targetSpaceID) {
+        return;
+      }
+      navigate(`/editor/${encodeURIComponent(targetSpaceID)}`);
+    },
+    [navigate]
+  );
 
   const loadSpaces = useCallback(async () => {
     setLoading(true);
@@ -817,13 +830,27 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                       </td>
                       <td className="min-w-0 px-3 py-3">
                         <div className="flex items-start gap-3">
-                          <div className="h-16 w-10 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-100">
+                          <button
+                            type="button"
+                            className="h-16 w-10 shrink-0 overflow-hidden rounded-md border-0 bg-transparent p-0 transition-opacity hover:opacity-90 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={isDeleted}
+                            onClick={() => handleOpenSpaceEditor(space)}
+                            title={isDeleted ? "已删除空间不可编辑" : `打开空间：${space.name || space.spaceId}`}
+                          >
                             {space.cover?.url ? (
                               <img src={space.cover.url} alt={`${space.name}-cover`} className="h-full w-full object-cover" />
-                            ) : null}
-                          </div>
+                            ) : <span className="sr-only">打开空间编辑器</span>}
+                          </button>
                           <div className="grid min-w-0 gap-1">
-                            <strong className="truncate text-sm font-semibold text-slate-900">{space.name}</strong>
+                            <button
+                              type="button"
+                              className="w-fit max-w-full truncate border-0 bg-transparent p-0 text-left text-sm font-semibold text-slate-900 transition-colors hover:text-sky-700 focus-visible:outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                              disabled={isDeleted}
+                              onClick={() => handleOpenSpaceEditor(space)}
+                              title={isDeleted ? "已删除空间不可编辑" : `打开空间：${space.name || space.spaceId}`}
+                            >
+                              {space.name || space.spaceId}
+                            </button>
                             <div className="flex min-w-0 items-center gap-1.5">
                               <code
                                 className="max-w-[220px] truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700"

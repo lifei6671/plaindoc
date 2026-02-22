@@ -1545,7 +1545,9 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}()
 
 	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "theme-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "theme-platform-admin@example.com")
 	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
 
 	themeID := "custom_admin_theme_01"
 	createThemeBody := []byte(`{
@@ -1560,8 +1562,16 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 		"customCss":".markdown-body { letter-spacing: 0.01em; }",
 		"enabled":true
 	}`)
+	spaceAdminCreateThemeReq := httptest.NewRequest(http.MethodPost, "/api/admin/themes", bytes.NewReader(createThemeBody))
+	spaceAdminCreateThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminCreateThemeReq.Header.Set("Content-Type", "application/json")
+	spaceAdminCreateThemeRec := serve(spaceAdminCreateThemeReq)
+	if spaceAdminCreateThemeRec.Code != http.StatusForbidden {
+		t.Fatalf("expected space admin create admin theme status 403, got %d body=%s", spaceAdminCreateThemeRec.Code, spaceAdminCreateThemeRec.Body.String())
+	}
+
 	createThemeReq := httptest.NewRequest(http.MethodPost, "/api/admin/themes", bytes.NewReader(createThemeBody))
-	createThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	createThemeReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	createThemeReq.Header.Set("Content-Type", "application/json")
 	createThemeRec := serve(createThemeReq)
 	if createThemeRec.Code != http.StatusOK {
@@ -1572,7 +1582,7 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}
 
 	listAdminThemesReq := httptest.NewRequest(http.MethodGet, "/api/admin/themes", nil)
-	listAdminThemesReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	listAdminThemesReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	listAdminThemesRec := serve(listAdminThemesReq)
 	if listAdminThemesRec.Code != http.StatusOK {
 		t.Fatalf("expected list admin themes status 200, got %d body=%s", listAdminThemesRec.Code, listAdminThemesRec.Body.String())
@@ -1581,18 +1591,29 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 		t.Fatalf("expected list admin themes include created theme %s, body=%s", themeID, listAdminThemesRec.Body.String())
 	}
 
+	spaceAdminListAdminThemesReq := httptest.NewRequest(http.MethodGet, "/api/admin/themes", nil)
+	spaceAdminListAdminThemesReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminListAdminThemesRec := serve(spaceAdminListAdminThemesReq)
+	if spaceAdminListAdminThemesRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin list admin themes status 403, got %d body=%s",
+			spaceAdminListAdminThemesRec.Code,
+			spaceAdminListAdminThemesRec.Body.String(),
+		)
+	}
+
 	disableThemeReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/themes/"+themeID,
 		bytes.NewReader([]byte(`{"enabled":false}`)),
 	)
-	disableThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	disableThemeReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	disableThemeReq.Header.Set("Content-Type", "application/json")
 	attachAdminOperationToken(
 		t,
 		serve,
 		disableThemeReq,
-		spaceAdminToken,
+		platformAdminToken,
 		"theme.update",
 		"theme",
 		themeID,
@@ -1612,12 +1633,12 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}
 
 	deleteThemeReq := httptest.NewRequest(http.MethodDelete, "/api/admin/themes/"+themeID, nil)
-	deleteThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	deleteThemeReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	attachAdminOperationToken(
 		t,
 		serve,
 		deleteThemeReq,
-		spaceAdminToken,
+		platformAdminToken,
 		"theme.delete",
 		"theme",
 		themeID,
@@ -1628,7 +1649,7 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}
 
 	listAdminThemesAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/admin/themes", nil)
-	listAdminThemesAfterDeleteReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	listAdminThemesAfterDeleteReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	listAdminThemesAfterDeleteRec := serve(listAdminThemesAfterDeleteReq)
 	if listAdminThemesAfterDeleteRec.Code != http.StatusOK {
 		t.Fatalf(
@@ -1642,12 +1663,12 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}
 
 	deleteBuiltinThemeReq := httptest.NewRequest(http.MethodDelete, "/api/admin/themes/default", nil)
-	deleteBuiltinThemeReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	deleteBuiltinThemeReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	attachAdminOperationToken(
 		t,
 		serve,
 		deleteBuiltinThemeReq,
-		spaceAdminToken,
+		platformAdminToken,
 		"theme.delete",
 		"theme",
 		"default",
@@ -1676,7 +1697,7 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 		"/api/admin/audits?module=theme&targetId="+themeID+"&page=1&pageSize=20",
 		nil,
 	)
-	listThemeAuditReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	listThemeAuditReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	listThemeAuditRec := serve(listThemeAuditReq)
 	if listThemeAuditRec.Code != http.StatusOK {
 		t.Fatalf(
@@ -1716,6 +1737,21 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}
 	if _, exists := actionSet["delete"]; !exists {
 		t.Fatalf("expected theme audit action delete, actions=%v", actionSet)
+	}
+
+	spaceAdminListThemeAuditReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/admin/audits?module=theme&targetId="+themeID+"&page=1&pageSize=20",
+		nil,
+	)
+	spaceAdminListThemeAuditReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminListThemeAuditRec := serve(spaceAdminListThemeAuditReq)
+	if spaceAdminListThemeAuditRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin list theme audit logs status 403, got %d body=%s",
+			spaceAdminListThemeAuditRec.Code,
+			spaceAdminListThemeAuditRec.Body.String(),
+		)
 	}
 }
 

@@ -94,15 +94,18 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
       description: "筛选文档并处理违规内容",
       path: "/admin/documents",
       icon: FileText
-    },
-    {
+    }
+  );
+
+  if (hasPlatformAdminRole) {
+    items.push({
       key: "themes",
       label: "主题管理",
       description: "维护全站主题模板与 CSS 变量",
       path: "/admin/themes",
       icon: Palette
-    }
-  );
+    });
+  }
 
   if (hasPlatformAdminRole) {
     items.push({
@@ -114,13 +117,15 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
     });
   }
 
-  items.push({
-    key: "audits",
-    label: "审计日志",
-    description: "检索关键管理操作轨迹",
-    path: "/admin/audits",
-    icon: History
-  });
+  if (hasPlatformAdminRole) {
+    items.push({
+      key: "audits",
+      label: "审计日志",
+      description: "检索关键管理操作轨迹",
+      path: "/admin/audits",
+      icon: History
+    });
+  }
 
   return items;
 }
@@ -558,8 +563,8 @@ export function AdminApp({
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => navigate("/editor", { replace: true })}>
-                返回编辑器
+              <Button type="button" variant="outline" onClick={() => navigate("/", { replace: true })}>
+                返回首页
               </Button>
               <Button type="button" variant="destructive" onClick={() => void onLogout()}>
                 切换账号
@@ -636,9 +641,9 @@ export function AdminApp({
                 size="sm"
                 variant="ghost"
                 className="admin-sidebar-footer-button flex-1 justify-start text-slate-700 hover:bg-slate-50"
-                onClick={() => navigate("/editor", { replace: true })}
+                onClick={() => navigate("/", { replace: true })}
               >
-                返回编辑器
+                返回首页
               </Button>
               <Button
                 type="button"

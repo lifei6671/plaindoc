@@ -29,7 +29,10 @@ const COVER_MAX_TITLE_LINES = 3;
 const COVER_MAX_TITLE_UNITS_PER_LINE = 10.8;
 const SYSTEM_COVER_TEXT_MARGIN = 128;
 const SYSTEM_COVER_FONT_FAMILY = "PingFang SC, Microsoft YaHei, Noto Sans SC, Source Han Sans SC, sans-serif";
-const SYSTEM_COVER_LINE_HEIGHT_RATIO = 1.3;
+const SYSTEM_COVER_LINE_HEIGHT_RATIO = 1.16;
+const SYSTEM_COVER_BG_COLOR = "#d9e3f2";
+const SYSTEM_COVER_TEXT_COLOR = "#2f3f5f";
+const SYSTEM_COVER_TITLE_BASELINE_RATIO = 0.31;
 
 interface LoadedImageData {
   element: HTMLImageElement;
@@ -229,8 +232,7 @@ function buildSystemCoverSVG(spaceName: string): string {
     fontSize = Math.max(1, Math.floor(fontSize * scale));
   }
   const lineHeight = Math.round(fontSize * SYSTEM_COVER_LINE_HEIGHT_RATIO);
-  const totalHeight = lineHeight * lines.length;
-  const startY = Math.round((COVER_MAX_HEIGHT - totalHeight) / 2 + fontSize);
+  const startY = Math.round(COVER_MAX_HEIGHT * SYSTEM_COVER_TITLE_BASELINE_RATIO);
 
   const tspans = lines
     .map((line, index) => {
@@ -240,11 +242,20 @@ function buildSystemCoverSVG(spaceName: string): string {
     .join("");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${COVER_MAX_WIDTH}" height="${COVER_MAX_HEIGHT}" viewBox="0 0 ${COVER_MAX_WIDTH} ${COVER_MAX_HEIGHT}">
-<rect width="100%" height="100%" fill="#f5f7fb"/>
-<rect x="72" y="88" width="1456" height="2384" rx="54" fill="#e1e7f1"/>
-<rect x="92" y="112" width="1416" height="2336" rx="42" fill="#fcfdff"/>
-<rect x="128" y="188" width="1344" height="26" rx="13" fill="#4a6eaa"/>
-<text x="${SYSTEM_COVER_TEXT_MARGIN}" y="${startY}" fill="#192d54" font-size="${fontSize}" font-weight="700" font-family="${SYSTEM_COVER_FONT_FAMILY}">
+<rect width="100%" height="100%" fill="${SYSTEM_COVER_BG_COLOR}"/>
+<g opacity="0.3">
+  <ellipse cx="300" cy="2610" rx="880" ry="470" fill="#edf2fb"/>
+</g>
+<g opacity="0.52">
+  <path d="M -260 2230 C 180 1880 670 1910 1070 2205 C 1230 2320 1360 2442 1470 2560 L -260 2560 Z" fill="#cad8ee"/>
+</g>
+<g opacity="0.64">
+  <path d="M -230 1770 C 90 1600 420 1710 728 1988 C 938 2174 1098 2348 1222 2560 L 852 2560 C 733 2364 614 2226 472 2096 C 248 1888 18 1794 -230 1846 Z" fill="#b4caec"/>
+</g>
+<g opacity="0.68">
+  <path d="M -320 1870 C -52 1722 190 1782 392 1944 C 584 2102 698 2280 768 2560 L 444 2560 C 382 2388 300 2260 185 2154 C 68 2042 -78 1972 -320 2000 Z" fill="#a2bcec"/>
+</g>
+<text x="${SYSTEM_COVER_TEXT_MARGIN}" y="${startY}" fill="${SYSTEM_COVER_TEXT_COLOR}" font-size="${fontSize}" font-weight="600" font-family="${SYSTEM_COVER_FONT_FAMILY}">
 ${tspans}
 </text>
 </svg>`;
