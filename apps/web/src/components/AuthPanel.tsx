@@ -1,5 +1,6 @@
 import { LoaderCircle } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 
 type AuthMode = "login" | "register";
 
@@ -76,7 +77,8 @@ export function AuthPanel({
     }
   }, []);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     if (!canSubmit) {
       return;
     }
@@ -128,7 +130,7 @@ export function AuthPanel({
           </button>
         </div>
 
-        <div className="auth-form">
+        <form className="auth-form" onSubmit={(event) => void handleSubmit(event)}>
           {mode === "register" ? (
             <label className="auth-form__field">
               <span>昵称</span>
@@ -185,15 +187,14 @@ export function AuthPanel({
           {!validationErrorMessage && errorMessage ? <p className="auth-form__error">{errorMessage}</p> : null}
 
           <button
-            type="button"
+            type="submit"
             className="auth-form__submit"
-            onClick={() => void handleSubmit()}
             disabled={!canSubmit}
           >
             {checking || submitting ? <LoaderCircle className="auth-form__submit-loader" size={14} /> : null}
             <span>{submitText}</span>
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

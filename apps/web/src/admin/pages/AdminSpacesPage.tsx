@@ -1,8 +1,15 @@
-import { ArrowLeftRight, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "../../components/ui/dropdown-menu";
 import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
@@ -761,62 +768,69 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                       <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.createdAt)}</td>
                       <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.updatedAt)}</td>
                       <td className="px-3 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {space.status === "banned" ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              disabled={isActioning || isDeleted}
-                              onClick={() => void handleUpdateStatus(space, "active")}
-                            >
-                              <ShieldCheck size={14} />
-                              <span>解封</span>
-                            </Button>
-                          ) : (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                              disabled={isActioning || isDeleted}
-                              onClick={() => void handleUpdateStatus(space, "banned")}
-                            >
-                              <ShieldBan size={14} />
-                              <span>封禁</span>
-                            </Button>
-                          )}
+                        <div className="inline-flex rounded-md">
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
+                            className="rounded-r-none border-r-0"
                             disabled={isActioning || isDeleted}
                             onClick={() => handleOpenSettings(space)}
                           >
                             <Settings size={14} />
                             <span>设置</span>
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                            disabled={isActioning || isDeleted}
-                            onClick={() => void handleTransferSpace(space)}
-                          >
-                            <ArrowLeftRight size={14} />
-                            <span>转让</span>
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            disabled={isActioning || isDeleted}
-                            onClick={() => void handleDelete(space)}
-                          >
-                            <Trash2 size={14} />
-                            <span>删除</span>
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="w-8 rounded-l-none px-0"
+                                disabled={isActioning || isDeleted}
+                                aria-label="展开更多操作"
+                              >
+                                <ChevronDown size={14} />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              {space.status === "banned" ? (
+                                <DropdownMenuItem
+                                  disabled={isActioning || isDeleted}
+                                  onSelect={() => void handleUpdateStatus(space, "active")}
+                                >
+                                  <ShieldCheck size={14} className="mr-2" />
+                                  <span>解封空间</span>
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem
+                                  disabled={isActioning || isDeleted}
+                                  onSelect={() => void handleUpdateStatus(space, "banned")}
+                                  className="text-amber-700 focus:text-amber-700"
+                                >
+                                  <ShieldBan size={14} className="mr-2" />
+                                  <span>封禁空间</span>
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                disabled={isActioning || isDeleted}
+                                onSelect={() => void handleTransferSpace(space)}
+                                className="text-indigo-700 focus:text-indigo-700"
+                              >
+                                <ArrowLeftRight size={14} className="mr-2" />
+                                <span>转让空间</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={isActioning || isDeleted}
+                                onSelect={() => void handleDelete(space)}
+                                className="text-rose-600 focus:text-rose-600"
+                              >
+                                <Trash2 size={14} className="mr-2" />
+                                <span>删除空间</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </td>
                     </tr>
