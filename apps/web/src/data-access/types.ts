@@ -199,14 +199,29 @@ export interface AdminUserListResult {
 
 export type AdminSpaceStatusFilter = "all" | "active" | "banned" | "deleted";
 export type AdminSpaceVisibilityFilter = "all" | "public" | "authenticated" | "member";
+export type AdminSpaceCoverSource = "user_upload" | "system_generated";
+
+export interface AdminSpaceCover {
+  assetId?: string;
+  key: string;
+  url: string;
+  width: number;
+  height: number;
+  mimeType: string;
+  sizeBytes?: number;
+  normalized: boolean;
+  source: AdminSpaceCoverSource;
+}
 
 export interface AdminSpace {
   spaceId: string;
   name: string;
+  description: string;
   ownerUserId: string;
   ownerName: string;
   ownerEmail: string;
   visibility: Visibility;
+  cover?: AdminSpaceCover | null;
   status: EntityStatus;
   bannedReason: string;
   bannedAt: string | null;
@@ -345,6 +360,16 @@ export interface AdminGateway {
   updateUserRole(input: { userId: string; role: "user" | AdminRole }): Promise<AdminUser>;
   updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }): Promise<AdminUser>;
   deleteUser(userId: string): Promise<void>;
+  createSpace(input: { name: string; description?: string; visibility?: Visibility; coverAssetId?: string }): Promise<AdminSpace>;
+  createSpaceCoverAsset(input: {
+    source: AdminSpaceCoverSource;
+    file?: File;
+    spaceName?: string;
+    clientWidth?: number;
+    clientHeight?: number;
+    clientMimeType?: string;
+    clientProcessed?: boolean;
+  }): Promise<AdminSpaceCover>;
   listSpaces(input?: AdminSpaceListInput): Promise<AdminSpaceListResult>;
   updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }): Promise<AdminSpace>;
   updateSpaceMetadata(input: { spaceId: string; name?: string; visibility?: Visibility }): Promise<AdminSpace>;

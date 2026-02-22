@@ -189,9 +189,11 @@ func (r *gormDocumentRepository) ListForAdmin(
 		Joins("JOIN users AS u ON u.user_id = s.owner_user_id")
 
 	if params.RestrictToScopes {
-		baseQuery = baseQuery.Joins(
-			"JOIN space_admin_scopes AS sas ON sas.space_id = s.space_id AND sas.user_id = ?",
-			strings.TrimSpace(params.ActorUserID),
+		actorUserID := strings.TrimSpace(params.ActorUserID)
+		baseQuery = baseQuery.Where(
+			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			actorUserID,
+			actorUserID,
 		)
 	}
 

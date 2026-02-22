@@ -63,7 +63,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		api.GET("/docs/:docId", accessHandler.GetDocument)
 		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
 
-		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo)
+		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo, spaceRepo)
 		adminHandler := handler.NewAdminHandler(adminAccessService)
 		adminOperationTokenService := service.NewAdminOperationTokenService(adminAccessService, 0)
 		adminOperationTokenHandler := handler.NewAdminOperationTokenHandler(adminOperationTokenService)
@@ -139,6 +139,8 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 				),
 				adminUserHandler.DeleteUser,
 			)
+			adminAPI.POST("/spaces", adminSpaceHandler.CreateSpace)
+			adminAPI.POST("/spaces/cover-assets", adminSpaceHandler.CreateCoverAsset)
 			adminAPI.GET("/spaces", adminSpaceHandler.ListSpaces)
 			adminAPI.PATCH(
 				"/spaces/:spaceId/status",

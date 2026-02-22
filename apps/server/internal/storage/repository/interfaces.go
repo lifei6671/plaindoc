@@ -76,8 +76,10 @@ type SpaceAdminScopeRepository interface {
 type SpaceRepository interface {
 	Create(ctx context.Context, space *models.Space) error
 	GetBySpaceID(ctx context.Context, spaceID string) (*models.Space, error)
+	GetCoverAssetByAssetID(ctx context.Context, assetID string) (*models.SpaceCoverAsset, error)
 	ListByUserID(ctx context.Context, userID string) ([]models.Space, error)
 	ListForAdmin(ctx context.Context, params ListAdminSpacesParams) ([]AdminSpaceListRecord, int64, error)
+	CreateCoverAsset(ctx context.Context, asset *models.SpaceCoverAsset) error
 	UpdateVisibility(ctx context.Context, spaceID string, visibility models.Visibility) (*models.Space, error)
 	UpdateStatus(ctx context.Context, params UpdateSpaceStatusParams) (bool, error)
 	UpdateMetadata(ctx context.Context, params UpdateSpaceMetadataParams) (bool, error)

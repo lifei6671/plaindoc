@@ -9,6 +9,7 @@ import {
   type AdminDocumentListResult,
   type AdminIdentity,
   type AdminSpace,
+  type AdminSpaceCover,
   type AdminSpaceListInput,
   type AdminSpaceListResult,
   type AdminRole,
@@ -489,6 +490,69 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       await request<void>(`/admin/users/${encodeURIComponent(targetUserID)}`, {
         method: "DELETE",
         headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async createSpace(input: { name: string; description?: string; visibility?: "public" | "authenticated" | "member"; coverAssetId?: string }) {
+      const name = input.name.trim();
+      if (!name) {
+        throw new Error("空间名称不能为空");
+      }
+      return request<AdminSpace>("/admin/spaces", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          description: input.description ?? "",
+          visibility: input.visibility ?? "member",
+          coverAssetId: input.coverAssetId ?? ""
+        })
+      });
+    },
+    async createSpaceCoverAsset(input: {
+      source: "user_upload" | "system_generated";
+      file?: File;
+      spaceName?: string;
+      clientWidth?: number;
+      clientHeight?: number;
+      clientMimeType?: string;
+      clientProcessed?: boolean;
+    }) {
+      const source = input.source;
+      if (source !== "user_upload" && source !== "system_generated") {
+        throw new Error("封面来源不合法");
+      }
+
+      const formData = new FormData();
+      formData.append("source", source);
+
+      if (source === "user_upload") {
+        if (!input.file) {
+          throw new Error("请先选择要上传的封面文件");
+        }
+        formData.append("file", input.file);
+      } else {
+        const spaceName = (input.spaceName ?? "").trim();
+        if (!spaceName) {
+          throw new Error("空间名称不能为空");
+        }
+        formData.append("spaceName", spaceName);
+      }
+
+      if (typeof input.clientWidth === "number" && Number.isFinite(input.clientWidth) && input.clientWidth > 0) {
+        formData.append("clientWidth", String(Math.trunc(input.clientWidth)));
+      }
+      if (typeof input.clientHeight === "number" && Number.isFinite(input.clientHeight) && input.clientHeight > 0) {
+        formData.append("clientHeight", String(Math.trunc(input.clientHeight)));
+      }
+      if (typeof input.clientMimeType === "string" && input.clientMimeType.trim()) {
+        formData.append("clientMimeType", input.clientMimeType.trim());
+      }
+      if (typeof input.clientProcessed === "boolean") {
+        formData.append("clientProcessed", input.clientProcessed ? "true" : "false");
+      }
+
+      return request<AdminSpaceCover>("/admin/spaces/cover-assets", {
+        method: "POST",
+        body: formData
       });
     },
     async listSpaces(input: AdminSpaceListInput = {}) {

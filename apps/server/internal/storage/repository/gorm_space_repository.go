@@ -25,11 +25,30 @@ func (r *gormSpaceRepository) Create(ctx context.Context, space *models.Space) e
 		return fmt.Errorf("space repository db is nil")
 	}
 	if space != nil {
+		space.Name = strings.TrimSpace(space.Name)
+		space.Description = strings.TrimSpace(space.Description)
 		if !models.IsValidVisibility(space.Visibility) {
 			space.Visibility = models.VisibilityMember
 		}
 		if !models.IsValidEntityStatus(space.Status) {
 			space.Status = models.EntityStatusActive
+		}
+		space.CoverKey = strings.TrimSpace(space.CoverKey)
+		space.CoverURL = strings.TrimSpace(space.CoverURL)
+		space.CoverSource = strings.TrimSpace(space.CoverSource)
+		if space.CoverWidth < 0 {
+			space.CoverWidth = 0
+		}
+		if space.CoverHeight < 0 {
+			space.CoverHeight = 0
+		}
+		if space.CoverAssetID != nil {
+			trimmedAssetID := strings.TrimSpace(*space.CoverAssetID)
+			if trimmedAssetID == "" {
+				space.CoverAssetID = nil
+			} else {
+				space.CoverAssetID = &trimmedAssetID
+			}
 		}
 	}
 	return r.db.WithContext(ctx).Create(space).Error
@@ -46,8 +65,15 @@ func (r *gormSpaceRepository) GetBySpaceID(ctx context.Context, spaceID string) 
 			"id",
 			"space_id",
 			"name",
+			"description",
 			"owner_user_id",
 			"visibility",
+			"cover_asset_id",
+			"cover_key",
+			"cover_url",
+			"cover_width",
+			"cover_height",
+			"cover_source",
 			"status",
 			"banned_reason",
 			"banned_at",
@@ -63,7 +89,73 @@ func (r *gormSpaceRepository) GetBySpaceID(ctx context.Context, spaceID string) 
 	if !models.IsValidEntityStatus(space.Status) {
 		space.Status = models.EntityStatusActive
 	}
+	space.Description = strings.TrimSpace(space.Description)
+	space.CoverKey = strings.TrimSpace(space.CoverKey)
+	space.CoverURL = strings.TrimSpace(space.CoverURL)
+	space.CoverSource = strings.TrimSpace(space.CoverSource)
+	if space.CoverWidth < 0 {
+		space.CoverWidth = 0
+	}
+	if space.CoverHeight < 0 {
+		space.CoverHeight = 0
+	}
+	if space.CoverAssetID != nil {
+		trimmedAssetID := strings.TrimSpace(*space.CoverAssetID)
+		if trimmedAssetID == "" {
+			space.CoverAssetID = nil
+		} else {
+			space.CoverAssetID = &trimmedAssetID
+		}
+	}
 	return &space, nil
+}
+
+func (r *gormSpaceRepository) GetCoverAssetByAssetID(
+	ctx context.Context,
+	assetID string,
+) (*models.SpaceCoverAsset, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("space repository db is nil")
+	}
+
+	var asset models.SpaceCoverAsset
+	if err := r.db.WithContext(ctx).
+		Select(
+			"id",
+			"asset_id",
+			"source",
+			"object_key",
+			"object_url",
+			"mime_type",
+			"width",
+			"height",
+			"size_bytes",
+			"normalized",
+			"created_by_user_id",
+			"created_at",
+			"updated_at",
+		).
+		Where("asset_id = ?", strings.TrimSpace(assetID)).
+		Take(&asset).Error; err != nil {
+		return nil, err
+	}
+
+	asset.AssetID = strings.TrimSpace(asset.AssetID)
+	asset.Source = strings.TrimSpace(asset.Source)
+	asset.ObjectKey = strings.TrimSpace(asset.ObjectKey)
+	asset.ObjectURL = strings.TrimSpace(asset.ObjectURL)
+	asset.MimeType = strings.TrimSpace(asset.MimeType)
+	asset.CreatedByUserID = strings.TrimSpace(asset.CreatedByUserID)
+	if asset.Width < 0 {
+		asset.Width = 0
+	}
+	if asset.Height < 0 {
+		asset.Height = 0
+	}
+	if asset.SizeBytes < 0 {
+		asset.SizeBytes = 0
+	}
+	return &asset, nil
 }
 
 func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) ([]models.Space, error) {
@@ -78,8 +170,15 @@ func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) (
 			"s.id",
 			"s.space_id",
 			"s.name",
+			"s.description",
 			"s.owner_user_id",
 			"s.visibility",
+			"s.cover_asset_id",
+			"s.cover_key",
+			"s.cover_url",
+			"s.cover_width",
+			"s.cover_height",
+			"s.cover_source",
 			"s.status",
 			"s.banned_reason",
 			"s.banned_at",
@@ -93,11 +192,30 @@ func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) (
 	}
 
 	for i := range spaces {
+		spaces[i].Name = strings.TrimSpace(spaces[i].Name)
+		spaces[i].Description = strings.TrimSpace(spaces[i].Description)
 		if !models.IsValidVisibility(spaces[i].Visibility) {
 			spaces[i].Visibility = models.VisibilityMember
 		}
 		if !models.IsValidEntityStatus(spaces[i].Status) {
 			spaces[i].Status = models.EntityStatusActive
+		}
+		spaces[i].CoverKey = strings.TrimSpace(spaces[i].CoverKey)
+		spaces[i].CoverURL = strings.TrimSpace(spaces[i].CoverURL)
+		spaces[i].CoverSource = strings.TrimSpace(spaces[i].CoverSource)
+		if spaces[i].CoverWidth < 0 {
+			spaces[i].CoverWidth = 0
+		}
+		if spaces[i].CoverHeight < 0 {
+			spaces[i].CoverHeight = 0
+		}
+		if spaces[i].CoverAssetID != nil {
+			trimmedAssetID := strings.TrimSpace(*spaces[i].CoverAssetID)
+			if trimmedAssetID == "" {
+				spaces[i].CoverAssetID = nil
+			} else {
+				spaces[i].CoverAssetID = &trimmedAssetID
+			}
 		}
 	}
 
@@ -117,9 +235,11 @@ func (r *gormSpaceRepository) ListForAdmin(
 		Joins("JOIN users AS u ON u.user_id = s.owner_user_id")
 
 	if params.RestrictToScopes {
-		baseQuery = baseQuery.Joins(
-			"JOIN space_admin_scopes AS sas ON sas.space_id = s.space_id AND sas.user_id = ?",
-			strings.TrimSpace(params.ActorUserID),
+		actorUserID := strings.TrimSpace(params.ActorUserID)
+		baseQuery = baseQuery.Where(
+			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			actorUserID,
+			actorUserID,
 		)
 	}
 
@@ -165,8 +285,15 @@ func (r *gormSpaceRepository) ListForAdmin(
 		ID           int64               `gorm:"column:id"`
 		SpaceID      string              `gorm:"column:space_id"`
 		Name         string              `gorm:"column:name"`
+		Description  string              `gorm:"column:description"`
 		OwnerUserID  string              `gorm:"column:owner_user_id"`
 		Visibility   models.Visibility   `gorm:"column:visibility"`
+		CoverAssetID *string             `gorm:"column:cover_asset_id"`
+		CoverKey     string              `gorm:"column:cover_key"`
+		CoverURL     string              `gorm:"column:cover_url"`
+		CoverWidth   int                 `gorm:"column:cover_width"`
+		CoverHeight  int                 `gorm:"column:cover_height"`
+		CoverSource  string              `gorm:"column:cover_source"`
 		Status       models.EntityStatus `gorm:"column:status"`
 		BannedReason string              `gorm:"column:banned_reason"`
 		BannedAt     *time.Time          `gorm:"column:banned_at"`
@@ -183,8 +310,15 @@ func (r *gormSpaceRepository) ListForAdmin(
 			"s.id",
 			"s.space_id",
 			"s.name",
+			"s.description",
 			"s.owner_user_id",
 			"s.visibility",
+			"s.cover_asset_id",
+			"s.cover_key",
+			"s.cover_url",
+			"s.cover_width",
+			"s.cover_height",
+			"s.cover_source",
 			"s.status",
 			"s.banned_reason",
 			"s.banned_at",
@@ -207,8 +341,15 @@ func (r *gormSpaceRepository) ListForAdmin(
 			ID:           row.ID,
 			SpaceID:      row.SpaceID,
 			Name:         row.Name,
+			Description:  row.Description,
 			OwnerUserID:  row.OwnerUserID,
 			Visibility:   row.Visibility,
+			CoverAssetID: row.CoverAssetID,
+			CoverKey:     row.CoverKey,
+			CoverURL:     row.CoverURL,
+			CoverWidth:   row.CoverWidth,
+			CoverHeight:  row.CoverHeight,
+			CoverSource:  row.CoverSource,
 			Status:       row.Status,
 			BannedReason: row.BannedReason,
 			BannedAt:     row.BannedAt,
@@ -221,6 +362,25 @@ func (r *gormSpaceRepository) ListForAdmin(
 		}
 		if !models.IsValidEntityStatus(space.Status) {
 			space.Status = models.EntityStatusActive
+		}
+		space.Name = strings.TrimSpace(space.Name)
+		space.Description = strings.TrimSpace(space.Description)
+		space.CoverKey = strings.TrimSpace(space.CoverKey)
+		space.CoverURL = strings.TrimSpace(space.CoverURL)
+		space.CoverSource = strings.TrimSpace(space.CoverSource)
+		if space.CoverWidth < 0 {
+			space.CoverWidth = 0
+		}
+		if space.CoverHeight < 0 {
+			space.CoverHeight = 0
+		}
+		if space.CoverAssetID != nil {
+			trimmedAssetID := strings.TrimSpace(*space.CoverAssetID)
+			if trimmedAssetID == "" {
+				space.CoverAssetID = nil
+			} else {
+				space.CoverAssetID = &trimmedAssetID
+			}
 		}
 		result = append(result, AdminSpaceListRecord{
 			Space:      space,
@@ -256,6 +416,30 @@ func (r *gormSpaceRepository) UpdateVisibility(
 	}
 
 	return r.GetBySpaceID(ctx, spaceID)
+}
+
+func (r *gormSpaceRepository) CreateCoverAsset(ctx context.Context, asset *models.SpaceCoverAsset) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("space repository db is nil")
+	}
+	if asset != nil {
+		asset.AssetID = strings.TrimSpace(asset.AssetID)
+		asset.Source = strings.TrimSpace(asset.Source)
+		asset.ObjectKey = strings.TrimSpace(asset.ObjectKey)
+		asset.ObjectURL = strings.TrimSpace(asset.ObjectURL)
+		asset.MimeType = strings.TrimSpace(asset.MimeType)
+		asset.CreatedByUserID = strings.TrimSpace(asset.CreatedByUserID)
+		if asset.Width < 0 {
+			asset.Width = 0
+		}
+		if asset.Height < 0 {
+			asset.Height = 0
+		}
+		if asset.SizeBytes < 0 {
+			asset.SizeBytes = 0
+		}
+	}
+	return r.db.WithContext(ctx).Create(asset).Error
 }
 
 func (r *gormSpaceRepository) UpdateStatus(ctx context.Context, params UpdateSpaceStatusParams) (bool, error) {

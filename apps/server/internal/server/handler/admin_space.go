@@ -2,6 +2,8 @@ package handler
 
 import (
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,10 +23,12 @@ type adminSpaceHandler struct {
 type adminSpaceResponse struct {
 	SpaceID      string              `json:"spaceId"`
 	Name         string              `json:"name"`
+	Description  string              `json:"description"`
 	OwnerUserID  string              `json:"ownerUserId"`
 	OwnerName    string              `json:"ownerName"`
 	OwnerEmail   string              `json:"ownerEmail"`
 	Visibility   models.Visibility   `json:"visibility"`
+	Cover        *adminSpaceCoverDTO `json:"cover,omitempty"`
 	Status       models.EntityStatus `json:"status"`
 	BannedReason string              `json:"bannedReason"`
 	BannedAt     *time.Time          `json:"bannedAt"`
@@ -44,6 +48,25 @@ type adminSpacePaginationResult struct {
 	Total    int64 `json:"total"`
 }
 
+type adminSpaceCoverDTO struct {
+	AssetID    string `json:"assetId,omitempty"`
+	Key        string `json:"key"`
+	URL        string `json:"url"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	MimeType   string `json:"mimeType"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	Normalized bool   `json:"normalized"`
+	Source     string `json:"source"`
+}
+
+type createAdminSpaceRequest struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Visibility   string `json:"visibility"`
+	CoverAssetID string `json:"coverAssetId"`
+}
+
 type updateAdminSpaceMetadataRequest struct {
 	Name       *string `json:"name"`
 	Visibility *string `json:"visibility"`
@@ -57,6 +80,135 @@ type updateAdminSpaceStatusRequest struct {
 // NewAdminSpaceHandler 创建后台空间管理处理器。
 func NewAdminSpaceHandler(adminSpaceService *service.AdminSpaceService) *adminSpaceHandler {
 	return &adminSpaceHandler{adminSpaceService: adminSpaceService}
+}
+
+// CreateSpace 创建后台空间。
+func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	var req createAdminSpaceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	payload, err := h.adminSpaceService.CreateSpace(c.Request.Context(), service.CreateAdminSpaceInput{
+		ActorUserID:  actorUserID,
+		RequestID:    response.RequestIDFromContext(c),
+		Name:         req.Name,
+		Description:  req.Description,
+		Visibility:   models.Visibility(strings.ToLower(strings.TrimSpace(req.Visibility))),
+		CoverAssetID: strings.TrimSpace(req.CoverAssetID),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+		case errors.Is(err, service.ErrAdminSpaceInvalidName):
+			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
+		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
+			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
+		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
+			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
+		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
+			response.Error(c, http.StatusNotFound, "COVER_ASSET_NOT_FOUND", "cover asset not found")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, mapAdminSpaceResponse(payload))
+}
+
+// CreateCoverAsset 创建空间封面资产。
+func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	source := service.AdminSpaceCoverSource(strings.ToLower(strings.TrimSpace(c.PostForm("source"))))
+	spaceName := strings.TrimSpace(c.PostForm("spaceName"))
+	fileName := ""
+	fileContentType := ""
+	fileBytes := make([]byte, 0)
+
+	if source == service.AdminSpaceCoverSourceUserUpload {
+		fileHeader, err := c.FormFile("file")
+		if err != nil || fileHeader == nil {
+			response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is required")
+			return
+		}
+
+		fileName = strings.TrimSpace(fileHeader.Filename)
+		fileContentType = strings.TrimSpace(fileHeader.Header.Get("Content-Type"))
+		content, err := readAdminUploadedFileBytes(fileHeader)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "cannot read uploaded file")
+			return
+		}
+		fileBytes = content
+	}
+
+	clientWidth, _ := parseAdminSpaceQueryInt(c.PostForm("clientWidth"))
+	clientHeight, _ := parseAdminSpaceQueryInt(c.PostForm("clientHeight"))
+	clientMimeType := strings.TrimSpace(c.PostForm("clientMimeType"))
+	clientProcessed := strings.EqualFold(strings.TrimSpace(c.PostForm("clientProcessed")), "true")
+
+	payload, err := h.adminSpaceService.CreateCoverAsset(c.Request.Context(), service.CreateAdminSpaceCoverAssetInput{
+		ActorUserID:      actorUserID,
+		Source:           source,
+		FileName:         fileName,
+		FileContentType:  fileContentType,
+		FileBytes:        fileBytes,
+		SpaceName:        spaceName,
+		ClientWidth:      clientWidth,
+		ClientHeight:     clientHeight,
+		ClientMimeType:   clientMimeType,
+		ClientProcessed:  clientProcessed,
+		PreferredQuality: 0,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+		case errors.Is(err, service.ErrAdminSpaceInvalidCoverSource):
+			response.Error(c, http.StatusBadRequest, "INVALID_SOURCE", "source must be user_upload or system_generated")
+		case errors.Is(err, service.ErrAdminSpaceCoverFileRequired):
+			response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is required")
+		case errors.Is(err, service.ErrAdminSpaceCoverSpaceNameRequired):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_NAME", "space name is required for system generated cover")
+		case errors.Is(err, service.ErrAdminSpaceCoverImageInvalid):
+			response.Error(c, http.StatusBadRequest, "INVALID_COVER_IMAGE", "cover image is invalid")
+		case errors.Is(err, service.ErrAdminSpaceCoverImageTooLarge):
+			response.Error(c, http.StatusRequestEntityTooLarge, "COVER_IMAGE_TOO_LARGE", "cover image exceeds 10MB limit")
+		case errors.Is(err, service.ErrAdminSpaceCoverImageTooManyPixels):
+			response.Error(c, http.StatusBadRequest, "COVER_IMAGE_TOO_LARGE", "cover image dimensions are too large")
+		case errors.Is(err, service.ErrAdminSpaceFontUnavailable):
+			response.Error(c, http.StatusServiceUnavailable, "COVER_FONT_UNAVAILABLE", "system cover font is unavailable")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, mapAdminSpaceCoverDTO(payload))
 }
 
 // ListSpaces 返回后台空间列表，支持关键词、状态、可见性与分页筛选。
@@ -291,10 +443,12 @@ func mapAdminSpaceResponse(value service.AdminSpaceRecord) adminSpaceResponse {
 	return adminSpaceResponse{
 		SpaceID:      value.SpaceID,
 		Name:         value.Name,
+		Description:  value.Description,
 		OwnerUserID:  value.OwnerUserID,
 		OwnerName:    value.OwnerName,
 		OwnerEmail:   value.OwnerEmail,
 		Visibility:   value.Visibility,
+		Cover:        mapAdminSpaceCoverDTOFromPointer(value.Cover),
 		Status:       value.Status,
 		BannedReason: value.BannedReason,
 		BannedAt:     value.BannedAt,
@@ -302,4 +456,35 @@ func mapAdminSpaceResponse(value service.AdminSpaceRecord) adminSpaceResponse {
 		CreatedAt:    value.CreatedAt,
 		UpdatedAt:    value.UpdatedAt,
 	}
+}
+
+func mapAdminSpaceCoverDTO(value service.AdminSpaceCoverAsset) adminSpaceCoverDTO {
+	return adminSpaceCoverDTO{
+		AssetID:    value.AssetID,
+		Key:        value.Key,
+		URL:        value.URL,
+		Width:      value.Width,
+		Height:     value.Height,
+		MimeType:   value.MimeType,
+		SizeBytes:  value.SizeBytes,
+		Normalized: value.Normalized,
+		Source:     string(value.Source),
+	}
+}
+
+func mapAdminSpaceCoverDTOFromPointer(value *service.AdminSpaceCoverAsset) *adminSpaceCoverDTO {
+	if value == nil {
+		return nil
+	}
+	payload := mapAdminSpaceCoverDTO(*value)
+	return &payload
+}
+
+func readAdminUploadedFileBytes(fileHeader *multipart.FileHeader) ([]byte, error) {
+	file, err := fileHeader.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
 }

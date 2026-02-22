@@ -8,6 +8,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
+	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 )
 
@@ -15,6 +16,8 @@ const (
 	defaultAdminSpacePage     = 1
 	defaultAdminSpacePageSize = 20
 	maxAdminSpacePageSize     = 100
+	maxAdminSpaceNameLength   = 120
+	maxAdminSpaceDescLength   = 280
 )
 
 var (
@@ -28,7 +31,65 @@ var (
 	ErrAdminSpaceNoMetadataChange        = errors.New("admin space metadata change is required")
 	ErrAdminSpaceNotFound                = errors.New("admin space target not found")
 	ErrAdminSpaceAlreadyDeleted          = errors.New("admin space target already deleted")
+	ErrAdminSpaceInvalidDescription      = errors.New("admin space description is invalid")
+	ErrAdminSpaceInvalidCoverSource      = errors.New("admin space cover source is invalid")
+	ErrAdminSpaceCoverFileRequired       = errors.New("admin space cover file is required")
+	ErrAdminSpaceCoverSpaceNameRequired  = errors.New("admin space cover space name is required")
+	ErrAdminSpaceCoverAssetNotFound      = errors.New("admin space cover asset not found")
+	ErrAdminSpaceCoverImageInvalid       = errors.New("admin space cover image is invalid")
+	ErrAdminSpaceCoverImageTooLarge      = errors.New("admin space cover image is too large")
+	ErrAdminSpaceCoverImageTooManyPixels = errors.New("admin space cover image has too many pixels")
+	ErrAdminSpaceFontUnavailable         = errors.New("admin space cover font is unavailable")
 )
+
+// AdminSpaceCoverSource 定义空间封面来源。
+type AdminSpaceCoverSource string
+
+const (
+	AdminSpaceCoverSourceUserUpload     AdminSpaceCoverSource = "user_upload"
+	AdminSpaceCoverSourceSystemGenerate AdminSpaceCoverSource = "system_generated"
+)
+
+// AdminSpaceCoverAsset 后台封面资产。
+type AdminSpaceCoverAsset struct {
+	AssetID     string
+	Key         string
+	URL         string
+	Width       int
+	Height      int
+	MimeType    string
+	SizeBytes   int64
+	Normalized  bool
+	Source      AdminSpaceCoverSource
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	CreatedByID string
+}
+
+// CreateAdminSpaceInput 后台新建空间参数。
+type CreateAdminSpaceInput struct {
+	ActorUserID  string
+	RequestID    string
+	Name         string
+	Description  string
+	Visibility   models.Visibility
+	CoverAssetID string
+}
+
+// CreateAdminSpaceCoverAssetInput 后台创建空间封面资产参数。
+type CreateAdminSpaceCoverAssetInput struct {
+	ActorUserID      string
+	Source           AdminSpaceCoverSource
+	FileName         string
+	FileContentType  string
+	FileBytes        []byte
+	SpaceName        string
+	ClientWidth      int
+	ClientHeight     int
+	ClientMimeType   string
+	ClientProcessed  bool
+	PreferredQuality float64
+}
 
 // AdminSpaceStatusFilter 管理后台空间状态过滤条件。
 type AdminSpaceStatusFilter string
@@ -54,10 +115,12 @@ const (
 type AdminSpaceRecord struct {
 	SpaceID      string
 	Name         string
+	Description  string
 	OwnerUserID  string
 	OwnerName    string
 	OwnerEmail   string
 	Visibility   models.Visibility
+	Cover        *AdminSpaceCoverAsset
 	Status       models.EntityStatus
 	BannedReason string
 	BannedAt     *time.Time
@@ -180,6 +243,271 @@ func (s *AdminSpaceService) ListSpaces(
 	}, nil
 }
 
+// CreateSpace 后台创建空间。
+func (s *AdminSpaceService) CreateSpace(
+	ctx context.Context,
+	input CreateAdminSpaceInput,
+) (AdminSpaceRecord, error) {
+	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
+		return AdminSpaceRecord{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	if actorUserID == "" {
+		return AdminSpaceRecord{}, ErrAdminForbidden
+	}
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
+	if err != nil {
+		return AdminSpaceRecord{}, err
+	}
+	if !isAdmin {
+		return AdminSpaceRecord{}, ErrAdminForbidden
+	}
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" || len([]rune(name)) > maxAdminSpaceNameLength {
+		return AdminSpaceRecord{}, ErrAdminSpaceInvalidName
+	}
+
+	description := strings.TrimSpace(input.Description)
+	if len([]rune(description)) > maxAdminSpaceDescLength {
+		return AdminSpaceRecord{}, ErrAdminSpaceInvalidDescription
+	}
+
+	visibility := input.Visibility
+	if !models.IsValidVisibility(visibility) {
+		if strings.TrimSpace(string(visibility)) != "" {
+			return AdminSpaceRecord{}, ErrAdminSpaceInvalidVisibility
+		}
+		visibility = models.VisibilityMember
+	}
+
+	var (
+		coverAssetID *string
+		coverKey     string
+		coverURL     string
+		coverWidth   int
+		coverHeight  int
+		coverSource  string
+	)
+	if trimmedCoverAssetID := strings.TrimSpace(input.CoverAssetID); trimmedCoverAssetID != "" {
+		coverAsset, err := s.spaceRepo.GetCoverAssetByAssetID(ctx, trimmedCoverAssetID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return AdminSpaceRecord{}, ErrAdminSpaceCoverAssetNotFound
+			}
+			return AdminSpaceRecord{}, err
+		}
+
+		assetID := strings.TrimSpace(coverAsset.AssetID)
+		coverAssetID = &assetID
+		coverKey = coverAsset.ObjectKey
+		coverURL = coverAsset.ObjectURL
+		coverWidth = coverAsset.Width
+		coverHeight = coverAsset.Height
+		coverSource = coverAsset.Source
+	}
+
+	now := time.Now().UTC()
+	space := &models.Space{
+		SpaceID:      strings.ToLower(ulid.Make().String()),
+		Name:         name,
+		Description:  description,
+		OwnerUserID:  actorUserID,
+		Visibility:   visibility,
+		CoverAssetID: coverAssetID,
+		CoverKey:     coverKey,
+		CoverURL:     coverURL,
+		CoverWidth:   coverWidth,
+		CoverHeight:  coverHeight,
+		CoverSource:  coverSource,
+		Status:       models.EntityStatusActive,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := s.spaceRepo.Create(ctx, space); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+
+	ownerName := ""
+	ownerEmail := ""
+	if s.userRepo != nil {
+		owner, ownerErr := s.userRepo.GetByUserID(ctx, actorUserID)
+		if ownerErr == nil && owner != nil {
+			ownerName = owner.Name
+			ownerEmail = owner.Email
+		}
+	}
+
+	record := mapAdminSpaceRecord(repository.AdminSpaceListRecord{
+		Space: models.Space{
+			ID:           space.ID,
+			SpaceID:      space.SpaceID,
+			Name:         space.Name,
+			Description:  space.Description,
+			OwnerUserID:  space.OwnerUserID,
+			Visibility:   space.Visibility,
+			CoverAssetID: space.CoverAssetID,
+			CoverKey:     space.CoverKey,
+			CoverURL:     space.CoverURL,
+			CoverWidth:   space.CoverWidth,
+			CoverHeight:  space.CoverHeight,
+			CoverSource:  space.CoverSource,
+			Status:       space.Status,
+			BannedReason: space.BannedReason,
+			BannedAt:     space.BannedAt,
+			DeletedAt:    space.DeletedAt,
+			CreatedAt:    space.CreatedAt,
+			UpdatedAt:    space.UpdatedAt,
+		},
+		OwnerName:  ownerName,
+		OwnerEmail: ownerEmail,
+	})
+
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionCreate,
+		TargetType: "space",
+		TargetID:   record.SpaceID,
+		Summary:    "space created: " + record.SpaceID,
+		Detail: map[string]any{
+			"name":         record.Name,
+			"description":  record.Description,
+			"visibility":   record.Visibility,
+			"coverAssetId": strings.TrimSpace(input.CoverAssetID),
+		},
+	}); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+
+	return record, nil
+}
+
+// CreateCoverAsset 创建空间封面资产（用户上传或系统生成）。
+func (s *AdminSpaceService) CreateCoverAsset(
+	ctx context.Context,
+	input CreateAdminSpaceCoverAssetInput,
+) (AdminSpaceCoverAsset, error) {
+	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
+		return AdminSpaceCoverAsset{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	if actorUserID == "" {
+		return AdminSpaceCoverAsset{}, ErrAdminForbidden
+	}
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
+	if err != nil {
+		return AdminSpaceCoverAsset{}, err
+	}
+	if !isAdmin {
+		return AdminSpaceCoverAsset{}, ErrAdminForbidden
+	}
+
+	source := normalizeAdminSpaceCoverSource(input.Source)
+	if source == "" {
+		return AdminSpaceCoverAsset{}, ErrAdminSpaceInvalidCoverSource
+	}
+
+	var (
+		encodedBytes []byte
+		width        int
+		height       int
+		normalized   bool
+	)
+
+	switch source {
+	case AdminSpaceCoverSourceUserUpload:
+		if len(input.FileBytes) == 0 {
+			return AdminSpaceCoverAsset{}, ErrAdminSpaceCoverFileRequired
+		}
+		processed, err := processAdminSpaceUserUploadCover(processAdminSpaceUserUploadCoverInput{
+			FileName:        input.FileName,
+			FileContentType: input.FileContentType,
+			FileBytes:       input.FileBytes,
+			Quality:         input.PreferredQuality,
+		})
+		if err != nil {
+			return AdminSpaceCoverAsset{}, err
+		}
+		encodedBytes = processed.WebPBytes
+		width = processed.Width
+		height = processed.Height
+		normalized = processed.Normalized
+	case AdminSpaceCoverSourceSystemGenerate:
+		spaceName := strings.TrimSpace(input.SpaceName)
+		if spaceName == "" {
+			return AdminSpaceCoverAsset{}, ErrAdminSpaceCoverSpaceNameRequired
+		}
+		processed, err := renderAdminSpaceSystemCover(renderAdminSpaceSystemCoverInput{
+			SpaceName: spaceName,
+			Quality:   input.PreferredQuality,
+		})
+		if err != nil {
+			return AdminSpaceCoverAsset{}, err
+		}
+		encodedBytes = processed.WebPBytes
+		width = processed.Width
+		height = processed.Height
+		normalized = true
+	default:
+		return AdminSpaceCoverAsset{}, ErrAdminSpaceInvalidCoverSource
+	}
+
+	objectKey, err := buildAdminSpaceCoverObjectKey(time.Now().UTC())
+	if err != nil {
+		return AdminSpaceCoverAsset{}, err
+	}
+	if err := saveAdminSpaceCoverObject(objectKey, encodedBytes); err != nil {
+		return AdminSpaceCoverAsset{}, err
+	}
+
+	asset := &models.SpaceCoverAsset{
+		AssetID:         strings.ToLower(ulid.Make().String()),
+		Source:          string(source),
+		ObjectKey:       objectKey,
+		ObjectURL:       resolveAdminSpaceCoverPublicURL(objectKey),
+		MimeType:        "image/webp",
+		Width:           width,
+		Height:          height,
+		SizeBytes:       int64(len(encodedBytes)),
+		Normalized:      normalized,
+		CreatedByUserID: actorUserID,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+
+	if err := s.spaceRepo.CreateCoverAsset(ctx, asset); err != nil {
+		return AdminSpaceCoverAsset{}, err
+	}
+
+	payload := mapAdminSpaceCoverAsset(*asset)
+
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionCreate,
+		TargetType: "space_cover_asset",
+		TargetID:   payload.AssetID,
+		Summary:    "space cover asset created: " + payload.AssetID,
+		Detail: map[string]any{
+			"source":       payload.Source,
+			"width":        payload.Width,
+			"height":       payload.Height,
+			"sizeBytes":    payload.SizeBytes,
+			"normalized":   payload.Normalized,
+			"clientWidth":  input.ClientWidth,
+			"clientHeight": input.ClientHeight,
+			"clientMime":   strings.TrimSpace(input.ClientMimeType),
+			"clientDone":   input.ClientProcessed,
+		},
+	}); err != nil {
+		return AdminSpaceCoverAsset{}, err
+	}
+
+	return payload, nil
+}
+
 // UpdateMetadata 更新后台空间元数据（名称、可见性）。
 func (s *AdminSpaceService) UpdateMetadata(
 	ctx context.Context,
@@ -263,20 +591,11 @@ func (s *AdminSpaceService) UpdateMetadata(
 		}
 	}
 
-	record := AdminSpaceRecord{
-		SpaceID:      latest.SpaceID,
-		Name:         latest.Name,
-		OwnerUserID:  latest.OwnerUserID,
-		OwnerName:    ownerName,
-		OwnerEmail:   ownerEmail,
-		Visibility:   latest.Visibility,
-		Status:       latest.Status,
-		BannedReason: latest.BannedReason,
-		BannedAt:     latest.BannedAt,
-		DeletedAt:    latest.DeletedAt,
-		CreatedAt:    latest.CreatedAt,
-		UpdatedAt:    latest.UpdatedAt,
-	}
+	record := mapAdminSpaceRecord(repository.AdminSpaceListRecord{
+		Space:      *latest,
+		OwnerName:  ownerName,
+		OwnerEmail: ownerEmail,
+	})
 
 	detail := map[string]any{
 		"nameBefore":       snapshot.Name,
@@ -371,20 +690,11 @@ func (s *AdminSpaceService) UpdateStatus(
 		}
 	}
 
-	record := AdminSpaceRecord{
-		SpaceID:      latest.SpaceID,
-		Name:         latest.Name,
-		OwnerUserID:  latest.OwnerUserID,
-		OwnerName:    ownerName,
-		OwnerEmail:   ownerEmail,
-		Visibility:   latest.Visibility,
-		Status:       latest.Status,
-		BannedReason: latest.BannedReason,
-		BannedAt:     latest.BannedAt,
-		DeletedAt:    latest.DeletedAt,
-		CreatedAt:    latest.CreatedAt,
-		UpdatedAt:    latest.UpdatedAt,
-	}
+	record := mapAdminSpaceRecord(repository.AdminSpaceListRecord{
+		Space:      *latest,
+		OwnerName:  ownerName,
+		OwnerEmail: ownerEmail,
+	})
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleSpace,
@@ -586,19 +896,92 @@ func mapAdminSpaceRecord(record repository.AdminSpaceListRecord) AdminSpaceRecor
 	if !models.IsValidEntityStatus(status) {
 		status = models.EntityStatusActive
 	}
+	description := strings.TrimSpace(space.Description)
+	coverKey := strings.TrimSpace(space.CoverKey)
+	coverURL := strings.TrimSpace(space.CoverURL)
+	coverSource := normalizeAdminSpaceCoverSource(AdminSpaceCoverSource(strings.TrimSpace(space.CoverSource)))
+	coverWidth := space.CoverWidth
+	if coverWidth < 0 {
+		coverWidth = 0
+	}
+	coverHeight := space.CoverHeight
+	if coverHeight < 0 {
+		coverHeight = 0
+	}
+
+	var cover *AdminSpaceCoverAsset
+	if coverKey != "" && coverURL != "" && coverWidth > 0 && coverHeight > 0 && coverSource != "" {
+		assetID := ""
+		if space.CoverAssetID != nil {
+			assetID = strings.TrimSpace(*space.CoverAssetID)
+		}
+		cover = &AdminSpaceCoverAsset{
+			AssetID:    assetID,
+			Key:        coverKey,
+			URL:        coverURL,
+			Width:      coverWidth,
+			Height:     coverHeight,
+			MimeType:   "image/webp",
+			SizeBytes:  0,
+			Normalized: true,
+			Source:     coverSource,
+		}
+	}
 
 	return AdminSpaceRecord{
 		SpaceID:      space.SpaceID,
-		Name:         space.Name,
+		Name:         strings.TrimSpace(space.Name),
+		Description:  description,
 		OwnerUserID:  space.OwnerUserID,
 		OwnerName:    record.OwnerName,
 		OwnerEmail:   record.OwnerEmail,
 		Visibility:   visibility,
+		Cover:        cover,
 		Status:       status,
 		BannedReason: space.BannedReason,
 		BannedAt:     space.BannedAt,
 		DeletedAt:    space.DeletedAt,
 		CreatedAt:    space.CreatedAt,
 		UpdatedAt:    space.UpdatedAt,
+	}
+}
+
+func mapAdminSpaceCoverAsset(value models.SpaceCoverAsset) AdminSpaceCoverAsset {
+	width := value.Width
+	if width < 0 {
+		width = 0
+	}
+	height := value.Height
+	if height < 0 {
+		height = 0
+	}
+	sizeBytes := value.SizeBytes
+	if sizeBytes < 0 {
+		sizeBytes = 0
+	}
+	return AdminSpaceCoverAsset{
+		AssetID:     strings.TrimSpace(value.AssetID),
+		Key:         strings.TrimSpace(value.ObjectKey),
+		URL:         strings.TrimSpace(value.ObjectURL),
+		Width:       width,
+		Height:      height,
+		MimeType:    strings.TrimSpace(value.MimeType),
+		SizeBytes:   sizeBytes,
+		Normalized:  value.Normalized,
+		Source:      normalizeAdminSpaceCoverSource(AdminSpaceCoverSource(value.Source)),
+		CreatedAt:   value.CreatedAt,
+		UpdatedAt:   value.UpdatedAt,
+		CreatedByID: strings.TrimSpace(value.CreatedByUserID),
+	}
+}
+
+func normalizeAdminSpaceCoverSource(source AdminSpaceCoverSource) AdminSpaceCoverSource {
+	switch AdminSpaceCoverSource(strings.ToLower(strings.TrimSpace(string(source)))) {
+	case AdminSpaceCoverSourceUserUpload:
+		return AdminSpaceCoverSourceUserUpload
+	case AdminSpaceCoverSourceSystemGenerate:
+		return AdminSpaceCoverSourceSystemGenerate
+	default:
+		return ""
 	}
 }

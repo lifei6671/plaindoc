@@ -6,6 +6,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
+	"gorm.io/gorm"
 )
 
 var (
@@ -16,16 +17,19 @@ var (
 type AdminAccessService struct {
 	adminRoleRepo       repository.AdminRoleRepository
 	spaceAdminScopeRepo repository.SpaceAdminScopeRepository
+	spaceRepo           repository.SpaceRepository
 }
 
 // NewAdminAccessService 创建后台权限服务。
 func NewAdminAccessService(
 	adminRoleRepo repository.AdminRoleRepository,
 	spaceAdminScopeRepo repository.SpaceAdminScopeRepository,
+	spaceRepo repository.SpaceRepository,
 ) *AdminAccessService {
 	return &AdminAccessService{
 		adminRoleRepo:       adminRoleRepo,
 		spaceAdminScopeRepo: spaceAdminScopeRepo,
+		spaceRepo:           spaceRepo,
 	}
 }
 
@@ -82,7 +86,28 @@ func (s *AdminAccessService) CanManageSpace(ctx context.Context, userID string, 
 		return false, nil
 	}
 
-	return s.spaceAdminScopeRepo.HasScope(ctx, userID, spaceID)
+	hasScope, err := s.spaceAdminScopeRepo.HasScope(ctx, userID, spaceID)
+	if err != nil {
+		return false, err
+	}
+	if hasScope {
+		return true, nil
+	}
+
+	if s.spaceRepo == nil {
+		return false, nil
+	}
+	space, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if space == nil {
+		return false, nil
+	}
+	return space.OwnerUserID == userID, nil
 }
 
 // ListAdminRoles 返回用户管理员角色列表，供菜单与后台入口控制使用。

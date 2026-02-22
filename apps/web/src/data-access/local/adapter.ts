@@ -433,6 +433,12 @@ const adminGateway: AdminGateway = {
   async deleteUser() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },
+  async createSpace() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async createSpaceCoverAsset() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
   async listSpaces() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },

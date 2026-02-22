@@ -1,4 +1,4 @@
-import { LoaderCircle, PencilLine, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
+import { LoaderCircle, PencilLine, Plus, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -7,6 +7,8 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { showToast } from "../../components/ui/toast";
 import { type AdminSpace, type AdminSpaceListResult, type DataGateway, type Visibility } from "../../data-access";
+import { formatError } from "../../editor/status-utils";
+import { AdminCreateSpaceDialog } from "../components/AdminCreateSpaceDialog";
 import { useAdminDialogs } from "../components/AdminDialogs";
 import {
   AdminBulkActionBar,
@@ -15,7 +17,6 @@ import {
   AdminTableContainer,
   AdminToolbarActions
 } from "../components/AdminPageLayout";
-import { formatError } from "../../editor/status-utils";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -113,6 +114,8 @@ function toVisibilityValue(raw: string): Visibility | null {
 export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
 
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "all" | "active" | "banned" | "deleted">("");
@@ -122,7 +125,6 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
 
   const [spacesState, setSpacesState] = useState<AdminSpacesState>(() => emptySpacesState());
   const [loading, setLoading] = useState(false);
-
   const [actioningSpaceID, setActioningSpaceID] = useState<string | null>(null);
   const [batchActioning, setBatchActioning] = useState(false);
 
@@ -147,7 +149,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [dataGateway, keyword, openToast, page, statusFilter, visibilityFilter]);
+  }, [dataGateway.admin, keyword, openToast, page, statusFilter, visibilityFilter]);
 
   useEffect(() => {
     void loadSpaces();
@@ -208,11 +210,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   );
 
   const runBatchSpaceAction = useCallback(
-    async (
-      actionName: string,
-      filter: (space: AdminSpace) => boolean,
-      callback: (space: AdminSpace) => Promise<void>
-    ) => {
+    async (actionName: string, filter: (space: AdminSpace) => boolean, callback: (space: AdminSpace) => Promise<void>) => {
       const targets = spacesState.items.filter((space) => selectedSpaceSet.has(space.spaceId) && filter(space));
       if (targets.length === 0) {
         openToast("请先选择可操作的空间");
@@ -235,6 +233,8 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
         setSelectedSpaceIDs([]);
         if (failures.length > 0) {
           openToast(`批量${actionName}完成：成功 ${successCount}，失败 ${failures.length}。首个失败：${failures[0]}`);
+        } else {
+          openToast(`批量${actionName}成功：共 ${successCount} 条`, "success");
         }
       } finally {
         setBatchActioning(false);
@@ -415,17 +415,13 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
       return;
     }
 
-    await runBatchSpaceAction(
-      "封禁",
-      (space) => space.status === "active",
-      async (space) => {
-        await dataGateway.admin.updateSpaceStatus({
-          spaceId: space.spaceId,
-          status: "banned",
-          reason
-        });
-      }
-    );
+    await runBatchSpaceAction("封禁", (space) => space.status === "active", async (space) => {
+      await dataGateway.admin.updateSpaceStatus({
+        spaceId: space.spaceId,
+        status: "banned",
+        reason
+      });
+    });
   }, [dataGateway.admin, openToast, prompt, runBatchSpaceAction]);
 
   const handleBatchUnban = useCallback(async () => {
@@ -438,16 +434,12 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
       return;
     }
 
-    await runBatchSpaceAction(
-      "解封",
-      (space) => space.status === "banned",
-      async (space) => {
-        await dataGateway.admin.updateSpaceStatus({
-          spaceId: space.spaceId,
-          status: "active"
-        });
-      }
-    );
+    await runBatchSpaceAction("解封", (space) => space.status === "banned", async (space) => {
+      await dataGateway.admin.updateSpaceStatus({
+        spaceId: space.spaceId,
+        status: "active"
+      });
+    });
   }, [confirm, dataGateway.admin, runBatchSpaceAction]);
 
   const handleBatchDelete = useCallback(async () => {
@@ -461,282 +453,299 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
       return;
     }
 
-    await runBatchSpaceAction(
-      "删除",
-      (space) => space.status !== "deleted",
-      async (space) => {
-        await dataGateway.admin.deleteSpace(space.spaceId);
-      }
-    );
+    await runBatchSpaceAction("删除", (space) => space.status !== "deleted", async (space) => {
+      await dataGateway.admin.deleteSpace(space.spaceId);
+    });
   }, [confirm, dataGateway.admin, runBatchSpaceAction]);
+
+  const handleSpaceCreated = useCallback(async () => {
+    setSelectedSpaceIDs([]);
+    await loadSpaces();
+  }, [loadSpaces]);
 
   const selectionDisabled = loading || batchActioning || actioningSpaceID !== null;
 
   return (
     <section aria-label="空间管理">
       {dialogs}
+      <AdminCreateSpaceDialog
+        open={createDialogOpen}
+        dataGateway={dataGateway}
+        onOpenChange={setCreateDialogOpen}
+        onCreated={handleSpaceCreated}
+      />
+
       <AdminPageCard>
-          <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_190px_auto]" onSubmit={handleSearchSubmit}>
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
-              <Input
-                type="search"
-                value={keywordInput}
-                placeholder="空间名称 / 空间 ID / 创建者"
-                onChange={(event) => setKeywordInput(event.target.value)}
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold tracking-wide text-slate-600">状态</span>
-              <Select
-                value={statusFilter || "default"}
-                onValueChange={(value) => {
-                  setStatusFilter((value === "default" ? "" : value) as "" | "all" | "active" | "banned" | "deleted");
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">未删除（默认）</SelectItem>
-                  <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="active">正常</SelectItem>
-                  <SelectItem value="banned">封禁</SelectItem>
-                  <SelectItem value="deleted">已删除</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold tracking-wide text-slate-600">可见性</span>
-              <Select
-                value={visibilityFilter || "default"}
-                onValueChange={(value) => {
-                  setVisibilityFilter((value === "default" ? "" : value) as "" | "all" | "public" | "authenticated" | "member");
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">全部可见性（默认）</SelectItem>
-                  <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="public">完全公开</SelectItem>
-                  <SelectItem value="authenticated">登录可见</SelectItem>
-                  <SelectItem value="member">成员可见</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-            <AdminToolbarActions>
-                <Button type="submit" disabled={loading || batchActioning}>
-                  <Search size={14} />
-                  <span>查询</span>
-                </Button>
-                <Button type="button" variant="outline" disabled={loading || batchActioning} onClick={handleReset}>
-                  重置
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={loading || batchActioning}
-                  onClick={() => void loadSpaces()}
-                >
-                  <RefreshCw size={14} />
-                  <span>刷新</span>
-                </Button>
-            </AdminToolbarActions>
-          </form>
+        <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_190px_auto]" onSubmit={handleSearchSubmit}>
+          <label className="space-y-1.5">
+            <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
+            <Input
+              type="search"
+              value={keywordInput}
+              placeholder="空间名称 / 空间 ID / 创建者"
+              onChange={(event) => setKeywordInput(event.target.value)}
+            />
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-xs font-semibold tracking-wide text-slate-600">状态</span>
+            <Select
+              value={statusFilter || "default"}
+              onValueChange={(value) => {
+                setStatusFilter((value === "default" ? "" : value) as "" | "all" | "active" | "banned" | "deleted");
+                setPage(1);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">未删除（默认）</SelectItem>
+                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="active">正常</SelectItem>
+                <SelectItem value="banned">封禁</SelectItem>
+                <SelectItem value="deleted">已删除</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-xs font-semibold tracking-wide text-slate-600">可见性</span>
+            <Select
+              value={visibilityFilter || "default"}
+              onValueChange={(value) => {
+                setVisibilityFilter((value === "default" ? "" : value) as "" | "all" | "public" | "authenticated" | "member");
+                setPage(1);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">全部可见性（默认）</SelectItem>
+                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="public">完全公开</SelectItem>
+                <SelectItem value="authenticated">登录可见</SelectItem>
+                <SelectItem value="member">成员可见</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <AdminToolbarActions actionsClassName="h-auto flex-wrap">
+            <Button type="submit" disabled={loading || batchActioning}>
+              <Search size={14} />
+              <span>查询</span>
+            </Button>
+            <Button type="button" variant="outline" disabled={loading || batchActioning} onClick={handleReset}>
+              重置
+            </Button>
+            <Button type="button" variant="outline" disabled={loading || batchActioning} onClick={() => void loadSpaces()}>
+              <RefreshCw size={14} />
+              <span>刷新</span>
+            </Button>
+            <Button type="button" disabled={loading || batchActioning} onClick={() => setCreateDialogOpen(true)}>
+              <Plus size={14} />
+              <span>新建空间</span>
+            </Button>
+          </AdminToolbarActions>
+        </form>
 
-          <AdminBulkActionBar selectedCount={selectedSpaceIDs.length}>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-                onClick={() => void handleBatchBan()}
-              >
-                批量封禁
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-                onClick={() => void handleBatchUnban()}
-              >
-                批量解封
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="destructive"
-                disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-                onClick={() => void handleBatchDelete()}
-              >
-                批量删除
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-                onClick={() => setSelectedSpaceIDs([])}
-              >
-                清空选择
-              </Button>
-          </AdminBulkActionBar>
+        <AdminBulkActionBar selectedCount={selectedSpaceIDs.length}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+            onClick={() => void handleBatchBan()}
+          >
+            批量封禁
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+            onClick={() => void handleBatchUnban()}
+          >
+            批量解封
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+            onClick={() => void handleBatchDelete()}
+          >
+            批量删除
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+            onClick={() => setSelectedSpaceIDs([])}
+          >
+            清空选择
+          </Button>
+        </AdminBulkActionBar>
 
-          <AdminTableContainer>
-              <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
-                <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
-                  <tr className="text-xs uppercase tracking-wide text-slate-600">
-                    <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
-                      <Checkbox
-                        checked={allSelectableChecked}
-                        disabled={selectionDisabled || selectableSpaceIDs.length === 0}
-                        onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
-                        aria-label="全选空间"
-                      />
-                    </th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">空间信息</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">创建者</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">创建时间</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={8} className="px-3 py-12">
-                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-                          <LoaderCircle size={15} className="animate-spin" />
-                          <span>正在加载空间列表...</span>
+        <AdminTableContainer>
+          <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+              <tr className="text-xs uppercase tracking-wide text-slate-600">
+                <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
+                  <Checkbox
+                    checked={allSelectableChecked}
+                    disabled={selectionDisabled || selectableSpaceIDs.length === 0}
+                    onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
+                    aria-label="全选空间"
+                  />
+                </th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">空间信息</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">创建者</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">创建时间</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="px-3 py-12">
+                    <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                      <LoaderCircle size={15} className="animate-spin" />
+                      <span>正在加载空间列表...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : spacesState.items.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-3 py-12 text-center text-sm text-slate-500">
+                    暂无符合条件的数据
+                  </td>
+                </tr>
+              ) : (
+                spacesState.items.map((space) => {
+                  const isActioning = actioningSpaceID === space.spaceId || batchActioning;
+                  const isDeleted = space.status === "deleted";
+                  return (
+                    <tr key={space.spaceId} className="border-b border-slate-100 align-top text-slate-700">
+                      <td className="px-3 py-3">
+                        <Checkbox
+                          checked={selectedSpaceSet.has(space.spaceId)}
+                          disabled={selectionDisabled || isDeleted}
+                          onCheckedChange={(checked) => handleToggleSelectOne(space.spaceId, checked === true)}
+                          aria-label={`选择空间 ${space.name || space.spaceId}`}
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-start gap-3">
+                          <div className="h-16 w-10 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-100">
+                            {space.cover?.url ? (
+                              <img src={space.cover.url} alt={`${space.name}-cover`} className="h-full w-full object-cover" />
+                            ) : null}
+                          </div>
+                          <div className="grid min-w-0 gap-1">
+                            <strong className="truncate text-sm font-semibold text-slate-900">{space.name}</strong>
+                            <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">{space.spaceId}</code>
+                            {space.description ? (
+                              <p className="line-clamp-2 text-xs leading-5 text-slate-600">{space.description}</p>
+                            ) : (
+                              <p className="text-xs text-slate-400">暂无简介</p>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="grid gap-1 text-xs">
+                          <strong className="font-semibold text-slate-800">{space.ownerName || "-"}</strong>
+                          <span className="text-slate-600">{space.ownerEmail || "-"}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant="outline" className={renderVisibilityBadgeClass(space.visibility)}>
+                          {renderVisibilityLabel(space.visibility)}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="grid gap-1.5">
+                          <Badge variant="outline" className={renderStatusBadgeClass(space.status)}>
+                            {renderStatusLabel(space.status)}
+                          </Badge>
+                          {space.status === "banned" && space.bannedReason ? (
+                            <small className="text-xs text-rose-600">{space.bannedReason}</small>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.createdAt)}</td>
+                      <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.updatedAt)}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {space.status === "banned" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              disabled={isActioning || isDeleted}
+                              onClick={() => void handleUpdateStatus(space, "active")}
+                            >
+                              <ShieldCheck size={14} />
+                              <span>解封</span>
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              disabled={isActioning || isDeleted}
+                              onClick={() => void handleUpdateStatus(space, "banned")}
+                            >
+                              <ShieldBan size={14} />
+                              <span>封禁</span>
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={isActioning || isDeleted}
+                            onClick={() => void handleUpdateMetadata(space)}
+                          >
+                            <PencilLine size={14} />
+                            <span>元数据</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            disabled={isActioning || isDeleted}
+                            onClick={() => void handleDelete(space)}
+                          >
+                            <Trash2 size={14} />
+                            <span>删除</span>
+                          </Button>
                         </div>
                       </td>
                     </tr>
-                  ) : spacesState.items.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-3 py-12 text-center text-sm text-slate-500">
-                        暂无符合条件的数据
-                      </td>
-                    </tr>
-                  ) : (
-                    spacesState.items.map((space) => {
-                      const isActioning = actioningSpaceID === space.spaceId || batchActioning;
-                      const isDeleted = space.status === "deleted";
-                      return (
-                        <tr key={space.spaceId} className="border-b border-slate-100 align-top text-slate-700">
-                          <td className="px-3 py-3">
-                            <Checkbox
-                              checked={selectedSpaceSet.has(space.spaceId)}
-                              disabled={selectionDisabled || isDeleted}
-                              onCheckedChange={(checked) => handleToggleSelectOne(space.spaceId, checked === true)}
-                              aria-label={`选择空间 ${space.name || space.spaceId}`}
-                            />
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="grid gap-1">
-                              <strong className="text-sm font-semibold text-slate-900">{space.name}</strong>
-                              <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
-                                {space.spaceId}
-                              </code>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="grid gap-1 text-xs">
-                              <strong className="font-semibold text-slate-800">{space.ownerName || "-"}</strong>
-                              <span className="text-slate-600">{space.ownerEmail || "-"}</span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3">
-                            <Badge variant="outline" className={renderVisibilityBadgeClass(space.visibility)}>
-                              {renderVisibilityLabel(space.visibility)}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="grid gap-1.5">
-                              <Badge variant="outline" className={renderStatusBadgeClass(space.status)}>
-                                {renderStatusLabel(space.status)}
-                              </Badge>
-                              {space.status === "banned" && space.bannedReason ? (
-                                <small className="text-xs text-rose-600">{space.bannedReason}</small>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.createdAt)}</td>
-                          <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.updatedAt)}</td>
-                          <td className="px-3 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {space.status === "banned" ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="secondary"
-                                  disabled={isActioning || isDeleted}
-                                  onClick={() => void handleUpdateStatus(space, "active")}
-                                >
-                                  <ShieldCheck size={14} />
-                                  <span>解封</span>
-                                </Button>
-                              ) : (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                                  disabled={isActioning || isDeleted}
-                                  onClick={() => void handleUpdateStatus(space, "banned")}
-                                >
-                                  <ShieldBan size={14} />
-                                  <span>封禁</span>
-                                </Button>
-                              )}
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={isActioning || isDeleted}
-                                onClick={() => void handleUpdateMetadata(space)}
-                              >
-                                <PencilLine size={14} />
-                                <span>元数据</span>
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="destructive"
-                                disabled={isActioning || isDeleted}
-                                onClick={() => void handleDelete(space)}
-                              >
-                                <Trash2 size={14} />
-                                <span>删除</span>
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-          </AdminTableContainer>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </AdminTableContainer>
 
-          <AdminPaginationFooter
-            summary={
-              <>
+        <AdminPaginationFooter
+          summary={
+            <>
               当前第 {spacesState.pagination.page} / {totalPages} 页，共 {spacesState.pagination.total} 条
-              </>
-            }
-            previousDisabled={loading || spacesState.pagination.page <= 1}
-            nextDisabled={loading || spacesState.pagination.page >= totalPages}
-            onPrevious={() => setPage((value) => Math.max(1, value - 1))}
-            onNext={() => setPage((value) => Math.min(totalPages, value + 1))}
-          />
+            </>
+          }
+          previousDisabled={loading || spacesState.pagination.page <= 1}
+          nextDisabled={loading || spacesState.pagination.page >= totalPages}
+          onPrevious={() => setPage((value) => Math.max(1, value - 1))}
+          onNext={() => setPage((value) => Math.min(totalPages, value + 1))}
+        />
       </AdminPageCard>
     </section>
   );
