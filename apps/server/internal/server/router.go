@@ -35,6 +35,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		userRepo := repository.NewGormUserRepository(db)
 		userSessionRepo := repository.NewGormUserSessionRepository(db)
 		spaceRepo := repository.NewGormSpaceRepository(db)
+		spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
 		documentRepo := repository.NewGormDocumentRepository(db)
 		themeRepo := repository.NewGormThemeRepository(db)
 		systemConfigRepo := repository.NewGormSystemConfigRepository(db)
@@ -71,7 +72,15 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		adminAuditHandler := handler.NewAdminAuditHandler(adminAuditService)
 		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminRoleRepo, adminAccessService, adminAuditService)
 		adminUserHandler := handler.NewAdminUserHandler(adminUserService)
-		adminSpaceService := service.NewAdminSpaceService(spaceRepo, userRepo, adminRoleRepo, spaceAdminScopeRepo, adminAccessService, adminAuditService)
+		adminSpaceService := service.NewAdminSpaceService(
+			spaceRepo,
+			spaceCategoryRepo,
+			userRepo,
+			adminRoleRepo,
+			spaceAdminScopeRepo,
+			adminAccessService,
+			adminAuditService,
+		)
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
 		adminDocumentService := service.NewAdminDocumentService(documentRepo, userRepo, adminAccessService, adminAuditService)
 		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
@@ -142,6 +151,10 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 			adminAPI.POST("/spaces", adminSpaceHandler.CreateSpace)
 			adminAPI.POST("/spaces/cover-assets", adminSpaceHandler.CreateCoverAsset)
 			adminAPI.GET("/spaces", adminSpaceHandler.ListSpaces)
+			adminAPI.GET("/spaces/categories", adminSpaceHandler.ListCategories)
+			adminAPI.POST("/spaces/categories", adminSpaceHandler.CreateCategory)
+			adminAPI.PATCH("/spaces/categories/:categoryId", adminSpaceHandler.RenameCategory)
+			adminAPI.DELETE("/spaces/categories/:categoryId", adminSpaceHandler.DeleteCategory)
 			adminAPI.GET(
 				"/spaces/:spaceId/members",
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),

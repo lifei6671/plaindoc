@@ -654,6 +654,188 @@ func TestRouter_AdminSpaceListRespectsScope(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSpaceCategoriesManageAndApply(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "space-category-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+
+	initialListReq := httptest.NewRequest(http.MethodGet, "/api/admin/spaces/categories", nil)
+	initialListReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	initialListRec := serve(initialListReq)
+	if initialListRec.Code != http.StatusOK {
+		t.Fatalf("expected initial list space categories status 200, got %d body=%s", initialListRec.Code, initialListRec.Body.String())
+	}
+	initialListPayload := decodeJSONResultData[struct {
+		Items []struct {
+			CategoryID string `json:"categoryId"`
+			Name       string `json:"name"`
+			IsDefault  bool   `json:"isDefault"`
+		} `json:"items"`
+	}](t, initialListRec.Body.Bytes())
+	if len(initialListPayload.Items) == 0 {
+		t.Fatalf("expected default category exists, got empty")
+	}
+
+	defaultCategoryID := ""
+	for _, item := range initialListPayload.Items {
+		if item.IsDefault {
+			defaultCategoryID = item.CategoryID
+			break
+		}
+	}
+	if defaultCategoryID == "" {
+		t.Fatalf("expected default category id in payload: %+v", initialListPayload.Items)
+	}
+
+	createCategoryReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/spaces/categories",
+		bytes.NewReader([]byte(`{"name":"产品文档"}`)),
+	)
+	createCategoryReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	createCategoryReq.Header.Set("Content-Type", "application/json")
+	createCategoryRec := serve(createCategoryReq)
+	if createCategoryRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected create space category status 200, got %d body=%s",
+			createCategoryRec.Code,
+			createCategoryRec.Body.String(),
+		)
+	}
+	createCategoryPayload := decodeJSONResultData[struct {
+		CategoryID string `json:"categoryId"`
+		Name       string `json:"name"`
+	}](t, createCategoryRec.Body.Bytes())
+	if createCategoryPayload.CategoryID == "" || createCategoryPayload.Name != "产品文档" {
+		t.Fatalf("unexpected create category payload: %+v", createCategoryPayload)
+	}
+
+	secondCategoryReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/spaces/categories",
+		bytes.NewReader([]byte(`{"name":"技术文档"}`)),
+	)
+	secondCategoryReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	secondCategoryReq.Header.Set("Content-Type", "application/json")
+	secondCategoryRec := serve(secondCategoryReq)
+	if secondCategoryRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected second category status 200, got %d body=%s",
+			secondCategoryRec.Code,
+			secondCategoryRec.Body.String(),
+		)
+	}
+	secondCategoryPayload := decodeJSONResultData[struct {
+		CategoryID string `json:"categoryId"`
+		Name       string `json:"name"`
+	}](t, secondCategoryRec.Body.Bytes())
+	if secondCategoryPayload.CategoryID == "" || secondCategoryPayload.Name != "技术文档" {
+		t.Fatalf("unexpected second category payload: %+v", secondCategoryPayload)
+	}
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/spaces",
+		bytes.NewReader([]byte(`{"name":"Category Space","description":"with category","categoryId":"`+createCategoryPayload.CategoryID+`","visibility":"member"}`)),
+	)
+	createReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := serve(createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected create space with category status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	createPayload := decodeJSONResultData[struct {
+		SpaceID    string `json:"spaceId"`
+		CategoryID string `json:"categoryId"`
+		Category   string `json:"category"`
+	}](t, createRec.Body.Bytes())
+	if createPayload.SpaceID == "" || createPayload.CategoryID != createCategoryPayload.CategoryID || createPayload.Category != "产品文档" {
+		t.Fatalf("unexpected create space payload: %+v", createPayload)
+	}
+
+	var createdSpace struct {
+		CategoryID string `gorm:"column:category_id"`
+		Category   string `gorm:"column:category"`
+	}
+	if err := database.ORM.Table("spaces").
+		Select("category_id", "category").
+		Where("space_id = ?", createPayload.SpaceID).
+		Scan(&createdSpace).Error; err != nil {
+		t.Fatalf("query created space category failed: %v", err)
+	}
+	if createdSpace.CategoryID != createCategoryPayload.CategoryID || createdSpace.Category != "产品文档" {
+		t.Fatalf(
+			"expected created space category (%s, 产品文档), got (%s, %s)",
+			createCategoryPayload.CategoryID,
+			createdSpace.CategoryID,
+			createdSpace.Category,
+		)
+	}
+
+	metadataReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/spaces/"+createPayload.SpaceID+"/metadata",
+		bytes.NewReader([]byte(`{"categoryId":"`+secondCategoryPayload.CategoryID+`"}`)),
+	)
+	metadataReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	metadataReq.Header.Set("Content-Type", "application/json")
+	metadataRec := serve(metadataReq)
+	if metadataRec.Code != http.StatusOK {
+		t.Fatalf("expected update space metadata category status 200, got %d body=%s", metadataRec.Code, metadataRec.Body.String())
+	}
+	metadataPayload := decodeJSONResultData[struct {
+		CategoryID string `json:"categoryId"`
+		Category   string `json:"category"`
+	}](t, metadataRec.Body.Bytes())
+	if metadataPayload.CategoryID != secondCategoryPayload.CategoryID || metadataPayload.Category != "技术文档" {
+		t.Fatalf(
+			"expected updated space category (%s, 技术文档), got (%s, %s) code=%d body=%s",
+			secondCategoryPayload.CategoryID,
+			metadataPayload.CategoryID,
+			metadataPayload.Category,
+			decodeJSONResultCode(t, metadataRec.Body.Bytes()),
+			metadataRec.Body.String(),
+		)
+	}
+
+	deleteCategoryReq := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/admin/spaces/categories/"+secondCategoryPayload.CategoryID,
+		nil,
+	)
+	deleteCategoryReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	deleteCategoryRec := serve(deleteCategoryReq)
+	if deleteCategoryRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected delete category status 200, got %d body=%s",
+			deleteCategoryRec.Code,
+			deleteCategoryRec.Body.String(),
+		)
+	}
+	deleteCategoryPayload := decodeJSONResultData[struct {
+		CategoryID             string `json:"categoryId"`
+		ReassignedToCategoryID string `json:"reassignedToCategoryId"`
+		MovedSpaceCount        int64  `json:"movedSpaceCount"`
+	}](t, deleteCategoryRec.Body.Bytes())
+	if deleteCategoryPayload.CategoryID != secondCategoryPayload.CategoryID {
+		t.Fatalf("unexpected delete payload: %+v", deleteCategoryPayload)
+	}
+	if deleteCategoryPayload.ReassignedToCategoryID != defaultCategoryID {
+		t.Fatalf(
+			"expected reassigned default category id %s, got %s",
+			defaultCategoryID,
+			deleteCategoryPayload.ReassignedToCategoryID,
+		)
+	}
+	if deleteCategoryPayload.MovedSpaceCount <= 0 {
+		t.Fatalf("expected moved space count > 0, got %d", deleteCategoryPayload.MovedSpaceCount)
+	}
+}
+
 func TestRouter_AdminSpaceUpdateDeleteAndScopeGuard(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

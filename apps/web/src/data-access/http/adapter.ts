@@ -9,6 +9,7 @@ import {
   type AdminDocumentListResult,
   type AdminIdentity,
   type AdminSpace,
+  type AdminSpaceCategory,
   type AdminSpaceMember,
   type AdminSpaceCover,
   type AdminSpaceListInput,
@@ -620,7 +621,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
-    async createSpace(input: { name: string; description?: string; visibility?: "public" | "authenticated" | "member"; coverAssetId?: string }) {
+    async createSpace(input: { name: string; description?: string; categoryId?: string; visibility?: "public" | "authenticated" | "member"; coverAssetId?: string }) {
       const name = input.name.trim();
       if (!name) {
         throw new Error("空间名称不能为空");
@@ -630,6 +631,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         body: JSON.stringify({
           name,
           description: input.description ?? "",
+          categoryId: input.categoryId ?? "",
           visibility: input.visibility ?? "member",
           coverAssetId: input.coverAssetId ?? ""
         })
@@ -691,6 +693,60 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         url: resolveBackendPublicUrl(cover.url, options.baseUrl)
       };
     },
+    async listSpaceCategories() {
+      const payload = await request<{ items: AdminSpaceCategory[] }>("/admin/spaces/categories");
+      if (!Array.isArray(payload.items)) {
+        return [];
+      }
+      return payload.items
+        .map((item) => ({
+          categoryId: typeof item?.categoryId === "string" ? item.categoryId.trim() : "",
+          name: typeof item?.name === "string" ? item.name.trim() : "",
+          isDefault: item?.isDefault === true,
+          createdAt: typeof item?.createdAt === "string" ? item.createdAt : "",
+          updatedAt: typeof item?.updatedAt === "string" ? item.updatedAt : ""
+        }))
+        .filter((item) => item.categoryId.length > 0 && item.name.length > 0)
+        .filter((item, index, items) => items.findIndex((current) => current.categoryId === item.categoryId) === index);
+    },
+    async createSpaceCategory(input: { name: string }) {
+      const name = input.name.trim();
+      if (!name) {
+        throw new Error("分类名称不能为空");
+      }
+      return request<AdminSpaceCategory>("/admin/spaces/categories", {
+        method: "POST",
+        body: JSON.stringify({ name })
+      });
+    },
+    async renameSpaceCategory(input: { categoryId: string; name: string }) {
+      const categoryId = input.categoryId.trim();
+      const name = input.name.trim();
+      if (!categoryId) {
+        throw new Error("分类 ID 不能为空");
+      }
+      if (!name) {
+        throw new Error("分类名称不能为空");
+      }
+      return request<AdminSpaceCategory>(`/admin/spaces/categories/${encodeURIComponent(categoryId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name })
+      });
+    },
+    async deleteSpaceCategory(input: { categoryId: string }) {
+      const categoryId = input.categoryId.trim();
+      if (!categoryId) {
+        throw new Error("分类 ID 不能为空");
+      }
+      return request<{
+        categoryId: string;
+        reassignedToCategoryId: string;
+        reassignedToName: string;
+        movedSpaceCount: number;
+      }>(`/admin/spaces/categories/${encodeURIComponent(categoryId)}`, {
+        method: "DELETE"
+      });
+    },
     async listSpaces(input: AdminSpaceListInput = {}) {
       const query = new URLSearchParams();
       if (typeof input.keyword === "string" && input.keyword.trim()) {
@@ -751,6 +807,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       spaceId: string;
       name?: string;
       description?: string;
+      categoryId?: string;
       visibility?: "public" | "authenticated" | "member";
       coverAssetId?: string;
     }) {
@@ -766,6 +823,9 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       // 允许传空字符串用于清空简介或封面。
       if (typeof input.description === "string") {
         payload.description = input.description.trim();
+      }
+      if (typeof input.categoryId === "string") {
+        payload.categoryId = input.categoryId.trim();
       }
       if (typeof input.visibility === "string" && input.visibility.trim()) {
         payload.visibility = input.visibility;

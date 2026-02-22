@@ -21,20 +21,23 @@ type adminSpaceHandler struct {
 }
 
 type adminSpaceResponse struct {
-	SpaceID      string              `json:"spaceId"`
-	Name         string              `json:"name"`
-	Description  string              `json:"description"`
-	OwnerUserID  string              `json:"ownerUserId"`
-	OwnerName    string              `json:"ownerName"`
-	OwnerEmail   string              `json:"ownerEmail"`
-	Visibility   models.Visibility   `json:"visibility"`
-	Cover        *adminSpaceCoverDTO `json:"cover,omitempty"`
-	Status       models.EntityStatus `json:"status"`
-	BannedReason string              `json:"bannedReason"`
-	BannedAt     *time.Time          `json:"bannedAt"`
-	DeletedAt    *time.Time          `json:"deletedAt"`
-	CreatedAt    time.Time           `json:"createdAt"`
-	UpdatedAt    time.Time           `json:"updatedAt"`
+	SpaceID           string              `json:"spaceId"`
+	Name              string              `json:"name"`
+	Description       string              `json:"description"`
+	CategoryID        string              `json:"categoryId"`
+	Category          string              `json:"category"`
+	CategoryIsDefault bool                `json:"categoryIsDefault"`
+	OwnerUserID       string              `json:"ownerUserId"`
+	OwnerName         string              `json:"ownerName"`
+	OwnerEmail        string              `json:"ownerEmail"`
+	Visibility        models.Visibility   `json:"visibility"`
+	Cover             *adminSpaceCoverDTO `json:"cover,omitempty"`
+	Status            models.EntityStatus `json:"status"`
+	BannedReason      string              `json:"bannedReason"`
+	BannedAt          *time.Time          `json:"bannedAt"`
+	DeletedAt         *time.Time          `json:"deletedAt"`
+	CreatedAt         time.Time           `json:"createdAt"`
+	UpdatedAt         time.Time           `json:"updatedAt"`
 }
 
 type adminSpaceListResponse struct {
@@ -63,6 +66,7 @@ type adminSpaceCoverDTO struct {
 type createAdminSpaceRequest struct {
 	Name         string `json:"name"`
 	Description  string `json:"description"`
+	CategoryID   string `json:"categoryId"`
 	Visibility   string `json:"visibility"`
 	CoverAssetID string `json:"coverAssetId"`
 }
@@ -71,8 +75,36 @@ type createAdminSpaceRequest struct {
 type updateAdminSpaceMetadataRequest struct {
 	Name         *string `json:"name"`
 	Description  *string `json:"description"`
+	CategoryID   *string `json:"categoryId"`
 	Visibility   *string `json:"visibility"`
 	CoverAssetID *string `json:"coverAssetId"`
+}
+
+type createAdminSpaceCategoryRequest struct {
+	Name string `json:"name"`
+}
+
+type renameAdminSpaceCategoryRequest struct {
+	Name string `json:"name"`
+}
+
+type deleteAdminSpaceCategoryResponse struct {
+	CategoryID             string `json:"categoryId"`
+	ReassignedToCategoryID string `json:"reassignedToCategoryId"`
+	ReassignedToName       string `json:"reassignedToName"`
+	MovedSpaceCount        int64  `json:"movedSpaceCount"`
+}
+
+type adminSpaceCategoryResponse struct {
+	CategoryID string    `json:"categoryId"`
+	Name       string    `json:"name"`
+	IsDefault  bool      `json:"isDefault"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type adminSpaceCategoriesResponse struct {
+	Items []adminSpaceCategoryResponse `json:"items"`
 }
 
 type updateAdminSpaceStatusRequest struct {
@@ -134,6 +166,7 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 		RequestID:    response.RequestIDFromContext(c),
 		Name:         req.Name,
 		Description:  req.Description,
+		CategoryID:   req.CategoryID,
 		Visibility:   models.Visibility(strings.ToLower(strings.TrimSpace(req.Visibility))),
 		CoverAssetID: strings.TrimSpace(req.CoverAssetID),
 	})
@@ -145,6 +178,8 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
 			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
+		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
 			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
 		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
@@ -297,6 +332,181 @@ func (h *adminSpaceHandler) ListSpaces(c *gin.Context) {
 			PageSize: payload.PageSize,
 			Total:    payload.Total,
 		},
+	})
+}
+
+// ListCategories 返回后台空间分类配置。
+func (h *adminSpaceHandler) ListCategories(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	payload, err := h.adminSpaceService.ListCategories(c.Request.Context(), actorUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	items := make([]adminSpaceCategoryResponse, 0, len(payload))
+	for _, item := range payload {
+		items = append(items, mapAdminSpaceCategoryResponse(item))
+	}
+
+	response.JSON(c, http.StatusOK, adminSpaceCategoriesResponse{
+		Items: items,
+	})
+}
+
+// CreateCategory 新增后台空间分类。
+func (h *adminSpaceHandler) CreateCategory(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	var req createAdminSpaceCategoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	payload, err := h.adminSpaceService.CreateCategory(c.Request.Context(), service.CreateAdminSpaceCategoryInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		Name:        req.Name,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
+		case errors.Is(err, service.ErrAdminSpaceCategoryNameConflict):
+			response.Error(c, http.StatusConflict, "SPACE_CATEGORY_NAME_EXISTS", "space category name already exists")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapAdminSpaceCategoryResponse(payload))
+}
+
+// RenameCategory 重命名后台空间分类。
+func (h *adminSpaceHandler) RenameCategory(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	categoryID := strings.TrimSpace(c.Param("categoryId"))
+	if categoryID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category id is invalid")
+		return
+	}
+
+	var req renameAdminSpaceCategoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	payload, err := h.adminSpaceService.RenameCategory(c.Request.Context(), service.RenameAdminSpaceCategoryInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		CategoryID:  categoryID,
+		Name:        req.Name,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
+		case errors.Is(err, service.ErrAdminSpaceCategoryNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_CATEGORY_NOT_FOUND", "space category not found")
+		case errors.Is(err, service.ErrAdminSpaceCategoryDefaultImmutable):
+			response.Error(c, http.StatusBadRequest, "SPACE_CATEGORY_DEFAULT_IMMUTABLE", "default category cannot be renamed")
+		case errors.Is(err, service.ErrAdminSpaceCategoryNameConflict):
+			response.Error(c, http.StatusConflict, "SPACE_CATEGORY_NAME_EXISTS", "space category name already exists")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapAdminSpaceCategoryResponse(payload))
+}
+
+// DeleteCategory 删除后台空间分类并迁移关联空间到“未分类”。
+func (h *adminSpaceHandler) DeleteCategory(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	categoryID := strings.TrimSpace(c.Param("categoryId"))
+	if categoryID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category id is invalid")
+		return
+	}
+
+	payload, err := h.adminSpaceService.DeleteCategory(c.Request.Context(), service.DeleteAdminSpaceCategoryInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		CategoryID:  categoryID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
+		case errors.Is(err, service.ErrAdminSpaceCategoryNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_CATEGORY_NOT_FOUND", "space category not found")
+		case errors.Is(err, service.ErrAdminSpaceCategoryDefaultImmutable):
+			response.Error(c, http.StatusBadRequest, "SPACE_CATEGORY_DEFAULT_IMMUTABLE", "default category cannot be deleted")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, deleteAdminSpaceCategoryResponse{
+		CategoryID:             payload.CategoryID,
+		ReassignedToCategoryID: payload.ReassignedToCategoryID,
+		ReassignedToName:       payload.ReassignedToName,
+		MovedSpaceCount:        payload.MovedSpaceCount,
 	})
 }
 
@@ -564,6 +774,7 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 		SpaceID:      spaceID,
 		Name:         req.Name,
 		Description:  req.Description,
+		CategoryID:   req.CategoryID,
 		Visibility:   visibility,
 		CoverAssetID: req.CoverAssetID,
 	})
@@ -579,6 +790,8 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
 			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
+		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
 			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
 		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
@@ -759,20 +972,33 @@ func parseAdminSpaceQueryInt(rawValue string) (int, error) {
 
 func mapAdminSpaceResponse(value service.AdminSpaceRecord) adminSpaceResponse {
 	return adminSpaceResponse{
-		SpaceID:      value.SpaceID,
-		Name:         value.Name,
-		Description:  value.Description,
-		OwnerUserID:  value.OwnerUserID,
-		OwnerName:    value.OwnerName,
-		OwnerEmail:   value.OwnerEmail,
-		Visibility:   value.Visibility,
-		Cover:        mapAdminSpaceCoverDTOFromPointer(value.Cover),
-		Status:       value.Status,
-		BannedReason: value.BannedReason,
-		BannedAt:     value.BannedAt,
-		DeletedAt:    value.DeletedAt,
-		CreatedAt:    value.CreatedAt,
-		UpdatedAt:    value.UpdatedAt,
+		SpaceID:           value.SpaceID,
+		Name:              value.Name,
+		Description:       value.Description,
+		CategoryID:        value.CategoryID,
+		Category:          value.Category,
+		CategoryIsDefault: value.CategoryIsDefault,
+		OwnerUserID:       value.OwnerUserID,
+		OwnerName:         value.OwnerName,
+		OwnerEmail:        value.OwnerEmail,
+		Visibility:        value.Visibility,
+		Cover:             mapAdminSpaceCoverDTOFromPointer(value.Cover),
+		Status:            value.Status,
+		BannedReason:      value.BannedReason,
+		BannedAt:          value.BannedAt,
+		DeletedAt:         value.DeletedAt,
+		CreatedAt:         value.CreatedAt,
+		UpdatedAt:         value.UpdatedAt,
+	}
+}
+
+func mapAdminSpaceCategoryResponse(value service.AdminSpaceCategoryRecord) adminSpaceCategoryResponse {
+	return adminSpaceCategoryResponse{
+		CategoryID: value.CategoryID,
+		Name:       value.Name,
+		IsDefault:  value.IsDefault,
+		CreatedAt:  value.CreatedAt,
+		UpdatedAt:  value.UpdatedAt,
 	}
 }
 

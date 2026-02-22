@@ -15,7 +15,7 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
-import type { AdminSpace, AdminSpaceCover, DataGateway, Visibility } from "../../data-access";
+import type { AdminSpace, AdminSpaceCategory, AdminSpaceCover, DataGateway, Visibility } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import { showToast } from "../../components/ui/toast";
 
@@ -54,6 +54,7 @@ interface AdminSpaceSettingsDialogProps {
   open: boolean;
   space: AdminSpace | null;
   dataGateway: DataGateway;
+  categoryOptions: AdminSpaceCategory[];
   onOpenChange: (open: boolean) => void;
   onUpdated: () => Promise<void> | void;
 }
@@ -397,12 +398,14 @@ export function AdminSpaceSettingsDialog({
   open,
   space,
   dataGateway,
+  categoryOptions,
   onOpenChange,
   onUpdated
 }: AdminSpaceSettingsDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("member");
+  const [categoryID, setCategoryID] = useState("");
   const [coverMode, setCoverMode] = useState<"user_upload" | "system_generated">("user_upload");
 
   const [loadedImage, setLoadedImage] = useState<LoadedImageData | null>(null);
@@ -446,6 +449,32 @@ export function AdminSpaceSettingsDialog({
   }, [loadedImage?.objectURL]);
 
   const frameInfo = useMemo(() => computeFrameScale(loadedImage, zoom), [loadedImage, zoom]);
+  const normalizedCategoryOptions = useMemo(() => {
+    const options = categoryOptions
+      .map((item) => ({
+        categoryId: (item.categoryId ?? "").trim(),
+        name: (item.name ?? "").trim(),
+        isDefault: item.isDefault === true
+      }))
+      .filter((item) => item.categoryId.length > 0 && item.name.length > 0)
+      .filter((item, index, items) => items.findIndex((current) => current.categoryId === item.categoryId) === index);
+    const current = categoryID.trim();
+    if (current && !options.some((option) => option.categoryId === current) && space) {
+      return [
+        {
+          categoryId: current,
+          name: (space.category ?? "").trim() || "未知分类",
+          isDefault: false
+        },
+        ...options
+      ];
+    }
+    return options;
+  }, [categoryID, categoryOptions, space]);
+  const defaultCategoryID = useMemo(
+    () => normalizedCategoryOptions.find((item) => item.isDefault)?.categoryId ?? normalizedCategoryOptions[0]?.categoryId ?? "",
+    [normalizedCategoryOptions]
+  );
   const coverPreviewUrl = pendingCover?.previewUrl?.trim() || existingCover?.url?.trim() || "";
   const pendingCoverResetLabel = existingCover ? "恢复当前封面" : "清除预览";
 
@@ -466,6 +495,7 @@ export function AdminSpaceSettingsDialog({
     setName(space.name ?? "");
     setDescription(space.description ?? "");
     setVisibility(space.visibility ?? "member");
+    setCategoryID((space.categoryId ?? "").trim() || defaultCategoryID);
     setCoverMode("user_upload");
     setZoom(1);
     setOffsetX(0);
@@ -480,12 +510,13 @@ export function AdminSpaceSettingsDialog({
       }
       return null;
     });
-  }, [clearPendingCover, open, space]);
+  }, [clearPendingCover, defaultCategoryID, open, space]);
 
   const resetDialog = useCallback(() => {
     setName("");
     setDescription("");
     setVisibility("member");
+    setCategoryID(defaultCategoryID);
     setCoverMode("user_upload");
     setZoom(1);
     setOffsetX(0);
@@ -500,7 +531,7 @@ export function AdminSpaceSettingsDialog({
       }
       return null;
     });
-  }, []);
+  }, [defaultCategoryID]);
 
   const closeDialog = useCallback(() => {
     if (uploadingCover || savingSpace) {
@@ -690,6 +721,7 @@ export function AdminSpaceSettingsDialog({
     const updates: {
       name?: string;
       description?: string;
+      categoryId?: string;
       visibility?: Visibility;
       coverAssetId?: string;
     } = {};
@@ -699,6 +731,9 @@ export function AdminSpaceSettingsDialog({
     }
     if (trimmedDescription !== (space.description ?? "").trim()) {
       updates.description = trimmedDescription;
+    }
+    if (categoryID.trim() !== (space.categoryId ?? "").trim()) {
+      updates.categoryId = categoryID.trim();
     }
     if (visibility !== space.visibility) {
       updates.visibility = normalizeVisibility(visibility);
@@ -738,7 +773,7 @@ export function AdminSpaceSettingsDialog({
     } finally {
       setSavingSpace(false);
     }
-  }, [dataGateway.admin, description, name, onOpenChange, onUpdated, pendingCover, resetDialog, space, visibility]);
+  }, [categoryID, dataGateway.admin, description, name, onOpenChange, onUpdated, pendingCover, resetDialog, space, visibility]);
 
   if (!open) {
     return null;
@@ -793,6 +828,30 @@ export function AdminSpaceSettingsDialog({
                     <SelectItem value="public">完全公开（public）</SelectItem>
                     <SelectItem value="authenticated">登录可见（authenticated）</SelectItem>
                     <SelectItem value="member">成员可见（member）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-semibold text-slate-700">分类</span>
+                <Select
+                  value={categoryID}
+                  onValueChange={(value) => setCategoryID(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="未分类" />
+                  </SelectTrigger>
+                  <SelectContent className="z-[2900]">
+                    {normalizedCategoryOptions.length === 0 ? (
+                      <SelectItem value="__PD_NO_CATEGORY_OPTIONS__" disabled>
+                        暂无可选分类
+                      </SelectItem>
+                    ) : (
+                      normalizedCategoryOptions.map((option) => (
+                        <SelectItem key={option.categoryId} value={option.categoryId}>
+                          {option.name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </label>

@@ -15,7 +15,7 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
-import type { DataGateway, Visibility } from "../../data-access";
+import type { AdminSpaceCategory, DataGateway, Visibility } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import { showToast } from "../../components/ui/toast";
 
@@ -53,6 +53,7 @@ interface PendingCoverPreview {
 interface AdminCreateSpaceDialogProps {
   open: boolean;
   dataGateway: DataGateway;
+  categoryOptions: AdminSpaceCategory[];
   onOpenChange: (open: boolean) => void;
   onCreated: () => Promise<void> | void;
 }
@@ -391,11 +392,12 @@ async function exportCroppedWebP(
   };
 }
 
-export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCreated }: AdminCreateSpaceDialogProps) {
+export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onOpenChange, onCreated }: AdminCreateSpaceDialogProps) {
   // 管理后台新建空间弹窗：负责表单、封面本地预览与创建提交流程。
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("member");
+  const [categoryID, setCategoryID] = useState("");
   const [coverMode, setCoverMode] = useState<"user_upload" | "system_generated">("user_upload");
 
   const [loadedImage, setLoadedImage] = useState<LoadedImageData | null>(null);
@@ -438,7 +440,33 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
   }, [loadedImage?.objectURL]);
 
   const frameInfo = useMemo(() => computeFrameScale(loadedImage, zoom), [loadedImage, zoom]);
+  const normalizedCategoryOptions = useMemo(
+    () =>
+      categoryOptions
+        .map((item) => ({
+          categoryId: (item.categoryId ?? "").trim(),
+          name: (item.name ?? "").trim(),
+          isDefault: item.isDefault === true
+        }))
+        .filter((item) => item.categoryId.length > 0 && item.name.length > 0)
+        .filter((item, index, items) => items.findIndex((current) => current.categoryId === item.categoryId) === index),
+    [categoryOptions]
+  );
+  const defaultCategoryID = useMemo(
+    () => normalizedCategoryOptions.find((item) => item.isDefault)?.categoryId ?? normalizedCategoryOptions[0]?.categoryId ?? "",
+    [normalizedCategoryOptions]
+  );
   const coverPreviewUrl = pendingCover?.previewUrl?.trim() || "";
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (categoryID || !defaultCategoryID) {
+      return;
+    }
+    setCategoryID(defaultCategoryID);
+  }, [categoryID, defaultCategoryID, open]);
 
   const clearPendingCover = useCallback(() => {
     setPendingCover((previous) => {
@@ -453,6 +481,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
     setName("");
     setDescription("");
     setVisibility("member");
+    setCategoryID(defaultCategoryID);
     setCoverMode("user_upload");
     setZoom(1);
     setOffsetX(0);
@@ -466,7 +495,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
       }
       return null;
     });
-  }, []);
+  }, [defaultCategoryID]);
 
   const closeDialog = useCallback(() => {
     if (uploadingCover || creatingSpace) {
@@ -665,6 +694,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
       await dataGateway.admin.createSpace({
         name: trimmedName,
         description,
+        categoryId: categoryID,
         visibility: normalizeVisibility(visibility),
         coverAssetId
       });
@@ -677,7 +707,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
     } finally {
       setCreatingSpace(false);
     }
-  }, [dataGateway.admin, description, name, onCreated, onOpenChange, pendingCover, resetDialog, visibility]);
+  }, [categoryID, dataGateway.admin, description, name, onCreated, onOpenChange, pendingCover, resetDialog, visibility]);
 
   if (!open) {
     return null;
@@ -732,6 +762,30 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
                     <SelectItem value="public">完全公开（public）</SelectItem>
                     <SelectItem value="authenticated">登录可见（authenticated）</SelectItem>
                     <SelectItem value="member">成员可见（member）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-semibold text-slate-700">分类</span>
+                <Select
+                  value={categoryID}
+                  onValueChange={(value) => setCategoryID(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="未分类" />
+                  </SelectTrigger>
+                  <SelectContent className="z-[2900]">
+                    {normalizedCategoryOptions.length === 0 ? (
+                      <SelectItem value="__PD_NO_CATEGORY_OPTIONS__" disabled>
+                        暂无可选分类
+                      </SelectItem>
+                    ) : (
+                      normalizedCategoryOptions.map((option) => (
+                        <SelectItem key={option.categoryId} value={option.categoryId}>
+                          {option.name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </label>

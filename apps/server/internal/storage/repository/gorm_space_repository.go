@@ -28,6 +28,8 @@ func (r *gormSpaceRepository) Create(ctx context.Context, space *models.Space) e
 	if space != nil {
 		space.Name = strings.TrimSpace(space.Name)
 		space.Description = strings.TrimSpace(space.Description)
+		space.CategoryID = strings.TrimSpace(space.CategoryID)
+		space.Category = strings.TrimSpace(space.Category)
 		if !models.IsValidVisibility(space.Visibility) {
 			space.Visibility = models.VisibilityMember
 		}
@@ -60,13 +62,39 @@ func (r *gormSpaceRepository) GetBySpaceID(ctx context.Context, spaceID string) 
 		return nil, fmt.Errorf("space repository db is nil")
 	}
 
-	var space models.Space
+	type spaceRecordRow struct {
+		ID           int64               `gorm:"column:id"`
+		SpaceID      string              `gorm:"column:space_id"`
+		Name         string              `gorm:"column:name"`
+		Description  string              `gorm:"column:description"`
+		CategoryID   string              `gorm:"column:category_id"`
+		Category     string              `gorm:"column:category"`
+		OwnerUserID  string              `gorm:"column:owner_user_id"`
+		Visibility   models.Visibility   `gorm:"column:visibility"`
+		CoverAssetID *string             `gorm:"column:cover_asset_id"`
+		CoverKey     string              `gorm:"column:cover_key"`
+		CoverURL     string              `gorm:"column:cover_url"`
+		CoverWidth   int                 `gorm:"column:cover_width"`
+		CoverHeight  int                 `gorm:"column:cover_height"`
+		CoverSource  string              `gorm:"column:cover_source"`
+		Status       models.EntityStatus `gorm:"column:status"`
+		BannedReason string              `gorm:"column:banned_reason"`
+		BannedAt     *time.Time          `gorm:"column:banned_at"`
+		DeletedAt    *time.Time          `gorm:"column:deleted_at"`
+		CreatedAtRaw string              `gorm:"column:created_at"`
+		UpdatedAtRaw string              `gorm:"column:updated_at"`
+	}
+
+	var row spaceRecordRow
 	if err := r.db.WithContext(ctx).
+		Table("spaces").
 		Select(
 			"id",
 			"space_id",
 			"name",
 			"description",
+			"category_id",
+			"category",
 			"owner_user_id",
 			"visibility",
 			"cover_asset_id",
@@ -79,10 +107,35 @@ func (r *gormSpaceRepository) GetBySpaceID(ctx context.Context, spaceID string) 
 			"banned_reason",
 			"banned_at",
 			"deleted_at",
+			"created_at",
+			"updated_at",
 		).
 		Where("space_id = ?", spaceID).
-		Take(&space).Error; err != nil {
+		Take(&row).Error; err != nil {
 		return nil, err
+	}
+
+	space := models.Space{
+		ID:           row.ID,
+		SpaceID:      row.SpaceID,
+		Name:         row.Name,
+		Description:  row.Description,
+		CategoryID:   row.CategoryID,
+		Category:     row.Category,
+		OwnerUserID:  row.OwnerUserID,
+		Visibility:   row.Visibility,
+		CoverAssetID: row.CoverAssetID,
+		CoverKey:     row.CoverKey,
+		CoverURL:     row.CoverURL,
+		CoverWidth:   row.CoverWidth,
+		CoverHeight:  row.CoverHeight,
+		CoverSource:  row.CoverSource,
+		Status:       row.Status,
+		BannedReason: row.BannedReason,
+		BannedAt:     row.BannedAt,
+		DeletedAt:    row.DeletedAt,
+		CreatedAt:    parseSpaceRecordTime(row.CreatedAtRaw),
+		UpdatedAt:    parseSpaceRecordTime(row.UpdatedAtRaw),
 	}
 	if !models.IsValidVisibility(space.Visibility) {
 		space.Visibility = models.VisibilityMember
@@ -91,6 +144,8 @@ func (r *gormSpaceRepository) GetBySpaceID(ctx context.Context, spaceID string) 
 		space.Status = models.EntityStatusActive
 	}
 	space.Description = strings.TrimSpace(space.Description)
+	space.CategoryID = strings.TrimSpace(space.CategoryID)
+	space.Category = strings.TrimSpace(space.Category)
 	space.CoverKey = strings.TrimSpace(space.CoverKey)
 	space.CoverURL = strings.TrimSpace(space.CoverURL)
 	space.CoverSource = strings.TrimSpace(space.CoverSource)
@@ -172,6 +227,8 @@ func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) (
 			"s.space_id",
 			"s.name",
 			"s.description",
+			"s.category_id",
+			"s.category",
 			"s.owner_user_id",
 			"s.visibility",
 			"s.cover_asset_id",
@@ -195,6 +252,8 @@ func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) (
 	for i := range spaces {
 		spaces[i].Name = strings.TrimSpace(spaces[i].Name)
 		spaces[i].Description = strings.TrimSpace(spaces[i].Description)
+		spaces[i].CategoryID = strings.TrimSpace(spaces[i].CategoryID)
+		spaces[i].Category = strings.TrimSpace(spaces[i].Category)
 		if !models.IsValidVisibility(spaces[i].Visibility) {
 			spaces[i].Visibility = models.VisibilityMember
 		}
@@ -233,7 +292,8 @@ func (r *gormSpaceRepository) ListForAdmin(
 
 	baseQuery := r.db.WithContext(ctx).
 		Table("spaces AS s").
-		Joins("JOIN users AS u ON u.user_id = s.owner_user_id")
+		Joins("JOIN users AS u ON u.user_id = s.owner_user_id").
+		Joins("LEFT JOIN space_categories AS sc ON sc.category_id = s.category_id")
 
 	if params.RestrictToScopes {
 		actorUserID := strings.TrimSpace(params.ActorUserID)
@@ -248,7 +308,9 @@ func (r *gormSpaceRepository) ListForAdmin(
 	if keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			"LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(u.user_id) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.name) LIKE ?",
+			"LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(s.category) LIKE ? OR LOWER(sc.name) LIKE ? OR LOWER(u.user_id) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.name) LIKE ?",
+			likeKeyword,
+			likeKeyword,
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -287,6 +349,10 @@ func (r *gormSpaceRepository) ListForAdmin(
 		SpaceID      string              `gorm:"column:space_id"`
 		Name         string              `gorm:"column:name"`
 		Description  string              `gorm:"column:description"`
+		CategoryID   string              `gorm:"column:category_id"`
+		Category     string              `gorm:"column:category"`
+		CategoryName string              `gorm:"column:category_name"`
+		CategoryDef  bool                `gorm:"column:category_is_default"`
 		OwnerUserID  string              `gorm:"column:owner_user_id"`
 		Visibility   models.Visibility   `gorm:"column:visibility"`
 		CoverAssetID *string             `gorm:"column:cover_asset_id"`
@@ -312,6 +378,10 @@ func (r *gormSpaceRepository) ListForAdmin(
 			"s.space_id",
 			"s.name",
 			"s.description",
+			"s.category_id",
+			"s.category",
+			"COALESCE(sc.name, s.category) AS category_name",
+			"COALESCE(sc.is_default, 0) AS category_is_default",
 			"s.owner_user_id",
 			"s.visibility",
 			"s.cover_asset_id",
@@ -343,6 +413,8 @@ func (r *gormSpaceRepository) ListForAdmin(
 			SpaceID:      row.SpaceID,
 			Name:         row.Name,
 			Description:  row.Description,
+			CategoryID:   row.CategoryID,
+			Category:     row.Category,
 			OwnerUserID:  row.OwnerUserID,
 			Visibility:   row.Visibility,
 			CoverAssetID: row.CoverAssetID,
@@ -366,6 +438,11 @@ func (r *gormSpaceRepository) ListForAdmin(
 		}
 		space.Name = strings.TrimSpace(space.Name)
 		space.Description = strings.TrimSpace(space.Description)
+		space.CategoryID = strings.TrimSpace(space.CategoryID)
+		space.Category = strings.TrimSpace(row.CategoryName)
+		if space.Category == "" {
+			space.Category = strings.TrimSpace(row.Category)
+		}
 		space.CoverKey = strings.TrimSpace(space.CoverKey)
 		space.CoverURL = strings.TrimSpace(space.CoverURL)
 		space.CoverSource = strings.TrimSpace(space.CoverSource)
@@ -384,9 +461,12 @@ func (r *gormSpaceRepository) ListForAdmin(
 			}
 		}
 		result = append(result, AdminSpaceListRecord{
-			Space:      space,
-			OwnerName:  row.OwnerName,
-			OwnerEmail: row.OwnerEmail,
+			Space:         space,
+			CategoryID:    space.CategoryID,
+			CategoryName:  space.Category,
+			CategoryIsDef: row.CategoryDef,
+			OwnerName:     row.OwnerName,
+			OwnerEmail:    row.OwnerEmail,
 		})
 	}
 
@@ -644,6 +724,12 @@ func (r *gormSpaceRepository) UpdateMetadata(ctx context.Context, params UpdateS
 	}
 	if params.Description != nil {
 		updateValues["description"] = strings.TrimSpace(*params.Description)
+	}
+	if params.CategoryID != nil {
+		updateValues["category_id"] = strings.TrimSpace(*params.CategoryID)
+	}
+	if params.Category != nil {
+		updateValues["category"] = strings.TrimSpace(*params.Category)
 	}
 	if params.Visibility != nil {
 		if !models.IsValidVisibility(*params.Visibility) {

@@ -217,6 +217,9 @@ export interface AdminSpace {
   spaceId: string;
   name: string;
   description: string;
+  categoryId: string;
+  category: string;
+  categoryIsDefault: boolean;
   ownerUserId: string;
   ownerName: string;
   ownerEmail: string;
@@ -255,6 +258,14 @@ export interface AdminSpaceListResult {
     pageSize: number;
     total: number;
   };
+}
+
+export interface AdminSpaceCategory {
+  categoryId: string;
+  name: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AdminDocumentStatusFilter = "all" | "active" | "banned" | "deleted";
@@ -370,7 +381,7 @@ export interface AdminGateway {
   updateUserRole(input: { userId: string; role: "user" | AdminRole }): Promise<AdminUser>;
   updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }): Promise<AdminUser>;
   deleteUser(userId: string): Promise<void>;
-  createSpace(input: { name: string; description?: string; visibility?: Visibility; coverAssetId?: string }): Promise<AdminSpace>;
+  createSpace(input: { name: string; description?: string; categoryId?: string; visibility?: Visibility; coverAssetId?: string }): Promise<AdminSpace>;
   createSpaceCoverAsset(input: {
     source: AdminSpaceCoverSource;
     file?: File;
@@ -380,12 +391,22 @@ export interface AdminGateway {
     clientMimeType?: string;
     clientProcessed?: boolean;
   }): Promise<AdminSpaceCover>;
+  listSpaceCategories(): Promise<AdminSpaceCategory[]>;
+  createSpaceCategory(input: { name: string }): Promise<AdminSpaceCategory>;
+  renameSpaceCategory(input: { categoryId: string; name: string }): Promise<AdminSpaceCategory>;
+  deleteSpaceCategory(input: { categoryId: string }): Promise<{
+    categoryId: string;
+    reassignedToCategoryId: string;
+    reassignedToName: string;
+    movedSpaceCount: number;
+  }>;
   listSpaces(input?: AdminSpaceListInput): Promise<AdminSpaceListResult>;
   updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }): Promise<AdminSpace>;
   updateSpaceMetadata(input: {
     spaceId: string;
     name?: string;
     description?: string;
+    categoryId?: string;
     visibility?: Visibility;
     coverAssetId?: string;
   }): Promise<AdminSpace>;

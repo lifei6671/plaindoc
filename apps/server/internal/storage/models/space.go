@@ -8,6 +8,8 @@ type Space struct {
 	SpaceID      string       `gorm:"column:space_id"`
 	Name         string       `gorm:"column:name"`
 	Description  string       `gorm:"column:description"`
+	CategoryID   string       `gorm:"column:category_id"`
+	Category     string       `gorm:"column:category"`
 	OwnerUserID  string       `gorm:"column:owner_user_id"`
 	Visibility   Visibility   `gorm:"column:visibility"`
 	CoverAssetID *string      `gorm:"column:cover_asset_id"`

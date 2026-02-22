@@ -1,4 +1,4 @@
-import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -14,8 +14,9 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
 import { showToast } from "../../components/ui/toast";
-import { type AdminSpace, type AdminSpaceListResult, type DataGateway, type Visibility } from "../../data-access";
+import { type AdminSpace, type AdminSpaceCategory, type AdminSpaceListResult, type DataGateway, type Visibility } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
+import { AdminSpaceCategoriesDialog } from "../components/AdminSpaceCategoriesDialog";
 import { AdminCreateSpaceDialog } from "../components/AdminCreateSpaceDialog";
 import { AdminSpaceMembersDialog } from "../components/AdminSpaceMembersDialog";
 import { AdminSpaceSettingsDialog } from "../components/AdminSpaceSettingsDialog";
@@ -125,6 +126,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [categoriesDialogOpen, setCategoriesDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [editingSpace, setEditingSpace] = useState<AdminSpace | null>(null);
   const [membersDialogOpen, setMembersDialogOpen] = useState(false);
@@ -138,9 +140,11 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const [selectedSpaceIDs, setSelectedSpaceIDs] = useState<string[]>([]);
 
   const [spacesState, setSpacesState] = useState<AdminSpacesState>(() => emptySpacesState());
+  const [spaceCategories, setSpaceCategories] = useState<AdminSpaceCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [actioningSpaceID, setActioningSpaceID] = useState<string | null>(null);
   const [batchActioning, setBatchActioning] = useState(false);
+  const [updatingCategories, setUpdatingCategories] = useState(false);
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -165,9 +169,23 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     }
   }, [dataGateway.admin, keyword, openToast, page, statusFilter, visibilityFilter]);
 
+  const loadSpaceCategories = useCallback(async () => {
+    try {
+      const items = await dataGateway.admin.listSpaceCategories();
+      setSpaceCategories(items);
+    } catch (error) {
+      openToast(`加载空间分类失败：${formatError(error)}`);
+      setSpaceCategories([]);
+    }
+  }, [dataGateway.admin, openToast]);
+
   useEffect(() => {
     void loadSpaces();
   }, [loadSpaces]);
+
+  useEffect(() => {
+    void loadSpaceCategories();
+  }, [loadSpaceCategories]);
 
   useEffect(() => {
     setSelectedSpaceIDs((previous) =>
@@ -528,14 +546,89 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     await loadSpaces();
   }, [loadSpaces]);
 
+  const handleCreateCategory = useCallback(
+    async (name: string) => {
+      setUpdatingCategories(true);
+      try {
+        await dataGateway.admin.createSpaceCategory({ name });
+        await loadSpaceCategories();
+        openToast("分类创建成功", "success");
+      } catch (error) {
+        openToast(`新增分类失败：${formatError(error)}`);
+      } finally {
+        setUpdatingCategories(false);
+      }
+    },
+    [dataGateway.admin, loadSpaceCategories, openToast]
+  );
+
+  const handleRenameCategory = useCallback(
+    async (category: AdminSpaceCategory, name: string) => {
+      setUpdatingCategories(true);
+      try {
+        await dataGateway.admin.renameSpaceCategory({
+          categoryId: category.categoryId,
+          name
+        });
+        await loadSpaceCategories();
+        await loadSpaces();
+        openToast("分类已重命名", "success");
+      } catch (error) {
+        openToast(`重命名分类失败：${formatError(error)}`);
+      } finally {
+        setUpdatingCategories(false);
+      }
+    },
+    [dataGateway.admin, loadSpaceCategories, loadSpaces, openToast]
+  );
+
+  const handleDeleteCategory = useCallback(
+    async (category: AdminSpaceCategory) => {
+      const confirmed = await confirm({
+        title: `删除分类：${category.name}`,
+        description: "删除后，该分类下空间将自动迁移到“未分类”。",
+        confirmText: "确认删除",
+        tone: "danger"
+      });
+      if (!confirmed) {
+        return;
+      }
+
+      setUpdatingCategories(true);
+      try {
+        const result = await dataGateway.admin.deleteSpaceCategory({
+          categoryId: category.categoryId
+        });
+        await loadSpaceCategories();
+        await loadSpaces();
+        openToast(`分类已删除，已迁移 ${result.movedSpaceCount} 个空间`, "success");
+      } catch (error) {
+        openToast(`删除分类失败：${formatError(error)}`);
+      } finally {
+        setUpdatingCategories(false);
+      }
+    },
+    [confirm, dataGateway.admin, loadSpaceCategories, loadSpaces, openToast]
+  );
+
   const selectionDisabled = loading || batchActioning || actioningSpaceID !== null;
 
   return (
     <section aria-label="空间管理">
       {dialogs}
+      <AdminSpaceCategoriesDialog
+        open={categoriesDialogOpen}
+        loading={updatingCategories}
+        categories={spaceCategories}
+        onOpenChange={setCategoriesDialogOpen}
+        onCreate={handleCreateCategory}
+        onRename={handleRenameCategory}
+        onDelete={handleDeleteCategory}
+      />
       <AdminCreateSpaceDialog
         open={createDialogOpen}
         dataGateway={dataGateway}
+        categoryOptions={spaceCategories}
         onOpenChange={setCreateDialogOpen}
         onCreated={handleSpaceCreated}
       />
@@ -543,6 +636,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
         open={settingsDialogOpen}
         space={editingSpace}
         dataGateway={dataGateway}
+        categoryOptions={spaceCategories}
         onOpenChange={handleSettingsOpenChange}
         onUpdated={handleSpaceCreated}
       />
@@ -617,6 +711,10 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
             <Button type="button" variant="outline" disabled={loading || batchActioning} onClick={() => void loadSpaces()}>
               <RefreshCw size={14} />
               <span>刷新</span>
+            </Button>
+            <Button type="button" variant="outline" disabled={loading || batchActioning || updatingCategories} onClick={() => setCategoriesDialogOpen(true)}>
+              <Tags size={14} />
+              <span>分类管理</span>
             </Button>
             <Button type="button" disabled={loading || batchActioning} onClick={() => setCreateDialogOpen(true)}>
               <Plus size={14} />
@@ -759,6 +857,16 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                             ) : (
                               <p className="text-xs text-slate-400">暂无简介</p>
                             )}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-slate-500">分类：</span>
+                              {space.category ? (
+                                <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-700">
+                                  {space.category}
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-slate-400">未分类</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>

@@ -75,6 +75,23 @@ type SpaceAdminScopeRepository interface {
 	ListByUserID(ctx context.Context, userID string) ([]string, error)
 }
 
+// SpaceCategoryRepository 空间分类仓储接口。
+type SpaceCategoryRepository interface {
+	List(ctx context.Context) ([]models.SpaceCategory, error)
+	GetByCategoryID(ctx context.Context, categoryID string) (*models.SpaceCategory, error)
+	GetByName(ctx context.Context, name string) (*models.SpaceCategory, error)
+	GetDefault(ctx context.Context) (*models.SpaceCategory, error)
+	Create(ctx context.Context, category *models.SpaceCategory) error
+	RenameAndSyncSpaces(ctx context.Context, categoryID string, name string, updatedAt time.Time) (bool, error)
+	DeleteAndReassignSpaces(
+		ctx context.Context,
+		categoryID string,
+		fallbackCategoryID string,
+		fallbackCategoryName string,
+		updatedAt time.Time,
+	) (int64, bool, error)
+}
+
 // SpaceRepository 空间仓储最小接口。
 type SpaceRepository interface {
 	Create(ctx context.Context, space *models.Space) error
@@ -109,9 +126,12 @@ type ListAdminSpacesParams struct {
 
 // AdminSpaceListRecord 管理后台空间列表项。
 type AdminSpaceListRecord struct {
-	Space      models.Space
-	OwnerName  string
-	OwnerEmail string
+	Space         models.Space
+	CategoryID    string
+	CategoryName  string
+	CategoryIsDef bool
+	OwnerName     string
+	OwnerEmail    string
 }
 
 // SpaceMemberListRecord 空间成员列表项。
@@ -129,6 +149,8 @@ type UpdateSpaceMetadataParams struct {
 	SpaceID      string
 	Name         *string
 	Description  *string
+	CategoryID   *string
+	Category     *string
 	Visibility   *models.Visibility
 	CoverAssetID *string
 	CoverKey     *string

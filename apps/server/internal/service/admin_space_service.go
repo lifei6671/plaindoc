@@ -18,37 +18,42 @@ const (
 	maxAdminSpacePageSize     = 100
 	maxAdminSpaceNameLength   = 120
 	maxAdminSpaceDescLength   = 280
+	maxAdminSpaceCategoryLen  = 40
 )
 
 var (
-	ErrAdminSpaceInvalidStatusFilter     = errors.New("invalid admin space status filter")
-	ErrAdminSpaceInvalidVisibilityFilter = errors.New("invalid admin space visibility filter")
-	ErrAdminSpaceInvalidSpaceID          = errors.New("admin space id is invalid")
-	ErrAdminSpaceInvalidName             = errors.New("admin space name is invalid")
-	ErrAdminSpaceInvalidVisibility       = errors.New("admin space visibility is invalid")
-	ErrAdminSpaceInvalidStatus           = errors.New("admin space status is invalid")
-	ErrAdminSpaceBanReasonRequired       = errors.New("admin space ban reason is required")
-	ErrAdminSpaceNoMetadataChange        = errors.New("admin space metadata change is required")
-	ErrAdminSpaceNotFound                = errors.New("admin space target not found")
-	ErrAdminSpaceAlreadyDeleted          = errors.New("admin space target already deleted")
-	ErrAdminSpaceInvalidDescription      = errors.New("admin space description is invalid")
-	ErrAdminSpaceInvalidCoverSource      = errors.New("admin space cover source is invalid")
-	ErrAdminSpaceCoverFileRequired       = errors.New("admin space cover file is required")
-	ErrAdminSpaceCoverSpaceNameRequired  = errors.New("admin space cover space name is required")
-	ErrAdminSpaceCoverAssetNotFound      = errors.New("admin space cover asset not found")
-	ErrAdminSpaceCoverImageInvalid       = errors.New("admin space cover image is invalid")
-	ErrAdminSpaceCoverImageTooLarge      = errors.New("admin space cover image is too large")
-	ErrAdminSpaceCoverImageTooManyPixels = errors.New("admin space cover image has too many pixels")
-	ErrAdminSpaceFontUnavailable         = errors.New("admin space cover font is unavailable")
-	ErrAdminSpaceTransferTargetRequired  = errors.New("admin space transfer target is required")
-	ErrAdminSpaceTransferTargetNotFound  = errors.New("admin space transfer target not found")
-	ErrAdminSpaceTransferTargetNotMember = errors.New("admin space transfer target not member")
-	ErrAdminSpaceTransferToSelf          = errors.New("admin space transfer to self")
-	ErrAdminSpaceMemberTargetRequired    = errors.New("admin space member target is required")
-	ErrAdminSpaceMemberTargetNotFound    = errors.New("admin space member target not found")
-	ErrAdminSpaceMemberInvalidRole       = errors.New("admin space member role is invalid")
-	ErrAdminSpaceMemberNotFound          = errors.New("admin space member not found")
-	ErrAdminSpaceMemberOwnerImmutable    = errors.New("admin space owner member is immutable")
+	ErrAdminSpaceInvalidStatusFilter      = errors.New("invalid admin space status filter")
+	ErrAdminSpaceInvalidVisibilityFilter  = errors.New("invalid admin space visibility filter")
+	ErrAdminSpaceInvalidSpaceID           = errors.New("admin space id is invalid")
+	ErrAdminSpaceInvalidName              = errors.New("admin space name is invalid")
+	ErrAdminSpaceInvalidVisibility        = errors.New("admin space visibility is invalid")
+	ErrAdminSpaceInvalidStatus            = errors.New("admin space status is invalid")
+	ErrAdminSpaceBanReasonRequired        = errors.New("admin space ban reason is required")
+	ErrAdminSpaceNoMetadataChange         = errors.New("admin space metadata change is required")
+	ErrAdminSpaceNotFound                 = errors.New("admin space target not found")
+	ErrAdminSpaceAlreadyDeleted           = errors.New("admin space target already deleted")
+	ErrAdminSpaceInvalidDescription       = errors.New("admin space description is invalid")
+	ErrAdminSpaceInvalidCategory          = errors.New("admin space category is invalid")
+	ErrAdminSpaceCategoryNotFound         = errors.New("admin space category not found")
+	ErrAdminSpaceCategoryNameConflict     = errors.New("admin space category name conflict")
+	ErrAdminSpaceCategoryDefaultImmutable = errors.New("admin space default category is immutable")
+	ErrAdminSpaceInvalidCoverSource       = errors.New("admin space cover source is invalid")
+	ErrAdminSpaceCoverFileRequired        = errors.New("admin space cover file is required")
+	ErrAdminSpaceCoverSpaceNameRequired   = errors.New("admin space cover space name is required")
+	ErrAdminSpaceCoverAssetNotFound       = errors.New("admin space cover asset not found")
+	ErrAdminSpaceCoverImageInvalid        = errors.New("admin space cover image is invalid")
+	ErrAdminSpaceCoverImageTooLarge       = errors.New("admin space cover image is too large")
+	ErrAdminSpaceCoverImageTooManyPixels  = errors.New("admin space cover image has too many pixels")
+	ErrAdminSpaceFontUnavailable          = errors.New("admin space cover font is unavailable")
+	ErrAdminSpaceTransferTargetRequired   = errors.New("admin space transfer target is required")
+	ErrAdminSpaceTransferTargetNotFound   = errors.New("admin space transfer target not found")
+	ErrAdminSpaceTransferTargetNotMember  = errors.New("admin space transfer target not member")
+	ErrAdminSpaceTransferToSelf           = errors.New("admin space transfer to self")
+	ErrAdminSpaceMemberTargetRequired     = errors.New("admin space member target is required")
+	ErrAdminSpaceMemberTargetNotFound     = errors.New("admin space member target not found")
+	ErrAdminSpaceMemberInvalidRole        = errors.New("admin space member role is invalid")
+	ErrAdminSpaceMemberNotFound           = errors.New("admin space member not found")
+	ErrAdminSpaceMemberOwnerImmutable     = errors.New("admin space owner member is immutable")
 )
 
 // AdminSpaceCoverSource 定义空间封面来源。
@@ -81,6 +86,7 @@ type CreateAdminSpaceInput struct {
 	RequestID    string
 	Name         string
 	Description  string
+	CategoryID   string
 	Visibility   models.Visibility
 	CoverAssetID string
 }
@@ -122,20 +128,23 @@ const (
 
 // AdminSpaceRecord 后台空间列表项。
 type AdminSpaceRecord struct {
-	SpaceID      string
-	Name         string
-	Description  string
-	OwnerUserID  string
-	OwnerName    string
-	OwnerEmail   string
-	Visibility   models.Visibility
-	Cover        *AdminSpaceCoverAsset
-	Status       models.EntityStatus
-	BannedReason string
-	BannedAt     *time.Time
-	DeletedAt    *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	SpaceID           string
+	Name              string
+	Description       string
+	CategoryID        string
+	Category          string
+	CategoryIsDefault bool
+	OwnerUserID       string
+	OwnerName         string
+	OwnerEmail        string
+	Visibility        models.Visibility
+	Cover             *AdminSpaceCoverAsset
+	Status            models.EntityStatus
+	BannedReason      string
+	BannedAt          *time.Time
+	DeletedAt         *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // AdminSpaceMemberRecord 后台空间成员列表项。
@@ -165,6 +174,15 @@ type ListAdminSpacesResult struct {
 	Page     int
 	PageSize int
 	Total    int64
+}
+
+// AdminSpaceCategoryRecord 后台空间分类记录。
+type AdminSpaceCategoryRecord struct {
+	CategoryID string
+	Name       string
+	IsDefault  bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // ListAdminSpaceMembersInput 后台空间成员列表查询参数。
@@ -207,8 +225,39 @@ type UpdateAdminSpaceMetadataInput struct {
 	SpaceID      string
 	Name         *string
 	Description  *string
+	CategoryID   *string
 	Visibility   *models.Visibility
 	CoverAssetID *string
+}
+
+// CreateAdminSpaceCategoryInput 后台创建空间分类参数。
+type CreateAdminSpaceCategoryInput struct {
+	ActorUserID string
+	RequestID   string
+	Name        string
+}
+
+// RenameAdminSpaceCategoryInput 后台重命名空间分类参数。
+type RenameAdminSpaceCategoryInput struct {
+	ActorUserID string
+	RequestID   string
+	CategoryID  string
+	Name        string
+}
+
+// DeleteAdminSpaceCategoryInput 后台删除空间分类参数。
+type DeleteAdminSpaceCategoryInput struct {
+	ActorUserID string
+	RequestID   string
+	CategoryID  string
+}
+
+// DeleteAdminSpaceCategoryResult 后台删除空间分类结果。
+type DeleteAdminSpaceCategoryResult struct {
+	CategoryID             string
+	ReassignedToCategoryID string
+	ReassignedToName       string
+	MovedSpaceCount        int64
 }
 
 // TransferAdminSpaceOwnershipInput 后台空间转让参数。
@@ -232,6 +281,7 @@ type UpdateAdminSpaceStatusInput struct {
 // AdminSpaceService 封装空间管理业务。
 type AdminSpaceService struct {
 	spaceRepo          repository.SpaceRepository
+	spaceCategoryRepo  repository.SpaceCategoryRepository
 	userRepo           repository.UserRepository
 	adminRoleRepo      repository.AdminRoleRepository
 	spaceScopeRepo     repository.SpaceAdminScopeRepository
@@ -242,6 +292,7 @@ type AdminSpaceService struct {
 // NewAdminSpaceService 创建后台空间管理服务。
 func NewAdminSpaceService(
 	spaceRepo repository.SpaceRepository,
+	spaceCategoryRepo repository.SpaceCategoryRepository,
 	userRepo repository.UserRepository,
 	adminRoleRepo repository.AdminRoleRepository,
 	spaceScopeRepo repository.SpaceAdminScopeRepository,
@@ -250,6 +301,7 @@ func NewAdminSpaceService(
 ) *AdminSpaceService {
 	return &AdminSpaceService{
 		spaceRepo:          spaceRepo,
+		spaceCategoryRepo:  spaceCategoryRepo,
 		userRepo:           userRepo,
 		adminRoleRepo:      adminRoleRepo,
 		spaceScopeRepo:     spaceScopeRepo,
@@ -311,6 +363,295 @@ func (s *AdminSpaceService) ListSpaces(
 		PageSize: pageSize,
 		Total:    total,
 	}, nil
+}
+
+// ListCategories 查询后台空间分类列表。
+func (s *AdminSpaceService) ListCategories(
+	ctx context.Context,
+	actorUserID string,
+) ([]AdminSpaceCategoryRecord, error) {
+	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
+		return nil, errors.New("admin space service dependencies are nil")
+	}
+	actor := strings.TrimSpace(actorUserID)
+	if actor == "" {
+		return nil, ErrAdminForbidden
+	}
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	if !isAdmin {
+		return nil, ErrAdminForbidden
+	}
+
+	items, err := s.spaceCategoryRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]AdminSpaceCategoryRecord, 0, len(items))
+	for _, item := range items {
+		result = append(result, AdminSpaceCategoryRecord{
+			CategoryID: strings.TrimSpace(item.CategoryID),
+			Name:       strings.TrimSpace(item.Name),
+			IsDefault:  item.IsDefault,
+			CreatedAt:  item.CreatedAt,
+			UpdatedAt:  item.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
+// CreateCategory 新增后台空间分类。
+func (s *AdminSpaceService) CreateCategory(
+	ctx context.Context,
+	input CreateAdminSpaceCategoryInput,
+) (AdminSpaceCategoryRecord, error) {
+	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
+		return AdminSpaceCategoryRecord{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	if actorUserID == "" {
+		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+	}
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
+	if err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+	if !isAdmin {
+		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+	}
+
+	name, err := normalizeAdminSpaceCategoryName(input.Name)
+	if err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+	existing, err := s.spaceCategoryRepo.GetByName(ctx, name)
+	switch {
+	case err == nil && existing != nil:
+		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNameConflict
+	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+		return AdminSpaceCategoryRecord{}, err
+	}
+
+	now := time.Now().UTC()
+	category := &models.SpaceCategory{
+		CategoryID: strings.ToLower(ulid.Make().String()),
+		Name:       name,
+		IsDefault:  false,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := s.spaceCategoryRepo.Create(ctx, category); err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+
+	record := AdminSpaceCategoryRecord{
+		CategoryID: category.CategoryID,
+		Name:       category.Name,
+		IsDefault:  category.IsDefault,
+		CreatedAt:  category.CreatedAt,
+		UpdatedAt:  category.UpdatedAt,
+	}
+
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionCreate,
+		TargetType: "space_category",
+		TargetID:   record.CategoryID,
+		Summary:    "space category created: " + record.CategoryID,
+		Detail: map[string]any{
+			"categoryId": record.CategoryID,
+			"name":       record.Name,
+		},
+	}); err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+
+	return record, nil
+}
+
+// RenameCategory 重命名后台空间分类。
+func (s *AdminSpaceService) RenameCategory(
+	ctx context.Context,
+	input RenameAdminSpaceCategoryInput,
+) (AdminSpaceCategoryRecord, error) {
+	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
+		return AdminSpaceCategoryRecord{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	if actorUserID == "" {
+		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+	}
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
+	if err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+	if !isAdmin {
+		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+	}
+
+	categoryID := strings.TrimSpace(input.CategoryID)
+	if categoryID == "" {
+		return AdminSpaceCategoryRecord{}, ErrAdminSpaceInvalidCategory
+	}
+	target, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNotFound
+		}
+		return AdminSpaceCategoryRecord{}, err
+	}
+	if target.IsDefault {
+		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryDefaultImmutable
+	}
+
+	name, err := normalizeAdminSpaceCategoryName(input.Name)
+	if err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+	if strings.EqualFold(strings.TrimSpace(target.Name), name) {
+		return AdminSpaceCategoryRecord{
+			CategoryID: target.CategoryID,
+			Name:       target.Name,
+			IsDefault:  target.IsDefault,
+			CreatedAt:  target.CreatedAt,
+			UpdatedAt:  target.UpdatedAt,
+		}, nil
+	}
+
+	existing, err := s.spaceCategoryRepo.GetByName(ctx, name)
+	switch {
+	case err == nil && existing != nil && strings.TrimSpace(existing.CategoryID) != categoryID:
+		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNameConflict
+	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+		return AdminSpaceCategoryRecord{}, err
+	}
+
+	updated, err := s.spaceCategoryRepo.RenameAndSyncSpaces(ctx, categoryID, name, time.Now().UTC())
+	if err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+	if !updated {
+		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNotFound
+	}
+	latest, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNotFound
+		}
+		return AdminSpaceCategoryRecord{}, err
+	}
+
+	record := AdminSpaceCategoryRecord{
+		CategoryID: latest.CategoryID,
+		Name:       latest.Name,
+		IsDefault:  latest.IsDefault,
+		CreatedAt:  latest.CreatedAt,
+		UpdatedAt:  latest.UpdatedAt,
+	}
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "space_category",
+		TargetID:   record.CategoryID,
+		Summary:    "space category renamed: " + record.CategoryID,
+		Detail: map[string]any{
+			"categoryId": record.CategoryID,
+			"nameBefore": target.Name,
+			"nameAfter":  record.Name,
+		},
+	}); err != nil {
+		return AdminSpaceCategoryRecord{}, err
+	}
+
+	return record, nil
+}
+
+// DeleteCategory 删除后台空间分类，并将关联空间移动到“未分类”。
+func (s *AdminSpaceService) DeleteCategory(
+	ctx context.Context,
+	input DeleteAdminSpaceCategoryInput,
+) (DeleteAdminSpaceCategoryResult, error) {
+	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
+		return DeleteAdminSpaceCategoryResult{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	if actorUserID == "" {
+		return DeleteAdminSpaceCategoryResult{}, ErrAdminForbidden
+	}
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
+	if err != nil {
+		return DeleteAdminSpaceCategoryResult{}, err
+	}
+	if !isAdmin {
+		return DeleteAdminSpaceCategoryResult{}, ErrAdminForbidden
+	}
+
+	categoryID := strings.TrimSpace(input.CategoryID)
+	if categoryID == "" {
+		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceInvalidCategory
+	}
+	target, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryNotFound
+		}
+		return DeleteAdminSpaceCategoryResult{}, err
+	}
+	if target.IsDefault {
+		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryDefaultImmutable
+	}
+
+	defaultCategory, err := s.getDefaultSpaceCategory(ctx)
+	if err != nil {
+		return DeleteAdminSpaceCategoryResult{}, err
+	}
+	if strings.TrimSpace(defaultCategory.CategoryID) == categoryID {
+		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryDefaultImmutable
+	}
+
+	movedCount, deleted, err := s.spaceCategoryRepo.DeleteAndReassignSpaces(
+		ctx,
+		categoryID,
+		defaultCategory.CategoryID,
+		defaultCategory.Name,
+		time.Now().UTC(),
+	)
+	if err != nil {
+		return DeleteAdminSpaceCategoryResult{}, err
+	}
+	if !deleted {
+		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryNotFound
+	}
+
+	result := DeleteAdminSpaceCategoryResult{
+		CategoryID:             categoryID,
+		ReassignedToCategoryID: defaultCategory.CategoryID,
+		ReassignedToName:       defaultCategory.Name,
+		MovedSpaceCount:        movedCount,
+	}
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionDelete,
+		TargetType: "space_category",
+		TargetID:   categoryID,
+		Summary:    "space category deleted: " + categoryID,
+		Detail: map[string]any{
+			"categoryId":             categoryID,
+			"name":                   target.Name,
+			"movedSpaceCount":        movedCount,
+			"reassignedToCategoryId": defaultCategory.CategoryID,
+			"reassignedToName":       defaultCategory.Name,
+		},
+	}); err != nil {
+		return DeleteAdminSpaceCategoryResult{}, err
+	}
+
+	return result, nil
 }
 
 // ListMembers 查询后台空间成员列表。
@@ -603,6 +944,10 @@ func (s *AdminSpaceService) CreateSpace(
 	if len([]rune(description)) > maxAdminSpaceDescLength {
 		return AdminSpaceRecord{}, ErrAdminSpaceInvalidDescription
 	}
+	resolvedCategory, err := s.resolveSpaceCategoryByID(ctx, input.CategoryID)
+	if err != nil {
+		return AdminSpaceRecord{}, err
+	}
 
 	visibility := input.Visibility
 	if !models.IsValidVisibility(visibility) {
@@ -643,6 +988,8 @@ func (s *AdminSpaceService) CreateSpace(
 		SpaceID:      strings.ToLower(ulid.Make().String()),
 		Name:         name,
 		Description:  description,
+		CategoryID:   resolvedCategory.CategoryID,
+		Category:     resolvedCategory.Name,
 		OwnerUserID:  actorUserID,
 		Visibility:   visibility,
 		CoverAssetID: coverAssetID,
@@ -676,6 +1023,8 @@ func (s *AdminSpaceService) CreateSpace(
 			SpaceID:      space.SpaceID,
 			Name:         space.Name,
 			Description:  space.Description,
+			CategoryID:   space.CategoryID,
+			Category:     space.Category,
 			OwnerUserID:  space.OwnerUserID,
 			Visibility:   space.Visibility,
 			CoverAssetID: space.CoverAssetID,
@@ -691,8 +1040,11 @@ func (s *AdminSpaceService) CreateSpace(
 			CreatedAt:    space.CreatedAt,
 			UpdatedAt:    space.UpdatedAt,
 		},
-		OwnerName:  ownerName,
-		OwnerEmail: ownerEmail,
+		CategoryID:    space.CategoryID,
+		CategoryName:  space.Category,
+		CategoryIsDef: resolvedCategory.IsDefault,
+		OwnerName:     ownerName,
+		OwnerEmail:    ownerEmail,
 	})
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
@@ -704,6 +1056,8 @@ func (s *AdminSpaceService) CreateSpace(
 		Detail: map[string]any{
 			"name":         record.Name,
 			"description":  record.Description,
+			"categoryId":   record.CategoryID,
+			"category":     record.Category,
 			"visibility":   record.Visibility,
 			"coverAssetId": strings.TrimSpace(input.CoverAssetID),
 		},
@@ -857,7 +1211,7 @@ func (s *AdminSpaceService) UpdateMetadata(
 		return AdminSpaceRecord{}, err
 	}
 
-	if input.Name == nil && input.Visibility == nil && input.Description == nil && input.CoverAssetID == nil {
+	if input.Name == nil && input.Visibility == nil && input.Description == nil && input.CategoryID == nil && input.CoverAssetID == nil {
 		return AdminSpaceRecord{}, ErrAdminSpaceNoMetadataChange
 	}
 
@@ -877,6 +1231,21 @@ func (s *AdminSpaceService) UpdateMetadata(
 			return AdminSpaceRecord{}, ErrAdminSpaceInvalidDescription
 		}
 		normalizedDescription = &description
+	}
+
+	var (
+		normalizedCategoryID *string
+		normalizedCategory   *string
+	)
+	if input.CategoryID != nil {
+		resolvedCategory, err := s.resolveSpaceCategoryByID(ctx, *input.CategoryID)
+		if err != nil {
+			return AdminSpaceRecord{}, err
+		}
+		categoryID := strings.TrimSpace(resolvedCategory.CategoryID)
+		categoryName := strings.TrimSpace(resolvedCategory.Name)
+		normalizedCategoryID = &categoryID
+		normalizedCategory = &categoryName
 	}
 
 	var normalizedVisibility *models.Visibility
@@ -947,6 +1316,8 @@ func (s *AdminSpaceService) UpdateMetadata(
 		SpaceID:      spaceID,
 		Name:         normalizedName,
 		Description:  normalizedDescription,
+		CategoryID:   normalizedCategoryID,
+		Category:     normalizedCategory,
 		Visibility:   normalizedVisibility,
 		CoverAssetID: normalizedCoverAssetID,
 		CoverKey:     normalizedCoverKey,
@@ -996,6 +1367,12 @@ func (s *AdminSpaceService) UpdateMetadata(
 	if normalizedDescription != nil {
 		detail["descriptionBefore"] = snapshot.Description
 		detail["descriptionAfter"] = record.Description
+	}
+	if normalizedCategory != nil {
+		detail["categoryIdBefore"] = snapshot.CategoryID
+		detail["categoryIdAfter"] = record.CategoryID
+		detail["categoryBefore"] = snapshot.Category
+		detail["categoryAfter"] = record.Category
 	}
 	if input.CoverAssetID != nil {
 		beforeCoverURL := strings.TrimSpace(snapshot.CoverURL)
@@ -1565,6 +1942,93 @@ func normalizeEditableAdminSpaceMemberRole(value models.Role) models.Role {
 	}
 }
 
+func normalizeAdminSpaceCategoryName(rawName string) (string, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		return "", ErrAdminSpaceInvalidCategory
+	}
+	if len([]rune(name)) > maxAdminSpaceCategoryLen {
+		return "", ErrAdminSpaceInvalidCategory
+	}
+	return name, nil
+}
+
+func (s *AdminSpaceService) getDefaultSpaceCategory(ctx context.Context) (models.SpaceCategory, error) {
+	if s == nil || s.spaceCategoryRepo == nil {
+		return models.SpaceCategory{}, errors.New("admin space service dependencies are nil")
+	}
+
+	defaultCategory, err := s.spaceCategoryRepo.GetDefault(ctx)
+	if err == nil && defaultCategory != nil {
+		defaultCategory.CategoryID = strings.TrimSpace(defaultCategory.CategoryID)
+		defaultCategory.Name = strings.TrimSpace(defaultCategory.Name)
+		if defaultCategory.CategoryID != "" && defaultCategory.Name != "" {
+			return *defaultCategory, nil
+		}
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.SpaceCategory{}, err
+	}
+
+	now := time.Now().UTC()
+	seed := &models.SpaceCategory{
+		CategoryID: models.DefaultSpaceCategoryID,
+		Name:       models.DefaultSpaceCategoryName,
+		IsDefault:  true,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if createErr := s.spaceCategoryRepo.Create(ctx, seed); createErr != nil {
+		if !errors.Is(createErr, gorm.ErrDuplicatedKey) && !strings.Contains(strings.ToLower(createErr.Error()), "unique") {
+			return models.SpaceCategory{}, createErr
+		}
+	}
+	defaultCategory, err = s.spaceCategoryRepo.GetDefault(ctx)
+	if err != nil {
+		return models.SpaceCategory{}, err
+	}
+	if defaultCategory == nil {
+		return models.SpaceCategory{}, ErrAdminSpaceCategoryNotFound
+	}
+	defaultCategory.CategoryID = strings.TrimSpace(defaultCategory.CategoryID)
+	defaultCategory.Name = strings.TrimSpace(defaultCategory.Name)
+	if defaultCategory.CategoryID == "" || defaultCategory.Name == "" {
+		return models.SpaceCategory{}, ErrAdminSpaceCategoryNotFound
+	}
+	return *defaultCategory, nil
+}
+
+func (s *AdminSpaceService) resolveSpaceCategoryByID(
+	ctx context.Context,
+	rawCategoryID string,
+) (models.SpaceCategory, error) {
+	if s == nil || s.spaceCategoryRepo == nil {
+		return models.SpaceCategory{}, errors.New("admin space service dependencies are nil")
+	}
+	categoryID := strings.TrimSpace(rawCategoryID)
+	if categoryID == "" {
+		return s.getDefaultSpaceCategory(ctx)
+	}
+
+	category, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.SpaceCategory{}, ErrAdminSpaceInvalidCategory
+		}
+		return models.SpaceCategory{}, err
+	}
+	if category == nil {
+		return models.SpaceCategory{}, ErrAdminSpaceInvalidCategory
+	}
+
+	category.CategoryID = strings.TrimSpace(category.CategoryID)
+	category.Name = strings.TrimSpace(category.Name)
+	if category.CategoryID == "" || category.Name == "" {
+		return models.SpaceCategory{}, ErrAdminSpaceInvalidCategory
+	}
+	return *category, nil
+}
+
 func resolveAdminSpaceStatuses(filter AdminSpaceStatusFilter) ([]models.EntityStatus, error) {
 	switch normalizeAdminSpaceStatusFilter(filter) {
 	case "":
@@ -1649,6 +2113,18 @@ func mapAdminSpaceRecord(record repository.AdminSpaceListRecord) AdminSpaceRecor
 		status = models.EntityStatusActive
 	}
 	description := strings.TrimSpace(space.Description)
+	categoryID := strings.TrimSpace(record.CategoryID)
+	if categoryID == "" {
+		categoryID = strings.TrimSpace(space.CategoryID)
+	}
+	category := strings.TrimSpace(record.CategoryName)
+	if category == "" {
+		category = strings.TrimSpace(space.Category)
+	}
+	categoryIsDefault := record.CategoryIsDef
+	if !categoryIsDefault && categoryID == models.DefaultSpaceCategoryID {
+		categoryIsDefault = true
+	}
 	coverKey := strings.TrimSpace(space.CoverKey)
 	coverURL := strings.TrimSpace(space.CoverURL)
 	coverSource := normalizeAdminSpaceCoverSource(AdminSpaceCoverSource(strings.TrimSpace(space.CoverSource)))
@@ -1681,20 +2157,23 @@ func mapAdminSpaceRecord(record repository.AdminSpaceListRecord) AdminSpaceRecor
 	}
 
 	return AdminSpaceRecord{
-		SpaceID:      space.SpaceID,
-		Name:         strings.TrimSpace(space.Name),
-		Description:  description,
-		OwnerUserID:  space.OwnerUserID,
-		OwnerName:    record.OwnerName,
-		OwnerEmail:   record.OwnerEmail,
-		Visibility:   visibility,
-		Cover:        cover,
-		Status:       status,
-		BannedReason: space.BannedReason,
-		BannedAt:     space.BannedAt,
-		DeletedAt:    space.DeletedAt,
-		CreatedAt:    space.CreatedAt,
-		UpdatedAt:    space.UpdatedAt,
+		SpaceID:           space.SpaceID,
+		Name:              strings.TrimSpace(space.Name),
+		Description:       description,
+		CategoryID:        categoryID,
+		Category:          category,
+		CategoryIsDefault: categoryIsDefault,
+		OwnerUserID:       space.OwnerUserID,
+		OwnerName:         record.OwnerName,
+		OwnerEmail:        record.OwnerEmail,
+		Visibility:        visibility,
+		Cover:             cover,
+		Status:            status,
+		BannedReason:      space.BannedReason,
+		BannedAt:          space.BannedAt,
+		DeletedAt:         space.DeletedAt,
+		CreatedAt:         space.CreatedAt,
+		UpdatedAt:         space.UpdatedAt,
 	}
 }
 

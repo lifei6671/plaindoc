@@ -439,6 +439,18 @@ const adminGateway: AdminGateway = {
   async createSpaceCoverAsset() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },
+  async listSpaceCategories() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async createSpaceCategory() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async renameSpaceCategory() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
+  async deleteSpaceCategory() {
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
   async listSpaces() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },
