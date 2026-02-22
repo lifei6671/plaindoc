@@ -70,6 +70,9 @@ type AdminRoleRepository interface {
 // SpaceAdminScopeRepository 空间管理范围仓储接口。
 type SpaceAdminScopeRepository interface {
 	HasScope(ctx context.Context, userID string, spaceID string) (bool, error)
+	UpsertScope(ctx context.Context, userID string, spaceID string) error
+	DeleteScope(ctx context.Context, userID string, spaceID string) error
+	ListByUserID(ctx context.Context, userID string) ([]string, error)
 }
 
 // SpaceRepository 空间仓储最小接口。
@@ -83,6 +86,8 @@ type SpaceRepository interface {
 	UpdateVisibility(ctx context.Context, spaceID string, visibility models.Visibility) (*models.Space, error)
 	UpdateStatus(ctx context.Context, params UpdateSpaceStatusParams) (bool, error)
 	UpdateMetadata(ctx context.Context, params UpdateSpaceMetadataParams) (bool, error)
+	IsMember(ctx context.Context, spaceID string, userID string) (bool, error)
+	TransferOwnership(ctx context.Context, spaceID string, fromUserID string, toUserID string, updatedAt time.Time) (bool, error)
 	SoftDelete(ctx context.Context, spaceID string, deletedAt time.Time) (bool, error)
 	HasReaderAccess(ctx context.Context, spaceID string, userID string) (bool, error)
 }
@@ -105,12 +110,19 @@ type AdminSpaceListRecord struct {
 	OwnerEmail string
 }
 
-// UpdateSpaceMetadataParams 管理后台空间元数据更新参数。
+// UpdateSpaceMetadataParams 管理后台空间元数据更新参数（包含描述与封面字段的可选更新）。
 type UpdateSpaceMetadataParams struct {
-	SpaceID    string
-	Name       *string
-	Visibility *models.Visibility
-	UpdatedAt  time.Time
+	SpaceID      string
+	Name         *string
+	Description  *string
+	Visibility   *models.Visibility
+	CoverAssetID *string
+	CoverKey     *string
+	CoverURL     *string
+	CoverWidth   *int
+	CoverHeight  *int
+	CoverSource  *string
+	UpdatedAt    time.Time
 }
 
 // UpdateSpaceStatusParams 管理后台空间状态更新参数。

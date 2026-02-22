@@ -71,7 +71,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		adminAuditHandler := handler.NewAdminAuditHandler(adminAuditService)
 		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminRoleRepo, adminAccessService, adminAuditService)
 		adminUserHandler := handler.NewAdminUserHandler(adminUserService)
-		adminSpaceService := service.NewAdminSpaceService(spaceRepo, userRepo, adminAccessService, adminAuditService)
+		adminSpaceService := service.NewAdminSpaceService(spaceRepo, userRepo, adminRoleRepo, spaceAdminScopeRepo, adminAccessService, adminAuditService)
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
 		adminDocumentService := service.NewAdminDocumentService(documentRepo, userRepo, adminAccessService, adminAuditService)
 		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
@@ -159,6 +159,19 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 				"/spaces/:spaceId/metadata",
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
 				adminSpaceHandler.UpdateMetadata,
+			)
+			adminAPI.POST(
+				"/spaces/:spaceId/transfer",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "space.transfer",
+						TargetType:    "space",
+						TargetIDParam: "spaceId",
+					},
+				),
+				adminSpaceHandler.TransferOwnership,
 			)
 			adminAPI.DELETE(
 				"/spaces/:spaceId",

@@ -15,7 +15,7 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
-import type { DataGateway, Visibility } from "../../data-access";
+import type { AdminSpace, AdminSpaceCover, DataGateway, Visibility } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import { showToast } from "../../components/ui/toast";
 
@@ -40,7 +40,7 @@ interface LoadedImageData {
   fileName: string;
 }
 
-// 封面仅做前端预览，点击“创建空间”时再统一上传到后端。
+// 封面仅做前端预览，点击“保存设置”时再统一上传到后端。
 interface PendingCoverPreview {
   sourceLabel: "user_upload" | "system_generated";
   file: File;
@@ -50,11 +50,12 @@ interface PendingCoverPreview {
   previewUrl: string;
 }
 
-interface AdminCreateSpaceDialogProps {
+interface AdminSpaceSettingsDialogProps {
   open: boolean;
+  space: AdminSpace | null;
   dataGateway: DataGateway;
   onOpenChange: (open: boolean) => void;
-  onCreated: () => Promise<void> | void;
+  onUpdated: () => Promise<void> | void;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -391,8 +392,14 @@ async function exportCroppedWebP(
   };
 }
 
-export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCreated }: AdminCreateSpaceDialogProps) {
-  // 管理后台新建空间弹窗：负责表单、封面本地预览与创建提交流程。
+// 管理后台空间设置弹窗：负责表单回填、封面预览与更新提交流程。
+export function AdminSpaceSettingsDialog({
+  open,
+  space,
+  dataGateway,
+  onOpenChange,
+  onUpdated
+}: AdminSpaceSettingsDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("member");
@@ -404,8 +411,9 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
   const [offsetY, setOffsetY] = useState(0);
 
   const [uploadingCover, setUploadingCover] = useState(false);
-  const [creatingSpace, setCreatingSpace] = useState(false);
+  const [savingSpace, setSavingSpace] = useState(false);
   const [pendingCover, setPendingCover] = useState<PendingCoverPreview | null>(null);
+  const [existingCover, setExistingCover] = useState<AdminSpaceCover | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragStartRef = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
@@ -438,7 +446,8 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
   }, [loadedImage?.objectURL]);
 
   const frameInfo = useMemo(() => computeFrameScale(loadedImage, zoom), [loadedImage, zoom]);
-  const coverPreviewUrl = pendingCover?.previewUrl?.trim() || "";
+  const coverPreviewUrl = pendingCover?.previewUrl?.trim() || existingCover?.url?.trim() || "";
+  const pendingCoverResetLabel = existingCover ? "恢复当前封面" : "清除预览";
 
   const clearPendingCover = useCallback(() => {
     setPendingCover((previous) => {
@@ -449,6 +458,30 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
     });
   }, []);
 
+  useEffect(() => {
+    if (!open || !space) {
+      return;
+    }
+    // 打开设置弹窗时回填空间数据，确保展示当前配置。
+    setName(space.name ?? "");
+    setDescription(space.description ?? "");
+    setVisibility(space.visibility ?? "member");
+    setCoverMode("user_upload");
+    setZoom(1);
+    setOffsetX(0);
+    setOffsetY(0);
+    setExistingCover(space.cover ?? null);
+    clearPendingCover();
+    setUploadingCover(false);
+    setSavingSpace(false);
+    setLoadedImage((previous) => {
+      if (previous?.objectURL) {
+        URL.revokeObjectURL(previous.objectURL);
+      }
+      return null;
+    });
+  }, [clearPendingCover, open, space]);
+
   const resetDialog = useCallback(() => {
     setName("");
     setDescription("");
@@ -458,8 +491,9 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
     setOffsetX(0);
     setOffsetY(0);
     clearPendingCover();
+    setExistingCover(null);
     setUploadingCover(false);
-    setCreatingSpace(false);
+    setSavingSpace(false);
     setLoadedImage((previous) => {
       if (previous?.objectURL) {
         URL.revokeObjectURL(previous.objectURL);
@@ -469,12 +503,12 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
   }, []);
 
   const closeDialog = useCallback(() => {
-    if (uploadingCover || creatingSpace) {
+    if (uploadingCover || savingSpace) {
       return;
     }
     resetDialog();
     onOpenChange(false);
-  }, [creatingSpace, onOpenChange, resetDialog, uploadingCover]);
+  }, [onOpenChange, resetDialog, savingSpace, uploadingCover]);
 
   const applyClampedOffsets = useCallback(
     (nextX: number, nextY: number, nextZoom: number = zoom) => {
@@ -608,7 +642,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
     }
     setUploadingCover(true);
     try {
-      // 系统封面在前端生成预览，创建时再统一上传。
+      // 系统封面在前端生成预览，保存设置时再统一上传。
       const generated = await exportSystemGeneratedWebP(trimmedName);
       const previewUrl = URL.createObjectURL(generated.file);
       setPendingCover((previous) => {
@@ -632,7 +666,12 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
     }
   }, [name]);
 
-  const handleCreateSpace = useCallback(async () => {
+  const handleSaveSettings = useCallback(async () => {
+    // 关键函数：校验表单并提交更新，必要时先上传封面资产。
+    if (!space) {
+      showToast("未找到可更新的空间");
+      return;
+    }
     const trimmedName = name.trim();
     if (!trimmedName) {
       showToast("空间名称不能为空");
@@ -642,15 +681,32 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
       showToast("空间名称最多 120 个字符");
       return;
     }
-    if (description.trim().length > 280) {
+    const trimmedDescription = description.trim();
+    if (trimmedDescription.length > 280) {
       showToast("空间简介最多 280 个字符");
       return;
     }
 
-    setCreatingSpace(true);
+    const updates: {
+      name?: string;
+      description?: string;
+      visibility?: Visibility;
+      coverAssetId?: string;
+    } = {};
+
+    if (trimmedName !== space.name.trim()) {
+      updates.name = trimmedName;
+    }
+    if (trimmedDescription !== (space.description ?? "").trim()) {
+      updates.description = trimmedDescription;
+    }
+    if (visibility !== space.visibility) {
+      updates.visibility = normalizeVisibility(visibility);
+    }
+
+    setSavingSpace(true);
     try {
-      // 若有封面预览，先上传封面再创建空间，保证预览与最终一致。
-      let coverAssetId: string | undefined;
+      // 若有封面预览，先上传封面再保存，保证预览与最终一致。
       if (pendingCover) {
         const payload = await dataGateway.admin.createSpaceCoverAsset({
           source: "user_upload",
@@ -660,24 +716,29 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
           clientMimeType: pendingCover.mimeType,
           clientProcessed: true
         });
-        coverAssetId = payload.assetId;
+        updates.coverAssetId = payload.assetId;
       }
-      await dataGateway.admin.createSpace({
-        name: trimmedName,
-        description,
-        visibility: normalizeVisibility(visibility),
-        coverAssetId
+
+      // 若没有任何字段变化则直接提示，避免空更新请求。
+      if (Object.keys(updates).length === 0) {
+        showToast("未检测到需要保存的变更");
+        return;
+      }
+
+      await dataGateway.admin.updateSpaceMetadata({
+        spaceId: space.spaceId,
+        ...updates
       });
-      showToast("空间创建成功", "success");
-      await onCreated();
+      showToast("空间设置已更新", "success");
+      await onUpdated();
       resetDialog();
       onOpenChange(false);
     } catch (error) {
-      showToast(`创建空间失败：${formatError(error)}`);
+      showToast(`保存空间设置失败：${formatError(error)}`);
     } finally {
-      setCreatingSpace(false);
+      setSavingSpace(false);
     }
-  }, [dataGateway.admin, description, name, onCreated, onOpenChange, pendingCover, resetDialog, visibility]);
+  }, [dataGateway.admin, description, name, onOpenChange, onUpdated, pendingCover, resetDialog, space, visibility]);
 
   if (!open) {
     return null;
@@ -695,10 +756,10 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
       <section className="grid max-h-[92vh] w-full max-w-[980px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.25)]">
         <header className="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-sky-50 px-5 py-4">
           <div className="space-y-1">
-            <h3 className="text-lg font-semibold text-slate-900">新建空间</h3>
-            <p className="text-xs text-slate-600">支持封面上传裁剪或系统自动生成，创建后立即生效。</p>
+            <h3 className="text-lg font-semibold text-slate-900">空间设置</h3>
+            <p className="text-xs text-slate-600">支持修改名称、简介、可见性与封面，保存后立即生效。</p>
           </div>
-          <Button type="button" size="icon" variant="ghost" className="h-8 w-8" disabled={uploadingCover || creatingSpace} onClick={closeDialog}>
+          <Button type="button" size="icon" variant="ghost" className="h-8 w-8" disabled={uploadingCover || savingSpace} onClick={closeDialog}>
             <X size={16} />
           </Button>
         </header>
@@ -751,20 +812,20 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
                 <TabsContent value="user_upload" className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-                    <Button type="button" variant="outline" onClick={handlePickFile} disabled={uploadingCover || creatingSpace}>
+                    <Button type="button" variant="outline" onClick={handlePickFile} disabled={uploadingCover || savingSpace}>
                       <ImagePlus size={15} />
                       选择图片
                     </Button>
                     <Button
                       type="button"
                       variant="default"
-                      disabled={!loadedImage || uploadingCover || creatingSpace}
+                      disabled={!loadedImage || uploadingCover || savingSpace}
                       onClick={() => void handleUploadProcessedCover()}
                     >
                       {uploadingCover ? <LoaderCircle size={15} className="animate-spin" /> : <ImagePlus size={15} />}
                       裁剪并预览
                     </Button>
-                    <span className="text-xs text-slate-500">目标比例 5:8，前端导出 WebP 仅用于预览，创建时上传</span>
+                    <span className="text-xs text-slate-500">目标比例 5:8，前端导出 WebP 仅用于预览，保存时上传</span>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_200px]">
@@ -835,10 +896,10 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
                 </TabsContent>
 
                 <TabsContent value="system_generated" className="space-y-3">
-                  <p className="text-xs text-slate-600">系统将基于当前“空间名称”在前端生成简约风 SVG，再转 Canvas 导出 WebP 作为预览，创建时上传。</p>
+                  <p className="text-xs text-slate-600">系统将基于当前“空间名称”在前端生成简约风 SVG，再转 Canvas 导出 WebP 作为预览，保存时上传。</p>
                   <Button
                     type="button"
-                    disabled={uploadingCover || creatingSpace || !name.trim()}
+                    disabled={uploadingCover || savingSpace || !name.trim()}
                     onClick={() => void handleGenerateSystemCover()}
                   >
                     {uploadingCover ? <LoaderCircle size={15} className="animate-spin" /> : <WandSparkles size={15} />}
@@ -858,16 +919,27 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
                     <img src={coverPreviewUrl} alt="space-cover-preview" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full items-center justify-center px-4 text-center text-xs text-slate-500">
-                      尚未设置封面，创建后可继续编辑
+                      尚未设置封面，可在此上传或系统生成
                     </div>
                   )}
                 </div>
               </div>
               {pendingCover ? (
+                <div className="mt-2 space-y-2 rounded-md bg-slate-50 p-2 text-[11px] text-slate-600">
+                  <div>
+                    <p>来源：{pendingCover.sourceLabel === "system_generated" ? "系统生成" : "用户上传"}</p>
+                    <p>尺寸：{pendingCover.width} × {pendingCover.height}</p>
+                    <p>格式：{pendingCover.mimeType}</p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={clearPendingCover}>
+                    {pendingCoverResetLabel}
+                  </Button>
+                </div>
+              ) : existingCover ? (
                 <div className="mt-2 rounded-md bg-slate-50 p-2 text-[11px] text-slate-600">
-                  <p>来源：{pendingCover.sourceLabel === "system_generated" ? "系统生成" : "用户上传"}</p>
-                  <p>尺寸：{pendingCover.width} × {pendingCover.height}</p>
-                  <p>格式：{pendingCover.mimeType}</p>
+                  <p>当前封面来源：{existingCover.source === "system_generated" ? "系统生成" : "用户上传"}</p>
+                  <p>尺寸：{existingCover.width} × {existingCover.height}</p>
+                  <p>格式：{existingCover.mimeType}</p>
                 </div>
               ) : null}
             </div>
@@ -875,12 +947,12 @@ export function AdminCreateSpaceDialog({ open, dataGateway, onOpenChange, onCrea
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
-          <Button type="button" variant="outline" disabled={uploadingCover || creatingSpace} onClick={closeDialog}>
+          <Button type="button" variant="outline" disabled={uploadingCover || savingSpace} onClick={closeDialog}>
             取消
           </Button>
-          <Button type="button" disabled={creatingSpace || uploadingCover} onClick={() => void handleCreateSpace()}>
-            {creatingSpace ? <LoaderCircle size={15} className="animate-spin" /> : null}
-            创建空间
+          <Button type="button" disabled={savingSpace || uploadingCover} onClick={() => void handleSaveSettings()}>
+            {savingSpace ? <LoaderCircle size={15} className="animate-spin" /> : null}
+            保存设置
           </Button>
         </footer>
       </section>

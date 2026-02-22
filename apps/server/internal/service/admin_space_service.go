@@ -40,6 +40,10 @@ var (
 	ErrAdminSpaceCoverImageTooLarge      = errors.New("admin space cover image is too large")
 	ErrAdminSpaceCoverImageTooManyPixels = errors.New("admin space cover image has too many pixels")
 	ErrAdminSpaceFontUnavailable         = errors.New("admin space cover font is unavailable")
+	ErrAdminSpaceTransferTargetRequired  = errors.New("admin space transfer target is required")
+	ErrAdminSpaceTransferTargetNotFound  = errors.New("admin space transfer target not found")
+	ErrAdminSpaceTransferTargetNotMember = errors.New("admin space transfer target not member")
+	ErrAdminSpaceTransferToSelf          = errors.New("admin space transfer to self")
 )
 
 // AdminSpaceCoverSource 定义空间封面来源。
@@ -153,7 +157,18 @@ type UpdateAdminSpaceMetadataInput struct {
 	RequestID   string
 	SpaceID     string
 	Name        *string
+	Description *string
 	Visibility  *models.Visibility
+	CoverAssetID *string
+}
+
+// TransferAdminSpaceOwnershipInput 后台空间转让参数。
+type TransferAdminSpaceOwnershipInput struct {
+	ActorUserID  string
+	RequestID    string
+	SpaceID      string
+	TargetUserID string
+	TargetEmail  string
 }
 
 // UpdateAdminSpaceStatusInput 后台空间状态更新参数。
@@ -169,6 +184,8 @@ type UpdateAdminSpaceStatusInput struct {
 type AdminSpaceService struct {
 	spaceRepo          repository.SpaceRepository
 	userRepo           repository.UserRepository
+	adminRoleRepo      repository.AdminRoleRepository
+	spaceScopeRepo     repository.SpaceAdminScopeRepository
 	adminAccessService *AdminAccessService
 	adminAuditService  *AdminAuditService
 }
@@ -177,12 +194,16 @@ type AdminSpaceService struct {
 func NewAdminSpaceService(
 	spaceRepo repository.SpaceRepository,
 	userRepo repository.UserRepository,
+	adminRoleRepo repository.AdminRoleRepository,
+	spaceScopeRepo repository.SpaceAdminScopeRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
 ) *AdminSpaceService {
 	return &AdminSpaceService{
 		spaceRepo:          spaceRepo,
 		userRepo:           userRepo,
+		adminRoleRepo:      adminRoleRepo,
+		spaceScopeRepo:     spaceScopeRepo,
 		adminAccessService: adminAccessService,
 		adminAuditService:  adminAuditService,
 	}
@@ -508,7 +529,7 @@ func (s *AdminSpaceService) CreateCoverAsset(
 	return payload, nil
 }
 
-// UpdateMetadata 更新后台空间元数据（名称、可见性）。
+// UpdateMetadata 更新后台空间元数据（名称、简介、可见性与封面）。
 func (s *AdminSpaceService) UpdateMetadata(
 	ctx context.Context,
 	input UpdateAdminSpaceMetadataInput,
@@ -527,7 +548,7 @@ func (s *AdminSpaceService) UpdateMetadata(
 		return AdminSpaceRecord{}, err
 	}
 
-	if input.Name == nil && input.Visibility == nil {
+	if input.Name == nil && input.Visibility == nil && input.Description == nil && input.CoverAssetID == nil {
 		return AdminSpaceRecord{}, ErrAdminSpaceNoMetadataChange
 	}
 
@@ -540,6 +561,15 @@ func (s *AdminSpaceService) UpdateMetadata(
 		normalizedName = &name
 	}
 
+	var normalizedDescription *string
+	if input.Description != nil {
+		description := strings.TrimSpace(*input.Description)
+		if len([]rune(description)) > maxAdminSpaceDescLength {
+			return AdminSpaceRecord{}, ErrAdminSpaceInvalidDescription
+		}
+		normalizedDescription = &description
+	}
+
 	var normalizedVisibility *models.Visibility
 	if input.Visibility != nil {
 		if !models.IsValidVisibility(*input.Visibility) {
@@ -547,6 +577,50 @@ func (s *AdminSpaceService) UpdateMetadata(
 		}
 		visibility := *input.Visibility
 		normalizedVisibility = &visibility
+	}
+
+	var (
+		normalizedCoverAssetID *string
+		normalizedCoverKey     *string
+		normalizedCoverURL     *string
+		normalizedCoverSource  *string
+		normalizedCoverWidth   *int
+		normalizedCoverHeight  *int
+	)
+	if input.CoverAssetID != nil {
+		trimmedCoverAssetID := strings.TrimSpace(*input.CoverAssetID)
+		if trimmedCoverAssetID == "" {
+			// 关键分支：显式清空封面，需把封面字段重置为默认值。
+			empty := ""
+			zero := 0
+			normalizedCoverAssetID = &empty
+			normalizedCoverKey = &empty
+			normalizedCoverURL = &empty
+			normalizedCoverSource = &empty
+			normalizedCoverWidth = &zero
+			normalizedCoverHeight = &zero
+		} else {
+			coverAsset, err := s.spaceRepo.GetCoverAssetByAssetID(ctx, trimmedCoverAssetID)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return AdminSpaceRecord{}, ErrAdminSpaceCoverAssetNotFound
+				}
+				return AdminSpaceRecord{}, err
+			}
+
+			assetID := strings.TrimSpace(coverAsset.AssetID)
+			coverKey := strings.TrimSpace(coverAsset.ObjectKey)
+			coverURL := strings.TrimSpace(coverAsset.ObjectURL)
+			coverSource := strings.TrimSpace(coverAsset.Source)
+			width := coverAsset.Width
+			height := coverAsset.Height
+			normalizedCoverAssetID = &assetID
+			normalizedCoverKey = &coverKey
+			normalizedCoverURL = &coverURL
+			normalizedCoverSource = &coverSource
+			normalizedCoverWidth = &width
+			normalizedCoverHeight = &height
+		}
 	}
 
 	snapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
@@ -561,10 +635,17 @@ func (s *AdminSpaceService) UpdateMetadata(
 	}
 
 	updated, err := s.spaceRepo.UpdateMetadata(ctx, repository.UpdateSpaceMetadataParams{
-		SpaceID:    spaceID,
-		Name:       normalizedName,
-		Visibility: normalizedVisibility,
-		UpdatedAt:  time.Now().UTC(),
+		SpaceID:      spaceID,
+		Name:         normalizedName,
+		Description:  normalizedDescription,
+		Visibility:   normalizedVisibility,
+		CoverAssetID: normalizedCoverAssetID,
+		CoverKey:     normalizedCoverKey,
+		CoverURL:     normalizedCoverURL,
+		CoverWidth:   normalizedCoverWidth,
+		CoverHeight:  normalizedCoverHeight,
+		CoverSource:  normalizedCoverSource,
+		UpdatedAt:    time.Now().UTC(),
 	})
 	if err != nil {
 		return AdminSpaceRecord{}, err
@@ -603,12 +684,163 @@ func (s *AdminSpaceService) UpdateMetadata(
 		"visibilityBefore": snapshot.Visibility,
 		"visibilityAfter":  record.Visibility,
 	}
+	if normalizedDescription != nil {
+		detail["descriptionBefore"] = snapshot.Description
+		detail["descriptionAfter"] = record.Description
+	}
+	if input.CoverAssetID != nil {
+		beforeCoverURL := strings.TrimSpace(snapshot.CoverURL)
+		afterCoverURL := ""
+		afterCoverSource := ""
+		if record.Cover != nil {
+			afterCoverURL = record.Cover.URL
+			afterCoverSource = string(record.Cover.Source)
+		}
+		detail["coverURLBefore"] = beforeCoverURL
+		detail["coverURLAfter"] = afterCoverURL
+		detail["coverSourceAfter"] = afterCoverSource
+	}
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleSpace,
 		Action:     AdminAuditActionUpdate,
 		TargetType: "space",
 		TargetID:   record.SpaceID,
 		Summary:    "space metadata updated: " + record.SpaceID,
+		Detail:     detail,
+	}); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+
+	return record, nil
+}
+
+// TransferOwnership 转让空间归属（当前 owner -> 目标成员）。
+func (s *AdminSpaceService) TransferOwnership(
+	ctx context.Context,
+	input TransferAdminSpaceOwnershipInput,
+) (AdminSpaceRecord, error) {
+	if s == nil || s.spaceRepo == nil || s.userRepo == nil || s.adminAccessService == nil || s.adminRoleRepo == nil || s.spaceScopeRepo == nil {
+		return AdminSpaceRecord{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	spaceID := strings.TrimSpace(input.SpaceID)
+	if spaceID == "" {
+		return AdminSpaceRecord{}, ErrAdminSpaceInvalidSpaceID
+	}
+	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+
+	targetUserID := strings.TrimSpace(input.TargetUserID)
+	targetEmail := strings.TrimSpace(input.TargetEmail)
+	if targetUserID == "" && targetEmail == "" {
+		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetRequired
+	}
+
+	var targetUser *models.User
+	var err error
+	if targetUserID != "" {
+		targetUser, err = s.userRepo.GetByUserID(ctx, targetUserID)
+	} else {
+		targetUser, err = s.userRepo.GetByEmail(ctx, targetEmail)
+	}
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotFound
+		}
+		return AdminSpaceRecord{}, err
+	}
+	if targetUser == nil {
+		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotFound
+	}
+	targetUserID = strings.TrimSpace(targetUser.UserID)
+	if targetUserID == "" {
+		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotFound
+	}
+
+	snapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+		}
+		return AdminSpaceRecord{}, err
+	}
+	if normalizeEntityStatus(snapshot.Status) == models.EntityStatusDeleted || snapshot.DeletedAt != nil {
+		return AdminSpaceRecord{}, ErrAdminSpaceAlreadyDeleted
+	}
+
+	if strings.TrimSpace(snapshot.OwnerUserID) == targetUserID {
+		return AdminSpaceRecord{}, ErrAdminSpaceTransferToSelf
+	}
+
+	isMember, err := s.spaceRepo.IsMember(ctx, spaceID, targetUserID)
+	if err != nil {
+		return AdminSpaceRecord{}, err
+	}
+	if !isMember {
+		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotMember
+	}
+
+	updated, err := s.spaceRepo.TransferOwnership(ctx, spaceID, snapshot.OwnerUserID, targetUserID, time.Now().UTC())
+	if err != nil {
+		return AdminSpaceRecord{}, err
+	}
+	if !updated {
+		return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+	}
+
+	// 目标用户升级为空间管理员，并绑定空间管理范围。
+	if err := s.spaceScopeRepo.UpsertScope(ctx, targetUserID, spaceID); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+	if err := s.ensureSpaceAdminRole(ctx, targetUserID); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+
+	// 当前 owner 降级为协作者，移除当前空间的管理范围。
+	if err := s.spaceScopeRepo.DeleteScope(ctx, snapshot.OwnerUserID, spaceID); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+	if err := s.dropSpaceAdminRoleWhenNoScopes(ctx, snapshot.OwnerUserID); err != nil {
+		return AdminSpaceRecord{}, err
+	}
+
+	latest, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+		}
+		return AdminSpaceRecord{}, err
+	}
+
+	ownerName := ""
+	ownerEmail := ""
+	if s.userRepo != nil {
+		ownerUser, ownerErr := s.userRepo.GetByUserID(ctx, latest.OwnerUserID)
+		if ownerErr == nil && ownerUser != nil {
+			ownerName = ownerUser.Name
+			ownerEmail = ownerUser.Email
+		}
+	}
+
+	record := mapAdminSpaceRecord(repository.AdminSpaceListRecord{
+		Space:      *latest,
+		OwnerName:  ownerName,
+		OwnerEmail: ownerEmail,
+	})
+
+	detail := map[string]any{
+		"ownerBefore": snapshot.OwnerUserID,
+		"ownerAfter":  targetUserID,
+		"targetEmail": targetUser.Email,
+	}
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "space",
+		TargetID:   record.SpaceID,
+		Summary:    "space ownership transferred: " + record.SpaceID,
 		Detail:     detail,
 	}); err != nil {
 		return AdminSpaceRecord{}, err
@@ -785,6 +1017,73 @@ func (s *AdminSpaceService) ensureCanManageSpace(ctx context.Context, actorUserI
 		return ErrAdminForbidden
 	}
 	return nil
+}
+
+func (s *AdminSpaceService) ensureSpaceAdminRole(ctx context.Context, userID string) error {
+	// 关键函数：保证目标用户具备 space_admin 管理角色。
+	if s == nil || s.adminRoleRepo == nil {
+		return errors.New("admin space service adminRoleRepo is nil")
+	}
+	normalizedUserID := strings.TrimSpace(userID)
+	if normalizedUserID == "" {
+		return nil
+	}
+
+	roles, err := s.adminRoleRepo.ListByUserID(ctx, normalizedUserID)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if role == models.AdminRoleSpaceAdmin {
+			return nil
+		}
+	}
+
+	roles = append(roles, models.AdminRoleSpaceAdmin)
+	return s.adminRoleRepo.ReplaceByUserID(ctx, normalizedUserID, roles)
+}
+
+func (s *AdminSpaceService) dropSpaceAdminRoleWhenNoScopes(ctx context.Context, userID string) error {
+	// 关键函数：无任何管理范围时移除 space_admin 角色，避免保留后台入口。
+	if s == nil || s.adminRoleRepo == nil || s.spaceScopeRepo == nil {
+		return errors.New("admin space service dependencies are nil")
+	}
+	normalizedUserID := strings.TrimSpace(userID)
+	if normalizedUserID == "" {
+		return nil
+	}
+
+	roles, err := s.adminRoleRepo.ListByUserID(ctx, normalizedUserID)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if role == models.AdminRolePlatformAdmin {
+			return nil
+		}
+	}
+
+	scopes, err := s.spaceScopeRepo.ListByUserID(ctx, normalizedUserID)
+	if err != nil {
+		return err
+	}
+	if len(scopes) > 0 {
+		return nil
+	}
+
+	filtered := make([]models.AdminRole, 0, len(roles))
+	removed := false
+	for _, role := range roles {
+		if role == models.AdminRoleSpaceAdmin {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, role)
+	}
+	if !removed {
+		return nil
+	}
+	return s.adminRoleRepo.ReplaceByUserID(ctx, normalizedUserID, filtered)
 }
 
 func (s *AdminSpaceService) resolveScopeRestriction(ctx context.Context, actorUserID string) (bool, error) {

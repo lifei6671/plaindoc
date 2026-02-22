@@ -372,7 +372,15 @@ export interface AdminGateway {
   }): Promise<AdminSpaceCover>;
   listSpaces(input?: AdminSpaceListInput): Promise<AdminSpaceListResult>;
   updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }): Promise<AdminSpace>;
-  updateSpaceMetadata(input: { spaceId: string; name?: string; visibility?: Visibility }): Promise<AdminSpace>;
+  updateSpaceMetadata(input: {
+    spaceId: string;
+    name?: string;
+    description?: string;
+    visibility?: Visibility;
+    coverAssetId?: string;
+  }): Promise<AdminSpace>;
+  // 空间管理：转让空间归属（管理员操作）。
+  transferSpaceOwnership(input: { spaceId: string; targetUserId?: string; targetEmail?: string }): Promise<AdminSpace>;
   deleteSpace(spaceId: string): Promise<void>;
   listDocuments(input?: AdminDocumentListInput): Promise<AdminDocumentListResult>;
   updateDocumentStatus(input: { documentId: string; status: "active" | "banned"; reason?: string }): Promise<AdminDocument>;

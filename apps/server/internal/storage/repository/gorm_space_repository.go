@@ -9,6 +9,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormSpaceRepository struct {
@@ -498,11 +499,38 @@ func (r *gormSpaceRepository) UpdateMetadata(ctx context.Context, params UpdateS
 	if params.Name != nil {
 		updateValues["name"] = strings.TrimSpace(*params.Name)
 	}
+	if params.Description != nil {
+		updateValues["description"] = strings.TrimSpace(*params.Description)
+	}
 	if params.Visibility != nil {
 		if !models.IsValidVisibility(*params.Visibility) {
 			return false, nil
 		}
 		updateValues["visibility"] = *params.Visibility
+	}
+	if params.CoverAssetID != nil {
+		// 关键分支：封面更新允许清空（传空字符串时转为 NULL）。
+		trimmed := strings.TrimSpace(*params.CoverAssetID)
+		if trimmed == "" {
+			updateValues["cover_asset_id"] = nil
+		} else {
+			updateValues["cover_asset_id"] = trimmed
+		}
+	}
+	if params.CoverKey != nil {
+		updateValues["cover_key"] = strings.TrimSpace(*params.CoverKey)
+	}
+	if params.CoverURL != nil {
+		updateValues["cover_url"] = strings.TrimSpace(*params.CoverURL)
+	}
+	if params.CoverSource != nil {
+		updateValues["cover_source"] = strings.TrimSpace(*params.CoverSource)
+	}
+	if params.CoverWidth != nil {
+		updateValues["cover_width"] = *params.CoverWidth
+	}
+	if params.CoverHeight != nil {
+		updateValues["cover_height"] = *params.CoverHeight
 	}
 
 	tx := r.db.WithContext(ctx).
@@ -514,6 +542,95 @@ func (r *gormSpaceRepository) UpdateMetadata(ctx context.Context, params UpdateS
 	}
 
 	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormSpaceRepository) IsMember(ctx context.Context, spaceID string, userID string) (bool, error) {
+	// 关键函数：校验用户是否为指定空间成员（用于转让前置校验）。
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(userID) == "" {
+		return false, nil
+	}
+
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("space_members").
+		Where("space_id = ? AND user_id = ?", spaceID, userID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *gormSpaceRepository) TransferOwnership(
+	ctx context.Context,
+	spaceID string,
+	fromUserID string,
+	toUserID string,
+	updatedAt time.Time,
+) (bool, error) {
+	// 关键函数：在同一事务内更新 owner 与成员角色，避免状态不一致。
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+	spaceID = strings.TrimSpace(spaceID)
+	fromUserID = strings.TrimSpace(fromUserID)
+	toUserID = strings.TrimSpace(toUserID)
+	if spaceID == "" || fromUserID == "" || toUserID == "" {
+		return false, nil
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Space{}).
+			Where("space_id = ? AND owner_user_id = ? AND status <> ?", spaceID, fromUserID, models.EntityStatusDeleted).
+			Updates(map[string]any{
+				"owner_user_id": toUserID,
+				"updated_at":    updatedAt,
+			})
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		memberUpsert := func(userID string, role models.Role) error {
+			now := updatedAt
+			return tx.Table("space_members").Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "space_id"}, {Name: "user_id"}},
+				DoUpdates: clause.Assignments(map[string]any{
+					"role":       role,
+					"updated_at": now,
+				}),
+			}).Create(map[string]any{
+				"space_id":   spaceID,
+				"user_id":    userID,
+				"role":       role,
+				"created_at": now,
+				"updated_at": now,
+			}).Error
+		}
+
+		if err := memberUpsert(fromUserID, models.RoleCollaborator); err != nil {
+			return err
+		}
+		if err := memberUpsert(toUserID, models.RoleOwner); err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *gormSpaceRepository) SoftDelete(ctx context.Context, spaceID string, deletedAt time.Time) (bool, error) {
@@ -645,6 +762,9 @@ func parseSpaceRecordTime(raw string) time.Time {
 	layouts := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05.999999-07:00",
+		"2006-01-02 15:04:05.999-07:00",
 		"2006-01-02 15:04:05.999999999-07:00",
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02 15:04:05",
@@ -655,6 +775,18 @@ func parseSpaceRecordTime(raw string) time.Time {
 		if parsedAt, err := time.Parse(layout, value); err == nil {
 			return parsedAt.UTC()
 		}
+	}
+	// 兼容数据库返回的 "YYYY-MM-DD HH:MM:SS+00:00" 等格式，统一转换为 RFC3339 再解析。
+	normalized := strings.Replace(value, " ", "T", 1)
+	timePart := normalized
+	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
+		timePart = normalized[index+1:]
+	}
+	if !strings.ContainsAny(timePart, "Zz+-") {
+		normalized += "Z"
+	}
+	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
+		return parsedAt.UTC()
 	}
 	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
 		return parsedAt.UTC()

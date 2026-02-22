@@ -95,6 +95,49 @@ function isAbsoluteUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
 
+// 关键函数：补全后端资源的绝对 URL，避免前后端端口不同导致相对路径失效。
+function resolveBackendPublicUrl(rawUrl: string, apiBaseUrl: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return rawUrl;
+  }
+  if (isAbsoluteUrl(trimmed) || /^data:|^blob:/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (!isAbsoluteUrl(apiBaseUrl)) {
+    return trimmed;
+  }
+
+  try {
+    const apiOrigin = new URL(apiBaseUrl).origin;
+    const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+    return `${apiOrigin}${path}`;
+  } catch {
+    return trimmed;
+  }
+}
+
+// 空间封面统一补全后端域名，避免列表页渲染失败。
+function normalizeAdminSpaceCover(
+  cover: AdminSpaceCover | null | undefined,
+  apiBaseUrl: string
+): AdminSpaceCover | null | undefined {
+  if (!cover) {
+    return cover;
+  }
+  if (!cover.url || !cover.url.trim()) {
+    return cover;
+  }
+  const normalizedUrl = resolveBackendPublicUrl(cover.url, apiBaseUrl);
+  if (normalizedUrl === cover.url) {
+    return cover;
+  }
+  return {
+    ...cover,
+    url: normalizedUrl
+  };
+}
+
 function normalizeUploadEndpoint(uploadEndpoint: string | undefined, apiBaseUrl: string): string {
   const raw = (uploadEndpoint ?? "").trim();
   if (!raw) {
@@ -127,6 +170,7 @@ function normalizeUploadEndpoint(uploadEndpoint: string | undefined, apiBaseUrl:
   return endpointPath;
 }
 
+// 模块职责：HTTP 数据驱动，负责与后端 API 交互并做必要的客户端归一化处理。
 export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   let accessToken: string | null = readStoredValue(ACCESS_TOKEN_STORAGE_KEY);
   let refreshToken: string | null = readStoredValue(REFRESH_TOKEN_STORAGE_KEY);
@@ -497,7 +541,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!name) {
         throw new Error("空间名称不能为空");
       }
-      return request<AdminSpace>("/admin/spaces", {
+      const space = await request<AdminSpace>("/admin/spaces", {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -506,6 +550,10 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
           coverAssetId: input.coverAssetId ?? ""
         })
       });
+      return {
+        ...space,
+        cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
+      };
     },
     async createSpaceCoverAsset(input: {
       source: "user_upload" | "system_generated";
@@ -550,10 +598,14 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         formData.append("clientProcessed", input.clientProcessed ? "true" : "false");
       }
 
-      return request<AdminSpaceCover>("/admin/spaces/cover-assets", {
+      const cover = await request<AdminSpaceCover>("/admin/spaces/cover-assets", {
         method: "POST",
         body: formData
       });
+      return {
+        ...cover,
+        url: resolveBackendPublicUrl(cover.url, options.baseUrl)
+      };
     },
     async listSpaces(input: AdminSpaceListInput = {}) {
       const query = new URLSearchParams();
@@ -574,7 +626,15 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
       const queryText = query.toString();
       const path = queryText ? `/admin/spaces?${queryText}` : "/admin/spaces";
-      return request<AdminSpaceListResult>(path);
+      const result = await request<AdminSpaceListResult>(path);
+      return {
+        ...result,
+        items: result.items.map((space) => ({
+          ...space,
+          // 关键分支：列表页封面 URL 可能是相对路径，这里统一补全。
+          cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
+        }))
+      };
     },
     async updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }) {
       const targetSpaceID = input.spaceId.trim();
@@ -587,7 +647,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         targetId: targetSpaceID
       });
 
-      return request<AdminSpace>(
+      const space = await request<AdminSpace>(
         `/admin/spaces/${encodeURIComponent(targetSpaceID)}/status`,
         {
           method: "PATCH",
@@ -598,8 +658,18 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
           })
         }
       );
+      return {
+        ...space,
+        cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
+      };
     },
-    async updateSpaceMetadata(input: { spaceId: string; name?: string; visibility?: "public" | "authenticated" | "member" }) {
+    async updateSpaceMetadata(input: {
+      spaceId: string;
+      name?: string;
+      description?: string;
+      visibility?: "public" | "authenticated" | "member";
+      coverAssetId?: string;
+    }) {
       const targetSpaceID = input.spaceId.trim();
       if (!targetSpaceID) {
         throw new Error("空间 ID 不能为空");
@@ -609,17 +679,64 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (typeof input.name === "string") {
         payload.name = input.name.trim();
       }
+      // 允许传空字符串用于清空简介或封面。
+      if (typeof input.description === "string") {
+        payload.description = input.description.trim();
+      }
       if (typeof input.visibility === "string" && input.visibility.trim()) {
         payload.visibility = input.visibility;
       }
+      if (typeof input.coverAssetId === "string") {
+        payload.coverAssetId = input.coverAssetId.trim();
+      }
 
-      return request<AdminSpace>(
+      const space = await request<AdminSpace>(
         `/admin/spaces/${encodeURIComponent(targetSpaceID)}/metadata`,
         {
           method: "PATCH",
           body: JSON.stringify(payload)
         }
       );
+      return {
+        ...space,
+        cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
+      };
+    },
+    async transferSpaceOwnership(input: { spaceId: string; targetUserId?: string; targetEmail?: string }) {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      // 高风险操作：转让空间归属，需要签发一次性操作令牌。
+      const targetUserId = (input.targetUserId ?? "").trim();
+      const targetEmail = (input.targetEmail ?? "").trim();
+      if (!targetUserId && !targetEmail) {
+        throw new Error("转让目标不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "space.transfer",
+        targetType: "space",
+        targetId: targetSpaceID
+      });
+      const payload: Record<string, string> = {};
+      if (targetUserId) {
+        payload.targetUserId = targetUserId;
+      }
+      if (targetEmail) {
+        payload.targetEmail = targetEmail;
+      }
+      const space = await request<AdminSpace>(
+        `/admin/spaces/${encodeURIComponent(targetSpaceID)}/transfer`,
+        {
+          method: "POST",
+          headers: buildAdminOperationTokenHeaders(operationToken),
+          body: JSON.stringify(payload)
+        }
+      );
+      return {
+        ...space,
+        cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
+      };
     },
     async deleteSpace(spaceId: string) {
       const targetSpaceID = spaceId.trim();

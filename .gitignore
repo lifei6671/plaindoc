@@ -150,3 +150,5 @@ bin/
 *.log
 *.cache
 .DS_Store
+
+uploads/

@@ -67,14 +67,22 @@ type createAdminSpaceRequest struct {
 	CoverAssetID string `json:"coverAssetId"`
 }
 
+// updateAdminSpaceMetadataRequest 支持空间基础信息与封面字段的局部更新。
 type updateAdminSpaceMetadataRequest struct {
-	Name       *string `json:"name"`
-	Visibility *string `json:"visibility"`
+	Name         *string `json:"name"`
+	Description  *string `json:"description"`
+	Visibility   *string `json:"visibility"`
+	CoverAssetID *string `json:"coverAssetId"`
 }
 
 type updateAdminSpaceStatusRequest struct {
 	Status string `json:"status"`
 	Reason string `json:"reason"`
+}
+
+type transferAdminSpaceRequest struct {
+	TargetUserID string `json:"targetUserId"`
+	TargetEmail  string `json:"targetEmail"`
 }
 
 // NewAdminSpaceHandler 创建后台空间管理处理器。
@@ -308,7 +316,9 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 		RequestID:   response.RequestIDFromContext(c),
 		SpaceID:     spaceID,
 		Name:        req.Name,
+		Description: req.Description,
 		Visibility:  visibility,
+		CoverAssetID: req.CoverAssetID,
 	})
 	if err != nil {
 		switch {
@@ -320,10 +330,71 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "metadata change is required")
 		case errors.Is(err, service.ErrAdminSpaceInvalidName):
 			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
+		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
+			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
 			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
+		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
+			response.Error(c, http.StatusNotFound, "COVER_ASSET_NOT_FOUND", "cover asset not found")
 		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
 			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, mapAdminSpaceResponse(payload))
+}
+
+// TransferOwnership 转让空间归属。
+func (h *adminSpaceHandler) TransferOwnership(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		return
+	}
+
+	var req transferAdminSpaceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	payload, err := h.adminSpaceService.TransferOwnership(c.Request.Context(), service.TransferAdminSpaceOwnershipInput{
+		ActorUserID:  actorUserID,
+		RequestID:    response.RequestIDFromContext(c),
+		SpaceID:      spaceID,
+		TargetUserID: strings.TrimSpace(req.TargetUserID),
+		TargetEmail:  strings.TrimSpace(req.TargetEmail),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
+		case errors.Is(err, service.ErrAdminSpaceNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
+			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
+		case errors.Is(err, service.ErrAdminSpaceTransferTargetRequired):
+			response.Error(c, http.StatusBadRequest, "TRANSFER_TARGET_REQUIRED", "transfer target is required")
+		case errors.Is(err, service.ErrAdminSpaceTransferTargetNotFound):
+			response.Error(c, http.StatusNotFound, "TRANSFER_TARGET_NOT_FOUND", "transfer target not found")
+		case errors.Is(err, service.ErrAdminSpaceTransferTargetNotMember):
+			response.Error(c, http.StatusBadRequest, "TRANSFER_TARGET_NOT_MEMBER", "transfer target is not a space member")
+		case errors.Is(err, service.ErrAdminSpaceTransferToSelf):
+			response.Error(c, http.StatusBadRequest, "TRANSFER_TARGET_SELF", "transfer target is current owner")
 		default:
 			response.InternalError(c)
 		}

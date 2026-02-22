@@ -448,6 +448,10 @@ const adminGateway: AdminGateway = {
   async updateSpaceMetadata() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },
+  async transferSpaceOwnership() {
+    // 管理后台转让能力仅在 HTTP 驱动中可用。
+    throw new Error("管理后台仅支持 HTTP 数据驱动");
+  },
   async deleteSpace() {
     throw new Error("管理后台仅支持 HTTP 数据驱动");
   },

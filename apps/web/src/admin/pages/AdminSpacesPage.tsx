@@ -1,14 +1,16 @@
-import { LoaderCircle, PencilLine, Plus, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
 import { showToast } from "../../components/ui/toast";
 import { type AdminSpace, type AdminSpaceListResult, type DataGateway, type Visibility } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import { AdminCreateSpaceDialog } from "../components/AdminCreateSpaceDialog";
+import { AdminSpaceSettingsDialog } from "../components/AdminSpaceSettingsDialog";
 import { useAdminDialogs } from "../components/AdminDialogs";
 import {
   AdminBulkActionBar,
@@ -44,8 +46,15 @@ function formatDateTime(value: string | null): string {
   if (!value) {
     return "-";
   }
+  // 服务端可能返回零时间或无效时间，前端兜底显示为占位符。
+  if (value.startsWith("0001-01-01")) {
+    return "-";
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  if (date.getFullYear() <= 1) {
     return "-";
   }
   return date.toLocaleString("zh-CN", { hour12: false });
@@ -103,18 +112,13 @@ function renderVisibilityBadgeClass(value: Visibility): string {
   }
 }
 
-function toVisibilityValue(raw: string): Visibility | null {
-  const value = raw.trim().toLowerCase();
-  if (value === "public" || value === "authenticated" || value === "member") {
-    return value;
-  }
-  return null;
-}
-
+// 空间管理页面：承载列表筛选、批量操作与空间设置入口。
 export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [editingSpace, setEditingSpace] = useState<AdminSpace | null>(null);
 
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -194,6 +198,39 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     setPage(1);
   }, []);
 
+  const handleCopySpaceId = useCallback(
+    async (spaceId: string) => {
+      const value = spaceId.trim();
+      if (!value) {
+        openToast("空间 ID 为空");
+        return;
+      }
+      try {
+        // 复制空间 ID，便于管理员快速定位与粘贴。
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+        } else {
+          const input = document.createElement("input");
+          input.value = value;
+          input.setAttribute("readonly", "true");
+          input.style.position = "absolute";
+          input.style.left = "-9999px";
+          document.body.appendChild(input);
+          input.select();
+          const copied = document.execCommand("copy");
+          document.body.removeChild(input);
+          if (!copied) {
+            throw new Error("复制失败");
+          }
+        }
+        openToast("空间 ID 已复制", "success");
+      } catch (error) {
+        openToast(`复制失败：${formatError(error)}`);
+      }
+    },
+    [openToast]
+  );
+
   const runSpaceAction = useCallback(
     async (spaceID: string, callback: () => Promise<void>) => {
       setActioningSpaceID(spaceID);
@@ -208,6 +245,65 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     },
     [loadSpaces, openToast]
   );
+
+  const handleTransferSpace = useCallback(
+    async (space: AdminSpace) => {
+      const promptResult = await prompt({
+        title: `转让空间：${space.name}`,
+        description: "仅支持转让给该空间成员，转让后当前所有者将变为协作者，目标成员成为空间拥有者并获得空间管理员权限。",
+        confirmText: "确认转让",
+        tone: "danger",
+        fields: [
+          {
+            key: "target",
+            label: "目标成员（用户 ID 或邮箱）",
+            required: true,
+            placeholder: "请输入用户 ID 或邮箱"
+          }
+        ]
+      });
+      if (!promptResult) {
+        return;
+      }
+      const targetRaw = (promptResult.target ?? "").trim();
+      if (!targetRaw) {
+        openToast("转让目标不能为空");
+        return;
+      }
+      if (targetRaw === space.ownerUserId || targetRaw === space.ownerEmail) {
+        openToast("不能转让给当前所有者");
+        return;
+      }
+
+      await runSpaceAction(space.spaceId, async () => {
+        if (targetRaw.includes("@")) {
+          await dataGateway.admin.transferSpaceOwnership({
+            spaceId: space.spaceId,
+            targetEmail: targetRaw
+          });
+          return;
+        }
+        await dataGateway.admin.transferSpaceOwnership({
+          spaceId: space.spaceId,
+          targetUserId: targetRaw
+        });
+      });
+    },
+    [dataGateway.admin, openToast, prompt, runSpaceAction]
+  );
+
+  const handleOpenSettings = useCallback((space: AdminSpace) => {
+    // 打开空间设置时同步回填当前记录。
+    setEditingSpace(space);
+    setSettingsDialogOpen(true);
+  }, []);
+
+  const handleSettingsOpenChange = useCallback((open: boolean) => {
+    setSettingsDialogOpen(open);
+    if (!open) {
+      setEditingSpace(null);
+    }
+  }, []);
 
   const runBatchSpaceAction = useCallback(
     async (actionName: string, filter: (space: AdminSpace) => boolean, callback: (space: AdminSpace) => Promise<void>) => {
@@ -241,59 +337,6 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
       }
     },
     [loadSpaces, openToast, selectedSpaceSet, spacesState.items]
-  );
-
-  const handleUpdateMetadata = useCallback(
-    async (space: AdminSpace) => {
-      const promptResult = await prompt({
-        title: `更新空间：${space.name}`,
-        description: "可修改空间名称和可见性策略。",
-        confirmText: "保存变更",
-        fields: [
-          {
-            key: "name",
-            label: "空间名称",
-            required: true,
-            defaultValue: space.name,
-            placeholder: "请输入空间名称"
-          },
-          {
-            key: "visibility",
-            label: "可见性",
-            type: "select",
-            required: true,
-            defaultValue: space.visibility,
-            options: [
-              { value: "public", label: "完全公开（public）" },
-              { value: "authenticated", label: "登录可见（authenticated）" },
-              { value: "member", label: "成员可见（member）" }
-            ]
-          }
-        ]
-      });
-      if (!promptResult) {
-        return;
-      }
-      const normalizedName = (promptResult.name ?? "").trim();
-      if (!normalizedName) {
-        openToast("空间名称不能为空");
-        return;
-      }
-      const nextVisibility = toVisibilityValue(promptResult.visibility ?? "");
-      if (!nextVisibility) {
-        openToast("可见性仅支持 public/authenticated/member");
-        return;
-      }
-
-      await runSpaceAction(space.spaceId, async () => {
-        await dataGateway.admin.updateSpaceMetadata({
-          spaceId: space.spaceId,
-          name: normalizedName,
-          visibility: nextVisibility
-        });
-      });
-    },
-    [dataGateway.admin, openToast, prompt, runSpaceAction]
   );
 
   const handleDelete = useCallback(
@@ -474,6 +517,13 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
         onOpenChange={setCreateDialogOpen}
         onCreated={handleSpaceCreated}
       />
+      <AdminSpaceSettingsDialog
+        open={settingsDialogOpen}
+        space={editingSpace}
+        dataGateway={dataGateway}
+        onOpenChange={handleSettingsOpenChange}
+        onUpdated={handleSpaceCreated}
+      />
 
       <AdminPageCard>
         <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_190px_auto]" onSubmit={handleSearchSubmit}>
@@ -587,28 +637,29 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
           </Button>
         </AdminBulkActionBar>
 
-        <AdminTableContainer>
-          <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
-              <tr className="text-xs uppercase tracking-wide text-slate-600">
-                <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
-                  <Checkbox
-                    checked={allSelectableChecked}
-                    disabled={selectionDisabled || selectableSpaceIDs.length === 0}
-                    onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
-                    aria-label="全选空间"
-                  />
-                </th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">空间信息</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">创建者</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">创建时间</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
-                <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
-              </tr>
-            </thead>
-            <tbody>
+        <TooltipProvider delayDuration={200}>
+          <AdminTableContainer>
+            <table className="w-full min-w-[1180px] table-fixed border-collapse text-left text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
+                <tr className="text-xs uppercase tracking-wide text-slate-600">
+                  <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
+                    <Checkbox
+                      checked={allSelectableChecked}
+                      disabled={selectionDisabled || selectableSpaceIDs.length === 0}
+                      onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
+                      aria-label="全选空间"
+                    />
+                  </th>
+                  <th className="min-w-[360px] border-b border-slate-200 px-3 py-2 font-semibold">空间信息</th>
+                  <th className="w-[160px] border-b border-slate-200 px-3 py-2 font-semibold">创建者</th>
+                  <th className="w-[110px] border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
+                  <th className="w-[110px] border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                  <th className="w-[130px] border-b border-slate-200 px-3 py-2 font-semibold">创建时间</th>
+                  <th className="w-[130px] border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                  <th className="w-[220px] border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
+                </tr>
+              </thead>
+              <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={8} className="px-3 py-12">
@@ -638,7 +689,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                           aria-label={`选择空间 ${space.name || space.spaceId}`}
                         />
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="min-w-0 px-3 py-3">
                         <div className="flex items-start gap-3">
                           <div className="h-16 w-10 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-100">
                             {space.cover?.url ? (
@@ -647,9 +698,36 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                           </div>
                           <div className="grid min-w-0 gap-1">
                             <strong className="truncate text-sm font-semibold text-slate-900">{space.name}</strong>
-                            <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">{space.spaceId}</code>
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <code
+                                className="max-w-[220px] truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700"
+                                title={space.spaceId}
+                              >
+                                {space.spaceId}
+                              </code>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6 text-slate-500 hover:text-slate-700"
+                                onClick={() => void handleCopySpaceId(space.spaceId)}
+                                aria-label="复制空间 ID"
+                                title="复制空间 ID"
+                              >
+                                <Copy size={14} />
+                              </Button>
+                            </div>
                             {space.description ? (
-                              <p className="line-clamp-2 text-xs leading-5 text-slate-600">{space.description}</p>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <p className="line-clamp-2 break-words text-xs leading-5 text-slate-600" tabIndex={0}>
+                                    {space.description}
+                                  </p>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" align="start" className="max-w-[360px] whitespace-pre-wrap break-words">
+                                  {space.description}
+                                </TooltipContent>
+                              </Tooltip>
                             ) : (
                               <p className="text-xs text-slate-400">暂无简介</p>
                             )}
@@ -663,13 +741,16 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <Badge variant="outline" className={renderVisibilityBadgeClass(space.visibility)}>
+                        <Badge
+                          variant="outline"
+                          className={`${renderVisibilityBadgeClass(space.visibility)} w-fit whitespace-nowrap`}
+                        >
                           {renderVisibilityLabel(space.visibility)}
                         </Badge>
                       </td>
                       <td className="px-3 py-3">
-                        <div className="grid gap-1.5">
-                          <Badge variant="outline" className={renderStatusBadgeClass(space.status)}>
+                        <div className="grid justify-items-start gap-1.5">
+                          <Badge variant="outline" className={`${renderStatusBadgeClass(space.status)} w-fit whitespace-nowrap`}>
                             {renderStatusLabel(space.status)}
                           </Badge>
                           {space.status === "banned" && space.bannedReason ? (
@@ -710,10 +791,21 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                             size="sm"
                             variant="outline"
                             disabled={isActioning || isDeleted}
-                            onClick={() => void handleUpdateMetadata(space)}
+                            onClick={() => handleOpenSettings(space)}
                           >
-                            <PencilLine size={14} />
-                            <span>元数据</span>
+                            <Settings size={14} />
+                            <span>设置</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                            disabled={isActioning || isDeleted}
+                            onClick={() => void handleTransferSpace(space)}
+                          >
+                            <ArrowLeftRight size={14} />
+                            <span>转让</span>
                           </Button>
                           <Button
                             type="button"
@@ -731,9 +823,10 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                   );
                 })
               )}
-            </tbody>
-          </table>
-        </AdminTableContainer>
+              </tbody>
+            </table>
+          </AdminTableContainer>
+        </TooltipProvider>
 
         <AdminPaginationFooter
           summary={
