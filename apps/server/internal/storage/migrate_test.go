@@ -38,6 +38,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		"system_configs",
 		"audit_logs",
 		"spaces",
+		"space_categories",
 		"space_cover_assets",
 		"space_admin_scopes",
 		"space_members",
@@ -85,7 +86,12 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		t.Fatalf("smokeInsertGraph failed: %v", err)
 	}
 
-	if err := MigrateDown(ctx, database.ORM, DriverSQLite, 10); err != nil {
+	migrations, err := LoadMigrations(DriverSQLite)
+	if err != nil {
+		t.Fatalf("LoadMigrations failed: %v", err)
+	}
+
+	if err := MigrateDown(ctx, database.ORM, DriverSQLite, len(migrations)); err != nil {
 		t.Fatalf("MigrateDown failed: %v", err)
 	}
 

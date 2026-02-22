@@ -30,7 +30,7 @@
 
 - [ ] 在预发布环境执行全量迁移并验证通过  
   命令示例：`go test ./internal/storage -count=1`
-- [ ] 校验关键表存在：`user_admin_roles`、`space_admin_scopes`、`audit_logs`、`system_configs`
+- [ ] 校验关键表存在：`user_admin_roles`、`space_admin_scopes`、`audit_logs`、`system_configs`、`space_categories`
 - [ ] 校验索引存在：`audit_logs` 相关索引
 
 ### 回滚预案
