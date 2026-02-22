@@ -190,16 +190,13 @@ func TestRouter_Explore_LoggedInUsesNoStoreAndCategoryFilter(t *testing.T) {
 		t.Fatalf("expected status 200 for explore all, got %d body=%s", allRec.Code, allRec.Body.String())
 	}
 	allBody := allRec.Body.String()
-	if !strings.Contains(allBody, "当前分类：全部") {
-		t.Fatalf("expected explore all subtitle, body=%s", allBody)
-	}
-	if !strings.Contains(allBody, `class="category-tab is-active" href="/explore/all"`) {
-		t.Fatalf("expected explore all tab active, body=%s", allBody)
+	if !strings.Contains(allBody, `class="category-link is-active" href="/explore/all"`) {
+		t.Fatalf("expected explore all sidebar category active, body=%s", allBody)
 	}
 	exploreAllIndex := strings.Index(allBody, `href="/explore/all"`)
 	exploreDefaultIndex := strings.Index(allBody, `/explore/`+models.DefaultSpaceCategoryID)
 	if exploreAllIndex < 0 || exploreDefaultIndex < 0 || exploreAllIndex >= exploreDefaultIndex {
-		t.Fatalf("expected explore all tab keeps first position, body=%s", allBody)
+		t.Fatalf("expected explore all sidebar category keeps first position, body=%s", allBody)
 	}
 	if !strings.Contains(allBody, "Public In Category") ||
 		!strings.Contains(allBody, "Authenticated In Category") ||
