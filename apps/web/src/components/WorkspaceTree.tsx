@@ -64,6 +64,13 @@ interface WorkspaceTreeProps {
   onDeleteNode: (nodeId: string) => Promise<void>;
 }
 
+interface PendingCreateDraftNode {
+  nodeId: string;
+  parentId: string | null;
+  type: NodeType;
+  title: string;
+}
+
 function mergeClassNames(...classNames: Array<string | false | null | undefined>): string {
   return classNames.filter(Boolean).join(" ");
 }
@@ -141,6 +148,79 @@ function countDescendants(node: TreeNode): number {
   return descendantCount;
 }
 
+function cloneTreeNodes(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    children: cloneTreeNodes(node.children)
+  }));
+}
+
+function findNodeByID(nodes: TreeNode[], targetNodeID: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.id === targetNodeID) {
+      return node;
+    }
+    if (node.children.length > 0) {
+      const matchedChildNode = findNodeByID(node.children, targetNodeID);
+      if (matchedChildNode) {
+        return matchedChildNode;
+      }
+    }
+  }
+  return null;
+}
+
+function buildDraftNodeID(): string {
+  const randomValue = Math.random().toString(36).slice(2, 10);
+  return `draft-${Date.now().toString(36)}-${randomValue}`;
+}
+
+function mergeDraftNodesIntoTree(
+  baseNodes: TreeNode[],
+  draftNodes: PendingCreateDraftNode[]
+): TreeNode[] {
+  if (draftNodes.length === 0) {
+    return baseNodes;
+  }
+
+  const mergedNodes = cloneTreeNodes(baseNodes);
+  for (const draftNode of draftNodes) {
+    let spaceID = "";
+    if (draftNode.parentId) {
+      const parentNode = findNodeByID(mergedNodes, draftNode.parentId);
+      if (parentNode) {
+        spaceID = parentNode.spaceId;
+      }
+    }
+    if (!spaceID && mergedNodes.length > 0) {
+      spaceID = mergedNodes[0].spaceId;
+    }
+
+    const nextDraftNode: TreeNode = {
+      id: draftNode.nodeId,
+      spaceId: spaceID,
+      parentId: draftNode.parentId,
+      type: draftNode.type,
+      title: draftNode.title,
+      sort: Number.MAX_SAFE_INTEGER,
+      children: []
+    };
+
+    if (!draftNode.parentId) {
+      mergedNodes.push(nextDraftNode);
+      continue;
+    }
+    const parentNode = findNodeByID(mergedNodes, draftNode.parentId);
+    if (!parentNode) {
+      mergedNodes.push(nextDraftNode);
+      continue;
+    }
+    parentNode.children.push(nextDraftNode);
+  }
+
+  return mergedNodes;
+}
+
 // 目录树容器：使用 React Complex Tree 承载交互和可扩展能力。
 export const WorkspaceTree = memo(function WorkspaceTree({
   nodes,
@@ -151,8 +231,20 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   onDeleteNode
 }: WorkspaceTreeProps) {
   const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
-  const { items, nodeById } = useMemo(() => buildTreeItems(nodes), [nodes]);
-  const expandableNodeIds = useMemo(() => collectExpandableNodeIds(nodes), [nodes]);
+  const [draftNodes, setDraftNodes] = useState<PendingCreateDraftNode[]>([]);
+  const mergedNodes = useMemo(
+    () => mergeDraftNodesIntoTree(nodes, draftNodes),
+    [draftNodes, nodes]
+  );
+  const { items, nodeById } = useMemo(() => buildTreeItems(mergedNodes), [mergedNodes]);
+  const expandableNodeIds = useMemo(() => collectExpandableNodeIds(mergedNodes), [mergedNodes]);
+  const draftNodeByID = useMemo(() => {
+    const mappedDraftNodes = new Map<string, PendingCreateDraftNode>();
+    for (const draftNode of draftNodes) {
+      mappedDraftNodes.set(draftNode.nodeId, draftNode);
+    }
+    return mappedDraftNodes;
+  }, [draftNodes]);
   const knownExpandableNodeIdsRef = useRef<Set<string>>(new Set());
   const actionMenuRootRef = useRef<HTMLDivElement | null>(null);
   const inlineEditInputRef = useRef<HTMLInputElement | null>(null);
@@ -296,8 +388,37 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     setEditingNodeTitle("");
   }, []);
 
+  const removeDraftNode = useCallback((nodeId: string) => {
+    setDraftNodes((previousDraftNodes) =>
+      previousDraftNodes.filter((draftNode) => draftNode.nodeId !== nodeId)
+    );
+  }, []);
+
   const commitInlineEdit = useCallback(async () => {
     if (!editingNodeId || isCommittingInlineEditRef.current) {
+      return;
+    }
+
+    const editingDraftNode = draftNodeByID.get(editingNodeId);
+    if (editingDraftNode) {
+      const fallbackTitle =
+        editingDraftNode.type === "folder" ? DEFAULT_FOLDER_TITLE : DEFAULT_DOCUMENT_TITLE;
+      const normalizedTitle = editingNodeTitle.trim() || fallbackTitle;
+
+      isCommittingInlineEditRef.current = true;
+      try {
+        await onCreateNode({
+          parentId: editingDraftNode.parentId,
+          type: editingDraftNode.type,
+          title: normalizedTitle
+        });
+        removeDraftNode(editingNodeId);
+        cancelInlineEdit();
+      } catch (error) {
+        window.alert(`创建失败：${formatError(error)}`);
+      } finally {
+        isCommittingInlineEditRef.current = false;
+      }
       return;
     }
 
@@ -324,27 +445,41 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       isCommittingInlineEditRef.current = false;
       cancelInlineEdit();
     }
-  }, [cancelInlineEdit, editingNodeId, editingNodeTitle, nodeById, onRenameNode]);
+  }, [
+    cancelInlineEdit,
+    draftNodeByID,
+    editingNodeId,
+    editingNodeTitle,
+    nodeById,
+    onCreateNode,
+    onRenameNode,
+    removeDraftNode
+  ]);
 
-  const createNodeAndEnterInlineEdit = useCallback(
-    async (input: { parentId: string | null; type: NodeType; title: string }) => {
-      try {
-        const created = await onCreateNode(input);
-        if (input.parentId) {
-          setExpandedNodeIds((previousExpandedNodeIds) => {
-            if (previousExpandedNodeIds.includes(input.parentId!)) {
-              return previousExpandedNodeIds;
-            }
-            return [...previousExpandedNodeIds, input.parentId!];
-          });
+  const stageDraftNodeAndEnterInlineEdit = useCallback(
+    (input: { parentId: string | null; type: NodeType; title: string }) => {
+      const draftNodeID = buildDraftNodeID();
+      setDraftNodes((previousDraftNodes) => [
+        ...previousDraftNodes,
+        {
+          nodeId: draftNodeID,
+          parentId: input.parentId,
+          type: input.type,
+          title: input.title
         }
-        setOpenActionNodeId(null);
-        beginInlineEdit(created.nodeId, input.title);
-      } catch (error) {
-        window.alert(`操作失败：${formatError(error)}`);
+      ]);
+      if (input.parentId) {
+        setExpandedNodeIds((previousExpandedNodeIds) => {
+          if (previousExpandedNodeIds.includes(input.parentId!)) {
+            return previousExpandedNodeIds;
+          }
+          return [...previousExpandedNodeIds, input.parentId!];
+        });
       }
+      setOpenActionNodeId(null);
+      beginInlineEdit(draftNodeID, input.title);
     },
-    [beginInlineEdit, onCreateNode]
+    [beginInlineEdit]
   );
 
   const handleExpandNode = useCallback((item: TreeItem<WorkspaceTreeItemData>) => {
@@ -370,21 +505,24 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (item.data.type !== "doc" || !item.data.nodeId) {
         return;
       }
+      if (draftNodeByID.has(item.data.nodeId)) {
+        return;
+      }
       setOpenActionNodeId(null);
       void onOpenDocument(item.data.nodeId);
     },
-    [onOpenDocument]
+    [draftNodeByID, onOpenDocument]
   );
 
   const handleCreateChildDocument = useCallback(
     async (nodeId: string): Promise<void> => {
-      await createNodeAndEnterInlineEdit({
+      stageDraftNodeAndEnterInlineEdit({
         parentId: nodeId,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE
       });
     },
-    [createNodeAndEnterInlineEdit]
+    [stageDraftNodeAndEnterInlineEdit]
   );
 
   const handleCreateSiblingDocument = useCallback(
@@ -393,24 +531,24 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (!currentNode) {
         throw new Error("目录节点不存在");
       }
-      await createNodeAndEnterInlineEdit({
+      stageDraftNodeAndEnterInlineEdit({
         parentId: currentNode.parentId,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE
       });
     },
-    [createNodeAndEnterInlineEdit, nodeById]
+    [nodeById, stageDraftNodeAndEnterInlineEdit]
   );
 
   const handleCreateChildFolder = useCallback(
     async (nodeId: string): Promise<void> => {
-      await createNodeAndEnterInlineEdit({
+      stageDraftNodeAndEnterInlineEdit({
         parentId: nodeId,
         type: "folder",
         title: DEFAULT_FOLDER_TITLE
       });
     },
-    [createNodeAndEnterInlineEdit]
+    [stageDraftNodeAndEnterInlineEdit]
   );
 
   const handleRenameNode = useCallback(
@@ -456,7 +594,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     }
     setIsCreatingFirstDocument(true);
     try {
-      await createNodeAndEnterInlineEdit({
+      stageDraftNodeAndEnterInlineEdit({
         parentId: null,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE
@@ -464,7 +602,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     } finally {
       setIsCreatingFirstDocument(false);
     }
-  }, [createNodeAndEnterInlineEdit, isCreatingFirstDocument]);
+  }, [isCreatingFirstDocument, stageDraftNodeAndEnterInlineEdit]);
 
   const renderTreeItem = useCallback(
     ({
@@ -486,6 +624,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const isActive = nodeId === activeDocId;
       const isActionMenuOpen = openActionNodeId === nodeId;
       const isInlineEditing = editingNodeId === nodeId;
+      const isDraftNode = draftNodeByID.has(nodeId);
       const rowStyle = {
         ...(context.itemContainerWithoutChildrenProps.style ?? {}),
         paddingLeft: `${8 + depth * 20}px`,
@@ -539,6 +678,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                     }
                     if (event.key === "Escape") {
                       event.preventDefault();
+                      if (editingNodeId && draftNodeByID.has(editingNodeId)) {
+                        removeDraftNode(editingNodeId);
+                      }
                       cancelInlineEdit();
                     }
                   }}
@@ -558,7 +700,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                 </span>
               )}
             </InteractiveComponent>
-            {isInlineEditing ? null : (
+            {isInlineEditing || isDraftNode ? null : (
               <div className="relative ml-1.5 inline-flex items-center" ref={isActionMenuOpen ? actionMenuRootRef : undefined}>
                 <button
                   type="button"
@@ -661,6 +803,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     },
     [
       activeDocId,
+      draftNodeByID,
       handleCreateChildDocument,
       handleCreateChildFolder,
       handleCreateSiblingDocument,
@@ -669,6 +812,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       cancelInlineEdit,
       commitInlineEdit,
       editingNodeId,
+      removeDraftNode,
       editingNodeTitle,
       openActionNodeId,
       runActionMenuTask,
@@ -706,7 +850,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {nodes.length === 0 ? (
+      {mergedNodes.length === 0 ? (
         <div className="mt-2.5 mr-2 mb-0 ml-2 flex min-h-[168px] flex-col items-center justify-end gap-3 pb-5 text-center">
           <p className="m-0 text-[14px] text-[#8a8d90]">当前空间暂无文档。</p>
           <button

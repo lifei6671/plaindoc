@@ -983,6 +983,14 @@ export default function App() {
       if (!(await confirmLeaveForDocumentSwitch())) {
         return;
       }
+      const targetPath = activeSpaceId ? buildEditorRoutePath(activeSpaceId, docId) : null;
+      const shouldWaitRouteSync = Boolean(targetPath && location.pathname !== targetPath);
+      if (shouldWaitRouteSync) {
+        pendingRouteDocumentIDRef.current = {
+          docId,
+          startedAt: Date.now()
+        };
+      }
       setSaveStatus("loading");
       setStatusMessage("切换文档中...");
       try {
@@ -990,13 +998,11 @@ export default function App() {
         setSaveStatus("ready");
         setStatusMessage(`已切换文档 v${result.version}`);
         if (activeSpaceId) {
-          const targetPath = buildEditorRoutePath(activeSpaceId, result.id);
-          if (location.pathname !== targetPath) {
-            pendingRouteDocumentIDRef.current = {
-              docId: result.id,
-              startedAt: Date.now()
-            };
-            navigate(targetPath);
+          const resultPath = buildEditorRoutePath(activeSpaceId, result.id);
+          if (location.pathname !== resultPath) {
+            navigate(resultPath);
+          } else if (pendingRouteDocumentIDRef.current?.docId === result.id) {
+            pendingRouteDocumentIDRef.current = null;
           }
         }
       } catch (error) {
