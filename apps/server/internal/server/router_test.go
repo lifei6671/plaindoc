@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 )
 
 func testConfig() config.Config {
@@ -50,10 +51,7 @@ func TestRouter_Healthz(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	payload := decodeJSONResultData[map[string]any](t, rec.Body.Bytes())
 	if payload["ok"] != true {
 		t.Fatalf("expected ok=true, got %v", payload["ok"])
 	}
@@ -68,23 +66,23 @@ func TestRouter_NoRouteUsesUnifiedErrorShape(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	if rec.Header().Get("X-Request-Id") == "" {
 		t.Fatal("expected X-Request-Id header to be set")
 	}
 
 	var payload struct {
-		Code      string `json:"code"`
+		Code      int    `json:"code"`
 		Message   string `json:"message"`
 		RequestID string `json:"requestId"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if payload.Code != "ROUTE_NOT_FOUND" {
-		t.Fatalf("expected code ROUTE_NOT_FOUND, got %s", payload.Code)
+	if payload.Code != response.ResolveErrorCode("ROUTE_NOT_FOUND") {
+		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode("ROUTE_NOT_FOUND"), payload.Code)
 	}
 	if payload.RequestID == "" {
 		t.Fatal("expected requestId in response body")

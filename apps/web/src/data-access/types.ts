@@ -230,6 +230,16 @@ export interface AdminSpace {
   updatedAt: string;
 }
 
+export interface AdminSpaceMember {
+  userId: string;
+  email: string;
+  name: string;
+  role: Role;
+  isOwner: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AdminSpaceListInput {
   keyword?: string;
   status?: AdminSpaceStatusFilter;
@@ -379,6 +389,19 @@ export interface AdminGateway {
     visibility?: Visibility;
     coverAssetId?: string;
   }): Promise<AdminSpace>;
+  listSpaceMembers(spaceId: string): Promise<AdminSpaceMember[]>;
+  addSpaceMember(input: {
+    spaceId: string;
+    targetUserId?: string;
+    targetEmail?: string;
+    role: "collaborator" | "reader";
+  }): Promise<AdminSpaceMember>;
+  updateSpaceMemberRole(input: {
+    spaceId: string;
+    userId: string;
+    role: "collaborator" | "reader";
+  }): Promise<AdminSpaceMember>;
+  removeSpaceMember(input: { spaceId: string; userId: string }): Promise<void>;
   // 空间管理：转让空间归属（管理员操作）。
   transferSpaceOwnership(input: { spaceId: string; targetUserId?: string; targetEmail?: string }): Promise<AdminSpace>;
   deleteSpace(spaceId: string): Promise<void>;

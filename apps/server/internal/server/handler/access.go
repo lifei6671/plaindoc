@@ -82,7 +82,7 @@ func (h *accessHandler) GetSpace(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, spaceAccessResponse{
+	response.JSON(c, http.StatusOK, spaceAccessResponse{
 		ID:         space.SpaceID,
 		Name:       space.Name,
 		Visibility: string(space.Visibility),
@@ -130,7 +130,7 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, spaceAccessResponse{
+	response.JSON(c, http.StatusOK, spaceAccessResponse{
 		ID:         space.SpaceID,
 		Name:       space.Name,
 		Visibility: string(space.Visibility),
@@ -171,7 +171,7 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, documentAccessResponse{
+	response.JSON(c, http.StatusOK, documentAccessResponse{
 		ID:         document.DocumentID,
 		NodeID:     document.NodeID,
 		ThemeID:    document.ThemeID,
@@ -224,7 +224,7 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, documentAccessResponse{
+	response.JSON(c, http.StatusOK, documentAccessResponse{
 		ID:         document.DocumentID,
 		NodeID:     document.NodeID,
 		ThemeID:    document.ThemeID,

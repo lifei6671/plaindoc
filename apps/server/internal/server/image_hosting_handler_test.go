@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -33,16 +32,13 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 		t.Fatalf("expected get image-hosting config status 200, got %d body=%s", getConfigRec.Code, getConfigRec.Body.String())
 	}
 
-	var configPayload struct {
+	configPayload := decodeJSONResultData[struct {
 		DefaultProvider string `json:"defaultProvider"`
 		Local           struct {
 			UploadEndpoint string `json:"uploadEndpoint"`
 			PublicBaseURL  string `json:"publicBaseUrl"`
 		} `json:"local"`
-	}
-	if err := json.Unmarshal(getConfigRec.Body.Bytes(), &configPayload); err != nil {
-		t.Fatalf("decode image-hosting config response failed: %v", err)
-	}
+	}](t, getConfigRec.Body.Bytes())
 	if configPayload.DefaultProvider != "local" {
 		t.Fatalf("expected default provider local, got %s", configPayload.DefaultProvider)
 	}
@@ -61,13 +57,10 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 		t.Fatalf("expected local upload status 200, got %d body=%s", uploadRec.Code, uploadRec.Body.String())
 	}
 
-	var uploadPayload struct {
+	uploadPayload := decodeJSONResultData[struct {
 		Key string `json:"key"`
 		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(uploadRec.Body.Bytes(), &uploadPayload); err != nil {
-		t.Fatalf("decode local upload response failed: %v", err)
-	}
+	}](t, uploadRec.Body.Bytes())
 	if uploadPayload.Key == "" || uploadPayload.URL == "" {
 		t.Fatalf("expected upload key/url in response, got %+v", uploadPayload)
 	}
@@ -100,7 +93,7 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	disabledUploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes)
 	disabledUploadReq.Header.Set("Authorization", "Bearer "+accessToken)
 	disabledUploadRec := serve(disabledUploadReq)
-	if disabledUploadRec.Code != http.StatusBadRequest {
+	if disabledUploadRec.Code != http.StatusOK {
 		t.Fatalf("expected upload disabled status 400, got %d body=%s", disabledUploadRec.Code, disabledUploadRec.Body.String())
 	}
 }

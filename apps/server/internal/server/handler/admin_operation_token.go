@@ -73,7 +73,7 @@ func (h *adminOperationTokenHandler) Issue(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, issueAdminOperationTokenResponse{
+	response.JSON(c, http.StatusOK, issueAdminOperationTokenResponse{
 		Token:     payload.Token,
 		ExpiresAt: payload.ExpiresAt,
 	})

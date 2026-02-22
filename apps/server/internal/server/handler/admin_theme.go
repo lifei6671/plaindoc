@@ -90,7 +90,7 @@ func (h *adminThemeHandler) ListThemes(c *gin.Context) {
 	for _, item := range items {
 		payload = append(payload, mapAdminThemeResponse(item))
 	}
-	c.JSON(http.StatusOK, payload)
+	response.JSON(c, http.StatusOK, payload)
 }
 
 // CreateTheme 创建自定义主题。
@@ -149,7 +149,7 @@ func (h *adminThemeHandler) CreateTheme(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, mapAdminThemeResponse(item))
+	response.JSON(c, http.StatusCreated, mapAdminThemeResponse(item))
 }
 
 // UpdateTheme 更新主题内容与启停状态。
@@ -213,7 +213,7 @@ func (h *adminThemeHandler) UpdateTheme(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminThemeResponse(item))
+	response.JSON(c, http.StatusOK, mapAdminThemeResponse(item))
 }
 
 // DeleteTheme 删除自定义主题。
@@ -258,7 +258,7 @@ func (h *adminThemeHandler) DeleteTheme(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.JSON(c, http.StatusOK, struct{}{})
 }
 
 func mapAdminThemeResponse(value service.AdminThemeRecord) adminThemeResponse {

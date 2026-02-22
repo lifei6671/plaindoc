@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -54,12 +53,9 @@ func TestRouter_ListThemes(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload []struct {
+	payload := decodeJSONResultData[[]struct {
 		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response failed: %v", err)
-	}
+	}](t, rec.Body.Bytes())
 	if len(payload) == 0 {
 		t.Fatal("expected at least one theme")
 	}
@@ -151,13 +147,10 @@ func TestRouter_UpdateDocumentTheme(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload struct {
+	payload := decodeJSONResultData[struct {
 		ID      string `json:"id"`
 		ThemeID string `json:"themeId"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response failed: %v", err)
-	}
+	}](t, rec.Body.Bytes())
 	if payload.ID != documentID {
 		t.Fatalf("expected id %s, got %s", documentID, payload.ID)
 	}

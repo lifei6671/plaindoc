@@ -113,7 +113,7 @@ func (h *adminUserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, mapAdminUserResponse(payload))
+	response.JSON(c, http.StatusCreated, mapAdminUserResponse(payload))
 }
 
 // ListUsers 返回后台用户列表，支持关键词、状态、分页查询。
@@ -164,7 +164,7 @@ func (h *adminUserHandler) ListUsers(c *gin.Context) {
 		items = append(items, mapAdminUserResponse(item))
 	}
 
-	c.JSON(http.StatusOK, adminUserListResponse{
+	response.JSON(c, http.StatusOK, adminUserListResponse{
 		Items: items,
 		Pagination: adminUserPaginationPayload{
 			Page:     payload.Page,
@@ -226,7 +226,7 @@ func (h *adminUserHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminUserResponse(payload))
+	response.JSON(c, http.StatusOK, mapAdminUserResponse(payload))
 }
 
 // UpdateRole 更新后台目标用户角色（user/space_admin/platform_admin）。
@@ -282,7 +282,7 @@ func (h *adminUserHandler) UpdateRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminUserResponse(payload))
+	response.JSON(c, http.StatusOK, mapAdminUserResponse(payload))
 }
 
 // DeleteUser 软删除后台目标用户。
@@ -325,7 +325,7 @@ func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.JSON(c, http.StatusOK, struct{}{})
 }
 
 func parseQueryInt(rawValue string) (int, error) {

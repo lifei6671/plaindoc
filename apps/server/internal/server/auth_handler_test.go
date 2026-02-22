@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 )
@@ -50,11 +51,11 @@ func TestRouter_AuthRegisterAndMe(t *testing.T) {
 	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
 	registerReq.Header.Set("Content-Type", "application/json")
 	registerRec := serve(registerReq)
-	if registerRec.Code != http.StatusCreated {
+	if registerRec.Code != http.StatusOK {
 		t.Fatalf("expected status 201, got %d, body=%s", registerRec.Code, registerRec.Body.String())
 	}
 
-	var registerPayload struct {
+	registerPayload := decodeJSONResultData[struct {
 		User struct {
 			ID    string `json:"id"`
 			Email string `json:"email"`
@@ -62,10 +63,7 @@ func TestRouter_AuthRegisterAndMe(t *testing.T) {
 		} `json:"user"`
 		Token        string `json:"token"`
 		RefreshToken string `json:"refreshToken"`
-	}
-	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
-		t.Fatalf("decode register response failed: %v", err)
-	}
+	}](t, registerRec.Body.Bytes())
 	if registerPayload.User.ID == "" {
 		t.Fatal("expected user id in register response")
 	}
@@ -80,14 +78,11 @@ func TestRouter_AuthRegisterAndMe(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", meRec.Code, meRec.Body.String())
 	}
 
-	var mePayload struct {
+	mePayload := decodeJSONResultData[struct {
 		User struct {
 			Email string `json:"email"`
 		} `json:"user"`
-	}
-	if err := json.Unmarshal(meRec.Body.Bytes(), &mePayload); err != nil {
-		t.Fatalf("decode me response failed: %v", err)
-	}
+	}](t, meRec.Body.Bytes())
 	if mePayload.User.Email != "demo@example.com" {
 		t.Fatalf("expected me email demo@example.com, got %s", mePayload.User.Email)
 	}
@@ -103,7 +98,7 @@ func TestRouter_AuthLoginInvalidCredentials(t *testing.T) {
 	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
 	registerReq.Header.Set("Content-Type", "application/json")
 	registerRec := serve(registerReq)
-	if registerRec.Code != http.StatusCreated {
+	if registerRec.Code != http.StatusOK {
 		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
 	}
 
@@ -111,7 +106,7 @@ func TestRouter_AuthLoginInvalidCredentials(t *testing.T) {
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := serve(loginReq)
-	if loginRec.Code != http.StatusUnauthorized {
+	if loginRec.Code != http.StatusForbidden {
 		t.Fatalf("expected status 401, got %d, body=%s", loginRec.Code, loginRec.Body.String())
 	}
 }
@@ -126,17 +121,14 @@ func TestRouter_AuthRefresh(t *testing.T) {
 	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
 	registerReq.Header.Set("Content-Type", "application/json")
 	registerRec := serve(registerReq)
-	if registerRec.Code != http.StatusCreated {
+	if registerRec.Code != http.StatusOK {
 		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
 	}
 
-	var registerPayload struct {
+	registerPayload := decodeJSONResultData[struct {
 		Token        string `json:"token"`
 		RefreshToken string `json:"refreshToken"`
-	}
-	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
-		t.Fatalf("decode register response failed: %v", err)
-	}
+	}](t, registerRec.Body.Bytes())
 	if registerPayload.RefreshToken == "" {
 		t.Fatal("expected refresh token in register response")
 	}
@@ -149,13 +141,10 @@ func TestRouter_AuthRefresh(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", refreshRec.Code, refreshRec.Body.String())
 	}
 
-	var refreshPayload struct {
+	refreshPayload := decodeJSONResultData[struct {
 		Token        string `json:"token"`
 		RefreshToken string `json:"refreshToken"`
-	}
-	if err := json.Unmarshal(refreshRec.Body.Bytes(), &refreshPayload); err != nil {
-		t.Fatalf("decode refresh response failed: %v", err)
-	}
+	}](t, refreshRec.Body.Bytes())
 	if refreshPayload.Token == "" || refreshPayload.RefreshToken == "" {
 		t.Fatal("expected refreshed token and refresh token")
 	}
@@ -163,7 +152,7 @@ func TestRouter_AuthRefresh(t *testing.T) {
 	oldTokenRefreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", bytes.NewReader(refreshBody))
 	oldTokenRefreshReq.Header.Set("Content-Type", "application/json")
 	oldTokenRefreshRec := serve(oldTokenRefreshReq)
-	if oldTokenRefreshRec.Code != http.StatusUnauthorized {
+	if oldTokenRefreshRec.Code != http.StatusForbidden {
 		t.Fatalf("expected old refresh token to be rejected with 401, got %d, body=%s", oldTokenRefreshRec.Code, oldTokenRefreshRec.Body.String())
 	}
 
@@ -184,8 +173,8 @@ func TestRouter_AuthLogout(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	rec := serve(req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected status 204, got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -199,17 +188,14 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
 	registerReq.Header.Set("Content-Type", "application/json")
 	registerRec := serve(registerReq)
-	if registerRec.Code != http.StatusCreated {
+	if registerRec.Code != http.StatusOK {
 		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
 	}
 
-	var registerPayload struct {
+	registerPayload := decodeJSONResultData[struct {
 		Token        string `json:"token"`
 		RefreshToken string `json:"refreshToken"`
-	}
-	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
-		t.Fatalf("decode register response failed: %v", err)
-	}
+	}](t, registerRec.Body.Bytes())
 	if registerPayload.Token == "" || registerPayload.RefreshToken == "" {
 		t.Fatal("expected access/refresh token in register response")
 	}
@@ -217,7 +203,7 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	logoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	logoutReq.Header.Set("Authorization", "Bearer "+registerPayload.Token)
 	logoutRec := serve(logoutReq)
-	if logoutRec.Code != http.StatusNoContent {
+	if logoutRec.Code != http.StatusOK {
 		t.Fatalf("logout failed, status=%d body=%s", logoutRec.Code, logoutRec.Body.String())
 	}
 
@@ -225,7 +211,7 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	refreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", bytes.NewReader(refreshBody))
 	refreshReq.Header.Set("Content-Type", "application/json")
 	refreshRec := serve(refreshReq)
-	if refreshRec.Code != http.StatusUnauthorized {
+	if refreshRec.Code != http.StatusForbidden {
 		t.Fatalf("expected revoked session refresh token to be rejected with 401, got %d, body=%s", refreshRec.Code, refreshRec.Body.String())
 	}
 }
@@ -256,12 +242,12 @@ func TestRouter_AuthRegisterDisabledBySiteConfig(t *testing.T) {
 	}
 
 	var payload struct {
-		Code string `json:"code"`
+		Code int `json:"code"`
 	}
 	if err := json.Unmarshal(registerRec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode register disabled response failed: %v", err)
 	}
-	if payload.Code != "REGISTRATION_DISABLED" {
-		t.Fatalf("expected error code REGISTRATION_DISABLED, got %s", payload.Code)
+	if payload.Code != response.ResolveErrorCode("REGISTRATION_DISABLED") {
+		t.Fatalf("expected error code %d, got %d", response.ResolveErrorCode("REGISTRATION_DISABLED"), payload.Code)
 	}
 }

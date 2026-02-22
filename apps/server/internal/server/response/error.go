@@ -10,11 +10,19 @@ import (
 // RequestIDContextKey 用于在请求生命周期内传递 request_id。
 const RequestIDContextKey = "request_id"
 
-// ErrorBody 定义统一错误体，便于前端和日志系统稳定解析。
-type ErrorBody struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
+const (
+	// SuccessCode 统一成功响应码。
+	SuccessCode = 0
+	// SuccessMessage 统一成功响应描述。
+	SuccessMessage = "success"
+)
+
+// JsonResult 定义统一 JSON 返回结构。
+type JsonResult[T any] struct {
+	Code      int    `json:"code"`
+	Message   string `json:"message,omitempty"`
 	RequestID string `json:"requestId,omitempty"`
+	Data      T      `json:"data"`
 }
 
 // RequestIDFromContext 读取中间件写入的 request_id，缺失时返回空字符串。
@@ -32,19 +40,34 @@ func RequestIDFromContext(c *gin.Context) string {
 	return requestID
 }
 
+// JSON 统一输出 JSON 成功响应，并自动附带 request_id。
+func JSON[T any](c *gin.Context, _ int, data T) {
+	c.JSON(http.StatusOK, JsonResult[T]{
+		Code:      SuccessCode,
+		Message:   SuccessMessage,
+		RequestID: RequestIDFromContext(c),
+		Data:      data,
+	})
+}
+
 // Error 统一输出 JSON 错误响应，并自动附带 request_id。
 func Error(c *gin.Context, status int, code string, message string) {
+	errorCode := ResolveErrorCode(code)
+	httpStatus := NormalizeErrorHTTPStatus(status)
+
 	// 中文注释：错误信息进入请求容器，便于请求结束时统一输出结构化日志。
 	logit.SetRequestAttrs(c.Request.Context(),
-		logit.Int("error_status", status),
-		logit.String("error_code", code),
+		logit.Int("error_status", httpStatus),
+		logit.Int("error_code", errorCode),
+		logit.String("error_key", code),
 		logit.String("error_message", message),
 	)
 
-	c.AbortWithStatusJSON(status, ErrorBody{
-		Code:      code,
+	c.AbortWithStatusJSON(httpStatus, JsonResult[any]{
+		Code:      errorCode,
 		Message:   message,
 		RequestID: RequestIDFromContext(c),
+		Data:      nil,
 	})
 }
 

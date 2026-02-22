@@ -393,6 +393,149 @@ func (r *gormSpaceRepository) ListForAdmin(
 	return result, total, nil
 }
 
+func (r *gormSpaceRepository) ListMembers(ctx context.Context, spaceID string) ([]SpaceMemberListRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("space repository db is nil")
+	}
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID == "" {
+		return []SpaceMemberListRecord{}, nil
+	}
+
+	type spaceMemberRow struct {
+		UserID       string      `gorm:"column:user_id"`
+		Email        string      `gorm:"column:email"`
+		Name         string      `gorm:"column:name"`
+		Role         models.Role `gorm:"column:role"`
+		CreatedAtRaw string      `gorm:"column:created_at"`
+		UpdatedAtRaw string      `gorm:"column:updated_at"`
+	}
+
+	var rows []spaceMemberRow
+	if err := r.db.WithContext(ctx).
+		Table("space_members AS sm").
+		Select(
+			"sm.user_id",
+			"sm.role",
+			"sm.created_at",
+			"sm.updated_at",
+			"u.email",
+			"u.name",
+		).
+		Joins("JOIN users AS u ON u.user_id = sm.user_id").
+		Where("sm.space_id = ?", normalizedSpaceID).
+		Order("sm.created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]SpaceMemberListRecord, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, SpaceMemberListRecord{
+			UserID:    strings.TrimSpace(row.UserID),
+			Email:     strings.TrimSpace(row.Email),
+			Name:      strings.TrimSpace(row.Name),
+			Role:      normalizeSpaceMemberRole(row.Role),
+			CreatedAt: parseSpaceRecordTime(row.CreatedAtRaw),
+			UpdatedAt: parseSpaceRecordTime(row.UpdatedAtRaw),
+		})
+	}
+	return result, nil
+}
+
+func (r *gormSpaceRepository) UpsertMember(ctx context.Context, params UpsertSpaceMemberParams) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("space repository db is nil")
+	}
+
+	spaceID := strings.TrimSpace(params.SpaceID)
+	userID := strings.TrimSpace(params.UserID)
+	if spaceID == "" || userID == "" {
+		return nil
+	}
+
+	role := normalizeSpaceMemberRole(params.Role)
+	if role == "" {
+		return nil
+	}
+
+	updatedAt := params.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	return r.db.WithContext(ctx).
+		Table("space_members").
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "space_id"}, {Name: "user_id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"role":       role,
+				"updated_at": updatedAt,
+			}),
+		}).
+		Create(map[string]any{
+			"space_id":   spaceID,
+			"user_id":    userID,
+			"role":       role,
+			"created_at": updatedAt,
+			"updated_at": updatedAt,
+		}).Error
+}
+
+func (r *gormSpaceRepository) UpdateMemberRole(ctx context.Context, params UpdateSpaceMemberRoleParams) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+
+	spaceID := strings.TrimSpace(params.SpaceID)
+	userID := strings.TrimSpace(params.UserID)
+	if spaceID == "" || userID == "" {
+		return false, nil
+	}
+
+	role := normalizeSpaceMemberRole(params.Role)
+	if role == "" {
+		return false, nil
+	}
+
+	updatedAt := params.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	tx := r.db.WithContext(ctx).
+		Table("space_members").
+		Where("space_id = ? AND user_id = ?", spaceID, userID).
+		Updates(map[string]any{
+			"role":       role,
+			"updated_at": updatedAt,
+		})
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormSpaceRepository) DeleteMember(ctx context.Context, spaceID string, userID string) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedUserID := strings.TrimSpace(userID)
+	if normalizedSpaceID == "" || normalizedUserID == "" {
+		return false, nil
+	}
+
+	tx := r.db.WithContext(ctx).
+		Where("space_id = ? AND user_id = ?", normalizedSpaceID, normalizedUserID).
+		Delete(&models.SpaceMember{})
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
 func (r *gormSpaceRepository) UpdateVisibility(
 	ctx context.Context,
 	spaceID string,
@@ -713,6 +856,19 @@ func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID strin
 	}
 
 	return count > 0, nil
+}
+
+func normalizeSpaceMemberRole(value models.Role) models.Role {
+	switch models.Role(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case models.RoleOwner:
+		return models.RoleOwner
+	case models.RoleCollaborator:
+		return models.RoleCollaborator
+	case models.RoleReader:
+		return models.RoleReader
+	default:
+		return ""
+	}
 }
 
 func normalizeSpaceStatuses(input []models.EntityStatus) []models.EntityStatus {

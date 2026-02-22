@@ -142,6 +142,26 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 			adminAPI.POST("/spaces", adminSpaceHandler.CreateSpace)
 			adminAPI.POST("/spaces/cover-assets", adminSpaceHandler.CreateCoverAsset)
 			adminAPI.GET("/spaces", adminSpaceHandler.ListSpaces)
+			adminAPI.GET(
+				"/spaces/:spaceId/members",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.ListMembers,
+			)
+			adminAPI.POST(
+				"/spaces/:spaceId/members",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.UpsertMember,
+			)
+			adminAPI.PATCH(
+				"/spaces/:spaceId/members/:userId",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.UpdateMemberRole,
+			)
+			adminAPI.DELETE(
+				"/spaces/:spaceId/members/:userId",
+				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
+				adminSpaceHandler.DeleteMember,
+			)
 			adminAPI.PATCH(
 				"/spaces/:spaceId/status",
 				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),

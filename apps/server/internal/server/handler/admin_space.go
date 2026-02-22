@@ -85,6 +85,26 @@ type transferAdminSpaceRequest struct {
 	TargetEmail  string `json:"targetEmail"`
 }
 
+type upsertAdminSpaceMemberRequest struct {
+	TargetUserID string `json:"targetUserId"`
+	TargetEmail  string `json:"targetEmail"`
+	Role         string `json:"role"`
+}
+
+type updateAdminSpaceMemberRoleRequest struct {
+	Role string `json:"role"`
+}
+
+type adminSpaceMemberResponse struct {
+	UserID    string      `json:"userId"`
+	Email     string      `json:"email"`
+	Name      string      `json:"name"`
+	Role      models.Role `json:"role"`
+	IsOwner   bool        `json:"isOwner"`
+	CreatedAt time.Time   `json:"createdAt"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+}
+
 // NewAdminSpaceHandler 创建后台空间管理处理器。
 func NewAdminSpaceHandler(adminSpaceService *service.AdminSpaceService) *adminSpaceHandler {
 	return &adminSpaceHandler{adminSpaceService: adminSpaceService}
@@ -135,7 +155,7 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, mapAdminSpaceResponse(payload))
+	response.JSON(c, http.StatusCreated, mapAdminSpaceResponse(payload))
 }
 
 // CreateCoverAsset 创建空间封面资产。
@@ -216,7 +236,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminSpaceCoverDTO(payload))
+	response.JSON(c, http.StatusOK, mapAdminSpaceCoverDTO(payload))
 }
 
 // ListSpaces 返回后台空间列表，支持关键词、状态、可见性与分页筛选。
@@ -270,7 +290,7 @@ func (h *adminSpaceHandler) ListSpaces(c *gin.Context) {
 		items = append(items, mapAdminSpaceResponse(item))
 	}
 
-	c.JSON(http.StatusOK, adminSpaceListResponse{
+	response.JSON(c, http.StatusOK, adminSpaceListResponse{
 		Items: items,
 		Pagination: adminSpacePaginationResult{
 			Page:     payload.Page,
@@ -278,6 +298,233 @@ func (h *adminSpaceHandler) ListSpaces(c *gin.Context) {
 			Total:    payload.Total,
 		},
 	})
+}
+
+// ListMembers 返回后台空间成员列表。
+func (h *adminSpaceHandler) ListMembers(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		return
+	}
+
+	members, err := h.adminSpaceService.ListMembers(c.Request.Context(), service.ListAdminSpaceMembersInput{
+		ActorUserID: actorUserID,
+		SpaceID:     spaceID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
+		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
+		case errors.Is(err, service.ErrAdminSpaceNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
+			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	items := make([]adminSpaceMemberResponse, 0, len(members))
+	for _, member := range members {
+		items = append(items, mapAdminSpaceMemberResponse(member))
+	}
+
+	response.JSON(c, http.StatusOK, map[string]any{
+		"items": items,
+	})
+}
+
+// UpsertMember 新增空间成员（已存在则更新角色）。
+func (h *adminSpaceHandler) UpsertMember(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		return
+	}
+
+	var req upsertAdminSpaceMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	member, err := h.adminSpaceService.UpsertMember(c.Request.Context(), service.UpsertAdminSpaceMemberInput{
+		ActorUserID:  actorUserID,
+		RequestID:    response.RequestIDFromContext(c),
+		SpaceID:      spaceID,
+		TargetUserID: strings.TrimSpace(req.TargetUserID),
+		TargetEmail:  strings.TrimSpace(req.TargetEmail),
+		Role:         models.Role(strings.ToLower(strings.TrimSpace(req.Role))),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
+		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
+		case errors.Is(err, service.ErrAdminSpaceNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
+			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
+		case errors.Is(err, service.ErrAdminSpaceMemberTargetRequired):
+			response.Error(c, http.StatusBadRequest, "MEMBER_TARGET_REQUIRED", "member target is required")
+		case errors.Is(err, service.ErrAdminSpaceMemberTargetNotFound):
+			response.Error(c, http.StatusNotFound, "MEMBER_TARGET_NOT_FOUND", "member target not found")
+		case errors.Is(err, service.ErrAdminSpaceMemberInvalidRole):
+			response.Error(c, http.StatusBadRequest, "INVALID_MEMBER_ROLE", "member role must be collaborator or reader")
+		case errors.Is(err, service.ErrAdminSpaceMemberOwnerImmutable):
+			response.Error(c, http.StatusBadRequest, "OWNER_MEMBER_IMMUTABLE", "owner member role cannot be changed")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapAdminSpaceMemberResponse(member))
+}
+
+// UpdateMemberRole 更新空间成员角色。
+func (h *adminSpaceHandler) UpdateMemberRole(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		return
+	}
+	memberUserID := strings.TrimSpace(c.Param("userId"))
+	if memberUserID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "member user id is required")
+		return
+	}
+
+	var req updateAdminSpaceMemberRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+
+	member, err := h.adminSpaceService.UpdateMemberRole(c.Request.Context(), service.UpdateAdminSpaceMemberRoleInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		SpaceID:     spaceID,
+		UserID:      memberUserID,
+		Role:        models.Role(strings.ToLower(strings.TrimSpace(req.Role))),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
+		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
+		case errors.Is(err, service.ErrAdminSpaceNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
+			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
+		case errors.Is(err, service.ErrAdminSpaceMemberTargetRequired):
+			response.Error(c, http.StatusBadRequest, "MEMBER_TARGET_REQUIRED", "member target is required")
+		case errors.Is(err, service.ErrAdminSpaceMemberInvalidRole):
+			response.Error(c, http.StatusBadRequest, "INVALID_MEMBER_ROLE", "member role must be collaborator or reader")
+		case errors.Is(err, service.ErrAdminSpaceMemberNotFound):
+			response.Error(c, http.StatusNotFound, "MEMBER_NOT_FOUND", "space member not found")
+		case errors.Is(err, service.ErrAdminSpaceMemberOwnerImmutable):
+			response.Error(c, http.StatusBadRequest, "OWNER_MEMBER_IMMUTABLE", "owner member role cannot be changed")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapAdminSpaceMemberResponse(member))
+}
+
+// DeleteMember 删除空间成员。
+func (h *adminSpaceHandler) DeleteMember(c *gin.Context) {
+	if h == nil || h.adminSpaceService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		return
+	}
+	memberUserID := strings.TrimSpace(c.Param("userId"))
+	if memberUserID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "member user id is required")
+		return
+	}
+
+	if err := h.adminSpaceService.DeleteMember(c.Request.Context(), service.DeleteAdminSpaceMemberInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		SpaceID:     spaceID,
+		UserID:      memberUserID,
+	}); err != nil {
+		switch {
+		case errors.Is(err, service.ErrAdminForbidden):
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
+		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
+		case errors.Is(err, service.ErrAdminSpaceNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
+			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
+		case errors.Is(err, service.ErrAdminSpaceMemberTargetRequired):
+			response.Error(c, http.StatusBadRequest, "MEMBER_TARGET_REQUIRED", "member target is required")
+		case errors.Is(err, service.ErrAdminSpaceMemberNotFound):
+			response.Error(c, http.StatusNotFound, "MEMBER_NOT_FOUND", "space member not found")
+		case errors.Is(err, service.ErrAdminSpaceMemberOwnerImmutable):
+			response.Error(c, http.StatusBadRequest, "OWNER_MEMBER_IMMUTABLE", "owner member cannot be removed")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, struct{}{})
 }
 
 // UpdateMetadata 更新空间名称、可见性等元数据。
@@ -312,12 +559,12 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 	}
 
 	payload, err := h.adminSpaceService.UpdateMetadata(c.Request.Context(), service.UpdateAdminSpaceMetadataInput{
-		ActorUserID: actorUserID,
-		RequestID:   response.RequestIDFromContext(c),
-		SpaceID:     spaceID,
-		Name:        req.Name,
-		Description: req.Description,
-		Visibility:  visibility,
+		ActorUserID:  actorUserID,
+		RequestID:    response.RequestIDFromContext(c),
+		SpaceID:      spaceID,
+		Name:         req.Name,
+		Description:  req.Description,
+		Visibility:   visibility,
 		CoverAssetID: req.CoverAssetID,
 	})
 	if err != nil {
@@ -344,7 +591,7 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminSpaceResponse(payload))
+	response.JSON(c, http.StatusOK, mapAdminSpaceResponse(payload))
 }
 
 // TransferOwnership 转让空间归属。
@@ -401,7 +648,7 @@ func (h *adminSpaceHandler) TransferOwnership(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminSpaceResponse(payload))
+	response.JSON(c, http.StatusOK, mapAdminSpaceResponse(payload))
 }
 
 // UpdateStatus 更新空间状态（active/banned）。
@@ -454,7 +701,7 @@ func (h *adminSpaceHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminSpaceResponse(payload))
+	response.JSON(c, http.StatusOK, mapAdminSpaceResponse(payload))
 }
 
 // DeleteSpace 软删除空间。
@@ -495,7 +742,7 @@ func (h *adminSpaceHandler) DeleteSpace(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.JSON(c, http.StatusOK, struct{}{})
 }
 
 func parseAdminSpaceQueryInt(rawValue string) (int, error) {
@@ -549,6 +796,18 @@ func mapAdminSpaceCoverDTOFromPointer(value *service.AdminSpaceCoverAsset) *admi
 	}
 	payload := mapAdminSpaceCoverDTO(*value)
 	return &payload
+}
+
+func mapAdminSpaceMemberResponse(value service.AdminSpaceMemberRecord) adminSpaceMemberResponse {
+	return adminSpaceMemberResponse{
+		UserID:    value.UserID,
+		Email:     value.Email,
+		Name:      value.Name,
+		Role:      value.Role,
+		IsOwner:   value.IsOwner,
+		CreatedAt: value.CreatedAt,
+		UpdatedAt: value.UpdatedAt,
+	}
 }
 
 func readAdminUploadedFileBytes(fileHeader *multipart.FileHeader) ([]byte, error) {

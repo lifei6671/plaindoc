@@ -109,7 +109,7 @@ func (h *themeHandler) List(c *gin.Context) {
 		payload = append(payload, item)
 	}
 
-	c.JSON(http.StatusOK, payload)
+	response.JSON(c, http.StatusOK, payload)
 }
 
 // UpdateTheme 按文档 ID 绑定主题 ID，并返回最新文档快照。
@@ -175,7 +175,7 @@ func (h *documentThemeHandler) UpdateTheme(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toDocumentResponse(document, time.Now().UTC().Format(time.RFC3339Nano)))
+	response.JSON(c, http.StatusOK, toDocumentResponse(document, time.Now().UTC().Format(time.RFC3339Nano)))
 }
 
 func toThemeResponse(theme themeRow) (themeResponse, error) {

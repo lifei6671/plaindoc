@@ -59,7 +59,7 @@ func (h *imageHostingHandler) GetConfig(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, config)
+	response.JSON(c, http.StatusOK, config)
 }
 
 // UploadImage 接收本地图片上传并返回可访问地址。
@@ -128,7 +128,7 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.JSON(c, http.StatusOK, gin.H{
 		"key": objectKey,
 		"url": resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/api/uploads/local"),
 	})

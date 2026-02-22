@@ -54,7 +54,7 @@ func (h *adminHandler) Me(c *gin.Context) {
 		payloadRoles = append(payloadRoles, string(role))
 	}
 
-	c.JSON(http.StatusOK, adminMeResponse{
+	response.JSON(c, http.StatusOK, adminMeResponse{
 		UserID: actorUserID,
 		Roles:  payloadRoles,
 	})
@@ -73,7 +73,7 @@ func (h *adminHandler) CheckSpace(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, adminSpaceCheckResponse{
+	response.JSON(c, http.StatusOK, adminSpaceCheckResponse{
 		SpaceID:   spaceID,
 		CanManage: true,
 	})

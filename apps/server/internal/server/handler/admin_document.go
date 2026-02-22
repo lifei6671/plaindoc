@@ -109,7 +109,7 @@ func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 		items = append(items, mapAdminDocumentResponse(item))
 	}
 
-	c.JSON(http.StatusOK, adminDocumentListResponse{
+	response.JSON(c, http.StatusOK, adminDocumentListResponse{
 		Items: items,
 		Pagination: adminDocumentPageResponse{
 			Page:     payload.Page,
@@ -169,7 +169,7 @@ func (h *adminDocumentHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminDocumentResponse(payload))
+	response.JSON(c, http.StatusOK, mapAdminDocumentResponse(payload))
 }
 
 // DeleteDocument 软删除文档。
@@ -210,7 +210,7 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.JSON(c, http.StatusOK, struct{}{})
 }
 
 func parseAdminDocumentQueryInt(rawValue string) (int, error) {

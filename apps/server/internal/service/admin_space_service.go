@@ -44,6 +44,11 @@ var (
 	ErrAdminSpaceTransferTargetNotFound  = errors.New("admin space transfer target not found")
 	ErrAdminSpaceTransferTargetNotMember = errors.New("admin space transfer target not member")
 	ErrAdminSpaceTransferToSelf          = errors.New("admin space transfer to self")
+	ErrAdminSpaceMemberTargetRequired    = errors.New("admin space member target is required")
+	ErrAdminSpaceMemberTargetNotFound    = errors.New("admin space member target not found")
+	ErrAdminSpaceMemberInvalidRole       = errors.New("admin space member role is invalid")
+	ErrAdminSpaceMemberNotFound          = errors.New("admin space member not found")
+	ErrAdminSpaceMemberOwnerImmutable    = errors.New("admin space owner member is immutable")
 )
 
 // AdminSpaceCoverSource 定义空间封面来源。
@@ -133,6 +138,17 @@ type AdminSpaceRecord struct {
 	UpdatedAt    time.Time
 }
 
+// AdminSpaceMemberRecord 后台空间成员列表项。
+type AdminSpaceMemberRecord struct {
+	UserID    string
+	Email     string
+	Name      string
+	Role      models.Role
+	IsOwner   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // ListAdminSpacesInput 后台空间列表查询参数。
 type ListAdminSpacesInput struct {
 	ActorUserID      string
@@ -151,14 +167,47 @@ type ListAdminSpacesResult struct {
 	Total    int64
 }
 
-// UpdateAdminSpaceMetadataInput 后台空间元数据更新参数。
-type UpdateAdminSpaceMetadataInput struct {
+// ListAdminSpaceMembersInput 后台空间成员列表查询参数。
+type ListAdminSpaceMembersInput struct {
+	ActorUserID string
+	SpaceID     string
+}
+
+// UpsertAdminSpaceMemberInput 后台空间成员新增参数。
+type UpsertAdminSpaceMemberInput struct {
+	ActorUserID  string
+	RequestID    string
+	SpaceID      string
+	TargetUserID string
+	TargetEmail  string
+	Role         models.Role
+}
+
+// UpdateAdminSpaceMemberRoleInput 后台空间成员角色更新参数。
+type UpdateAdminSpaceMemberRoleInput struct {
 	ActorUserID string
 	RequestID   string
 	SpaceID     string
-	Name        *string
-	Description *string
-	Visibility  *models.Visibility
+	UserID      string
+	Role        models.Role
+}
+
+// DeleteAdminSpaceMemberInput 后台空间成员删除参数。
+type DeleteAdminSpaceMemberInput struct {
+	ActorUserID string
+	RequestID   string
+	SpaceID     string
+	UserID      string
+}
+
+// UpdateAdminSpaceMetadataInput 后台空间元数据更新参数。
+type UpdateAdminSpaceMetadataInput struct {
+	ActorUserID  string
+	RequestID    string
+	SpaceID      string
+	Name         *string
+	Description  *string
+	Visibility   *models.Visibility
 	CoverAssetID *string
 }
 
@@ -262,6 +311,266 @@ func (s *AdminSpaceService) ListSpaces(
 		PageSize: pageSize,
 		Total:    total,
 	}, nil
+}
+
+// ListMembers 查询后台空间成员列表。
+func (s *AdminSpaceService) ListMembers(
+	ctx context.Context,
+	input ListAdminSpaceMembersInput,
+) ([]AdminSpaceMemberRecord, error) {
+	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
+		return nil, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	spaceID := strings.TrimSpace(input.SpaceID)
+	if spaceID == "" {
+		return nil, ErrAdminSpaceInvalidSpaceID
+	}
+
+	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
+		return nil, err
+	}
+
+	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAdminSpaceNotFound
+		}
+		return nil, err
+	}
+	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
+		return nil, ErrAdminSpaceAlreadyDeleted
+	}
+
+	members, err := s.spaceRepo.ListMembers(ctx, spaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.hydrateSpaceMembers(ctx, spaceSnapshot, members), nil
+}
+
+// UpsertMember 新增空间成员（已存在则更新角色）。
+func (s *AdminSpaceService) UpsertMember(
+	ctx context.Context,
+	input UpsertAdminSpaceMemberInput,
+) (AdminSpaceMemberRecord, error) {
+	if s == nil || s.spaceRepo == nil || s.userRepo == nil || s.adminAccessService == nil {
+		return AdminSpaceMemberRecord{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	spaceID := strings.TrimSpace(input.SpaceID)
+	if spaceID == "" {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceInvalidSpaceID
+	}
+	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+
+	memberRole := normalizeEditableAdminSpaceMemberRole(input.Role)
+	if memberRole == "" {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberInvalidRole
+	}
+
+	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceMemberRecord{}, ErrAdminSpaceNotFound
+		}
+		return AdminSpaceMemberRecord{}, err
+	}
+	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceAlreadyDeleted
+	}
+
+	targetUser, err := s.resolveTargetUser(ctx, input.TargetUserID, input.TargetEmail)
+	if err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+	targetUserID := strings.TrimSpace(targetUser.UserID)
+	if targetUserID == strings.TrimSpace(spaceSnapshot.OwnerUserID) {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberOwnerImmutable
+	}
+
+	now := time.Now().UTC()
+	if err := s.spaceRepo.UpsertMember(ctx, repository.UpsertSpaceMemberParams{
+		SpaceID:   spaceID,
+		UserID:    targetUserID,
+		Role:      memberRole,
+		UpdatedAt: now,
+	}); err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+
+	members, err := s.spaceRepo.ListMembers(ctx, spaceID)
+	if err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+	memberRecord, found := findAdminSpaceMemberRecord(s.hydrateSpaceMembers(ctx, spaceSnapshot, members), targetUserID)
+	if !found {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberNotFound
+	}
+
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "space_member",
+		TargetID:   spaceID + ":" + targetUserID,
+		Summary:    "space member upserted: " + spaceID + ":" + targetUserID,
+		Detail: map[string]any{
+			"spaceId":   spaceID,
+			"userId":    targetUserID,
+			"userEmail": strings.TrimSpace(targetUser.Email),
+			"role":      memberRole,
+		},
+	}); err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+
+	return memberRecord, nil
+}
+
+// UpdateMemberRole 更新空间成员角色。
+func (s *AdminSpaceService) UpdateMemberRole(
+	ctx context.Context,
+	input UpdateAdminSpaceMemberRoleInput,
+) (AdminSpaceMemberRecord, error) {
+	if s == nil || s.spaceRepo == nil || s.userRepo == nil || s.adminAccessService == nil {
+		return AdminSpaceMemberRecord{}, errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	spaceID := strings.TrimSpace(input.SpaceID)
+	memberUserID := strings.TrimSpace(input.UserID)
+	if spaceID == "" {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceInvalidSpaceID
+	}
+	if memberUserID == "" {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberTargetRequired
+	}
+	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+
+	memberRole := normalizeEditableAdminSpaceMemberRole(input.Role)
+	if memberRole == "" {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberInvalidRole
+	}
+
+	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceMemberRecord{}, ErrAdminSpaceNotFound
+		}
+		return AdminSpaceMemberRecord{}, err
+	}
+	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceAlreadyDeleted
+	}
+	if memberUserID == strings.TrimSpace(spaceSnapshot.OwnerUserID) {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberOwnerImmutable
+	}
+
+	updated, err := s.spaceRepo.UpdateMemberRole(ctx, repository.UpdateSpaceMemberRoleParams{
+		SpaceID:   spaceID,
+		UserID:    memberUserID,
+		Role:      memberRole,
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+	if !updated {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberNotFound
+	}
+
+	members, err := s.spaceRepo.ListMembers(ctx, spaceID)
+	if err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+	memberRecord, found := findAdminSpaceMemberRecord(s.hydrateSpaceMembers(ctx, spaceSnapshot, members), memberUserID)
+	if !found {
+		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberNotFound
+	}
+
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "space_member",
+		TargetID:   spaceID + ":" + memberUserID,
+		Summary:    "space member role updated: " + spaceID + ":" + memberUserID,
+		Detail: map[string]any{
+			"spaceId": spaceID,
+			"userId":  memberUserID,
+			"role":    memberRole,
+		},
+	}); err != nil {
+		return AdminSpaceMemberRecord{}, err
+	}
+
+	return memberRecord, nil
+}
+
+// DeleteMember 删除空间成员。
+func (s *AdminSpaceService) DeleteMember(
+	ctx context.Context,
+	input DeleteAdminSpaceMemberInput,
+) error {
+	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
+		return errors.New("admin space service dependencies are nil")
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	spaceID := strings.TrimSpace(input.SpaceID)
+	memberUserID := strings.TrimSpace(input.UserID)
+	if spaceID == "" {
+		return ErrAdminSpaceInvalidSpaceID
+	}
+	if memberUserID == "" {
+		return ErrAdminSpaceMemberTargetRequired
+	}
+	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
+		return err
+	}
+
+	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrAdminSpaceNotFound
+		}
+		return err
+	}
+	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
+		return ErrAdminSpaceAlreadyDeleted
+	}
+	if memberUserID == strings.TrimSpace(spaceSnapshot.OwnerUserID) {
+		return ErrAdminSpaceMemberOwnerImmutable
+	}
+
+	deleted, err := s.spaceRepo.DeleteMember(ctx, spaceID, memberUserID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return ErrAdminSpaceMemberNotFound
+	}
+
+	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSpace,
+		Action:     AdminAuditActionDelete,
+		TargetType: "space_member",
+		TargetID:   spaceID + ":" + memberUserID,
+		Summary:    "space member removed: " + spaceID + ":" + memberUserID,
+		Detail: map[string]any{
+			"spaceId": spaceID,
+			"userId":  memberUserID,
+		},
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // CreateSpace 后台创建空间。
@@ -1110,6 +1419,150 @@ func (s *AdminSpaceService) recordSpaceAudit(ctx context.Context, input RecordAd
 		return nil
 	}
 	return s.adminAuditService.Record(ctx, input)
+}
+
+func (s *AdminSpaceService) resolveTargetUser(ctx context.Context, targetUserID string, targetEmail string) (*models.User, error) {
+	if s == nil || s.userRepo == nil {
+		return nil, errors.New("admin space service userRepo is nil")
+	}
+
+	normalizedUserID := strings.TrimSpace(targetUserID)
+	normalizedEmail := strings.TrimSpace(targetEmail)
+	if normalizedUserID == "" && normalizedEmail == "" {
+		return nil, ErrAdminSpaceMemberTargetRequired
+	}
+
+	var (
+		targetUser *models.User
+		err        error
+	)
+	if normalizedUserID != "" {
+		targetUser, err = s.userRepo.GetByUserID(ctx, normalizedUserID)
+	} else {
+		targetUser, err = s.userRepo.GetByEmail(ctx, normalizedEmail)
+	}
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAdminSpaceMemberTargetNotFound
+		}
+		return nil, err
+	}
+	if targetUser == nil || strings.TrimSpace(targetUser.UserID) == "" {
+		return nil, ErrAdminSpaceMemberTargetNotFound
+	}
+	return targetUser, nil
+}
+
+func (s *AdminSpaceService) hydrateSpaceMembers(
+	ctx context.Context,
+	spaceSnapshot *models.Space,
+	members []repository.SpaceMemberListRecord,
+) []AdminSpaceMemberRecord {
+	ownerUserID := ""
+	ownerCreatedAt := time.Time{}
+	ownerUpdatedAt := time.Time{}
+	if spaceSnapshot != nil {
+		ownerUserID = strings.TrimSpace(spaceSnapshot.OwnerUserID)
+		ownerCreatedAt = spaceSnapshot.CreatedAt
+		ownerUpdatedAt = spaceSnapshot.UpdatedAt
+	}
+
+	result := make([]AdminSpaceMemberRecord, 0, len(members)+1)
+	seen := make(map[string]int, len(members)+1)
+	for _, member := range members {
+		memberUserID := strings.TrimSpace(member.UserID)
+		if memberUserID == "" {
+			continue
+		}
+		record := AdminSpaceMemberRecord{
+			UserID:    memberUserID,
+			Email:     strings.TrimSpace(member.Email),
+			Name:      strings.TrimSpace(member.Name),
+			Role:      normalizeAdminSpaceMemberRole(member.Role),
+			IsOwner:   memberUserID == ownerUserID,
+			CreatedAt: member.CreatedAt,
+			UpdatedAt: member.UpdatedAt,
+		}
+		if record.IsOwner {
+			record.Role = models.RoleOwner
+		}
+		seen[memberUserID] = len(result)
+		result = append(result, record)
+	}
+
+	if ownerUserID != "" {
+		ownerEmail := ""
+		ownerName := ""
+		if s != nil && s.userRepo != nil {
+			ownerUser, err := s.userRepo.GetByUserID(ctx, ownerUserID)
+			if err == nil && ownerUser != nil {
+				ownerEmail = strings.TrimSpace(ownerUser.Email)
+				ownerName = strings.TrimSpace(ownerUser.Name)
+			}
+		}
+		if index, exists := seen[ownerUserID]; exists {
+			result[index].IsOwner = true
+			result[index].Role = models.RoleOwner
+			if ownerEmail != "" {
+				result[index].Email = ownerEmail
+			}
+			if ownerName != "" {
+				result[index].Name = ownerName
+			}
+		} else {
+			result = append([]AdminSpaceMemberRecord{
+				{
+					UserID:    ownerUserID,
+					Email:     ownerEmail,
+					Name:      ownerName,
+					Role:      models.RoleOwner,
+					IsOwner:   true,
+					CreatedAt: ownerCreatedAt,
+					UpdatedAt: ownerUpdatedAt,
+				},
+			}, result...)
+		}
+	}
+
+	return result
+}
+
+func findAdminSpaceMemberRecord(members []AdminSpaceMemberRecord, userID string) (AdminSpaceMemberRecord, bool) {
+	targetUserID := strings.TrimSpace(userID)
+	if targetUserID == "" {
+		return AdminSpaceMemberRecord{}, false
+	}
+	for _, member := range members {
+		if strings.TrimSpace(member.UserID) != targetUserID {
+			continue
+		}
+		return member, true
+	}
+	return AdminSpaceMemberRecord{}, false
+}
+
+func normalizeAdminSpaceMemberRole(value models.Role) models.Role {
+	switch models.Role(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case models.RoleOwner:
+		return models.RoleOwner
+	case models.RoleCollaborator:
+		return models.RoleCollaborator
+	case models.RoleReader:
+		return models.RoleReader
+	default:
+		return models.RoleReader
+	}
+}
+
+func normalizeEditableAdminSpaceMemberRole(value models.Role) models.Role {
+	switch models.Role(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case models.RoleCollaborator:
+		return models.RoleCollaborator
+	case models.RoleReader:
+		return models.RoleReader
+	default:
+		return ""
+	}
 }
 
 func resolveAdminSpaceStatuses(filter AdminSpaceStatusFilter) ([]models.EntityStatus, error) {

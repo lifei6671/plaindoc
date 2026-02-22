@@ -9,6 +9,7 @@ import {
   type AdminDocumentListResult,
   type AdminIdentity,
   type AdminSpace,
+  type AdminSpaceMember,
   type AdminSpaceCover,
   type AdminSpaceListInput,
   type AdminSpaceListResult,
@@ -45,6 +46,9 @@ interface HttpAdapterOptions {
 
 const ACCESS_TOKEN_STORAGE_KEY = "plaindoc.auth.access-token";
 const REFRESH_TOKEN_STORAGE_KEY = "plaindoc.auth.refresh-token";
+const JSON_RESULT_SUCCESS_CODE = 0;
+const JSON_RESULT_UNAUTHORIZED_CODE = 1001;
+const JSON_RESULT_CONFIG_VERSION_CONFLICT_CODE = 4002;
 
 interface HttpAuthSession extends AuthSession {
   refreshToken?: string;
@@ -53,12 +57,14 @@ interface HttpAuthSession extends AuthSession {
 class HttpRequestError extends Error {
   readonly status: number;
   readonly body: string;
+  readonly code?: number;
 
-  constructor(status: number, body: string) {
+  constructor(status: number, body: string, code?: number) {
     super(body || `Request failed: ${status}`);
     this.name = "HttpRequestError";
     this.status = status;
     this.body = body;
+    this.code = code;
   }
 }
 
@@ -87,8 +93,55 @@ function removeStoredValue(key: string): void {
   }
 }
 
-function toRequestError(status: number, body: string): HttpRequestError {
-  return new HttpRequestError(status, body);
+function toRequestError(status: number, body: string, code?: number): HttpRequestError {
+  return new HttpRequestError(status, body, code);
+}
+
+interface JsonResultEnvelope<T> {
+  code?: number;
+  message?: string;
+  requestId?: string;
+  data?: T;
+}
+
+function isJsonResultEnvelope(value: unknown): value is JsonResultEnvelope<unknown> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return "code" in record && "data" in record;
+}
+
+function parseResponsePayload(rawBody: string): unknown {
+  const text = rawBody.trim();
+  if (!text) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return rawBody;
+  }
+}
+
+function extractErrorMessage(status: number, payload: unknown, fallbackBody: string): string {
+  if (typeof payload === "string" && payload.trim()) {
+    return payload;
+  }
+  if (isJsonResultEnvelope(payload) && typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message.trim();
+  }
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message.trim();
+    }
+  }
+  const text = fallbackBody.trim();
+  if (text) {
+    return text;
+  }
+  return `Request failed: ${status}`;
 }
 
 function isAbsoluteUrl(value: string): boolean {
@@ -226,13 +279,17 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       ...init,
       headers
     });
+    const rawBody = await response.text();
+    const payload = parseResponsePayload(rawBody);
+    const envelope = isJsonResultEnvelope(payload) ? payload : null;
+    const resultCode = typeof envelope?.code === "number" ? envelope.code : undefined;
 
-    if (response.status === 409) {
-      const payload = (await response.json()) as { latestDocument: Document };
-      throw new ConflictError(payload.latestDocument);
-    }
-
-    if (response.status === 401 && !skipAuth && retryOnUnauthorized) {
+    if (
+      response.status === 403 &&
+      resultCode === JSON_RESULT_UNAUTHORIZED_CODE &&
+      !skipAuth &&
+      retryOnUnauthorized
+    ) {
       const refreshed = await refreshSession();
       if (refreshed) {
         return request<T>(path, init, {
@@ -242,16 +299,40 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
     }
 
+    if (resultCode === JSON_RESULT_CONFIG_VERSION_CONFLICT_CODE) {
+      const resultData = envelope?.data as { latestDocument?: Document } | undefined;
+      if (resultData?.latestDocument) {
+        throw new ConflictError(resultData.latestDocument);
+      }
+    } else if (response.status === 409 && payload && typeof payload === "object") {
+      const value = payload as { latestDocument?: Document };
+      if (value.latestDocument) {
+        throw new ConflictError(value.latestDocument);
+      }
+    }
+
     if (!response.ok) {
-      const message = await response.text();
-      throw toRequestError(response.status, message);
+      const message = extractErrorMessage(response.status, payload, rawBody);
+      throw toRequestError(response.status, message, resultCode);
+    }
+
+    if (
+      envelope &&
+      typeof envelope.code === "number" &&
+      envelope.code !== JSON_RESULT_SUCCESS_CODE
+    ) {
+      const message = extractErrorMessage(response.status, payload, rawBody);
+      throw toRequestError(response.status, message, envelope.code);
     }
 
     if (response.status === 204) {
       return undefined as T;
     }
 
-    return (await response.json()) as T;
+    if (envelope) {
+      return envelope.data as T;
+    }
+    return payload as T;
   };
 
   const refreshSession = async (): Promise<boolean> => {
@@ -302,7 +383,10 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
           token: accessToken ?? undefined
         };
       } catch (error) {
-        if (error instanceof HttpRequestError && error.status === 401) {
+        if (
+          error instanceof HttpRequestError &&
+          (error.code === JSON_RESULT_UNAUTHORIZED_CODE || error.status === 403)
+        ) {
           clearStoredTokens();
           return { user: null };
         }
@@ -701,6 +785,89 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         ...space,
         cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
       };
+    },
+    async listSpaceMembers(spaceId: string) {
+      const targetSpaceID = spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      const payload = await request<{ items: AdminSpaceMember[] }>(
+        `/admin/spaces/${encodeURIComponent(targetSpaceID)}/members`
+      );
+      return Array.isArray(payload.items) ? payload.items : [];
+    },
+    async addSpaceMember(input: {
+      spaceId: string;
+      targetUserId?: string;
+      targetEmail?: string;
+      role: "collaborator" | "reader";
+    }) {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      const role = input.role;
+      if (role !== "collaborator" && role !== "reader") {
+        throw new Error("成员角色非法");
+      }
+
+      const targetUserID = (input.targetUserId ?? "").trim();
+      const targetEmail = (input.targetEmail ?? "").trim();
+      if (!targetUserID && !targetEmail) {
+        throw new Error("成员目标不能为空");
+      }
+
+      return request<AdminSpaceMember>(`/admin/spaces/${encodeURIComponent(targetSpaceID)}/members`, {
+        method: "POST",
+        body: JSON.stringify({
+          targetUserId: targetUserID,
+          targetEmail,
+          role
+        })
+      });
+    },
+    async updateSpaceMemberRole(input: {
+      spaceId: string;
+      userId: string;
+      role: "collaborator" | "reader";
+    }) {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      const memberUserID = input.userId.trim();
+      if (!memberUserID) {
+        throw new Error("成员用户 ID 不能为空");
+      }
+      const role = input.role;
+      if (role !== "collaborator" && role !== "reader") {
+        throw new Error("成员角色非法");
+      }
+
+      return request<AdminSpaceMember>(
+        `/admin/spaces/${encodeURIComponent(targetSpaceID)}/members/${encodeURIComponent(memberUserID)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ role })
+        }
+      );
+    },
+    async removeSpaceMember(input: { spaceId: string; userId: string }) {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      const memberUserID = input.userId.trim();
+      if (!memberUserID) {
+        throw new Error("成员用户 ID 不能为空");
+      }
+
+      await request<void>(
+        `/admin/spaces/${encodeURIComponent(targetSpaceID)}/members/${encodeURIComponent(memberUserID)}`,
+        {
+          method: "DELETE"
+        }
+      );
     },
     async transferSpaceOwnership(input: { spaceId: string; targetUserId?: string; targetEmail?: string }) {
       const targetSpaceID = input.spaceId.trim();

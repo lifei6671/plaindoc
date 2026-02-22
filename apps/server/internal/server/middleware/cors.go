@@ -12,7 +12,7 @@ func CORS(allowOrigin string) gin.HandlerFunc {
 		c.Writer.Header().Set("Vary", "Origin")
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(200)
 			return
 		}
 

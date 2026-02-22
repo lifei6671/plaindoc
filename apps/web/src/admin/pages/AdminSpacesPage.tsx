@@ -1,4 +1,4 @@
-import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -17,6 +17,7 @@ import { showToast } from "../../components/ui/toast";
 import { type AdminSpace, type AdminSpaceListResult, type DataGateway, type Visibility } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import { AdminCreateSpaceDialog } from "../components/AdminCreateSpaceDialog";
+import { AdminSpaceMembersDialog } from "../components/AdminSpaceMembersDialog";
 import { AdminSpaceSettingsDialog } from "../components/AdminSpaceSettingsDialog";
 import { useAdminDialogs } from "../components/AdminDialogs";
 import {
@@ -126,6 +127,8 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [editingSpace, setEditingSpace] = useState<AdminSpace | null>(null);
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
+  const [managingMembersSpace, setManagingMembersSpace] = useState<AdminSpace | null>(null);
 
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -305,10 +308,22 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     setSettingsDialogOpen(true);
   }, []);
 
+  const handleOpenMembers = useCallback((space: AdminSpace) => {
+    setManagingMembersSpace(space);
+    setMembersDialogOpen(true);
+  }, []);
+
   const handleSettingsOpenChange = useCallback((open: boolean) => {
     setSettingsDialogOpen(open);
     if (!open) {
       setEditingSpace(null);
+    }
+  }, []);
+
+  const handleMembersOpenChange = useCallback((open: boolean) => {
+    setMembersDialogOpen(open);
+    if (!open) {
+      setManagingMembersSpace(null);
     }
   }, []);
 
@@ -530,6 +545,12 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
         dataGateway={dataGateway}
         onOpenChange={handleSettingsOpenChange}
         onUpdated={handleSpaceCreated}
+      />
+      <AdminSpaceMembersDialog
+        open={membersDialogOpen}
+        space={managingMembersSpace}
+        dataGateway={dataGateway}
+        onOpenChange={handleMembersOpenChange}
       />
 
       <AdminPageCard>
@@ -812,6 +833,14 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                                   <span>封禁空间</span>
                                 </DropdownMenuItem>
                               )}
+                              <DropdownMenuItem
+                                disabled={isActioning || isDeleted}
+                                onSelect={() => handleOpenMembers(space)}
+                                className="text-sky-700 focus:text-sky-700"
+                              >
+                                <UserPlus size={14} className="mr-2" />
+                                <span>成员管理</span>
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={isActioning || isDeleted}
                                 onSelect={() => void handleTransferSpace(space)}

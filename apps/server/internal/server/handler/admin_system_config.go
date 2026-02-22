@@ -65,7 +65,7 @@ func (h *adminSystemConfigHandler) ListConfigs(c *gin.Context) {
 	for _, item := range items {
 		payload = append(payload, mapAdminSystemConfigResponse(item))
 	}
-	c.JSON(http.StatusOK, payload)
+	response.JSON(c, http.StatusOK, payload)
 }
 
 // UpsertConfig 创建或更新系统配置。
@@ -118,7 +118,7 @@ func (h *adminSystemConfigHandler) UpsertConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mapAdminSystemConfigResponse(item))
+	response.JSON(c, http.StatusOK, mapAdminSystemConfigResponse(item))
 }
 
 func mapAdminSystemConfigResponse(value service.AdminSystemConfigRecord) adminSystemConfigResponse {

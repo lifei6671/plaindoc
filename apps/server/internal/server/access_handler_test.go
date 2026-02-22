@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,7 +26,7 @@ func TestRouter_GetDocument_VisibilityAccessMatrix(t *testing.T) {
 
 	anonReq := httptest.NewRequest(http.MethodGet, "/api/docs/"+docID, nil)
 	anonRec := serve(anonReq)
-	if anonRec.Code != http.StatusUnauthorized {
+	if anonRec.Code != http.StatusForbidden {
 		t.Fatalf("expected anonymous access status 401, got %d body=%s", anonRec.Code, anonRec.Body.String())
 	}
 
@@ -56,13 +55,10 @@ func TestRouter_GetDocument_VisibilityAccessMatrix(t *testing.T) {
 		t.Fatalf("expected member access status 200, got %d body=%s", memberRec.Code, memberRec.Body.String())
 	}
 
-	var payload struct {
+	payload := decodeJSONResultData[struct {
 		ID         string `json:"id"`
 		Visibility string `json:"visibility"`
-	}
-	if err := json.Unmarshal(memberRec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode document response failed: %v", err)
-	}
+	}](t, memberRec.Body.Bytes())
 	if payload.ID != docID {
 		t.Fatalf("expected document id %s, got %s", docID, payload.ID)
 	}
@@ -103,7 +99,7 @@ func TestRouter_GetSpace_AuthenticatedVisibility(t *testing.T) {
 
 	anonReq := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID, nil)
 	anonRec := serve(anonReq)
-	if anonRec.Code != http.StatusUnauthorized {
+	if anonRec.Code != http.StatusForbidden {
 		t.Fatalf("expected anonymous access status 401, got %d body=%s", anonRec.Code, anonRec.Body.String())
 	}
 
@@ -188,20 +184,17 @@ func registerAccessUser(
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := serve(req)
-	if rec.Code != http.StatusCreated {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("register failed, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload struct {
+	payload := decodeJSONResultData[struct {
 		User struct {
 			ID    string `json:"id"`
 			Email string `json:"email"`
 		} `json:"user"`
 		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode register response failed: %v", err)
-	}
+	}](t, rec.Body.Bytes())
 	if payload.User.ID == "" || payload.Token == "" {
 		t.Fatalf("register response missing id/token, body=%s", rec.Body.String())
 	}

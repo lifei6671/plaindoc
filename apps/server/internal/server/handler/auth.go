@@ -104,7 +104,7 @@ func (h *authHandler) Register(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, authSessionResponse{
+	response.JSON(c, http.StatusCreated, authSessionResponse{
 		User: authUserResponse{
 			ID:    session.User.ID,
 			Email: session.User.Email,
@@ -149,7 +149,7 @@ func (h *authHandler) Login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, authSessionResponse{
+	response.JSON(c, http.StatusOK, authSessionResponse{
 		User: authUserResponse{
 			ID:    session.User.ID,
 			Email: session.User.Email,
@@ -198,7 +198,7 @@ func (h *authHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, authSessionResponse{
+	response.JSON(c, http.StatusOK, authSessionResponse{
 		User: authUserResponse{
 			ID:    session.User.ID,
 			Email: session.User.Email,
@@ -233,7 +233,7 @@ func (h *authHandler) Me(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, authSessionResponse{
+	response.JSON(c, http.StatusOK, authSessionResponse{
 		User: authUserResponse{
 			ID:    session.User.ID,
 			Email: session.User.Email,
@@ -243,21 +243,21 @@ func (h *authHandler) Me(c *gin.Context) {
 	})
 }
 
-// Logout 退出当前会话：有 token 时尽力吊销会话，无 token 时直接返回 204。
+// Logout 退出当前会话：有 token 时尽力吊销会话，无 token 时返回统一成功体。
 func (h *authHandler) Logout(c *gin.Context) {
 	if h == nil || h.authService == nil {
-		c.Status(http.StatusNoContent)
+		response.JSON(c, http.StatusOK, struct{}{})
 		return
 	}
 
 	accessToken, ok := bearerTokenFromRequest(c)
 	if !ok {
-		c.Status(http.StatusNoContent)
+		response.JSON(c, http.StatusOK, struct{}{})
 		return
 	}
 
 	_ = h.authService.Logout(c.Request.Context(), accessToken)
-	c.Status(http.StatusNoContent)
+	response.JSON(c, http.StatusOK, struct{}{})
 }
 
 func normalizeEmail(value string) string {

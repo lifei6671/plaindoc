@@ -82,6 +82,10 @@ type SpaceRepository interface {
 	GetCoverAssetByAssetID(ctx context.Context, assetID string) (*models.SpaceCoverAsset, error)
 	ListByUserID(ctx context.Context, userID string) ([]models.Space, error)
 	ListForAdmin(ctx context.Context, params ListAdminSpacesParams) ([]AdminSpaceListRecord, int64, error)
+	ListMembers(ctx context.Context, spaceID string) ([]SpaceMemberListRecord, error)
+	UpsertMember(ctx context.Context, params UpsertSpaceMemberParams) error
+	UpdateMemberRole(ctx context.Context, params UpdateSpaceMemberRoleParams) (bool, error)
+	DeleteMember(ctx context.Context, spaceID string, userID string) (bool, error)
 	CreateCoverAsset(ctx context.Context, asset *models.SpaceCoverAsset) error
 	UpdateVisibility(ctx context.Context, spaceID string, visibility models.Visibility) (*models.Space, error)
 	UpdateStatus(ctx context.Context, params UpdateSpaceStatusParams) (bool, error)
@@ -110,6 +114,16 @@ type AdminSpaceListRecord struct {
 	OwnerEmail string
 }
 
+// SpaceMemberListRecord 空间成员列表项。
+type SpaceMemberListRecord struct {
+	UserID    string
+	Email     string
+	Name      string
+	Role      models.Role
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // UpdateSpaceMetadataParams 管理后台空间元数据更新参数（包含描述与封面字段的可选更新）。
 type UpdateSpaceMetadataParams struct {
 	SpaceID      string
@@ -123,6 +137,22 @@ type UpdateSpaceMetadataParams struct {
 	CoverHeight  *int
 	CoverSource  *string
 	UpdatedAt    time.Time
+}
+
+// UpsertSpaceMemberParams 空间成员新增/更新参数。
+type UpsertSpaceMemberParams struct {
+	SpaceID   string
+	UserID    string
+	Role      models.Role
+	UpdatedAt time.Time
+}
+
+// UpdateSpaceMemberRoleParams 空间成员角色更新参数。
+type UpdateSpaceMemberRoleParams struct {
+	SpaceID   string
+	UserID    string
+	Role      models.Role
+	UpdatedAt time.Time
 }
 
 // UpdateSpaceStatusParams 管理后台空间状态更新参数。

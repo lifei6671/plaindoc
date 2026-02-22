@@ -130,7 +130,7 @@ func (h *adminAuditHandler) ListAudits(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, adminAuditListResponse{
+	response.JSON(c, http.StatusOK, adminAuditListResponse{
 		Items: items,
 		Pagination: adminAuditPaginationBlock{
 			Page:     payload.Page,
