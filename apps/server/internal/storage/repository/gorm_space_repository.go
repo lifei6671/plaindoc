@@ -282,6 +282,165 @@ func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) (
 	return spaces, nil
 }
 
+func (r *gormSpaceRepository) ListVisibleForHomepage(
+	ctx context.Context,
+	params ListVisibleHomepageSpacesParams,
+) ([]HomepageVisibleSpaceRecord, int64, error) {
+	if r == nil || r.db == nil {
+		return nil, 0, fmt.Errorf("space repository db is nil")
+	}
+
+	viewerUserID := strings.TrimSpace(params.ViewerUserID)
+	categoryID := strings.TrimSpace(params.CategoryID)
+
+	baseQuery := r.db.WithContext(ctx).
+		Table("spaces AS s").
+		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive)
+
+	if categoryID != "" {
+		baseQuery = baseQuery.Where("s.category_id = ?", categoryID)
+	}
+
+	if viewerUserID == "" {
+		baseQuery = baseQuery.Where("s.visibility = ?", models.VisibilityPublic)
+	} else {
+		baseQuery = baseQuery.
+			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", viewerUserID).
+			Where(
+				"(s.visibility IN ? OR (s.visibility = ? AND (s.owner_user_id = ? OR sm.id IS NOT NULL)))",
+				[]models.Visibility{models.VisibilityPublic, models.VisibilityAuthenticated},
+				models.VisibilityMember,
+				viewerUserID,
+			)
+	}
+
+	var total int64
+	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	type homepageSpaceRow struct {
+		ID           int64               `gorm:"column:id"`
+		SpaceID      string              `gorm:"column:space_id"`
+		Name         string              `gorm:"column:name"`
+		Description  string              `gorm:"column:description"`
+		CategoryID   string              `gorm:"column:category_id"`
+		Category     string              `gorm:"column:category"`
+		OwnerUserID  string              `gorm:"column:owner_user_id"`
+		Visibility   models.Visibility   `gorm:"column:visibility"`
+		CoverAssetID *string             `gorm:"column:cover_asset_id"`
+		CoverKey     string              `gorm:"column:cover_key"`
+		CoverURL     string              `gorm:"column:cover_url"`
+		CoverWidth   int                 `gorm:"column:cover_width"`
+		CoverHeight  int                 `gorm:"column:cover_height"`
+		CoverSource  string              `gorm:"column:cover_source"`
+		Status       models.EntityStatus `gorm:"column:status"`
+		BannedReason string              `gorm:"column:banned_reason"`
+		BannedAt     *time.Time          `gorm:"column:banned_at"`
+		DeletedAt    *time.Time          `gorm:"column:deleted_at"`
+		CreatedAtRaw string              `gorm:"column:created_at"`
+		UpdatedAtRaw string              `gorm:"column:updated_at"`
+	}
+
+	var rows []homepageSpaceRow
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select(
+			"s.id",
+			"s.space_id",
+			"s.name",
+			"s.description",
+			"s.category_id",
+			"s.category",
+			"s.owner_user_id",
+			"s.visibility",
+			"s.cover_asset_id",
+			"s.cover_key",
+			"s.cover_url",
+			"s.cover_width",
+			"s.cover_height",
+			"s.cover_source",
+			"s.status",
+			"s.banned_reason",
+			"s.banned_at",
+			"s.deleted_at",
+			"s.created_at",
+			"s.updated_at",
+		).
+		Order("s.created_at DESC, s.id DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]HomepageVisibleSpaceRecord, 0, len(rows))
+	for _, row := range rows {
+		space := models.Space{
+			ID:           row.ID,
+			SpaceID:      row.SpaceID,
+			Name:         row.Name,
+			Description:  row.Description,
+			CategoryID:   row.CategoryID,
+			Category:     row.Category,
+			OwnerUserID:  row.OwnerUserID,
+			Visibility:   row.Visibility,
+			CoverAssetID: row.CoverAssetID,
+			CoverKey:     row.CoverKey,
+			CoverURL:     row.CoverURL,
+			CoverWidth:   row.CoverWidth,
+			CoverHeight:  row.CoverHeight,
+			CoverSource:  row.CoverSource,
+			Status:       row.Status,
+			BannedReason: row.BannedReason,
+			BannedAt:     row.BannedAt,
+			DeletedAt:    row.DeletedAt,
+			CreatedAt:    parseSpaceRecordTime(row.CreatedAtRaw),
+			UpdatedAt:    parseSpaceRecordTime(row.UpdatedAtRaw),
+		}
+		if !models.IsValidVisibility(space.Visibility) {
+			space.Visibility = models.VisibilityMember
+		}
+		if !models.IsValidEntityStatus(space.Status) {
+			space.Status = models.EntityStatusActive
+		}
+		space.Name = strings.TrimSpace(space.Name)
+		space.Description = strings.TrimSpace(space.Description)
+		space.CategoryID = strings.TrimSpace(space.CategoryID)
+		space.Category = strings.TrimSpace(space.Category)
+		space.CoverKey = strings.TrimSpace(space.CoverKey)
+		space.CoverURL = strings.TrimSpace(space.CoverURL)
+		space.CoverSource = strings.TrimSpace(space.CoverSource)
+		if space.CoverWidth < 0 {
+			space.CoverWidth = 0
+		}
+		if space.CoverHeight < 0 {
+			space.CoverHeight = 0
+		}
+		if space.CoverAssetID != nil {
+			trimmedAssetID := strings.TrimSpace(*space.CoverAssetID)
+			if trimmedAssetID == "" {
+				space.CoverAssetID = nil
+			} else {
+				space.CoverAssetID = &trimmedAssetID
+			}
+		}
+		result = append(result, HomepageVisibleSpaceRecord{
+			Space: space,
+		})
+	}
+
+	return result, total, nil
+}
+
 func (r *gormSpaceRepository) ListForAdmin(
 	ctx context.Context,
 	params ListAdminSpacesParams,

@@ -1,0 +1,10 @@
+{{ define "category_sidebar" }}
+<nav class="category-nav category-nav-vertical">
+  {{ range .Categories }}
+    <a class="category-link{{ if .IsActive }} is-active{{ end }}" href="{{ .URL }}">
+      <span class="category-link-dot" aria-hidden="true"></span>
+      <span class="category-link-text">{{ .Name }}</span>
+    </a>
+  {{ end }}
+</nav>
+{{ end }}

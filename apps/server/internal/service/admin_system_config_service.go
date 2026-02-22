@@ -22,10 +22,11 @@ var (
 )
 
 var systemConfigValidators = map[string]func(map[string]any) error{
-	"site":          validateSiteConfig,
-	"editor":        validateEditorConfig,
-	"security":      validateSecurityConfig,
-	"image-hosting": validateImageHostingConfig,
+	"site":                          validateSiteConfig,
+	"editor":                        validateEditorConfig,
+	"security":                      validateSecurityConfig,
+	"image-hosting":                 validateImageHostingConfig,
+	HomepageAnonymousCacheConfigKey: validateHomepageAnonymousCacheConfig,
 }
 
 // AdminSystemConfigRecord 后台系统配置记录。
@@ -524,6 +525,43 @@ func validateImageHostingConfig(payload map[string]any) error {
 		if localUploadEndpoint == "" || localPublicBaseURL == "" {
 			return fmt.Errorf("local is incomplete for default provider")
 		}
+	}
+
+	return nil
+}
+
+func validateHomepageAnonymousCacheConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"maxAgeSeconds":               {},
+		"sMaxAgeSeconds":              {},
+		"staleWhileRevalidateSeconds": {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+
+	maxAgeSeconds, err := getRequiredInt(payload, "maxAgeSeconds")
+	if err != nil {
+		return err
+	}
+	if maxAgeSeconds < 0 || maxAgeSeconds > 86400 {
+		return fmt.Errorf("maxAgeSeconds must be between 0 and 86400")
+	}
+
+	sMaxAgeSeconds, err := getRequiredInt(payload, "sMaxAgeSeconds")
+	if err != nil {
+		return err
+	}
+	if sMaxAgeSeconds < 0 || sMaxAgeSeconds > 86400 {
+		return fmt.Errorf("sMaxAgeSeconds must be between 0 and 86400")
+	}
+
+	staleWhileRevalidateSeconds, err := getRequiredInt(payload, "staleWhileRevalidateSeconds")
+	if err != nil {
+		return err
+	}
+	if staleWhileRevalidateSeconds < 0 || staleWhileRevalidateSeconds > 86400 {
+		return fmt.Errorf("staleWhileRevalidateSeconds must be between 0 and 86400")
 	}
 
 	return nil

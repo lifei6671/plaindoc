@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ .Title }}</title>
+  <meta name="description" content="{{ .Description }}">
+  <link rel="canonical" href="{{ .CanonicalURL }}">
+  <link rel="stylesheet" href="/assets/home.css">
+</head>
+<body class="home-body">
+  {{ template "top_nav" . }}
+  <div class="home-shell">
+    <main class="explore-layout">
+      <header class="explore-header">
+        <p class="home-kicker">Category Explore</p>
+        <h1 class="home-title">分类探索</h1>
+        <p class="home-subtitle">
+          {{ if .ActiveCategoryName }}
+            当前分类：{{ .ActiveCategoryName }}
+          {{ else }}
+            当前分类暂无名称，已按分类 ID 过滤
+          {{ end }}
+        </p>
+      </header>
+
+      <section class="explore-tabs-wrap" aria-label="分类导航">
+        {{ template "category_tabs" . }}
+      </section>
+
+      <section class="spaces-grid" aria-label="分类空间列表">
+        {{ if .Spaces }}
+          {{ range .Spaces }}
+            {{ template "space_cover_card" . }}
+          {{ end }}
+        {{ else }}
+          <div class="spaces-empty">该分类下暂无可见空间</div>
+        {{ end }}
+      </section>
+    </main>
+  </div>
+</body>
+</html>

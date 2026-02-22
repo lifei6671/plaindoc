@@ -1,10 +1,17 @@
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, LogIn, UserPlus } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
 
 type AuthMode = "login" | "register";
 
 interface AuthPanelProps {
+  mode: AuthMode;
+  switchPath: string;
+  redirectTarget: string | null;
   checking: boolean;
   submitting: boolean;
   errorMessage: string | null;
@@ -14,13 +21,15 @@ interface AuthPanelProps {
 
 // 登录注册入口：独立于编辑器主视图，避免未登录状态触发业务加载链路。
 export function AuthPanel({
+  mode,
+  switchPath,
+  redirectTarget,
   checking,
   submitting,
   errorMessage,
   onLogin,
   onRegister
 }: AuthPanelProps) {
-  const [mode, setMode] = useState<AuthMode>("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,12 +79,17 @@ export function AuthPanel({
     return mode === "login" ? "登录" : "注册";
   }, [checking, mode, submitting]);
 
-  const switchMode = useCallback((nextMode: AuthMode) => {
-    setMode(nextMode);
-    if (nextMode !== "register") {
-      setConfirmPassword("");
+  const switchActionText = mode === "login" ? "注册新账号" : "去登录";
+  const switchPromptText = mode === "login" ? "还没有账号？" : "已有账号？";
+  const headingText = mode === "login" ? "PlainDoc 登录" : "PlainDoc 注册";
+  const introText = mode === "login" ? "登录后开始编辑文档" : "注册后创建你的文档空间";
+  const badgeText = mode === "login" ? "账号登录" : "账号注册";
+  const switchHref = useMemo(() => {
+    if (!redirectTarget) {
+      return switchPath;
     }
-  }, []);
+    return `${switchPath}?redirect=${encodeURIComponent(redirectTarget)}`;
+  }, [redirectTarget, switchPath]);
 
   const handleSubmit = useCallback(async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -100,102 +114,92 @@ export function AuthPanel({
   }, [canSubmit, email, mode, name, onLogin, onRegister, password]);
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-header">
-          <h1>PlainDoc</h1>
-          <p>{mode === "login" ? "登录后开始编辑文档" : "注册后创建你的文档空间"}</p>
-        </div>
+    <div className="admin-auth-page">
+      <Card className="mx-auto w-full max-w-md border-slate-200 shadow-xl">
+        <CardHeader className="space-y-4 pb-4">
+          <Badge variant="outline" className="w-fit gap-1 border-cyan-200 bg-cyan-50 text-cyan-700">
+            {mode === "login" ? <LogIn size={13} /> : <UserPlus size={13} />}
+            <span>{badgeText}</span>
+          </Badge>
+          <div className="space-y-2">
+            <CardTitle className="text-2xl tracking-tight">{headingText}</CardTitle>
+            <CardDescription>{introText}</CardDescription>
+            {redirectTarget ? (
+              <p className="text-xs leading-5 text-slate-500">登录后将返回来源页面</p>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
+            {mode === "register" ? (
+              <label className="admin-auth-form__field">
+                <span>昵称</span>
+                <Input
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="输入昵称"
+                  autoComplete="name"
+                  disabled={checking || submitting}
+                />
+              </label>
+            ) : null}
 
-        <div className="auth-mode-switch" role="tablist" aria-label="登录或注册">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "login"}
-            className={`auth-mode-switch__button ${mode === "login" ? "auth-mode-switch__button--active" : ""}`}
-            onClick={() => switchMode("login")}
-            disabled={checking || submitting}
-          >
-            登录
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "register"}
-            className={`auth-mode-switch__button ${mode === "register" ? "auth-mode-switch__button--active" : ""}`}
-            onClick={() => switchMode("register")}
-            disabled={checking || submitting}
-          >
-            注册
-          </button>
-        </div>
-
-        <form className="auth-form" onSubmit={(event) => void handleSubmit(event)}>
-          {mode === "register" ? (
-            <label className="auth-form__field">
-              <span>昵称</span>
-              <input
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="输入昵称"
-                autoComplete="name"
+            <label className="admin-auth-form__field">
+              <span>邮箱</span>
+              <Input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="name@example.com"
+                autoComplete="email"
                 disabled={checking || submitting}
               />
             </label>
-          ) : null}
 
-          <label className="auth-form__field">
-            <span>邮箱</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="name@example.com"
-              autoComplete="email"
-              disabled={checking || submitting}
-            />
-          </label>
-
-          <label className="auth-form__field">
-            <span>密码</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="至少 6 位"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              disabled={checking || submitting}
-            />
-          </label>
-
-          {mode === "register" ? (
-            <label className="auth-form__field">
-              <span>确认密码</span>
-              <input
+            <label className="admin-auth-form__field">
+              <span>密码</span>
+              <Input
                 type="password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                placeholder="再次输入密码"
-                autoComplete="new-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="至少 6 位"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
                 disabled={checking || submitting}
               />
             </label>
-          ) : null}
 
-          {validationErrorMessage ? <p className="auth-form__error">{validationErrorMessage}</p> : null}
-          {!validationErrorMessage && errorMessage ? <p className="auth-form__error">{errorMessage}</p> : null}
+            {mode === "register" ? (
+              <label className="admin-auth-form__field">
+                <span>确认密码</span>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="再次输入密码"
+                  autoComplete="new-password"
+                  disabled={checking || submitting}
+                />
+              </label>
+            ) : null}
 
-          <button
-            type="submit"
-            className="auth-form__submit"
-            disabled={!canSubmit}
-          >
-            {checking || submitting ? <LoaderCircle className="auth-form__submit-loader" size={14} /> : null}
-            <span>{submitText}</span>
-          </button>
-        </form>
-      </div>
+            {validationErrorMessage ? <p className="admin-auth-form__error">{validationErrorMessage}</p> : null}
+            {!validationErrorMessage && errorMessage ? <p className="admin-auth-form__error">{errorMessage}</p> : null}
+
+            <Button type="submit" className="w-full" disabled={!canSubmit}>
+              {checking || submitting ? <LoaderCircle className="admin-auth-form__submit-loader" size={14} /> : null}
+              <span>{submitText}</span>
+            </Button>
+
+            <p className="text-center text-sm text-slate-600">
+              <span>{switchPromptText}</span>
+              <a href={switchHref} className="ml-2 font-medium text-cyan-700 hover:text-cyan-800 hover:underline">
+                {switchActionText}
+              </a>
+            </p>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

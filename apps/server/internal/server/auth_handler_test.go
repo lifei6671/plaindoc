@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,7 @@ func TestRouter_AuthRegisterAndMe(t *testing.T) {
 	if registerPayload.Token == "" || registerPayload.RefreshToken == "" {
 		t.Fatal("expected access/refresh token in register response")
 	}
+	assertSessionCookiesExist(t, registerRec)
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	meReq.Header.Set("Authorization", "Bearer "+registerPayload.Token)
@@ -85,6 +87,21 @@ func TestRouter_AuthRegisterAndMe(t *testing.T) {
 	}](t, meRec.Body.Bytes())
 	if mePayload.User.Email != "demo@example.com" {
 		t.Fatalf("expected me email demo@example.com, got %s", mePayload.User.Email)
+	}
+
+	meByCookieReq := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	meByCookieReq.AddCookie(extractCookieByName(t, registerRec, "accessToken"))
+	meByCookieRec := serve(meByCookieReq)
+	if meByCookieRec.Code != http.StatusOK {
+		t.Fatalf("expected cookie me status 200, got %d, body=%s", meByCookieRec.Code, meByCookieRec.Body.String())
+	}
+	meByCookiePayload := decodeJSONResultData[struct {
+		User struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}](t, meByCookieRec.Body.Bytes())
+	if meByCookiePayload.User.Email != "demo@example.com" {
+		t.Fatalf("expected cookie me email demo@example.com, got %s", meByCookiePayload.User.Email)
 	}
 }
 
@@ -163,6 +180,15 @@ func TestRouter_AuthRefresh(t *testing.T) {
 	if nextRefreshRec.Code != http.StatusOK {
 		t.Fatalf("expected rotated refresh token to be accepted with 200, got %d, body=%s", nextRefreshRec.Code, nextRefreshRec.Body.String())
 	}
+	refreshCookie := extractCookieByName(t, nextRefreshRec, "refreshToken")
+
+	refreshByCookieReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
+	refreshByCookieReq.AddCookie(refreshCookie)
+	refreshByCookieRec := serve(refreshByCookieReq)
+	if refreshByCookieRec.Code != http.StatusOK {
+		t.Fatalf("expected cookie refresh status 200, got %d, body=%s", refreshByCookieRec.Code, refreshByCookieRec.Body.String())
+	}
+	assertSessionCookiesExist(t, refreshByCookieRec)
 }
 
 func TestRouter_AuthLogout(t *testing.T) {
@@ -176,6 +202,7 @@ func TestRouter_AuthLogout(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
+	assertSessionCookiesCleared(t, rec)
 }
 
 func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
@@ -206,6 +233,7 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	if logoutRec.Code != http.StatusOK {
 		t.Fatalf("logout failed, status=%d body=%s", logoutRec.Code, logoutRec.Body.String())
 	}
+	assertSessionCookiesCleared(t, logoutRec)
 
 	refreshBody := []byte(`{"refreshToken":"` + registerPayload.RefreshToken + `"}`)
 	refreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", bytes.NewReader(refreshBody))
@@ -213,6 +241,44 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	refreshRec := serve(refreshReq)
 	if refreshRec.Code != http.StatusForbidden {
 		t.Fatalf("expected revoked session refresh token to be rejected with 401, got %d, body=%s", refreshRec.Code, refreshRec.Body.String())
+	}
+}
+
+func extractCookieByName(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	t.Fatalf("expected cookie %q in response", name)
+	return nil
+}
+
+func assertSessionCookiesExist(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	accessCookie := extractCookieByName(t, rec, "accessToken")
+	refreshCookie := extractCookieByName(t, rec, "refreshToken")
+	if strings.TrimSpace(accessCookie.Value) == "" {
+		t.Fatal("expected non-empty accessToken cookie")
+	}
+	if strings.TrimSpace(refreshCookie.Value) == "" {
+		t.Fatal("expected non-empty refreshToken cookie")
+	}
+}
+
+func assertSessionCookiesCleared(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	accessCookie := extractCookieByName(t, rec, "accessToken")
+	refreshCookie := extractCookieByName(t, rec, "refreshToken")
+	if accessCookie.MaxAge >= 0 {
+		t.Fatalf("expected cleared accessToken cookie max-age < 0, got %d", accessCookie.MaxAge)
+	}
+	if refreshCookie.MaxAge >= 0 {
+		t.Fatalf("expected cleared refreshToken cookie max-age < 0, got %d", refreshCookie.MaxAge)
 	}
 }
 

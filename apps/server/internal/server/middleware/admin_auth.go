@@ -137,19 +137,24 @@ func AdminActorUserID(c *gin.Context) (string, error) {
 
 func bearerTokenFromRequest(c *gin.Context) (string, bool) {
 	rawAuthorization := strings.TrimSpace(c.GetHeader("Authorization"))
-	if rawAuthorization == "" {
+	if rawAuthorization != "" {
+		parts := strings.SplitN(rawAuthorization, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			token := strings.TrimSpace(parts[1])
+			if token != "" {
+				return token, true
+			}
+		}
+	}
+
+	tokenFromCookie, err := c.Cookie("accessToken")
+	if err != nil {
 		return "", false
 	}
-	parts := strings.SplitN(rawAuthorization, " ", 2)
-	if len(parts) != 2 {
-		return "", false
-	}
-	if !strings.EqualFold(parts[0], "Bearer") {
-		return "", false
-	}
-	token := strings.TrimSpace(parts[1])
+	token := strings.TrimSpace(tokenFromCookie)
 	if token == "" {
 		return "", false
 	}
+
 	return token, true
 }

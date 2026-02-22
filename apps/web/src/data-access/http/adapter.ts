@@ -278,7 +278,8 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     const requestUrl = isAbsoluteUrl(path) ? path : `${options.baseUrl}${path}`;
     const response = await fetch(requestUrl, {
       ...init,
-      headers
+      headers,
+      credentials: init?.credentials ?? "include"
     });
     const rawBody = await response.text();
     const payload = parseResponsePayload(rawBody);
@@ -337,15 +338,13 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   };
 
   const refreshSession = async (): Promise<boolean> => {
-    if (!refreshToken) {
-      return false;
-    }
     try {
+      const refreshPayload = refreshToken ? JSON.stringify({ refreshToken }) : undefined;
       const session = await request<HttpAuthSession>(
         "/auth/refresh",
         {
           method: "POST",
-          body: JSON.stringify({ refreshToken })
+          body: refreshPayload
         },
         {
           skipAuth: true,
@@ -366,12 +365,10 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
 
   const auth: AuthGateway = {
     async getSession() {
-      if (!accessToken) {
-        return { user: null };
-      }
-
       try {
-        const session = await request<HttpAuthSession>("/auth/me");
+        const session = await request<HttpAuthSession>("/auth/me", undefined, {
+          skipAuth: true
+        });
         if (!session.user) {
           clearStoredTokens();
           return { user: null };

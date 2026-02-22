@@ -1,0 +1,9 @@
+{{ define "category_tabs" }}
+<nav class="category-nav category-nav-horizontal">
+  {{ range .Categories }}
+    <a class="category-tab{{ if .IsActive }} is-active{{ end }}" href="{{ .URL }}">
+      <span>{{ .Name }}</span>
+    </a>
+  {{ end }}
+</nav>
+{{ end }}

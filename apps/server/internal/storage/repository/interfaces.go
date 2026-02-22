@@ -98,6 +98,10 @@ type SpaceRepository interface {
 	GetBySpaceID(ctx context.Context, spaceID string) (*models.Space, error)
 	GetCoverAssetByAssetID(ctx context.Context, assetID string) (*models.SpaceCoverAsset, error)
 	ListByUserID(ctx context.Context, userID string) ([]models.Space, error)
+	ListVisibleForHomepage(
+		ctx context.Context,
+		params ListVisibleHomepageSpacesParams,
+	) ([]HomepageVisibleSpaceRecord, int64, error)
 	ListForAdmin(ctx context.Context, params ListAdminSpacesParams) ([]AdminSpaceListRecord, int64, error)
 	ListMembers(ctx context.Context, spaceID string) ([]SpaceMemberListRecord, error)
 	UpsertMember(ctx context.Context, params UpsertSpaceMemberParams) error
@@ -111,6 +115,19 @@ type SpaceRepository interface {
 	TransferOwnership(ctx context.Context, spaceID string, fromUserID string, toUserID string, updatedAt time.Time) (bool, error)
 	SoftDelete(ctx context.Context, spaceID string, deletedAt time.Time) (bool, error)
 	HasReaderAccess(ctx context.Context, spaceID string, userID string) (bool, error)
+}
+
+// ListVisibleHomepageSpacesParams 首页/分类页可见空间查询参数。
+type ListVisibleHomepageSpacesParams struct {
+	ViewerUserID string
+	CategoryID   string
+	Limit        int
+	Offset       int
+}
+
+// HomepageVisibleSpaceRecord 首页/分类页可见空间列表项。
+type HomepageVisibleSpaceRecord struct {
+	Space models.Space
 }
 
 // ListAdminSpacesParams 管理后台空间分页查询参数。

@@ -1,0 +1,33 @@
+{{ define "top_nav" }}
+<header class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/" class="top-nav-logo" aria-label="{{ .SiteName }} 首页">
+      <span class="top-nav-logo-mark">P</span>
+      <span class="top-nav-logo-text">{{ .SiteName }}</span>
+    </a>
+
+    <div class="top-nav-actions">
+      {{ if .IsAuthenticated }}
+        <details class="nav-user-dropdown">
+          <summary class="nav-user-trigger">
+            <span class="nav-user-avatar">{{ .CurrentUserAvatar }}</span>
+            <span class="nav-user-name">{{ .CurrentUserName }}</span>
+            <span class="nav-user-arrow">▾</span>
+          </summary>
+          <div class="nav-user-menu">
+            <a href="{{ .AdminURL }}" class="nav-user-menu-item">后台管理</a>
+            <form method="post" action="{{ .LogoutURL }}">
+              <button type="submit" class="nav-user-menu-item nav-user-menu-button">退出登录</button>
+            </form>
+          </div>
+        </details>
+      {{ else }}
+        <div class="top-nav-guest-actions">
+          <a href="{{ .LoginURL }}" class="top-nav-login-button">登录</a>
+          <a href="{{ .RegisterURL }}" class="top-nav-register-button">注册</a>
+        </div>
+      {{ end }}
+    </div>
+  </div>
+</header>
+{{ end }}

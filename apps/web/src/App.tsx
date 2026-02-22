@@ -109,10 +109,12 @@ const WORKSPACE_ACTIVE_SPACE_ID_STORAGE_KEY = "workspace.activeSpaceId";
 const WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY = "workspace.activeDocId";
 const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode";
 const LOGIN_ROUTE_PATH = "/login";
+const REGISTER_ROUTE_PATH = "/register";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
 
 export type AppRoute =
   | { kind: "login" }
+  | { kind: "register" }
   | { kind: "editor-root" }
   | { kind: "editor-space"; spaceId: string }
   | { kind: "editor-doc"; spaceId: string; docId: string }
@@ -138,6 +140,9 @@ function parseAppRoute(pathname: string): AppRoute {
   const normalizedPathname = normalizeRoutePath(pathname);
   if (normalizedPathname === LOGIN_ROUTE_PATH) {
     return { kind: "login" };
+  }
+  if (normalizedPathname === REGISTER_ROUTE_PATH) {
+    return { kind: "register" };
   }
   if (normalizedPathname === ADMIN_LOGIN_ROUTE_PATH) {
     return { kind: "admin-login" };
@@ -180,6 +185,26 @@ function buildEditorRoutePath(spaceId: string | null, docId: string | null): str
     return `${EDITOR_ROUTE_BASE_PATH}/${encodedSpaceID}`;
   }
   return `${EDITOR_ROUTE_BASE_PATH}/${encodedSpaceID}/${encodeURIComponent(docId)}`;
+}
+
+function resolveAuthRedirectTarget(rawValue: string | null): string | null {
+  const trimmedValue = rawValue?.trim() ?? "";
+  if (!trimmedValue) {
+    return null;
+  }
+  if (trimmedValue.startsWith("/")) {
+    return trimmedValue;
+  }
+
+  try {
+    const parsedURL = new URL(trimmedValue);
+    if (parsedURL.protocol !== "http:" && parsedURL.protocol !== "https:") {
+      return null;
+    }
+    return parsedURL.toString();
+  } catch {
+    return null;
+  }
 }
 
 // 统一钳制侧栏宽度，避免本地脏值导致布局异常。
@@ -314,6 +339,12 @@ export default function App() {
     route.kind === "admin-login" || route.kind === "admin-root" || route.kind === "admin-page";
   const routeSpaceId = route.kind === "editor-space" || route.kind === "editor-doc" ? route.spaceId : null;
   const routeDocId = route.kind === "editor-doc" ? route.docId : null;
+  const authRedirectTarget = useMemo(() => {
+    if (route.kind !== "login" && route.kind !== "register") {
+      return null;
+    }
+    return resolveAuthRedirectTarget(new URLSearchParams(location.search).get("redirect"));
+  }, [location.search, route.kind]);
   // 会话状态：登录态用户、校验中状态与提交中状态。
   const [authSession, setAuthSession] = useState<AuthSession>({ user: null });
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -478,9 +509,14 @@ export default function App() {
         }
         return;
       }
-      if (route.kind !== "login") {
+      if (route.kind !== "login" && route.kind !== "register") {
         navigate(LOGIN_ROUTE_PATH, { replace: true });
       }
+      return;
+    }
+
+    if ((route.kind === "login" || route.kind === "register") && authRedirectTarget) {
+      window.location.replace(authRedirectTarget);
       return;
     }
 
@@ -494,6 +530,7 @@ export default function App() {
     activeDocId,
     activeSpaceId,
     activeUser,
+    authRedirectTarget,
     isAuthChecking,
     isAdminRoute,
     isEditorRoute,
@@ -1287,13 +1324,16 @@ export default function App() {
         setAuthSession(session);
         setSaveStatus("loading");
         setStatusMessage(`欢迎回来，${session.user.name}`);
+        if (authRedirectTarget) {
+          window.location.assign(authRedirectTarget);
+        }
       } catch (error) {
         setAuthErrorMessage(`登录失败：${formatError(error)}`);
       } finally {
         setIsAuthSubmitting(false);
       }
     },
-    [dataGateway]
+    [authRedirectTarget, dataGateway]
   );
 
   // 注册动作：注册成功后直接进入登录态。
@@ -1310,13 +1350,16 @@ export default function App() {
         setAuthSession(session);
         setSaveStatus("loading");
         setStatusMessage(`欢迎使用，${session.user.name}`);
+        if (authRedirectTarget) {
+          window.location.assign(authRedirectTarget);
+        }
       } catch (error) {
         setAuthErrorMessage(`注册失败：${formatError(error)}`);
       } finally {
         setIsAuthSubmitting(false);
       }
     },
-    [dataGateway]
+    [authRedirectTarget, dataGateway]
   );
 
   // 退出登录：清除会话并返回登录页。
@@ -1359,6 +1402,9 @@ export default function App() {
       <>
         <Toaster />
         <AuthPanel
+          mode={route.kind === "register" ? "register" : "login"}
+          switchPath={route.kind === "register" ? LOGIN_ROUTE_PATH : REGISTER_ROUTE_PATH}
+          redirectTarget={authRedirectTarget}
           checking={isAuthChecking}
           submitting={isAuthSubmitting}
           errorMessage={authErrorMessage}

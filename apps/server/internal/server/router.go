@@ -9,6 +9,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/view"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -29,23 +30,31 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 	router.Use(middleware.Timeout(cfg.RequestTimeout))
 	router.Use(middleware.CORS(cfg.WebOrigin))
 
+	userRepo := repository.NewGormUserRepository(db)
+	userSessionRepo := repository.NewGormUserSessionRepository(db)
+	spaceRepo := repository.NewGormSpaceRepository(db)
+	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
+	documentRepo := repository.NewGormDocumentRepository(db)
+	themeRepo := repository.NewGormThemeRepository(db)
+	systemConfigRepo := repository.NewGormSystemConfigRepository(db)
+	auditLogRepo := repository.NewGormAuditLogRepository(db)
+	adminRoleRepo := repository.NewGormAdminRoleRepository(db)
+	spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
+
+	authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
+	homeService := service.NewHomeService(spaceRepo, spaceCategoryRepo, systemConfigRepo)
+	homeHandler := handler.NewHomeHandler(authService, homeService, cfg.WebOrigin)
+
+	router.StaticFS("/assets", http.FS(view.MustStaticFS()))
+	router.GET("/", homeHandler.Home)
+	router.GET("/explore/:categoryId", homeHandler.Explore)
+	router.POST("/logout", homeHandler.Logout)
+
 	api := router.Group("/api")
 	{
 		api.GET("/healthz", handler.Health)
-		userRepo := repository.NewGormUserRepository(db)
-		userSessionRepo := repository.NewGormUserSessionRepository(db)
-		spaceRepo := repository.NewGormSpaceRepository(db)
-		spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
-		documentRepo := repository.NewGormDocumentRepository(db)
-		themeRepo := repository.NewGormThemeRepository(db)
-		systemConfigRepo := repository.NewGormSystemConfigRepository(db)
-		auditLogRepo := repository.NewGormAuditLogRepository(db)
-		adminRoleRepo := repository.NewGormAdminRoleRepository(db)
-		spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
-
-		authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
 		authRegistrationPolicyService := service.NewAuthRegistrationPolicyService(systemConfigRepo)
-		authHandler := handler.NewAuthHandler(authService, authRegistrationPolicyService)
+		authHandler := handler.NewAuthHandler(authService, authRegistrationPolicyService, cfg.JWT)
 		imageHostingService := service.NewImageHostingService(systemConfigRepo)
 		imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService)
 		api.POST("/auth/register", authHandler.Register)
