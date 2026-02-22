@@ -50,6 +50,7 @@ var errorCodeRegistry = map[string]int{
 	"INVALID_SYNTAX_THEME":     2030,
 	"INVALID_DESCRIPTION":      2031,
 	"INVALID_SPACE_CATEGORY":   2032,
+	"INVALID_NODE_ID":          2033,
 
 	// 3000 段：资源不存在。
 	"ROUTE_NOT_FOUND":           3001,
@@ -64,6 +65,7 @@ var errorCodeRegistry = map[string]int{
 	"MEMBER_TARGET_NOT_FOUND":   3010,
 	"TRANSFER_TARGET_NOT_FOUND": 3011,
 	"SPACE_CATEGORY_NOT_FOUND":  3012,
+	"NODE_NOT_FOUND":            3013,
 
 	// 4000 段：冲突与并发状态。
 	"EMAIL_ALREADY_EXISTS":           4001,
@@ -75,6 +77,7 @@ var errorCodeRegistry = map[string]int{
 	"OPERATION_TOKEN_SCOPE_MISMATCH": 4007,
 	"OPERATION_TOKEN_INVALID":        4008,
 	"SPACE_CATEGORY_NAME_EXISTS":     4009,
+	"DOCUMENT_VERSION_CONFLICT":      4010,
 
 	// 5000 段：业务约束。
 	"SPACE_DELETED":                    5001,

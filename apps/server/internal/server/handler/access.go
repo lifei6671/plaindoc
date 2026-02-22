@@ -24,6 +24,8 @@ type spaceAccessResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Visibility string `json:"visibility"`
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
 }
 
 type documentAccessResponse struct {
@@ -86,6 +88,8 @@ func (h *accessHandler) GetSpace(c *gin.Context) {
 		ID:         space.SpaceID,
 		Name:       space.Name,
 		Visibility: string(space.Visibility),
+		CreatedAt:  space.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:  space.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	})
 }
 
@@ -134,6 +138,8 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 		ID:         space.SpaceID,
 		Name:       space.Name,
 		Visibility: string(space.Visibility),
+		CreatedAt:  space.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:  space.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	})
 }
 

@@ -137,6 +137,15 @@
   - 保持插件顺序为 `rehype-raw -> rehype-sanitize -> rehype-katex`；
   - 每次改 sanitize 规则后，必须手工验证长文档双向滚动。
 
+### 坑 9：DropdownMenu 打开后页面其它按钮失去手型/无法交互
+
+- 根因：
+  - Radix `DropdownMenu.Root` 默认 `modal=true`，菜单打开时会将其它区域置为“不可交互层”；
+  - 现象表现为后台空间管理等页面中，菜单打开后其它按钮光标不再是手型，且点击被拦截。
+- 正确做法：
+  - 统一封装层默认使用 `modal={false}`（见 `apps/web/src/components/ui/dropdown-menu.tsx`）；
+  - 业务页面若显式声明 `modal`，也必须保持 `false`，避免回归默认行为。
+
 ## 4. 高风险改动区（请谨慎）
 
 - `apps/web/src/App.tsx` 中以下区域：
@@ -168,10 +177,13 @@
 - 原则 7：每一块功能的引入需要考虑是否可以抽离成独立模块，方便后续迭代。
 - 原则 8：涉及 `rehype-sanitize` 的改动必须验证“锚点属性保留 + XSS 拦截 + 公式渲染”三件事同时成立。
 - 原则 9：预览区样式（`apps/web/src/styles.css` 与 `App.tsx` 里相关 class）发生新增或改动时，必须同步更新 `apps/web/src/editor/wechat-export.ts` 里的 `WECHAT_CRITICAL_SELECTORS_BY_TYPE`，且不得删除 `inlineWechatCriticalStyles` 这条“预览样式 -> 微信内联样式”兜底链路。
+- 原则 10：所有 `DropdownMenu` 统一禁止 `modal=true`，必须使用非 modal 模式，避免阻断页面其它交互。
+- 原则 11：提交前必须执行 `npm run check:dropdown-menu -w @plaindoc/web`，由脚本自动拦截 `modal=true` 与绕过封装的写法。
 
 ## 6. 新会话最小验证清单
 
 ```bash
+npm run check:dropdown-menu -w @plaindoc/web
 npm run build -w @plaindoc/web
 ```
 

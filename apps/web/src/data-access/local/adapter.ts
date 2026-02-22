@@ -122,6 +122,16 @@ const workspaceGateway: WorkspaceGateway = {
     });
   },
 
+  async getSpace(spaceId: string): Promise<Space> {
+    return useDatabase(async (database) => {
+      const space = await database.spacesTable.where("ulid").equals(spaceId).first();
+      if (!space) {
+        throw new Error("目标空间不存在");
+      }
+      return mapLocalSpace(space);
+    });
+  },
+
   async createSpace(input: CreateSpaceInput): Promise<Space> {
     const ulid = await createLocalId("space");
     return useDatabaseTransaction("rw", async (database) => {

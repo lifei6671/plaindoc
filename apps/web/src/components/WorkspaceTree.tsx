@@ -22,6 +22,12 @@ import {
 import type { CreateNodeResult, NodeType, TreeNode } from "../data-access";
 import { formatError } from "../editor/status-utils";
 import { useConfirmDialog } from "./ConfirmDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "./ui/dropdown-menu";
 
 const WORKSPACE_TREE_ID = "workspace-doc-tree";
 const WORKSPACE_TREE_ROOT_ID = "__workspace_doc_tree_root__";
@@ -156,6 +162,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const [openActionNodeId, setOpenActionNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
+  const [isCreatingFirstDocument, setIsCreatingFirstDocument] = useState(false);
 
   // 树结构变化时更新展开状态：保留用户折叠选择，仅默认展开新出现的目录。
   useEffect(() => {
@@ -443,6 +450,22 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     [confirmByModal, nodeById, onDeleteNode]
   );
 
+  const handleCreateRootDocument = useCallback(async () => {
+    if (isCreatingFirstDocument) {
+      return;
+    }
+    setIsCreatingFirstDocument(true);
+    try {
+      await createNodeAndEnterInlineEdit({
+        parentId: null,
+        type: "doc",
+        title: DEFAULT_DOCUMENT_TITLE
+      });
+    } finally {
+      setIsCreatingFirstDocument(false);
+    }
+  }, [createNodeAndEnterInlineEdit, isCreatingFirstDocument]);
+
   const renderTreeItem = useCallback(
     ({
       item,
@@ -542,7 +565,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                   className={mergeClassNames(
                     "inline-flex h-[26px] w-[26px] items-center justify-center rounded-[8px] border-0 bg-transparent text-[#71767a]",
                     "transition-[opacity,background-color,color] duration-100",
-                    "hover:bg-[#dde0e4] hover:text-[#3e4247] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]",
+                    "hover:bg-[#dde0e4] hover:text-[#3e4247] focus-visible:outline-none",
                     isActionMenuOpen
                       ? "pointer-events-auto opacity-100"
                       : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
@@ -564,7 +587,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                   >
                     <button
                       type="button"
-                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
                       role="menuitem"
                       onMouseDown={stopTreeItemEvent}
                       onClick={(event) => {
@@ -577,7 +600,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                     </button>
                     <button
                       type="button"
-                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
                       role="menuitem"
                       onMouseDown={stopTreeItemEvent}
                       onClick={(event) => {
@@ -590,7 +613,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                     </button>
                     <button
                       type="button"
-                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
                       role="menuitem"
                       onMouseDown={stopTreeItemEvent}
                       onClick={(event) => {
@@ -603,7 +626,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                     </button>
                     <button
                       type="button"
-                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
                       role="menuitem"
                       onMouseDown={stopTreeItemEvent}
                       onClick={(event) => {
@@ -616,7 +639,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                     </button>
                     <button
                       type="button"
-                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#b42318] hover:bg-[#fff0ef] focus-visible:outline-2 focus-visible:outline-[#8ea8c4] focus-visible:outline-offset-[-1px]"
+                      className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#b42318] hover:bg-[#fff0ef] focus-visible:outline-none"
                       role="menuitem"
                       onMouseDown={stopTreeItemEvent}
                       onClick={(event) => {
@@ -654,53 +677,87 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     ]
   );
 
-  if (nodes.length === 0) {
-    return (
-      <>
-        {confirmDialog}
-        <p className="mt-2.5 mr-2 mb-0 ml-2 text-[14px] text-[#8a8d90]">当前空间暂无文档。</p>
-      </>
-    );
-  }
-
   return (
     <>
       {confirmDialog}
-      <ControlledTreeEnvironment<WorkspaceTreeItemData>
-        items={items}
-        getItemTitle={(item) => item.data.title}
-        viewState={viewState}
-        defaultInteractionMode={InteractionMode.ClickArrowToExpand}
-        canDragAndDrop={false}
-        canDropOnFolder={false}
-        canReorderItems={false}
-        canSearch={false}
-        canRename={false}
-        // 允许“可展开文档”点击触发主动作，避免仅叶子文档可打开。
-        canInvokePrimaryActionOnItemContainer
-        onExpandItem={handleExpandNode}
-        onCollapseItem={handleCollapseNode}
-        onPrimaryAction={handlePrimaryAction}
-        renderTreeContainer={({ children, containerProps }) => (
-          <div {...containerProps} className={mergeClassNames("min-h-0", containerProps.className)}>
-            {children}
-          </div>
-        )}
-        renderItemsContainer={({ children, containerProps, depth }) => (
-          <ul
-            {...containerProps}
-            className={mergeClassNames(
-              depth > 0 ? "mt-px m-0 list-none p-0" : "m-0 list-none p-0",
-              containerProps.className
-            )}
+      <div className="mb-2 flex h-11 items-center justify-between border-b border-[#d9dade] px-2">
+        <span className="text-[18px] font-semibold text-[#1f2328]">目录</span>
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] border-0 bg-transparent text-[#1f2328] transition-colors hover:bg-[#e7e8ea] data-[state=open]:bg-[#e7e8ea] focus:outline-none focus-visible:outline-none"
+              aria-label="打开目录快捷菜单"
+              disabled={isCreatingFirstDocument}
+            >
+              <Plus size={18} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[148px]">
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onSelect={() => {
+                void handleCreateRootDocument();
+              }}
+            >
+              <FilePlus2 size={14} className="mr-2" />
+              <span>新建文档</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {nodes.length === 0 ? (
+        <div className="mt-2.5 mr-2 mb-0 ml-2 flex min-h-[168px] flex-col items-center justify-end gap-3 pb-5 text-center">
+          <p className="m-0 text-[14px] text-[#8a8d90]">当前空间暂无文档。</p>
+          <button
+            type="button"
+            className="inline-flex h-9 w-fit items-center gap-1.5 rounded-full border-0 bg-[#e1e4e8] px-4 text-[13px] font-medium text-[#2f2f30] transition-colors hover:bg-[#cfd4da] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => {
+              void handleCreateRootDocument();
+            }}
+            disabled={isCreatingFirstDocument}
           >
-            {children}
-          </ul>
-        )}
-        renderItem={renderTreeItem}
-      >
-        <Tree treeId={WORKSPACE_TREE_ID} rootItem={WORKSPACE_TREE_ROOT_ID} treeLabel="工作区目录树" />
-      </ControlledTreeEnvironment>
+            <FilePlus2 size={14} />
+            <span>{isCreatingFirstDocument ? "创建中..." : "新建第一篇文档"}</span>
+          </button>
+        </div>
+      ) : (
+        <ControlledTreeEnvironment<WorkspaceTreeItemData>
+          items={items}
+          getItemTitle={(item) => item.data.title}
+          viewState={viewState}
+          defaultInteractionMode={InteractionMode.ClickArrowToExpand}
+          canDragAndDrop={false}
+          canDropOnFolder={false}
+          canReorderItems={false}
+          canSearch={false}
+          canRename={false}
+          // 允许“可展开文档”点击触发主动作，避免仅叶子文档可打开。
+          canInvokePrimaryActionOnItemContainer
+          onExpandItem={handleExpandNode}
+          onCollapseItem={handleCollapseNode}
+          onPrimaryAction={handlePrimaryAction}
+          renderTreeContainer={({ children, containerProps }) => (
+            <div {...containerProps} className={mergeClassNames("min-h-0", containerProps.className)}>
+              {children}
+            </div>
+          )}
+          renderItemsContainer={({ children, containerProps, depth }) => (
+            <ul
+              {...containerProps}
+              className={mergeClassNames(
+                depth > 0 ? "mt-px m-0 list-none p-0" : "m-0 list-none p-0",
+                containerProps.className
+              )}
+            >
+              {children}
+            </ul>
+          )}
+          renderItem={renderTreeItem}
+        >
+          <Tree treeId={WORKSPACE_TREE_ID} rootItem={WORKSPACE_TREE_ROOT_ID} treeLabel="工作区目录树" />
+        </ControlledTreeEnvironment>
+      )}
     </>
   );
 });

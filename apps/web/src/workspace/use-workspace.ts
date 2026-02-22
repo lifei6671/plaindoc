@@ -352,12 +352,22 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
       setIsWorkspaceBootstrapping(true);
       setWorkspaceErrorMessage(null);
       try {
+        const preferredSpaceID = input?.preferredSpaceId?.trim() ?? "";
+        if (preferredSpaceID && input?.strictPreferredSpace) {
+          const strictSpace = await dataGateway.workspace.getSpace(preferredSpaceID);
+          setSpaces([strictSpace]);
+          return await ensureSpaceReady(strictSpace, input?.preferredDocId ?? null);
+        }
+
         const listedSpaces = await dataGateway.workspace.listSpaces();
         const sortedSpaces = sortSpaces(listedSpaces);
         const preferredSpace =
-          input?.preferredSpaceId
-            ? sortedSpaces.find((space) => space.id === input.preferredSpaceId) ?? null
+          preferredSpaceID
+            ? sortedSpaces.find((space) => space.id === preferredSpaceID) ?? null
             : null;
+        if (preferredSpaceID && input?.strictPreferredSpace && !preferredSpace) {
+          throw new Error("目标空间不存在或无访问权限");
+        }
         const targetSpace =
           preferredSpace ??
           sortedSpaces[0] ??

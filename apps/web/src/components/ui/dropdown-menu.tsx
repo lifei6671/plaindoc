@@ -3,7 +3,13 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight, Circle } from "lucide-react";
 import { cn } from "../../lib/utils";
 
-const DropdownMenu = DropdownMenuPrimitive.Root;
+// 统一约束：默认关闭 Radix DropdownMenu 的 modal 行为，避免打开菜单时冻结页面其他可交互元素。
+const DropdownMenu = ({
+  modal = false,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) => {
+  return <DropdownMenuPrimitive.Root modal={modal} {...props} />;
+};
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 const DropdownMenuPortal = DropdownMenuPrimitive.Portal;

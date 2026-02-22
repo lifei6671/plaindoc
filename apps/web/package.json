@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "check:dropdown-menu": "node ./scripts/check-dropdown-menu-modal.mjs",
+    "build": "npm run check:dropdown-menu && tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -50,6 +50,7 @@ const REFRESH_TOKEN_STORAGE_KEY = "plaindoc.auth.refresh-token";
 const JSON_RESULT_SUCCESS_CODE = 0;
 const JSON_RESULT_UNAUTHORIZED_CODE = 1001;
 const JSON_RESULT_CONFIG_VERSION_CONFLICT_CODE = 4002;
+const JSON_RESULT_DOCUMENT_VERSION_CONFLICT_CODE = 4010;
 
 interface HttpAuthSession extends AuthSession {
   refreshToken?: string;
@@ -301,7 +302,10 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
     }
 
-    if (resultCode === JSON_RESULT_CONFIG_VERSION_CONFLICT_CODE) {
+    if (
+      resultCode === JSON_RESULT_CONFIG_VERSION_CONFLICT_CODE ||
+      resultCode === JSON_RESULT_DOCUMENT_VERSION_CONFLICT_CODE
+    ) {
       const resultData = envelope?.data as { latestDocument?: Document } | undefined;
       if (resultData?.latestDocument) {
         throw new ConflictError(resultData.latestDocument);
@@ -427,6 +431,13 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   const workspace: WorkspaceGateway = {
     async listSpaces() {
       return request<Space[]>("/spaces");
+    },
+    async getSpace(spaceId: string) {
+      const targetSpaceID = spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      return request<Space>(`/spaces/${targetSpaceID}`);
     },
     async createSpace(input: CreateSpaceInput) {
       return request<Space>("/spaces", {

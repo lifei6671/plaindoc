@@ -1,7 +1,25 @@
 # Admin Console 发布清单（首期）
 
-**Last Updated**: 2026-02-20  
+**Last Updated**: 2026-02-22  
 **Scope**: 用户管理、空间管理、文档管理、主题管理、系统配置、审计日志
+
+---
+
+## 最新进展（2026-02-22）
+
+### 0.1 今日已落地（摘要）
+
+- [x] 后端统一响应协议：`JsonResult`（`code:int` + `message` + `data`），业务数据统一放入 `data`。
+- [x] 错误码体系已按业务类型拆分，接口状态码策略收敛为 `200/403`。
+- [x] 角色权限收敛：`space_admin` 不可访问主题管理与审计日志（前后端双重限制）。
+- [x] `space_admin` 空间治理范围收敛：仅可管理“本人创建”或“已授权 scope”的空间及空间文档。
+- [x] 空间管理列表已支持点击封面/标题进入对应空间编辑模式。
+- [x] 后台返回入口已调整为“返回首页”。
+
+### 0.2 关联文档
+
+- 今日完整变更汇总：`docs/DAILY_PROGRESS_2026-02-22.md`
+- 空间分类重构说明：`docs/SPACE_CATEGORY_REFACTOR_NOTES.md`
 
 ---
 
@@ -74,6 +92,7 @@
 
 - [ ] `platform_admin` 菜单与操作权限完整可用
 - [ ] `space_admin` 仅可管理授权空间与文档
+- [ ] `space_admin` 访问 `/api/admin/themes`、`/api/admin/audits` 返回 `403`
 - [ ] 普通用户访问 `/api/admin/*` 被拒绝（401/403）
 - [ ] 高风险操作要求 `X-Admin-Operation-Token`
 - [ ] 一次性 token 重放被拒绝（409）

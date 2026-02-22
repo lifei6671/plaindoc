@@ -125,6 +125,7 @@ export interface AuthGateway {
 
 export interface WorkspaceGateway {
   listSpaces(): Promise<Space[]>;
+  getSpace(spaceId: string): Promise<Space>;
   createSpace(input: CreateSpaceInput): Promise<Space>;
   getTree(spaceId: string): Promise<TreeNode[]>;
   createNode(input: CreateNodeInput): Promise<CreateNodeResult>;

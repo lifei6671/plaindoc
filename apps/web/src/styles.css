@@ -113,6 +113,99 @@ input[type="reset"]:not(:disabled) {
   opacity: 0.7;
 }
 
+/* 编辑器空间校验失败页：用于“空间不存在/无权限”场景的简约兜底。 */
+.editor-access-error-page {
+  height: 100vh;
+  height: 100dvh;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f6f8;
+}
+
+.editor-access-error-card {
+  width: min(560px, 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 28px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.editor-access-error-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #b42318;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-access-error-title {
+  margin: 16px 0 8px;
+  font-size: 24px;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.editor-access-error-description {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.editor-access-error-meta {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.editor-access-error-meta code {
+  font-family: var(--pd-latin-mono-font-family);
+  color: #334155;
+}
+
+.editor-access-error-actions {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.editor-access-error-button {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-access-error-button:hover {
+  background: #f8fafc;
+}
+
+.editor-access-error-button--primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.editor-access-error-button--primary:hover {
+  background: #1d4ed8;
+}
+
 /* 顶栏“复制到公众号”按钮：触发预览内容内联导出并写入剪贴板。 */
 .wechat-copy-button {
   height: 34px;

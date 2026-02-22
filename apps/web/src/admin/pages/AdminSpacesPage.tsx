@@ -936,7 +936,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                             <Settings size={14} />
                             <span>设置</span>
                           </Button>
-                          <DropdownMenu>
+                          <DropdownMenu modal={false}>
                             <DropdownMenuTrigger asChild>
                               <Button
                                 type="button"

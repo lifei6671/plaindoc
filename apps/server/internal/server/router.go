@@ -68,9 +68,18 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 
 		visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 		accessHandler := handler.NewAccessHandler(authService, visibilityService)
+		workspaceHandler := handler.NewWorkspaceHandler(db, authService, visibilityService)
+		api.GET("/spaces", workspaceHandler.ListSpaces)
+		api.POST("/spaces", workspaceHandler.CreateSpace)
 		api.GET("/spaces/:spaceId", accessHandler.GetSpace)
+		api.GET("/spaces/:spaceId/tree", workspaceHandler.GetTree)
+		api.POST("/spaces/:spaceId/nodes", workspaceHandler.CreateNode)
+		api.PATCH("/nodes/:nodeId", workspaceHandler.UpdateNode)
+		api.DELETE("/nodes/:nodeId", workspaceHandler.DeleteNode)
 		api.PUT("/spaces/:spaceId/visibility", accessHandler.UpdateSpaceVisibility)
 		api.GET("/docs/:docId", accessHandler.GetDocument)
+		api.PUT("/docs/:docId", workspaceHandler.SaveDocument)
+		api.GET("/docs/:docId/revisions", workspaceHandler.ListRevisions)
 		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
 
 		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo, spaceRepo)

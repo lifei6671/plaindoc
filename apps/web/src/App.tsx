@@ -35,6 +35,7 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { AuthPanel } from "./components/AuthPanel";
+import { EditorAccessErrorPage } from "./components/EditorAccessErrorPage";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
@@ -123,6 +124,12 @@ export type AppRoute =
   | { kind: "admin-page"; pagePath: string }
   | { kind: "unknown" };
 
+interface EditorAccessErrorState {
+  spaceId: string | null;
+  description: string;
+  technicalMessage?: string | null;
+}
+
 function normalizeRoutePath(pathname: string): string {
   const normalized = pathname.replace(/\/+$/, "");
   return normalized || "/";
@@ -205,6 +212,24 @@ function resolveAuthRedirectTarget(rawValue: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+// 根据后端错误文本生成可展示给用户的空间访问失败说明。
+function resolveEditorAccessDescription(rawMessage: string): string {
+  const normalizedMessage = rawMessage.trim();
+  if (!normalizedMessage) {
+    return "当前无法验证空间访问权限，请稍后重试。";
+  }
+  if (
+    normalizedMessage.includes("不存在") ||
+    normalizedMessage.includes("无访问权限") ||
+    normalizedMessage.includes("无权访问") ||
+    normalizedMessage.includes("forbidden") ||
+    normalizedMessage.includes("not found")
+  ) {
+    return "该空间不存在，或你暂无访问权限。请联系空间管理员确认权限。";
+  }
+  return "空间访问校验失败，请稍后重试。";
 }
 
 // 统一钳制侧栏宽度，避免本地脏值导致布局异常。
@@ -421,7 +446,13 @@ export default function App() {
   const [isWorkspaceSidebarCollapsed, setIsWorkspaceSidebarCollapsed] = useState(
     readStoredWorkspaceSidebarCollapsed
   );
+  // 编辑器空间访问失败态：用于展示“空间不存在/无权限”简约错误页。
+  const [editorAccessError, setEditorAccessError] = useState<EditorAccessErrorState | null>(null);
+  // 手动重试计数：点击“重新校验”时递增，触发路由同步 effect 重新执行。
+  const [editorAccessRetryCount, setEditorAccessRetryCount] = useState(0);
   const workspaceSidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  // 记录“由本地动作触发的目标文档路由”，避免路由 effect 在状态尚未同步时重复请求。
+  const pendingRouteDocumentIDRef = useRef<{ docId: string; startedAt: number } | null>(null);
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
@@ -961,10 +992,15 @@ export default function App() {
         if (activeSpaceId) {
           const targetPath = buildEditorRoutePath(activeSpaceId, result.id);
           if (location.pathname !== targetPath) {
+            pendingRouteDocumentIDRef.current = {
+              docId: result.id,
+              startedAt: Date.now()
+            };
             navigate(targetPath);
           }
         }
       } catch (error) {
+        pendingRouteDocumentIDRef.current = null;
         setSaveStatus("error");
         setStatusMessage(`切换文档失败：${formatError(error)}`);
         throw error;
@@ -973,6 +1009,12 @@ export default function App() {
     [activeDocId, activeSpaceId, confirmLeaveForDocumentSwitch, location.pathname, navigate, openDocument]
   );
 
+  // 路由同步 effect 使用 ref 读取最新打开文档函数，避免因依赖抖动触发重复初始化请求。
+  const handleOpenWorkspaceDocumentRef = useRef(handleOpenWorkspaceDocument);
+  useEffect(() => {
+    handleOpenWorkspaceDocumentRef.current = handleOpenWorkspaceDocument;
+  }, [handleOpenWorkspaceDocument]);
+
   // 路由与工作区同步：支持 /editor、/editor/:spaceId、/editor/:spaceId/:docId 深链接。
   useEffect(() => {
     if (isAuthChecking || !activeUser || !isEditorRoute) {
@@ -980,9 +1022,29 @@ export default function App() {
     }
 
     let cancelled = false;
+    setEditorAccessError(null);
 
     const syncWorkspaceByRoute = async () => {
       try {
+        const pendingRouteDocument = pendingRouteDocumentIDRef.current;
+        if (pendingRouteDocument) {
+          const pendingElapsed = Date.now() - pendingRouteDocument.startedAt;
+          const isPendingExpired = pendingElapsed > 1500;
+          if (routeDocId !== pendingRouteDocument.docId) {
+            if (!isPendingExpired) {
+              return;
+            }
+            pendingRouteDocumentIDRef.current = null;
+          } else if (activeDocId !== pendingRouteDocument.docId) {
+            if (!isPendingExpired) {
+              return;
+            }
+            pendingRouteDocumentIDRef.current = null;
+          } else {
+            pendingRouteDocumentIDRef.current = null;
+          }
+        }
+
         // 未初始化或目标空间变更时，按路由参数重建工作区上下文。
         if (!activeSpaceId || (routeSpaceId && routeSpaceId !== activeSpaceId)) {
           setSaveStatus("loading");
@@ -990,7 +1052,8 @@ export default function App() {
 
           const bootstrapResult = await bootstrapWorkspace({
             preferredSpaceId: routeSpaceId ?? readStoredWorkspaceActiveSpaceId(),
-            preferredDocId: routeSpaceId ? routeDocId : readStoredWorkspaceActiveDocId()
+            preferredDocId: routeSpaceId ? routeDocId : readStoredWorkspaceActiveDocId(),
+            strictPreferredSpace: Boolean(routeSpaceId)
           });
           if (cancelled) {
             return;
@@ -1007,6 +1070,10 @@ export default function App() {
 
         // 同空间下，URL 显式指定了新文档时，按 URL 切文档（支持浏览器前进/后退）。
         if (routeDocId && routeDocId !== activeDocId) {
+          // 本地动作触发的路由切换：等待 activeDocId 与路由同步，避免二次请求。
+          if (pendingRouteDocumentIDRef.current?.docId === routeDocId) {
+            return;
+          }
           // 若 URL 指向已失效文档（例如被删除），回退到当前激活文档路径。
           if (activeDocId && !routeDocExistsInTree) {
             const fallbackPath = buildEditorRoutePath(activeSpaceId, activeDocId);
@@ -1015,7 +1082,7 @@ export default function App() {
             }
             return;
           }
-          await handleOpenWorkspaceDocument(routeDocId);
+          await handleOpenWorkspaceDocumentRef.current(routeDocId);
           return;
         }
 
@@ -1030,8 +1097,16 @@ export default function App() {
         if (cancelled) {
           return;
         }
+        const message = formatError(error);
         setSaveStatus("error");
-        setStatusMessage(`加载失败：${formatError(error)}`);
+        setStatusMessage(`加载失败：${message}`);
+        if (routeSpaceId) {
+          setEditorAccessError({
+            spaceId: routeSpaceId,
+            description: resolveEditorAccessDescription(message),
+            technicalMessage: message
+          });
+        }
       }
     };
 
@@ -1044,15 +1119,26 @@ export default function App() {
     activeSpaceId,
     activeUser,
     bootstrapWorkspace,
-    handleOpenWorkspaceDocument,
     isAuthChecking,
     isEditorRoute,
     location.pathname,
     navigate,
     routeDocExistsInTree,
     routeDocId,
-    routeSpaceId
+    routeSpaceId,
+    editorAccessRetryCount
   ]);
+
+  // 重新校验空间访问权限：触发一次路由同步 effect 即可。
+  const retryEditorAccessCheck = useCallback(() => {
+    setEditorAccessError(null);
+    setEditorAccessRetryCount((value) => value + 1);
+  }, []);
+
+  // 返回首页：当空间不可访问时提供明确出口，避免停留在无效路由。
+  const backToHomepage = useCallback(() => {
+    window.location.assign("/");
+  }, []);
 
   // 目录树菜单动作：创建节点后若为文档则自动打开，保持编辑流连续。
   const handleCreateWorkspaceNode = useCallback(
@@ -1412,6 +1498,22 @@ export default function App() {
           errorMessage={authErrorMessage}
           onLogin={handleAuthLogin}
           onRegister={handleAuthRegister}
+        />
+      </>
+    );
+  }
+
+  // 编辑器路由在空间校验失败时显示简约错误页，避免继续渲染无效工作区状态。
+  if (isEditorRoute && editorAccessError) {
+    return (
+      <>
+        <Toaster />
+        <EditorAccessErrorPage
+          spaceId={editorAccessError.spaceId}
+          description={editorAccessError.description}
+          technicalMessage={editorAccessError.technicalMessage}
+          onRetry={retryEditorAccessCheck}
+          onBackHome={backToHomepage}
         />
       </>
     );

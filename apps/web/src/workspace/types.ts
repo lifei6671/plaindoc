@@ -44,6 +44,8 @@ export interface WorkspaceBootstrapResult {
 export interface WorkspaceBootstrapInput {
   preferredSpaceId?: string | null;
   preferredDocId?: string | null;
+  // 开启后若指定空间不存在或不可访问，直接抛错，不再回退到其它空间。
+  strictPreferredSpace?: boolean;
 }
 
 // 目录移动参数：作为拖拽排序扩展点的统一输入结构。
