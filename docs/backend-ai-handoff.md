@@ -43,7 +43,6 @@
   - `theme.listThemes()`
   - `document.setDocumentTheme(docId, themeId)`
 - 新增前端内置主题源 `apps/web/src/theme-presets.ts`，主题菜单与预览逻辑改为数据驱动。
-- 本地 IndexedDB 引入 `themes` 表，文档记录增加 `themeId`。
 
 ### 4) 原 TS 主题迁移结果
 
@@ -108,37 +107,31 @@
 - 根因：迁移策略只做“补缺”，未做“升级”。
 - 处理：三库 `0002` 全部改成 upsert update（冲突时更新主题内容与 `updated_at`）。
 
-### 坑 4：本地 IndexedDB 仅插入缺失主题，旧主题不会被覆盖
-
-- 问题：本地已存在旧版 `default` 时，升级后仍保留旧数据。
-- 根因：`ensureBuiltinThemes` 只做 exists-check + add。
-- 处理：改为 `syncBuiltinThemes`：存在则更新、缺失则新增，并保留 `createdAt`。
-
-### 坑 5：迁移回滚测试步数固定为 1，新增版本后无法完全回滚
+### 坑 4：迁移回滚测试步数固定为 1，新增版本后无法完全回滚
 
 - 问题：新增 `0002` 后，测试仍按 1 步回滚，残留表结构。
 - 根因：回滚测试与迁移版本数耦合。
 - 处理：测试改为足够步数的全量回滚（当前用 `10` 步兜底）。
 
-### 坑 6：refresh token 没有持久化时，无法真正做到“旋转后失效”
+### 坑 5：refresh token 没有持久化时，无法真正做到“旋转后失效”
 
 - 问题：仅靠 JWT 自包含校验时，旧 refresh token 在过期前依然可继续换发。
 - 根因：服务端缺少会话状态存储，无法识别“已被替换/吊销”的 token。
 - 处理：新增 `user_sessions` 表，refresh 时进行 hash 对比与会话状态检查，并在旋转时吊销旧 session。
 
-### 坑 7：测试中 JWT TTL 若写成整数 `1`，会被解释为 1 纳秒
+### 坑 6：测试中 JWT TTL 若写成整数 `1`，会被解释为 1 纳秒
 
 - 问题：登录后立即请求 `me/refresh` 偶发 `401`。
 - 根因：`time.Duration` 默认单位是纳秒，TTL 过短导致 token 几乎立即过期。
 - 处理：测试配置改为显式时长（`time.Hour`、`24*time.Hour`）。
 
-### 坑 8：在 handler 直接写 SQL，导致职责混杂与后续扩展困难
+### 坑 7：在 handler 直接写 SQL，导致职责混杂与后续扩展困难
 
 - 问题：业务逻辑、查询细节、HTTP 映射耦合在同一层，后续加鉴权策略或换存储实现成本高。
 - 根因：虽然定义了仓储接口，但认证链路初版未按接口分层实现。
 - 处理：将认证链路重构为 `handler -> service -> repository`，并补 GORM 仓储实现，保留统一错误语义。
 
-### 坑 9：SQLite 扫描 `time.Time` 字段在部分模型查询上存在兼容风险
+### 坑 8：SQLite 扫描 `time.Time` 字段在部分模型查询上存在兼容风险
 
 - 问题：直接 `SELECT *` 到包含 `time.Time` 字段的模型时，部分场景会触发扫描错误。
 - 根因：SQLite 驱动在时间类型返回值与模型字段解析上存在差异。

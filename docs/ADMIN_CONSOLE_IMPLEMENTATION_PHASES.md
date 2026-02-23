@@ -169,7 +169,7 @@
 - `apps/server/internal/server/admin_handler_test.go`（新增用户管理集成测试）
 - `apps/web/src/admin/pages/AdminUsersPage.tsx`（新增）
 - `apps/web/src/admin/AdminApp.tsx`（接入用户管理页面）
-- `apps/web/src/data-access/types.ts`、`apps/web/src/data-access/http/adapter.ts`、`apps/web/src/data-access/local/adapter.ts`
+- `apps/web/src/data-access/types.ts`、`apps/web/src/data-access/http/adapter.ts`
 
 **Tasks**:
 - [x] 实现用户列表、搜索、分页接口。

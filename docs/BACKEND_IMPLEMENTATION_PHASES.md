@@ -228,11 +228,11 @@
 - `apps/server/internal/service/*_test.go`（新增）
 - `apps/server/Makefile` 或脚本（新增，可选）
 - `README.md`
-- `docs/LOCAL_WORKSPACE_ACCEPTANCE.md`（补充后端联调项，可选）
+- `docs/WORKSPACE_ACCEPTANCE.md`（补充后端联调项，可选）
 
 **Tasks**:
 - 建立 API 集成测试与关键服务单测（认证、节点递归删除、409 冲突、权限继承）。
-- 与前端 `VITE_DATA_DRIVER=http` 完成主流程联调。
+- 与前端 HTTP 数据驱动完成主流程联调。
 - 固化运行命令与回归脚本（启动、迁移、测试）。
 - 准备发布前检查清单（配置、密钥、CORS、日志、备份策略）。
 
