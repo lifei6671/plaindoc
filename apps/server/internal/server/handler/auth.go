@@ -35,9 +35,10 @@ type refreshRequest struct {
 }
 
 type authUserResponse struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID        string `json:"id"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 
 type authSessionResponse struct {
@@ -119,9 +120,10 @@ func (h *authHandler) Register(c *gin.Context) {
 
 	response.JSON(c, http.StatusCreated, authSessionResponse{
 		User: authUserResponse{
-			ID:    session.User.ID,
-			Email: session.User.Email,
-			Name:  session.User.Name,
+			ID:        session.User.ID,
+			Email:     session.User.Email,
+			Name:      session.User.Name,
+			AvatarURL: session.User.AvatarURL,
 		},
 		Token:        session.Token,
 		RefreshToken: session.RefreshToken,
@@ -165,9 +167,10 @@ func (h *authHandler) Login(c *gin.Context) {
 
 	response.JSON(c, http.StatusOK, authSessionResponse{
 		User: authUserResponse{
-			ID:    session.User.ID,
-			Email: session.User.Email,
-			Name:  session.User.Name,
+			ID:        session.User.ID,
+			Email:     session.User.Email,
+			Name:      session.User.Name,
+			AvatarURL: session.User.AvatarURL,
 		},
 		Token:        session.Token,
 		RefreshToken: session.RefreshToken,
@@ -221,9 +224,10 @@ func (h *authHandler) Refresh(c *gin.Context) {
 
 	response.JSON(c, http.StatusOK, authSessionResponse{
 		User: authUserResponse{
-			ID:    session.User.ID,
-			Email: session.User.Email,
-			Name:  session.User.Name,
+			ID:        session.User.ID,
+			Email:     session.User.Email,
+			Name:      session.User.Name,
+			AvatarURL: session.User.AvatarURL,
 		},
 		Token:        session.Token,
 		RefreshToken: session.RefreshToken,
@@ -256,9 +260,10 @@ func (h *authHandler) Me(c *gin.Context) {
 
 	response.JSON(c, http.StatusOK, authSessionResponse{
 		User: authUserResponse{
-			ID:    session.User.ID,
-			Email: session.User.Email,
-			Name:  session.User.Name,
+			ID:        session.User.ID,
+			Email:     session.User.Email,
+			Name:      session.User.Name,
+			AvatarURL: session.User.AvatarURL,
 		},
 		Token: session.Token,
 	})

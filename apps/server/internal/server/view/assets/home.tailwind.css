@@ -149,8 +149,8 @@ body {
 }
 
 .nav-user-trigger {
-  height: 44px;
-  padding: 0 12px 0 6px;
+  height: 40px;
+  padding: 0 11px 0 5px;
   border-radius: 999px;
   border: 1px solid #ced6e9;
   background: linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%);
@@ -161,16 +161,26 @@ body {
 }
 
 .nav-user-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  overflow: hidden;
+  font-size: 12px;
   font-weight: 700;
   color: #1f2b47;
   background: linear-gradient(140deg, #e6edff 0%, #d7e4ff 100%);
+}
+
+.nav-user-avatar-image {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  display: block;
+  object-fit: cover;
 }
 
 .nav-user-name {
@@ -636,13 +646,15 @@ body {
   }
 
   .nav-user-trigger {
-    height: 38px;
+    height: 36px;
   }
 
   .nav-user-avatar {
-    width: 27px;
-    height: 27px;
-    font-size: 12px;
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    font-size: 11px;
   }
 
   .nav-user-name {

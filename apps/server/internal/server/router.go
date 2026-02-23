@@ -185,13 +185,15 @@ func newRouter(
 		// ---- 后台治理 API 依赖装配 ----
 		// adminAccessService 统一封装 platform_admin / space_admin(scope) 权限判定。
 		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo, spaceRepo)
-		adminHandler := handler.NewAdminHandler(adminAccessService)
+		adminHandler := handler.NewAdminHandler(adminAccessService, userRepo)
 		// 高风险操作一次性 token 服务；TTL=0 表示使用服务默认值。
 		adminOperationTokenService := service.NewAdminOperationTokenService(adminAccessService, 0)
 		adminOperationTokenHandler := handler.NewAdminOperationTokenHandler(adminOperationTokenService)
 		// 审计服务：记录后台关键动作并支持检索。
 		adminAuditService := service.NewAdminAuditService(auditLogRepo, adminAccessService)
 		adminAuditHandler := handler.NewAdminAuditHandler(adminAuditService)
+		adminProfileService := service.NewAdminProfileService(userRepo, adminAccessService, adminAuditService)
+		adminProfileHandler := handler.NewAdminProfileHandler(adminProfileService, imageHostingService)
 		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminRoleRepo, adminAccessService, adminAuditService)
 		adminUserHandler := handler.NewAdminUserHandler(adminUserService)
 		adminSpaceService := service.NewAdminSpaceService(
@@ -221,6 +223,11 @@ func newRouter(
 		{
 			// 当前管理员信息（用于前端初始化角色与菜单）。
 			adminAPI.GET("/me", adminHandler.Me)
+			// 当前管理员个人资料查询/更新。
+			adminAPI.GET("/profile", adminProfileHandler.GetProfile)
+			adminAPI.PATCH("/profile", adminProfileHandler.UpdateProfile)
+			adminAPI.PUT("/profile/password", adminProfileHandler.UpdatePassword)
+			adminAPI.POST("/profile/avatar", adminProfileHandler.UploadAvatar)
 			// 签发高风险操作一次性 token（例如删除/封禁/配置变更前置校验）。
 			adminAPI.POST("/operation-tokens", adminOperationTokenHandler.Issue)
 

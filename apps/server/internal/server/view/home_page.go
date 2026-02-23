@@ -40,25 +40,26 @@ type HomeSpaceViewData struct {
 
 // HomePageViewData 首页/分类页模板数据。
 type HomePageViewData struct {
-	Title              string
-	Description        string
-	CanonicalURL       string
-	SiteName           string
-	IsExplore          bool
-	IsAuthenticated    bool
-	CurrentUserName    string
-	CurrentUserAvatar  string
-	LoginURL           string
-	RegisterURL        string
-	AdminURL           string
-	LogoutURL          string
-	ActiveCategoryID   string
-	ActiveCategoryName string
-	Categories         []HomeCategoryViewData
-	Spaces             []HomeSpaceViewData
-	Page               int
-	PageSize           int
-	Total              int64
+	Title                string
+	Description          string
+	CanonicalURL         string
+	SiteName             string
+	IsExplore            bool
+	IsAuthenticated      bool
+	CurrentUserName      string
+	CurrentUserAvatar    string
+	CurrentUserAvatarURL string
+	LoginURL             string
+	RegisterURL          string
+	AdminURL             string
+	LogoutURL            string
+	ActiveCategoryID     string
+	ActiveCategoryName   string
+	Categories           []HomeCategoryViewData
+	Spaces               []HomeSpaceViewData
+	Page                 int
+	PageSize             int
+	Total                int64
 }
 
 // RenderHomePage 渲染首页或分类页 HTML。

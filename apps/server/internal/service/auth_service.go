@@ -42,9 +42,10 @@ type parsedToken struct {
 }
 
 type AuthUser struct {
-	ID    string
-	Email string
-	Name  string
+	ID        string
+	Email     string
+	Name      string
+	AvatarURL string
 }
 
 type AuthSession struct {
@@ -118,9 +119,10 @@ func (s *AuthService) Register(ctx context.Context, email string, password strin
 
 	return AuthSession{
 		User: AuthUser{
-			ID:    user.UserID,
-			Email: user.Email,
-			Name:  user.Name,
+			ID:        user.UserID,
+			Email:     user.Email,
+			Name:      user.Name,
+			AvatarURL: strings.TrimSpace(user.AvatarURL),
 		},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
@@ -155,9 +157,10 @@ func (s *AuthService) Login(ctx context.Context, email string, password string) 
 
 	return AuthSession{
 		User: AuthUser{
-			ID:    user.UserID,
-			Email: user.Email,
-			Name:  user.Name,
+			ID:        user.UserID,
+			Email:     user.Email,
+			Name:      user.Name,
+			AvatarURL: strings.TrimSpace(user.AvatarURL),
 		},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
@@ -198,9 +201,10 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (AuthSes
 
 	return AuthSession{
 		User: AuthUser{
-			ID:    user.UserID,
-			Email: user.Email,
-			Name:  user.Name,
+			ID:        user.UserID,
+			Email:     user.Email,
+			Name:      user.Name,
+			AvatarURL: strings.TrimSpace(user.AvatarURL),
 		},
 		Token:        accessToken,
 		RefreshToken: nextRefreshToken,
@@ -233,9 +237,10 @@ func (s *AuthService) Me(ctx context.Context, accessToken string) (AuthSession, 
 
 	return AuthSession{
 		User: AuthUser{
-			ID:    user.UserID,
-			Email: user.Email,
-			Name:  user.Name,
+			ID:        user.UserID,
+			Email:     user.Email,
+			Name:      user.Name,
+			AvatarURL: strings.TrimSpace(user.AvatarURL),
 		},
 		Token: accessToken,
 	}, nil

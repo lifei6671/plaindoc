@@ -6,7 +6,7 @@
   <title>{{ .Title }}</title>
   <meta name="description" content="{{ .Description }}">
   <link rel="canonical" href="{{ .CanonicalURL }}">
-  <link rel="stylesheet" href="/assets/home.css">
+  <link rel="stylesheet" href="/assets/home.css?v=20260224">
 </head>
 <body class="home-body">
   {{ template "top_nav" . }}
@@ -39,5 +39,6 @@
       </section>
     </main>
   </div>
+  <script src="/assets/home.js?v=20260224" defer></script>
 </body>
 </html>

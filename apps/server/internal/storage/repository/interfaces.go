@@ -19,6 +19,8 @@ type UserRepository interface {
 	GetByUserID(ctx context.Context, userID string) (*models.User, error)
 	GetByEmail(ctx context.Context, email string) (*models.User, error)
 	List(ctx context.Context, params ListUsersParams) ([]models.User, int64, error)
+	UpdateProfile(ctx context.Context, params UpdateUserProfileParams) (bool, error)
+	UpdatePassword(ctx context.Context, userID string, passwordHash string, updatedAt time.Time) (bool, error)
 	UpdateStatus(ctx context.Context, params UpdateUserStatusParams) (bool, error)
 	SoftDelete(ctx context.Context, userID string, deletedAt time.Time) (bool, error)
 }
@@ -38,6 +40,14 @@ type UpdateUserStatusParams struct {
 	BannedReason string
 	BannedAt     *time.Time
 	UpdatedAt    time.Time
+}
+
+// UpdateUserProfileParams 用户资料更新参数。
+type UpdateUserProfileParams struct {
+	UserID    string
+	Name      *string
+	AvatarURL *string
+	UpdatedAt time.Time
 }
 
 // RotateUserSessionParams 定义 refresh token 旋转所需参数。

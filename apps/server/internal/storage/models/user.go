@@ -9,6 +9,7 @@ type User struct {
 	Email        string       `gorm:"column:email"`
 	PasswordHash string       `gorm:"column:password_hash"`
 	Name         string       `gorm:"column:name"`
+	AvatarURL    string       `gorm:"column:avatar_url"`
 	Status       EntityStatus `gorm:"column:status"`
 	BannedReason string       `gorm:"column:banned_reason"`
 	BannedAt     *time.Time   `gorm:"column:banned_at"`

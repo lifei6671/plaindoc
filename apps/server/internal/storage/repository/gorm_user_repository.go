@@ -37,7 +37,7 @@ func (r *gormUserRepository) GetByUserID(ctx context.Context, userID string) (*m
 	}
 	var user models.User
 	if err := r.db.WithContext(ctx).
-		Select("id", "user_id", "email", "password_hash", "name", "status", "banned_reason", "banned_at", "deleted_at").
+		Select("id, user_id, email, password_hash, name, avatar_url, status, banned_reason, banned_at, deleted_at").
 		Where("user_id = ?", userID).
 		Take(&user).Error; err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (r *gormUserRepository) GetByEmail(ctx context.Context, email string) (*mod
 	}
 	var user models.User
 	if err := r.db.WithContext(ctx).
-		Select("id", "user_id", "email", "password_hash", "name", "status", "banned_reason", "banned_at", "deleted_at").
+		Select("id, user_id, email, password_hash, name, avatar_url, status, banned_reason, banned_at, deleted_at").
 		Where("email = ?", email).
 		Take(&user).Error; err != nil {
 		return nil, err
@@ -111,6 +111,7 @@ func (r *gormUserRepository) List(
 		Email        string              `gorm:"column:email"`
 		PasswordHash string              `gorm:"column:password_hash"`
 		Name         string              `gorm:"column:name"`
+		AvatarURL    string              `gorm:"column:avatar_url"`
 		Status       models.EntityStatus `gorm:"column:status"`
 		BannedReason string              `gorm:"column:banned_reason"`
 		BannedAt     *time.Time          `gorm:"column:banned_at"`
@@ -121,7 +122,7 @@ func (r *gormUserRepository) List(
 
 	var rows []userListRow
 	if err := baseQuery.Session(&gorm.Session{}).
-		Select("id", "user_id", "email", "password_hash", "name", "status", "banned_reason", "banned_at", "deleted_at", "created_at", "updated_at").
+		Select("id, user_id, email, password_hash, name, avatar_url, status, banned_reason, banned_at, deleted_at, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).
@@ -137,6 +138,7 @@ func (r *gormUserRepository) List(
 			Email:        row.Email,
 			PasswordHash: row.PasswordHash,
 			Name:         row.Name,
+			AvatarURL:    row.AvatarURL,
 			Status:       row.Status,
 			BannedReason: row.BannedReason,
 			BannedAt:     row.BannedAt,
@@ -190,6 +192,76 @@ func (r *gormUserRepository) UpdateStatus(ctx context.Context, params UpdateUser
 		return false, tx.Error
 	}
 
+	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormUserRepository) UpdateProfile(ctx context.Context, params UpdateUserProfileParams) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("user repository db is nil")
+	}
+	userID := strings.TrimSpace(params.UserID)
+	if userID == "" {
+		return false, nil
+	}
+
+	updateValues := map[string]any{}
+	if params.Name != nil {
+		updateValues["name"] = strings.TrimSpace(*params.Name)
+	}
+	if params.AvatarURL != nil {
+		updateValues["avatar_url"] = strings.TrimSpace(*params.AvatarURL)
+	}
+	if len(updateValues) == 0 {
+		return false, nil
+	}
+
+	updatedAt := params.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	updateValues["updated_at"] = updatedAt
+
+	tx := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", userID).
+		Updates(updateValues)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormUserRepository) UpdatePassword(
+	ctx context.Context,
+	userID string,
+	passwordHash string,
+	updatedAt time.Time,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("user repository db is nil")
+	}
+	targetUserID := strings.TrimSpace(userID)
+	if targetUserID == "" {
+		return false, nil
+	}
+	targetPasswordHash := strings.TrimSpace(passwordHash)
+	if targetPasswordHash == "" {
+		return false, nil
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	tx := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", targetUserID).
+		Updates(map[string]any{
+			"password_hash": targetPasswordHash,
+			"updated_at":    updatedAt,
+		})
+	if tx.Error != nil {
+		return false, tx.Error
+	}
 	return tx.RowsAffected > 0, nil
 }
 

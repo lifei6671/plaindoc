@@ -8,9 +8,15 @@
 
     <div class="top-nav-actions">
       {{ if .IsAuthenticated }}
-        <details class="nav-user-dropdown">
+        <details class="nav-user-dropdown" data-nav-user-dropdown="1">
           <summary class="nav-user-trigger">
-            <span class="nav-user-avatar">{{ .CurrentUserAvatar }}</span>
+            <span class="nav-user-avatar">
+              {{ if .CurrentUserAvatarURL }}
+                <img src="{{ .CurrentUserAvatarURL }}" alt="{{ .CurrentUserName }} 头像" class="nav-user-avatar-image">
+              {{ else }}
+                {{ .CurrentUserAvatar }}
+              {{ end }}
+            </span>
             <span class="nav-user-name">{{ .CurrentUserName }}</span>
             <span class="nav-user-arrow">▾</span>
           </summary>

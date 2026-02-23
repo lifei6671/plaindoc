@@ -8,6 +8,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  avatarUrl?: string;
 }
 
 export interface AuthSession {
@@ -167,7 +168,20 @@ export interface ThemeGateway {
 
 export interface AdminIdentity {
   userId: string;
+  email: string;
+  name: string;
+  avatarUrl: string;
   roles: AdminRole[];
+}
+
+export interface AdminProfile {
+  userId: string;
+  email: string;
+  name: string;
+  avatarUrl: string;
+  roles: AdminRole[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AdminUserStatusFilter = "all" | "active" | "banned" | "deleted";
@@ -380,6 +394,10 @@ export interface AdminAuditListResult {
 
 export interface AdminGateway {
   getMe(): Promise<AdminIdentity>;
+  getProfile(): Promise<AdminProfile>;
+  updateProfile(input: { name?: string; avatarUrl?: string }): Promise<AdminProfile>;
+  updatePassword(input: { currentPassword: string; newPassword: string; confirmPassword: string }): Promise<void>;
+  uploadAvatar(file: File): Promise<AdminProfile>;
   canManageSpace(spaceId: string): Promise<boolean>;
   listUsers(input?: AdminUserListInput): Promise<AdminUserListResult>;
   createUser(input: { email: string; name: string; password: string; role: "user" | AdminRole }): Promise<AdminUser>;

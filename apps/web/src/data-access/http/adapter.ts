@@ -8,6 +8,7 @@ import {
   type AdminDocumentListInput,
   type AdminDocumentListResult,
   type AdminIdentity,
+  type AdminProfile,
   type AdminSpace,
   type AdminSpaceCategory,
   type AdminSpaceMember,
@@ -552,6 +553,52 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   const admin: AdminGateway = {
     async getMe() {
       return request<AdminIdentity>("/admin/me");
+    },
+    async getProfile() {
+      return request<AdminProfile>("/admin/profile");
+    },
+    async updateProfile(input: { name?: string; avatarUrl?: string }) {
+      const payload: Record<string, string> = {};
+      if (typeof input.name === "string") {
+        payload.name = input.name.trim();
+      }
+      if (typeof input.avatarUrl === "string") {
+        payload.avatarUrl = input.avatarUrl.trim();
+      }
+      return request<AdminProfile>("/admin/profile", {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      });
+    },
+    async updatePassword(input: { currentPassword: string; newPassword: string; confirmPassword: string }) {
+      const currentPassword = input.currentPassword ?? "";
+      const newPassword = input.newPassword ?? "";
+      const confirmPassword = input.confirmPassword ?? "";
+      if (!currentPassword) {
+        throw new Error("当前密码不能为空");
+      }
+      if (!newPassword) {
+        throw new Error("新密码不能为空");
+      }
+      await request<void>("/admin/profile/password", {
+        method: "PUT",
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+          confirmPassword
+        })
+      });
+    },
+    async uploadAvatar(file: File) {
+      if (!file) {
+        throw new Error("请选择头像文件");
+      }
+      const formData = new FormData();
+      formData.append("file", file);
+      return request<AdminProfile>("/admin/profile/avatar", {
+        method: "POST",
+        body: formData
+      });
     },
     async canManageSpace(spaceId: string) {
       const payload = await request<{ canManage: boolean }>(`/admin/spaces/${spaceId}/check`);

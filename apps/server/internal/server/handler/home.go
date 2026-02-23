@@ -24,6 +24,7 @@ type homeViewerIdentity struct {
 	UserID        string
 	Name          string
 	Email         string
+	AvatarURL     string
 	Authenticated bool
 }
 
@@ -149,25 +150,26 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 	}
 
 	htmlBytes, err := view.RenderHomePage(view.HomePageViewData{
-		Title:              title,
-		Description:        description,
-		CanonicalURL:       view.NormalizeCanonicalPath(canonicalURL),
-		SiteName:           "PlainDoc",
-		IsExplore:          explore,
-		IsAuthenticated:    viewerIdentity.Authenticated,
-		CurrentUserName:    viewerIdentity.Name,
-		CurrentUserAvatar:  buildUserAvatarText(viewerIdentity.Name, viewerIdentity.Email),
-		LoginURL:           loginURL,
-		RegisterURL:        registerURL,
-		AdminURL:           "/admin",
-		LogoutURL:          "/logout",
-		ActiveCategoryID:   strings.TrimSpace(record.ActiveCategoryID),
-		ActiveCategoryName: activeCategoryName,
-		Categories:         categoryItems,
-		Spaces:             spaceItems,
-		Page:               record.Pagination.Page,
-		PageSize:           record.Pagination.PageSize,
-		Total:              record.Pagination.Total,
+		Title:                title,
+		Description:          description,
+		CanonicalURL:         view.NormalizeCanonicalPath(canonicalURL),
+		SiteName:             "PlainDoc",
+		IsExplore:            explore,
+		IsAuthenticated:      viewerIdentity.Authenticated,
+		CurrentUserName:      viewerIdentity.Name,
+		CurrentUserAvatar:    buildUserAvatarText(viewerIdentity.Name, viewerIdentity.Email),
+		CurrentUserAvatarURL: strings.TrimSpace(viewerIdentity.AvatarURL),
+		LoginURL:             loginURL,
+		RegisterURL:          registerURL,
+		AdminURL:             "/admin",
+		LogoutURL:            "/logout",
+		ActiveCategoryID:     strings.TrimSpace(record.ActiveCategoryID),
+		ActiveCategoryName:   activeCategoryName,
+		Categories:           categoryItems,
+		Spaces:               spaceItems,
+		Page:                 record.Pagination.Page,
+		PageSize:             record.Pagination.PageSize,
+		Total:                record.Pagination.Total,
 	})
 	if err != nil {
 		renderHomeFallback(c)
@@ -204,6 +206,7 @@ func (h *homeHandler) resolveOptionalViewerIdentity(c *gin.Context) homeViewerId
 		UserID:        strings.TrimSpace(session.User.ID),
 		Name:          name,
 		Email:         email,
+		AvatarURL:     strings.TrimSpace(session.User.AvatarURL),
 		Authenticated: strings.TrimSpace(session.User.ID) != "",
 	}
 }

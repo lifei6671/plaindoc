@@ -1,21 +1,29 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
+	"gorm.io/gorm"
 )
 
 type adminHandler struct {
 	adminAccessService *service.AdminAccessService
+	userRepo           repository.UserRepository
 }
 
 type adminMeResponse struct {
-	UserID string   `json:"userId"`
-	Roles  []string `json:"roles"`
+	UserID    string   `json:"userId"`
+	Email     string   `json:"email"`
+	Name      string   `json:"name"`
+	AvatarURL string   `json:"avatarUrl"`
+	Roles     []string `json:"roles"`
 }
 
 type adminSpaceCheckResponse struct {
@@ -24,15 +32,19 @@ type adminSpaceCheckResponse struct {
 }
 
 // NewAdminHandler 创建管理后台基础处理器。
-func NewAdminHandler(adminAccessService *service.AdminAccessService) *adminHandler {
+func NewAdminHandler(
+	adminAccessService *service.AdminAccessService,
+	userRepo repository.UserRepository,
+) *adminHandler {
 	return &adminHandler{
 		adminAccessService: adminAccessService,
+		userRepo:           userRepo,
 	}
 }
 
 // Me 返回当前管理员身份信息。
 func (h *adminHandler) Me(c *gin.Context) {
-	if h == nil || h.adminAccessService == nil {
+	if h == nil || h.adminAccessService == nil || h.userRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -48,6 +60,15 @@ func (h *adminHandler) Me(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
+	user, err := h.userRepo.GetByUserID(c.Request.Context(), actorUserID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "admin user not found")
+			return
+		}
+		response.InternalError(c)
+		return
+	}
 
 	payloadRoles := make([]string, 0, len(roles))
 	for _, role := range roles {
@@ -55,8 +76,11 @@ func (h *adminHandler) Me(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, adminMeResponse{
-		UserID: actorUserID,
-		Roles:  payloadRoles,
+		UserID:    actorUserID,
+		Email:     strings.TrimSpace(user.Email),
+		Name:      strings.TrimSpace(user.Name),
+		AvatarURL: strings.TrimSpace(user.AvatarURL),
+		Roles:     payloadRoles,
 	})
 }
 

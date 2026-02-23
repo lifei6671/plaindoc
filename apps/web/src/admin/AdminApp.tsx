@@ -13,6 +13,7 @@ import {
   Palette,
   Settings2,
   ShieldAlert,
+  User,
   Users
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -31,8 +32,9 @@ import { AdminDocumentsPage } from "./pages/AdminDocumentsPage";
 import { AdminThemesPage } from "./pages/AdminThemesPage";
 import { AdminSystemConfigsPage } from "./pages/AdminSystemConfigsPage";
 import { AdminAuditsPage } from "./pages/AdminAuditsPage";
+import { AdminProfilePage } from "./pages/AdminProfilePage";
 
-type AdminMenuKey = "dashboard" | "users" | "spaces" | "documents" | "themes" | "system" | "audits";
+type AdminMenuKey = "dashboard" | "profile" | "users" | "spaces" | "documents" | "themes" | "system" | "audits";
 
 interface AdminMenuItem {
   key: AdminMenuKey;
@@ -67,6 +69,13 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
       description: "查看后台整体运行与风险概况",
       path: ADMIN_ROUTE_BASE_PATH,
       icon: LayoutDashboard
+    },
+    {
+      key: "profile",
+      label: "个人信息",
+      description: "维护昵称、头像与密码",
+      path: "/admin/profile",
+      icon: User
     }
   ];
 
@@ -159,6 +168,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         title: "用户管理",
         description: "用户列表、搜索、封禁/解封、软删除。",
         todo: ["实现列表与筛选", "支持批量封禁", "写入审计日志"]
+      };
+    case "profile":
+      return {
+        title: "个人信息",
+        description: "维护昵称、头像与密码。",
+        todo: ["昵称修改", "头像上传", "密码更新"]
       };
     case "spaces":
       return {
@@ -275,6 +290,7 @@ const DASHBOARD_TODO: readonly DashboardTodo[] = [
 
 const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
+  { label: "账号", keys: ["profile"] },
   { label: "内容管理", keys: ["users", "spaces", "documents"] },
   { label: "系统治理", keys: ["themes", "system", "audits"] }
 ];
@@ -523,6 +539,26 @@ export function AdminApp({
     },
     [location.pathname, navigate]
   );
+  const handleBackHome = useCallback(() => {
+    // 返回首页需触发整页导航，交由后端 SSR 渲染首页，而不是停留在前端 SPA 路由。
+    window.location.assign("/");
+  }, []);
+  const handleProfileUpdated = useCallback(
+    (payload: { name: string; email: string; avatarUrl: string }) => {
+      setAdminIdentity((previousState) => {
+        if (!previousState) {
+          return previousState;
+        }
+        return {
+          ...previousState,
+          name: payload.name,
+          email: payload.email,
+          avatarUrl: payload.avatarUrl
+        };
+      });
+    },
+    []
+  );
 
   if (checking || isAdminIdentityLoading) {
     return (
@@ -563,7 +599,7 @@ export function AdminApp({
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => navigate("/", { replace: true })}>
+              <Button type="button" variant="outline" onClick={handleBackHome}>
                 返回首页
               </Button>
               <Button type="button" variant="destructive" onClick={() => void onLogout()}>
@@ -628,8 +664,10 @@ export function AdminApp({
           <div className="mt-4 border-t border-slate-200/80 px-2 pt-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <p className="truncate text-sm font-semibold text-slate-900">{activeUser.name || "管理员"}</p>
-                <p className="truncate text-xs text-slate-500">{activeUser.email}</p>
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  {adminIdentity.name || activeUser.name || "管理员"}
+                </p>
+                <p className="truncate text-xs text-slate-500">{adminIdentity.email || activeUser.email}</p>
               </div>
               <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-600">
                 Admin
@@ -641,7 +679,7 @@ export function AdminApp({
                 size="sm"
                 variant="ghost"
                 className="admin-sidebar-footer-button flex-1 justify-start text-slate-700 hover:bg-slate-50"
-                onClick={() => navigate("/", { replace: true })}
+                onClick={handleBackHome}
               >
                 返回首页
               </Button>
@@ -701,6 +739,8 @@ export function AdminApp({
               <div className="mx-auto max-w-[1500px]">
               {activeMenuItem?.key === "users" ? (
                 <AdminUsersPage currentUserID={adminIdentity.userId} dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "profile" ? (
+                <AdminProfilePage dataGateway={dataGateway} onProfileUpdated={handleProfileUpdated} />
               ) : activeMenuItem?.key === "spaces" ? (
                 <AdminSpacesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "documents" ? (
