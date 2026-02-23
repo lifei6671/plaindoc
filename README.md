@@ -207,7 +207,7 @@ npm run web:dev
 
 ## 5. 构建与发布
 
-### 前端构建
+### 5.1 本地构建
 
 ```bash
 npm run web:build
@@ -225,11 +225,121 @@ cd apps/server
 go test ./...
 ```
 
-### Docker 镜像（手动）
+### Docker 镜像（本地手动构建）
 
 ```bash
 docker build -t plaindoc:latest .
 docker run --rm -p 8080:8080 plaindoc:latest
+```
+
+### 5.2 GitHub Release 产物说明
+
+当你推送 tag 后，`Release` 工作流会上传以下文件：
+
+- `plaindoc-server-linux-amd64`：Linux amd64 的后端可执行文件（Go 编译产物）。
+- `plaindoc-server-linux-amd64-<tag>.tar.gz`：后端二进制压缩包（包含上面的可执行文件）。
+- `plaindoc-web-<tag>.tar.gz`：前端发布产物压缩包，包含 `dist`（前端静态资源）和 `dist-ssr`（阅读页 SSR Worker 产物）。
+- `checksums-<tag>.txt`：上述产物的 SHA256 校验清单。
+
+### 5.3 使用 Release 产物部署（Linux 裸机/云主机）
+
+1. 下载对应 tag 的 3 个核心文件：
+`plaindoc-server-linux-amd64-<tag>.tar.gz`、`plaindoc-web-<tag>.tar.gz`、`checksums-<tag>.txt`。  
+2. 校验文件完整性：
+
+```bash
+sha256sum -c checksums-<tag>.txt
+```
+
+3. 解压到部署目录：
+
+```bash
+mkdir -p /opt/plaindoc/apps/web
+tar -xzf plaindoc-server-linux-amd64-<tag>.tar.gz -C /opt/plaindoc
+tar -xzf plaindoc-web-<tag>.tar.gz -C /opt/plaindoc/apps/web
+chmod +x /opt/plaindoc/plaindoc-server-linux-amd64
+```
+
+4. 配置并启动（示例）：
+
+```bash
+export APP_ENV=production
+export APP_ADDR=:8080
+export WEB_ORIGIN=http://your-domain-or-ip:8080
+export WEB_DIST_DIR=/opt/plaindoc/apps/web/dist
+export DB_DRIVER=sqlite
+export DB_DSN='file:/opt/plaindoc/data/plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)'
+export SSR_WORKER_ENABLED=true
+export SSR_WORKER_EXEC=node
+export SSR_WORKER_ENTRY=/opt/plaindoc/apps/web/dist-ssr/worker-entry.js
+
+/opt/plaindoc/plaindoc-server-linux-amd64
+```
+
+提示：阅读页 SSR 依赖 Node 子进程。若服务器未安装 Node，请先安装 Node，或临时设置 `SSR_WORKER_ENABLED=false`。
+
+### 5.4 DockerHub 部署（推荐）
+
+说明：工作流会始终推送 `<tag>` 镜像标签；当 Git tag 以 `v` 开头时，额外推送 `latest`。
+
+拉取镜像：
+
+```bash
+docker pull lifei6671/plaindoc:latest
+```
+
+直接运行：
+
+```bash
+docker run -d \
+  --name plaindoc \
+  -p 8080:8080 \
+  -e APP_ENV=production \
+  -e WEB_ORIGIN=http://localhost:8080 \
+  -e DB_DRIVER=sqlite \
+  -e DB_DSN='file:/app/data/plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)' \
+  -v plaindoc_data:/app/data \
+  -v plaindoc_uploads:/app/uploads \
+  --restart unless-stopped \
+  lifei6671/plaindoc:latest
+```
+
+### 5.5 Docker Compose（使用 DockerHub 镜像）
+
+如果不想本地 build，可使用以下 compose：
+
+```yaml
+services:
+  plaindoc:
+    image: lifei6671/plaindoc:latest
+    container_name: plaindoc
+    ports:
+      - "8080:8080"
+    environment:
+      APP_ENV: "production"
+      APP_ADDR: ":8080"
+      WEB_ORIGIN: "http://localhost:8080"
+      WEB_DIST_DIR: "/app/apps/web/dist"
+      DB_DRIVER: "sqlite"
+      DB_DSN: "file:/app/data/plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+      DB_AUTO_MIGRATE: "true"
+      SSR_WORKER_ENABLED: "true"
+      SSR_WORKER_EXEC: "node"
+      SSR_WORKER_ENTRY: "/app/apps/web/dist-ssr/worker-entry.js"
+    volumes:
+      - plaindoc_data:/app/data
+      - plaindoc_uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  plaindoc_data:
+  plaindoc_uploads:
+```
+
+启动：
+
+```bash
+docker compose up -d
 ```
 
 ---

@@ -1,7 +1,7 @@
 services:
   plaindoc:
     container_name: plaindoc
-    image: plaindoc:latest
+    image: lifei6671/plaindoc:latest
     build:
       context: .
       dockerfile: Dockerfile
