@@ -35,6 +35,43 @@
 
 说明：下方原始任务清单保留了初版勾选状态，实施进度以本节快照与 `docs/DAILY_PROGRESS_2026-02-23.md` 为准。
 
+## 0.6 阅读页 DOM Hook 契约（后续迭代必须遵守）
+
+> 目的：避免阅读页异步增强逻辑与样式 class 强耦合。  
+> 原则：阅读页交互脚本只依赖 `data-reader-*` 钩子，不依赖视觉 class 命名。
+
+### 必须保留的 Hook（破坏即功能失效）
+
+- 文档链接：
+  - `a[data-reader-doc-link='1']`
+  - `data-reader-doc-id`
+- 树结构节点：
+  - `[data-reader-hook='tree-details']`
+  - `[data-reader-hook='tree-summary']`
+  - `[data-reader-hook='tree-arrow']`
+  - `[data-reader-hook='tree-row']`
+  - `[data-reader-hook='tree-label']`
+  - `[data-reader-hook='tree-title-tooltip']`
+- 页面区域：
+  - `[data-reader-hook='article-shell']`
+  - `[data-reader-hook='progress']`
+  - `[data-reader-hook='main']`
+  - `[data-reader-hook='sidebar']`
+- 激活态属性：
+  - `data-reader-active='1'`
+  - `data-reader-label-active='1'`
+
+### 迭代约束（必须执行）
+
+1. 调整阅读页 DOM 结构或命名时，必须同步检查并更新 `apps/web/src/ssr/render-space-reader.tsx` 内联脚本选择器。  
+2. 视觉样式 class 可以重构，但不得删除上述 `data-reader-*` 钩子，除非同步完成脚本迁移。  
+3. 提交前至少手测以下场景：
+   - 左侧树点击文档，仅右侧异步刷新，URL 正确变化。
+   - 浏览器前进/后退可以恢复对应文档内容与激活态。
+   - 顶部细进度条在异步切换时出现并正常消失。
+   - 刷新直达 URL（`/r/:spaceId/:docId`）可正常渲染并定位当前节点。  
+4. 若异步增强失败，必须可降级为完整页面跳转，不能阻断阅读链路。
+
 ---
 
 ## Milestone 1: 协议与配置基线

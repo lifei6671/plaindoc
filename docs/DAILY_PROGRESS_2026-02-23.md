@@ -132,6 +132,15 @@
 - 处理：为共享 remark 插件增加开关，阅读 SSR 关闭锚点注入。
 - 建议：共享渲染链路必须支持“编辑态能力开关”，避免阅读面泄露编辑内部实现。
 
+### 3.7 阅读页异步脚本与 DOM 选择器耦合风险
+
+- 问题：阅读页右侧异步加载脚本如果依赖 class 选择器，后续样式重构容易导致点击、折叠、激活态、Tooltip 定位失效。
+- 根因：class 同时承担“视觉语义 + 交互语义”，改样式时容易误伤交互逻辑。
+- 处理：统一切换为 `data-reader-*` 钩子契约，脚本只依赖 hook，不依赖视觉 class。
+- 建议：
+  - 后续迭代中，阅读页可以改 class，但必须保留并校验 hook。
+  - 详细约束见：`docs/SPACE_READER_SSR_SUBPROCESS_IMPLEMENTATION_PHASES.md` 的“0.6 阅读页 DOM Hook 契约”。
+
 ---
 
 ## 4) 涉及文件（本日重点）
@@ -152,4 +161,3 @@
   - `apps/web/src/editor/markdown-shared.ts`
   - `apps/web/package.json`
   - `apps/web/src/ssr/render-space-reader.tsx`
-
