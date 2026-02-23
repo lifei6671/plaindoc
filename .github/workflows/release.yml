@@ -37,6 +37,9 @@ jobs:
         run: npm ci
 
       - name: Build frontend (dist + dist-ssr)
+        env:
+          VITE_DATA_DRIVER: http
+          VITE_API_BASE_URL: /api
         run: npm run web:build
 
       - name: Build backend binary
@@ -129,5 +132,8 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            VITE_DATA_DRIVER=http
+            VITE_API_BASE_URL=/api
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

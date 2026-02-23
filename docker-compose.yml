@@ -23,6 +23,7 @@ services:
       SSR_WORKER_START_TIMEOUT: "5s"
       SSR_WORKER_MAX_PAYLOAD_BYTES: "1048576"
       SSR_PROTOCOL_VERSION: "v1"
+      JWT_SECRET: "01kj4zg1qajeecbj7ez8qn0npzl8m9"
     volumes:
       - plaindoc_data:/app/data
       - plaindoc_uploads:/app/uploads

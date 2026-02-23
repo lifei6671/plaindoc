@@ -6,6 +6,11 @@ ARG GO_VERSION=1.26
 FROM node:${NODE_VERSION}-bookworm-slim AS web-builder
 WORKDIR /workspace
 
+ARG VITE_DATA_DRIVER=http
+ARG VITE_API_BASE_URL=/api
+ENV VITE_DATA_DRIVER=${VITE_DATA_DRIVER}
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
 # 先复制 workspace 依赖描述，利用 Docker layer cache 加速 npm ci。
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
