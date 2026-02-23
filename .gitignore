@@ -154,3 +154,6 @@ bin/
 uploads/
 
 .idea
+
+dist/
+dist-ssr/

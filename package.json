@@ -8,6 +8,7 @@
   "scripts": {
     "web:dev": "npm run dev -w @plaindoc/web",
     "web:build": "npm run build -w @plaindoc/web",
+    "web:build-ssr": "npm run build:ssr-worker -w @plaindoc/web",
     "web:preview": "npm run preview -w @plaindoc/web"
   }
 }

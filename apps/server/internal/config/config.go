@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	IdleTimeout    time.Duration
 	Database       DatabaseConfig
 	JWT            JWTConfig
+	SSRWorker      SSRWorkerConfig
 }
 
 // DatabaseConfig 预留多数据库接入所需参数。
@@ -39,6 +41,18 @@ type JWTConfig struct {
 	RefreshTokenTTL time.Duration
 }
 
+// SSRWorkerConfig 描述 Go 进程内管理的 Node SSR 子进程配置。
+type SSRWorkerConfig struct {
+	Enabled         bool
+	Exec            string
+	Entry           string
+	Count           int
+	RenderTimeout   time.Duration
+	StartTimeout    time.Duration
+	MaxPayloadBytes int64
+	ProtocolVersion string
+}
+
 // Load 解析并校验环境变量；配置非法时返回明确错误，避免服务带病启动。
 func Load() (Config, error) {
 	cfg := Config{
@@ -51,6 +65,15 @@ func Load() (Config, error) {
 		},
 		JWT: JWTConfig{
 			Secret: getenv("JWT_SECRET", "plaindoc-dev-secret"),
+		},
+		SSRWorker: SSRWorkerConfig{
+			Exec:            getenv("SSR_WORKER_EXEC", "node"),
+			Entry:           getenv("SSR_WORKER_ENTRY", ""),
+			Count:           2,
+			RenderTimeout:   1500 * time.Millisecond,
+			StartTimeout:    5 * time.Second,
+			MaxPayloadBytes: 1024 * 1024,
+			ProtocolVersion: getenv("SSR_PROTOCOL_VERSION", "v1"),
 		},
 	}
 
@@ -104,6 +127,36 @@ func Load() (Config, error) {
 	}
 	cfg.JWT.RefreshTokenTTL = refreshTokenTTL
 
+	ssrWorkerEnabled, err := parseBool("SSR_WORKER_ENABLED", "false")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SSRWorker.Enabled = ssrWorkerEnabled
+
+	ssrWorkerCount, err := parseInt("SSR_WORKER_COUNT", "2")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SSRWorker.Count = ssrWorkerCount
+
+	ssrRenderTimeout, err := parseDuration("SSR_RENDER_TIMEOUT", "1500ms")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SSRWorker.RenderTimeout = ssrRenderTimeout
+
+	ssrWorkerStartTimeout, err := parseDuration("SSR_WORKER_START_TIMEOUT", "5s")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SSRWorker.StartTimeout = ssrWorkerStartTimeout
+
+	ssrWorkerMaxPayloadBytes, err := parseInt64("SSR_WORKER_MAX_PAYLOAD_BYTES", "1048576")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SSRWorker.MaxPayloadBytes = ssrWorkerMaxPayloadBytes
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -150,6 +203,29 @@ func (c Config) Validate() error {
 	if c.Env == "production" && c.JWT.Secret == "plaindoc-dev-secret" {
 		return errors.New("JWT_SECRET must be explicitly set in production")
 	}
+	if c.SSRWorker.Enabled {
+		if strings.TrimSpace(c.SSRWorker.Exec) == "" {
+			return errors.New("SSR_WORKER_EXEC must not be empty when SSR_WORKER_ENABLED is true")
+		}
+		if strings.TrimSpace(c.SSRWorker.Entry) == "" {
+			return errors.New("SSR_WORKER_ENTRY must not be empty when SSR_WORKER_ENABLED is true")
+		}
+		if c.SSRWorker.Count <= 0 {
+			return errors.New("SSR_WORKER_COUNT must be greater than 0 when SSR_WORKER_ENABLED is true")
+		}
+		if c.SSRWorker.RenderTimeout <= 0 {
+			return errors.New("SSR_RENDER_TIMEOUT must be greater than 0 when SSR_WORKER_ENABLED is true")
+		}
+		if c.SSRWorker.StartTimeout <= 0 {
+			return errors.New("SSR_WORKER_START_TIMEOUT must be greater than 0 when SSR_WORKER_ENABLED is true")
+		}
+		if c.SSRWorker.MaxPayloadBytes <= 0 {
+			return errors.New("SSR_WORKER_MAX_PAYLOAD_BYTES must be greater than 0 when SSR_WORKER_ENABLED is true")
+		}
+		if strings.TrimSpace(c.SSRWorker.ProtocolVersion) == "" {
+			return errors.New("SSR_PROTOCOL_VERSION must not be empty when SSR_WORKER_ENABLED is true")
+		}
+	}
 
 	return nil
 }
@@ -188,6 +264,24 @@ func parseBool(key string, fallback string) (bool, error) {
 	default:
 		return false, fmt.Errorf("%s must be a valid boolean value, got %q", key, raw)
 	}
+}
+
+func parseInt(key string, fallback string) (int, error) {
+	raw := strings.TrimSpace(getenv(key, fallback))
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid integer value, got %q", key, raw)
+	}
+	return value, nil
+}
+
+func parseInt64(key string, fallback string) (int64, error) {
+	raw := strings.TrimSpace(getenv(key, fallback))
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid int64 value, got %q", key, raw)
+	}
+	return value, nil
 }
 
 func getenv(key string, fallback string) string {

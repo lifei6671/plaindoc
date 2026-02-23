@@ -19,8 +19,26 @@
 
 ---
 
+## 0.5 实施状态快照（2026-02-23）
+
+> 详细当日记录见：`docs/DAILY_PROGRESS_2026-02-23.md`
+
+| Milestone | 状态 | 备注 |
+| --- | --- | --- |
+| M1 协议与配置基线 | Completed | `SSR_WORKER_*` 配置、`.env.example`、启动日志已落地 |
+| M2 Go 子进程监督器 | In Progress | 核心可用（握手/渲染/重启重试），原计划中的完整测试与调度优化待补 |
+| M3 Node Worker 与 SSR 构建 | Completed | `worker-entry`、SSR 构建链路、产物目录已打通 |
+| M4 阅读路由与数据聚合 | Completed | `/r/:spaceId`、`/r/:spaceId/:docId`、权限与友好错误页已打通 |
+| M5 阅读端页面落地 | In Progress | 已完成左树右文与样式一致性；独立 hydration 模块暂缓 |
+| M6 一致性测试 | Pending | 自动化 DOM 对比与测试计划待补 |
+| M7 性能与发布加固 | Pending | 缓存、指标、发布回滚清单待补 |
+
+说明：下方原始任务清单保留了初版勾选状态，实施进度以本节快照与 `docs/DAILY_PROGRESS_2026-02-23.md` 为准。
+
+---
+
 ## Milestone 1: 协议与配置基线
-**Status**: Pending  
+**Status**: Completed (2026-02-23)  
 **Type**: Infrastructure  
 **Estimated**: 1~2 天  
 **Files**:
@@ -53,7 +71,7 @@
 ---
 
 ## Milestone 2: Go 子进程监督器与协议实现
-**Status**: Pending  
+**Status**: In Progress (Core Available)  
 **Type**: Backend Core  
 **Estimated**: 2~4 天  
 **Files**:
@@ -93,7 +111,7 @@
 ---
 
 ## Milestone 3: Node Worker 与 SSR Bundle 构建
-**Status**: Pending  
+**Status**: Completed (2026-02-23)  
 **Type**: Web Build + Runtime  
 **Estimated**: 2~3 天  
 **Files**:
@@ -126,7 +144,7 @@
 ---
 
 ## Milestone 4: 阅读页后端路由与数据聚合
-**Status**: Pending  
+**Status**: Completed (2026-02-23)  
 **Type**: API + SSR Handler  
 **Estimated**: 2~4 天  
 **Files**:
@@ -163,7 +181,7 @@
 ---
 
 ## Milestone 5: 阅读端 Hydration 与页面组件落地
-**Status**: Pending  
+**Status**: In Progress (SSR Static Reader Ready)  
 **Type**: UI + Integration  
 **Estimated**: 2~4 天  
 **Files**:
@@ -297,4 +315,3 @@
 2. Worker 异常时主服务可降级，不出现大面积 500。  
 3. 渲染一致性样例通过并有自动化回归。  
 4. 发布与回滚清单完备，值班可独立执行故障处置。  
-

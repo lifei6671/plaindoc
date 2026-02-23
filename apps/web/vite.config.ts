@@ -24,6 +24,12 @@ export default defineConfig(({ mode }) => {
           xfwd: true,
           secure: false
         },
+        "/r": {
+          target: backendOrigin,
+          changeOrigin: true,
+          xfwd: true,
+          secure: false
+        },
         "/uploads": {
           target: backendOrigin,
           changeOrigin: true,

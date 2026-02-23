@@ -16,7 +16,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client", "react-syntax-highlighter"]
+    "types": ["vite/client", "react-syntax-highlighter", "node"]
   },
   "include": ["src"]
 }

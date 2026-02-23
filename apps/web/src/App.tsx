@@ -45,11 +45,6 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import { useLocation, useNavigate } from "react-router-dom";
-import rehypeKatex from "rehype-katex";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { AuthPanel } from "./components/AuthPanel";
 import { EditorAccessErrorPage } from "./components/EditorAccessErrorPage";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
@@ -84,18 +79,18 @@ import {
   PREVIEW_PANE_ID,
   PREVIEW_VIEWPORT_MODE_STORAGE_KEY
 } from "./editor/constants";
-import { buildMarkdownComponents } from "./editor/markdown-components";
+import {
+  createSharedMarkdownComponents,
+  createSharedRehypePlugins,
+  createSharedRemarkPlugins
+} from "./editor/markdown-shared";
 import {
   extractPlainTextFromMarkdown,
-  parseTocFromMarkdown,
-  remarkBlockAnchorPlugin
+  parseTocFromMarkdown
 } from "./editor/markdown-utils";
 import {
-  PREVIEW_HTML_SANITIZE_SCHEMA,
   PREVIEW_MARKDOWN_REHYPE_OPTIONS
 } from "./editor/markdown-sanitize";
-import { remarkReferenceFootnotePlugin } from "./editor/remark-reference-footnotes";
-import { remarkStyledSpanContainerPlugin } from "./editor/remark-styled-span-container";
 import {
   buildPreviewThemeStyleText,
   getPreviewThemeClassName,
@@ -1134,19 +1129,11 @@ export default function App() {
   );
   // remark 插件顺序：先 GFM/数学公式，再规整样式 span 容器，再按链接模式处理脚注，最后注入锚点属性。
   const remarkPlugins = useMemo(() => {
-    const referenceFootnotePlugin: [typeof remarkReferenceFootnotePlugin, { mode: PreviewLinkRenderMode }] = [
-      remarkReferenceFootnotePlugin,
-      { mode: previewLinkRenderMode }
-    ];
-    return [remarkGfm, remarkMath, remarkStyledSpanContainerPlugin, referenceFootnotePlugin, remarkBlockAnchorPlugin];
+    return createSharedRemarkPlugins(previewLinkRenderMode);
   }, [previewLinkRenderMode]);
   // rehype 插件顺序：先解析内嵌 HTML，再做白名单清洗，最后渲染 KaTeX。
   const rehypePlugins = useMemo(() => {
-    const sanitizePlugin: [typeof rehypeSanitize, typeof PREVIEW_HTML_SANITIZE_SCHEMA] = [
-      rehypeSanitize,
-      PREVIEW_HTML_SANITIZE_SCHEMA
-    ];
-    return [rehypeRaw, sanitizePlugin, rehypeKatex];
+    return createSharedRehypePlugins();
   }, []);
   // markdown-it 仅用于“去语法后的文字统计”和 TOC 语法解析。
   const markdownTextParser = useMemo(
@@ -1171,7 +1158,7 @@ export default function App() {
   // 自定义 Markdown 渲染器。
   const markdownComponents = useMemo(
     () =>
-      buildMarkdownComponents({
+      createSharedMarkdownComponents({
         activePreviewTheme,
         tocItems,
         onTocNavigate: handleTocNavigate

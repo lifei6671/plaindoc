@@ -1,5 +1,5 @@
 {{ define "space_cover_card" }}
-<article class="space-card" data-space-id="{{ .SpaceID }}">
+<a class="space-card" data-space-id="{{ .SpaceID }}" href="/r/{{ .SpaceID }}" aria-label="进入空间 {{ .Name }}">
   {{ if .CoverURL }}
     <img class="space-cover-image" src="{{ .CoverURL }}" alt="{{ .Name }} 封面" loading="lazy" />
   {{ else }}
@@ -7,5 +7,5 @@
       <span>暂无封面</span>
     </div>
   {{ end }}
-</article>
+</a>
 {{ end }}

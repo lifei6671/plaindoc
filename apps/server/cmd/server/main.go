@@ -1,21 +1,31 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server"
+	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
+	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/worker"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
 func main() {
+	loadDotEnvCandidates()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("load config failed: %v", err)
@@ -34,6 +44,46 @@ func main() {
 	}
 
 	logger := logit.NewLoggerWithWriter(cfg.LogLevel, logWriter)
+
+	if err := validateSSRWorkerRuntime(cfg); err != nil {
+		logger.Error("ssr worker runtime validation failed", logit.Error("error", err))
+		log.Fatalf("ssr worker runtime validation failed: %v", err)
+	}
+
+	var ssrWorkerPool *pool.Pool
+	var ssrDispatcher *pool.Dispatcher
+	if cfg.SSRWorker.Enabled {
+		ssrWorkerPool = pool.New(pool.Config{
+			WorkerCount: cfg.SSRWorker.Count,
+			Worker: worker.Config{
+				Exec:            cfg.SSRWorker.Exec,
+				Entry:           cfg.SSRWorker.Entry,
+				ProtocolVersion: cfg.SSRWorker.ProtocolVersion,
+				RenderTimeout:   cfg.SSRWorker.RenderTimeout,
+				MaxPayloadBytes: cfg.SSRWorker.MaxPayloadBytes,
+				Logger:          logger,
+			},
+			Logger: logger,
+		})
+
+		workerPoolStartContext, cancelWorkerPoolStart := context.WithTimeout(context.Background(), cfg.SSRWorker.StartTimeout)
+		if err := ssrWorkerPool.Start(workerPoolStartContext); err != nil {
+			cancelWorkerPoolStart()
+			logger.Error("ssr worker pool start failed", logit.Error("error", err))
+			log.Fatalf("ssr worker pool start failed: %v", err)
+		}
+		cancelWorkerPoolStart()
+		ssrDispatcher = pool.NewDispatcher(ssrWorkerPool)
+
+		defer func() {
+			workerPoolStopContext, cancelWorkerPoolStop := context.WithTimeout(context.Background(), 3*time.Second)
+			if stopErr := ssrWorkerPool.Close(workerPoolStopContext); stopErr != nil {
+				logger.Error("ssr worker pool close failed", logit.Error("error", stopErr))
+			}
+			cancelWorkerPoolStop()
+		}()
+	}
+
 	database, err := storage.OpenDatabase(storage.OpenConfig{
 		Driver: cfg.Database.Driver,
 		DSN:    cfg.Database.DSN,
@@ -59,7 +109,7 @@ func main() {
 		logger.Info("database migrations applied")
 	}
 
-	router := server.NewRouter(cfg, logger, database.ORM)
+	router := server.NewRouterWithSSR(cfg, logger, database.ORM, ssrDispatcher)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           router,
@@ -74,11 +124,44 @@ func main() {
 		"env", cfg.Env,
 		"log_level", cfg.LogLevel.String(),
 		"log_output", cfg.LogOutput,
+		"ssr_worker_enabled", cfg.SSRWorker.Enabled,
+		"ssr_worker_count", cfg.SSRWorker.Count,
+		"ssr_render_timeout", cfg.SSRWorker.RenderTimeout.String(),
 	)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server exited unexpectedly", "error", err.Error())
 		log.Fatalf("server exited: %v", err)
 	}
+}
+
+func validateSSRWorkerRuntime(cfg config.Config) error {
+	if !cfg.SSRWorker.Enabled {
+		return nil
+	}
+
+	if _, err := exec.LookPath(cfg.SSRWorker.Exec); err != nil {
+		return fmt.Errorf("find SSR_WORKER_EXEC %q failed: %w", cfg.SSRWorker.Exec, err)
+	}
+
+	entry := strings.TrimSpace(cfg.SSRWorker.Entry)
+	if entry == "" {
+		return errors.New("SSR_WORKER_ENTRY is empty")
+	}
+
+	normalizedEntry := entry
+	if !filepath.IsAbs(normalizedEntry) {
+		normalizedEntry = filepath.Clean(normalizedEntry)
+	}
+
+	entryInfo, err := os.Stat(normalizedEntry)
+	if err != nil {
+		return fmt.Errorf("stat SSR_WORKER_ENTRY %q failed: %w", normalizedEntry, err)
+	}
+	if entryInfo.IsDir() {
+		return fmt.Errorf("SSR_WORKER_ENTRY %q must be a file, got directory", normalizedEntry)
+	}
+
+	return nil
 }
 
 func resolveLogWriter(cfg config.Config) (io.Writer, func() error, error) {
@@ -102,4 +185,98 @@ func resolveLogWriter(cfg config.Config) (io.Writer, func() error, error) {
 		// 中文注释：理论上不会触发（配置层已校验），此处仅保底防御。
 		return nil, nil, errors.New("unsupported log output")
 	}
+}
+
+func loadDotEnvCandidates() {
+	candidatePaths := []string{
+		".env",
+		"apps/server/.env",
+		"cmd/server/.env",
+		"apps/server/cmd/server/.env",
+	}
+
+	seenPaths := make(map[string]struct{}, len(candidatePaths))
+	for _, candidatePath := range candidatePaths {
+		normalizedPath := filepath.Clean(strings.TrimSpace(candidatePath))
+		if normalizedPath == "" {
+			continue
+		}
+		if _, exists := seenPaths[normalizedPath]; exists {
+			continue
+		}
+		seenPaths[normalizedPath] = struct{}{}
+
+		if err := loadDotEnvFile(normalizedPath); err != nil {
+			log.Printf("load dotenv file %s failed: %v", normalizedPath, err)
+		}
+	}
+}
+
+func loadDotEnvFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	scanner := bufio.NewScanner(file)
+	for lineNumber := 1; scanner.Scan(); lineNumber += 1 {
+		rawLine := strings.TrimSpace(scanner.Text())
+		if rawLine == "" || strings.HasPrefix(rawLine, "#") {
+			continue
+		}
+		if strings.HasPrefix(rawLine, "export ") {
+			rawLine = strings.TrimSpace(strings.TrimPrefix(rawLine, "export "))
+		}
+
+		separatorIndex := strings.Index(rawLine, "=")
+		if separatorIndex <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(rawLine[:separatorIndex])
+		value := strings.TrimSpace(rawLine[separatorIndex+1:])
+		if key == "" {
+			continue
+		}
+		if _, alreadySet := os.LookupEnv(key); alreadySet {
+			// 明确环境变量优先，避免覆盖外部注入配置。
+			continue
+		}
+
+		unquotedValue, unquoteErr := parseDotEnvValue(value)
+		if unquoteErr != nil {
+			log.Printf("dotenv parse warning (%s:%d): %v", path, lineNumber, unquoteErr)
+			continue
+		}
+		if setErr := os.Setenv(key, unquotedValue); setErr != nil {
+			log.Printf("dotenv setenv warning (%s:%d): %v", path, lineNumber, setErr)
+		}
+	}
+	return scanner.Err()
+}
+
+func parseDotEnvValue(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 2 {
+		return trimmed, nil
+	}
+
+	if (strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"")) ||
+		(strings.HasPrefix(trimmed, "'") && strings.HasSuffix(trimmed, "'")) {
+		if strings.HasPrefix(trimmed, "'") {
+			// 单引号按字面值处理，不做转义展开。
+			return trimmed[1 : len(trimmed)-1], nil
+		}
+		unquoted, err := strconv.Unquote(trimmed)
+		if err != nil {
+			return "", err
+		}
+		return unquoted, nil
+	}
+	return trimmed, nil
 }

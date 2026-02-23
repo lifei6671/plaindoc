@@ -11,6 +11,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/view"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+	ssrpool "github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
@@ -26,6 +27,25 @@ import (
 // 这样做的目的是把“请求处理入口”和“依赖关系拓扑”固定在一个文件，避免路由分散导致权限边界不清、
 // 审计链路遗漏或中间件顺序回归。
 func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine {
+	return newRouter(cfg, logger, db, nil)
+}
+
+// NewRouterWithSSR 构建并返回启用 SSR 分发器的 HTTP 路由入口。
+func NewRouterWithSSR(
+	cfg config.Config,
+	logger *slog.Logger,
+	db *gorm.DB,
+	readerSSRDispatcher *ssrpool.Dispatcher,
+) *gin.Engine {
+	return newRouter(cfg, logger, db, readerSSRDispatcher)
+}
+
+func newRouter(
+	cfg config.Config,
+	logger *slog.Logger,
+	db *gorm.DB,
+	readerSSRDispatcher *ssrpool.Dispatcher,
+) *gin.Engine {
 	// 生产环境切到 ReleaseMode，避免 debug 输出与额外开销。
 	// 非生产环境保持默认模式，方便本地联调与故障排查。
 	if cfg.Env == "production" {
@@ -68,8 +88,20 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 	authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
 	// 首页 SSR 服务：负责首页/分类页可见性过滤、分类导航和缓存策略配置读取。
 	homeService := service.NewHomeService(spaceRepo, spaceCategoryRepo, systemConfigRepo)
+	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
+	visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
+	// 阅读页服务：聚合空间树与文档正文，供 SSR worker 渲染。
+	readerPageService := service.NewReaderPageService(db, visibilityService)
 	// 首页 Handler：承接 SSR 渲染与登录态相关行为。
 	homeHandler := handler.NewHomeHandler(authService, homeService, cfg.WebOrigin)
+	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
+	readerPageHandler := handler.NewReaderPageHandler(
+		authService,
+		readerPageService,
+		readerSSRDispatcher,
+		logger,
+		cfg.WebOrigin,
+	)
 	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
@@ -81,6 +113,10 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 	router.GET("/", homeHandler.Home)
 	// 分类探索页：服务端渲染分类导航与分类空间列表。
 	router.GET("/explore/:categoryId", homeHandler.Explore)
+	// 空间阅读入口：自动跳转到首篇可读文档。
+	router.GET("/r/:spaceId", readerPageHandler.Space)
+	// 文档阅读页：优先走 SSR worker 渲染，失败时降级 HTML 壳页。
+	router.GET("/r/:spaceId/:docId", readerPageHandler.Page)
 	// 页面层登出入口：与 SSR 页面交互保持一致。
 	router.POST("/logout", homeHandler.Logout)
 	// 本地图片公开访问路径（不带 /api），便于前端 Markdown 直接渲染。
@@ -116,8 +152,6 @@ func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine 
 		api.GET("/uploads/local/*path", imageHostingHandler.ServeLocalImage)
 
 		// ---- 工作区与文档协作 API（业务主链）----
-		// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
-		visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 		accessHandler := handler.NewAccessHandler(authService, visibilityService)
 		workspaceHandler := handler.NewWorkspaceHandler(db, authService, visibilityService)
 

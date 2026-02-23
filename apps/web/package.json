@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "check:dropdown-menu": "node ./scripts/check-dropdown-menu-modal.mjs",
-    "build": "npm run check:dropdown-menu && tsc -b && vite build",
+    "build:client": "vite build",
+    "build:ssr-worker": "vite build --config vite.ssr.config.ts",
+    "build": "npm run check:dropdown-menu && tsc -b && npm run build:client && npm run build:ssr-worker",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -48,6 +50,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@types/markdown-it": "^14.1.2",
+    "@types/node": "^25.3.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/react-syntax-highlighter": "^15.5.13",
