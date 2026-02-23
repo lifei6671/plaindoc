@@ -272,7 +272,13 @@ export function useScrollSync({
         }
 
         syncingRef.current = true;
-        const shouldContinue = applySyncStep(sourceName);
+        let shouldContinue = false;
+        try {
+          shouldContinue = applySyncStep(sourceName);
+        } catch {
+          // 同步过程中发生异常时立即释放锁，避免后续滚动全部失效。
+          shouldContinue = false;
+        }
         window.requestAnimationFrame(() => {
           syncingRef.current = false;
           if (shouldContinue && lastScrollSourceRef.current === sourceName) {
@@ -303,7 +309,13 @@ export function useScrollSync({
       // 同步阶段写入锁并记录来源。
       syncingRef.current = true;
       lastScrollSourceRef.current = sourceName;
-      const shouldFollow = applySyncStep(sourceName);
+      let shouldFollow = false;
+      try {
+        shouldFollow = applySyncStep(sourceName);
+      } catch {
+        // 防止异常导致锁永远不释放。
+        shouldFollow = false;
+      }
       window.requestAnimationFrame(() => {
         syncingRef.current = false;
         if (shouldFollow) {
@@ -326,7 +338,13 @@ export function useScrollSync({
     }
     syncingRef.current = true;
     const sourceName = lastScrollSourceRef.current;
-    const shouldFollow = applySyncStep(sourceName);
+    let shouldFollow = false;
+    try {
+      shouldFollow = applySyncStep(sourceName);
+    } catch {
+      // 防止异常导致锁永远不释放。
+      shouldFollow = false;
+    }
     window.requestAnimationFrame(() => {
       syncingRef.current = false;
       if (shouldFollow) {
