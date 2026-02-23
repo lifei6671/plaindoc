@@ -1,10 +1,6 @@
 # PlainDoc
 
-![](./docs/screenshot-1771855761950.png)
 
-![](./docs/screenshot-1771855798856.png)
-
-![](./docs/screenshot-1771855823209.png)
 
 一套面向中小团队的轻量级文档管理系统。  
 如果你熟悉 MinDoc，PlainDoc 的目标很直接：保留文档系统的核心价值，同时带来更现代的编辑体验和更省心的工程化部署。
@@ -16,6 +12,12 @@
 - 首页/分类页 SSR
 - 空间阅读页 SSR（对 SEO 友好）
 - 后台管理（用户、空间、文档、主题、系统配置、审计）
+
+![](./docs/screenshot-1771855761950.png)
+
+![](./docs/screenshot-1771855798856.png)
+
+![](./docs/screenshot-1771855823209.png)
 
 ---
 
