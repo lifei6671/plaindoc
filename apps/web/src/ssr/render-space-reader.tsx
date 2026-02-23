@@ -755,22 +755,36 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             __html: escapeJSONForScript(JSON.stringify(payload))
           }}
         />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(() => {
+	        <script
+	          dangerouslySetInnerHTML={{
+	            __html: `(() => {
+  const queryActiveRow = () => document.querySelector(".reader-tree__row--active");
+
   try {
-    const activeRow = document.querySelector(".reader-tree__row--active");
     const allDetails = document.querySelectorAll(".reader-tree__details");
     for (const detailNode of allDetails) {
       if (detailNode instanceof HTMLDetailsElement) {
         detailNode.open = false;
       }
     }
+    const activeRow = queryActiveRow();
     if (!(activeRow instanceof HTMLElement)) {
       return;
     }
 
-    let parentElement = activeRow.parentElement;
+    // 仅展开“当前文档的祖先链路”。
+    const activeDetails = activeRow.closest(".reader-tree__details");
+    const activeSummaryElement = activeRow.closest(".reader-tree__summary");
+    const isActiveInsideOwnSummary =
+      activeDetails instanceof HTMLDetailsElement &&
+      activeSummaryElement instanceof HTMLElement &&
+      activeDetails.firstElementChild === activeSummaryElement;
+    let parentElement =
+      activeDetails instanceof HTMLDetailsElement
+        ? isActiveInsideOwnSummary
+          ? activeDetails.parentElement
+          : activeDetails
+        : activeRow.parentElement;
     while (parentElement) {
       if (parentElement instanceof HTMLDetailsElement) {
         parentElement.open = true;
@@ -833,13 +847,14 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                 if (!(nestedDetail instanceof HTMLDetailsElement)) {
                   continue;
                 }
-                if (nestedDetail === detailsElement) {
-                  continue;
-                }
-                if (nestedDetail.contains(activeRow)) {
-                  nestedDetail.open = true;
-                  continue;
-                }
+	              if (nestedDetail === detailsElement) {
+	                  continue;
+	                }
+	                const currentActiveRow = queryActiveRow();
+	                if (currentActiveRow instanceof HTMLElement && nestedDetail.contains(currentActiveRow)) {
+	                  nestedDetail.open = true;
+	                  continue;
+	                }
                 nestedDetail.open = false;
               }
             });
