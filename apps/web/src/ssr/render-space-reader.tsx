@@ -91,10 +91,11 @@ a {
   text-decoration: none;
   font-size: 14px;
 }
-.reader-tree__row:not(.reader-tree__row--active):hover {
+.reader-tree__row:not([data-reader-active="1"]):hover {
   background: #e8e8ea;
 }
-.reader-tree__row--active {
+.reader-tree__row--active,
+.reader-tree__row[data-reader-active="1"] {
   background: #d9dade;
 }
 .reader-tree__arrow {
@@ -180,7 +181,8 @@ a {
 .reader-tree__label--folder {
   font-weight: 600;
 }
-.reader-tree__label--active {
+.reader-tree__label--active,
+.reader-tree__label[data-reader-label-active="1"] {
   font-weight: 600;
   color: #1d4ed8;
 }
@@ -275,6 +277,29 @@ a {
   padding: 26px;
   overflow-y: auto;
   overflow-x: hidden;
+}
+.reader-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9800;
+  height: 2px;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.reader-progress__bar {
+  display: block;
+  width: var(--reader-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #0ea5e9);
+  opacity: 0;
+  transition: width 0.18s ease, opacity 0.18s ease;
+}
+.reader-progress--visible .reader-progress__bar {
+  opacity: 0.95;
 }
 .reader-article-shell {
   max-width: 900px;
@@ -578,9 +603,17 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
         const labelClassName = `reader-tree__label${isFolderNode ? " reader-tree__label--folder" : ""}${isActive ? " reader-tree__label--active" : ""}`;
         const visibilityMarker = isDocumentNode ? renderVisibilityMarker(node.visibility) : null;
         const staticLabel = (
-          <span className={labelClassName}>
+          <span
+            className={labelClassName}
+            data-reader-hook="tree-label"
+            data-reader-label-active={isActive ? "1" : undefined}
+          >
             {visibilityMarker}
-            <span className="reader-tooltip reader-tree__title-tooltip" data-tooltip={title}>
+            <span
+              className="reader-tooltip reader-tree__title-tooltip"
+              data-reader-hook="tree-title-tooltip"
+              data-tooltip={title}
+            >
               <span className="reader-tree__label-text">{title}</span>
             </span>
           </span>
@@ -588,30 +621,42 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
         const linkLabel = (
           <a
             className={`${labelClassName} reader-tree__label-link`}
+            data-reader-hook="tree-label"
+            data-reader-label-active={isActive ? "1" : undefined}
             data-reader-doc-link={isDocumentNode ? "1" : undefined}
+            data-reader-doc-id={isDocumentNode ? resolvedDocumentID : undefined}
             href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentID)}`}
           >
             {visibilityMarker}
-            <span className="reader-tooltip reader-tree__title-tooltip" data-tooltip={title}>
+            <span
+              className="reader-tooltip reader-tree__title-tooltip"
+              data-reader-hook="tree-title-tooltip"
+              data-tooltip={title}
+            >
               <span className="reader-tree__label-text">{title}</span>
             </span>
           </a>
         );
         const rowContent = (
           <>
-            <span className={arrowClassName} aria-hidden="true">
+            <span className={arrowClassName} data-reader-hook={isExpandable ? "tree-arrow" : undefined} aria-hidden="true">
               {isExpandable ? <ChevronDown size={15} /> : null}
             </span>
-            {isExpandable && !isFolderNode && !isActive ? linkLabel : staticLabel}
+            {isDocumentNode ? (isExpandable ? linkLabel : staticLabel) : staticLabel}
           </>
         );
 
         if (isExpandable) {
           return (
             <li key={node.id} className="reader-tree__item">
-              <details className="reader-tree__details">
-                <summary className="reader-tree__summary">
-                  <div className={rowClassName} style={rowStyle}>
+              <details className="reader-tree__details" data-reader-hook="tree-details">
+                <summary className="reader-tree__summary" data-reader-hook="tree-summary">
+                  <div
+                    className={rowClassName}
+                    data-reader-hook="tree-row"
+                    data-reader-active={isActive ? "1" : undefined}
+                    style={rowStyle}
+                  >
                     {rowContent}
                   </div>
                 </summary>
@@ -625,18 +670,22 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
 
         return (
           <li key={node.id} className="reader-tree__item">
-            {isActive ? (
-              <div className={rowClassName} style={rowStyle}>
-                {rowContent}
-              </div>
-            ) : (
+            {isDocumentNode ? (
               <a
                 className={rowClassName}
+                data-reader-hook="tree-row"
+                data-reader-active={isActive ? "1" : undefined}
+                data-reader-doc-link="1"
+                data-reader-doc-id={resolvedDocumentID}
                 style={rowStyle}
                 href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentID)}`}
               >
                 {rowContent}
               </a>
+            ) : (
+              <div className={rowClassName} style={rowStyle}>
+                {rowContent}
+              </div>
             )}
           </li>
         );
@@ -684,12 +733,22 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
         <style>{appStyleText}</style>
         <style>{READER_BASE_STYLE}</style>
         <style>{katexStyleText}</style>
-        {previewThemeStyleText ? <style>{previewThemeStyleText}</style> : null}
-        {previewThemeCustomStyleText ? <style>{previewThemeCustomStyleText}</style> : null}
+        {previewThemeStyleText ? <style id="plaindoc-reader-theme-style">{previewThemeStyleText}</style> : null}
+        {previewThemeCustomStyleText ? (
+          <style id="plaindoc-reader-theme-custom-style">{previewThemeCustomStyleText}</style>
+        ) : null}
       </head>
       <body>
+        <div
+          id="plaindoc-reader-progress"
+          className="reader-progress"
+          data-reader-hook="progress"
+          aria-hidden="true"
+        >
+          <span className="reader-progress__bar" />
+        </div>
         <div className="reader-layout">
-          <aside className="reader-sidebar">
+          <aside className="reader-sidebar" data-reader-hook="sidebar">
             <h2 className="reader-sidebar__title">{spaceTitle}</h2>
             <ReaderTree
               nodes={payload.tree}
@@ -697,8 +756,12 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
               activeDocId={payload.activeDocId || payload.document.id}
             />
           </aside>
-          <main className="reader-main">
-            <div className="reader-article-shell">
+          <main className="reader-main" data-reader-hook="main">
+            <div
+              id="plaindoc-reader-article-shell"
+              className="reader-article-shell"
+              data-reader-hook="article-shell"
+            >
               {!hasDeniedAccess ? (
                 <header className="reader-article-header">
                   <h1 className="reader-article-title">{articleTitle}</h1>
@@ -755,13 +818,52 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             __html: escapeJSONForScript(JSON.stringify(payload))
           }}
         />
-	        <script
-	          dangerouslySetInnerHTML={{
-	            __html: `(() => {
-  const queryActiveRow = () => document.querySelector(".reader-tree__row--active");
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => {
+  const DOC_LINK_SELECTOR = "a[data-reader-doc-link='1']";
+  const TREE_DETAILS_SELECTOR = "[data-reader-hook='tree-details']";
+  const TREE_SUMMARY_SELECTOR = "[data-reader-hook='tree-summary']";
+  const TREE_ARROW_SELECTOR = "[data-reader-hook='tree-arrow']";
+  const TREE_ROW_SELECTOR = "[data-reader-hook='tree-row']";
+  const TREE_LABEL_SELECTOR = "[data-reader-hook='tree-label']";
+  const TREE_ROW_ACTIVE_SELECTOR = "[data-reader-hook='tree-row'][data-reader-active='1']";
+  const TREE_LABEL_ACTIVE_SELECTOR = "[data-reader-hook='tree-label'][data-reader-label-active='1']";
+  const ARTICLE_SHELL_SELECTOR = "[data-reader-hook='article-shell']";
+  const MAIN_SELECTOR = "[data-reader-hook='main']";
+  const TREE_TITLE_TOOLTIP_SELECTOR = "[data-reader-hook='tree-title-tooltip'][data-tooltip]";
+  const TREE_ROW_ACTIVE_CLASS = "reader-tree__row--active";
+  const TREE_LABEL_ACTIVE_CLASS = "reader-tree__label--active";
+  const STATE_SCRIPT_SELECTOR = "#plaindoc-reader-state";
+  const PROGRESS_SELECTOR = "[data-reader-hook='progress']";
+  const PROGRESS_VISIBLE_CLASS = "reader-progress--visible";
+  const THEME_STYLE_ID = "plaindoc-reader-theme-style";
+  const THEME_CUSTOM_STYLE_ID = "plaindoc-reader-theme-custom-style";
+  const queryActiveRow = () => document.querySelector(TREE_ROW_ACTIVE_SELECTOR);
 
-  try {
-    const allDetails = document.querySelectorAll(".reader-tree__details");
+  const normalizePathname = (pathname) => pathname.replace(/\\/+$/, "") || "/";
+  const isModifiedClick = (event) =>
+    !(event instanceof MouseEvent) ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey;
+
+  const toSameOriginURL = (rawHref) => {
+    try {
+      const parsedURL = new URL(rawHref, window.location.href);
+      if (parsedURL.origin !== window.location.origin) {
+        return null;
+      }
+      return parsedURL;
+    } catch {
+      return null;
+    }
+  };
+
+  const expandAncestorsForActiveRow = () => {
+    const allDetails = document.querySelectorAll(TREE_DETAILS_SELECTOR);
     for (const detailNode of allDetails) {
       if (detailNode instanceof HTMLDetailsElement) {
         detailNode.open = false;
@@ -772,9 +874,8 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
       return;
     }
 
-    // 仅展开“当前文档的祖先链路”。
-    const activeDetails = activeRow.closest(".reader-tree__details");
-    const activeSummaryElement = activeRow.closest(".reader-tree__summary");
+    const activeDetails = activeRow.closest(TREE_DETAILS_SELECTOR);
+    const activeSummaryElement = activeRow.closest(TREE_SUMMARY_SELECTOR);
     const isActiveInsideOwnSummary =
       activeDetails instanceof HTMLDetailsElement &&
       activeSummaryElement instanceof HTMLElement &&
@@ -791,13 +892,265 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
       }
       parentElement = parentElement.parentElement;
     }
+    activeRow.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
 
-    activeRow.scrollIntoView({
-      block: "nearest",
-      inline: "nearest"
-    });
+  const progressRoot = document.querySelector(PROGRESS_SELECTOR);
+  let progressTimer = 0;
+  let progressValue = 0;
+  const setProgress = (value) => {
+    if (!(progressRoot instanceof HTMLElement)) {
+      return;
+    }
+    progressValue = Math.max(0, Math.min(100, value));
+    progressRoot.style.setProperty("--reader-progress", progressValue.toFixed(2) + "%");
+  };
+  const startProgress = () => {
+    if (!(progressRoot instanceof HTMLElement)) {
+      return;
+    }
+    if (progressTimer) {
+      window.clearInterval(progressTimer);
+      progressTimer = 0;
+    }
+    progressRoot.classList.add(PROGRESS_VISIBLE_CLASS);
+    setProgress(8);
+    progressTimer = window.setInterval(() => {
+      if (progressValue >= 90) {
+        return;
+      }
+      const increment = Math.max(1.2, (90 - progressValue) * 0.16);
+      setProgress(progressValue + increment);
+    }, 120);
+  };
+  const finishProgress = () => {
+    if (!(progressRoot instanceof HTMLElement)) {
+      return;
+    }
+    if (progressTimer) {
+      window.clearInterval(progressTimer);
+      progressTimer = 0;
+    }
+    setProgress(100);
+    window.setTimeout(() => {
+      progressRoot.classList.remove(PROGRESS_VISIBLE_CLASS);
+      setProgress(0);
+    }, 220);
+  };
+
+  const syncHeadStyleByID = (styleID, nextDocument) => {
+    const nextStyleNode = nextDocument.getElementById(styleID);
+    const nextStyleText = nextStyleNode ? nextStyleNode.textContent || "" : "";
+    const currentStyleNode = document.getElementById(styleID);
+    if (!nextStyleText.trim()) {
+      if (currentStyleNode && currentStyleNode.parentNode) {
+        currentStyleNode.parentNode.removeChild(currentStyleNode);
+      }
+      return;
+    }
+    if (currentStyleNode instanceof HTMLStyleElement) {
+      currentStyleNode.textContent = nextStyleText;
+      return;
+    }
+    const createdStyleNode = document.createElement("style");
+    createdStyleNode.id = styleID;
+    createdStyleNode.textContent = nextStyleText;
+    document.head.appendChild(createdStyleNode);
+  };
+
+  const syncReaderStateScript = (nextDocument) => {
+    const nextStateNode = nextDocument.querySelector(STATE_SCRIPT_SELECTOR);
+    const currentStateNode = document.querySelector(STATE_SCRIPT_SELECTOR);
+    if (!(nextStateNode instanceof HTMLScriptElement) || !(currentStateNode instanceof HTMLScriptElement)) {
+      return;
+    }
+    currentStateNode.textContent = nextStateNode.textContent || "{}";
+  };
+
+  const syncDocumentHead = (nextDocument, targetURL) => {
+    if (typeof nextDocument.title === "string" && nextDocument.title.trim()) {
+      document.title = nextDocument.title.trim();
+    }
+    const nextCanonicalNode = nextDocument.querySelector("link[rel='canonical']");
+    let currentCanonicalNode = document.querySelector("link[rel='canonical']");
+    if (!(currentCanonicalNode instanceof HTMLLinkElement)) {
+      currentCanonicalNode = document.createElement("link");
+      currentCanonicalNode.setAttribute("rel", "canonical");
+      document.head.appendChild(currentCanonicalNode);
+    }
+    if (nextCanonicalNode instanceof HTMLLinkElement && nextCanonicalNode.href) {
+      currentCanonicalNode.href = nextCanonicalNode.href;
+    } else {
+      currentCanonicalNode.href = targetURL.toString();
+    }
+  };
+
+  const replaceArticleShell = (nextDocument) => {
+    const currentArticleShell = document.querySelector(ARTICLE_SHELL_SELECTOR);
+    const nextArticleShell =
+      nextDocument.querySelector(ARTICLE_SHELL_SELECTOR) || nextDocument.querySelector(".reader-article-shell");
+    if (!(currentArticleShell instanceof HTMLElement) || !(nextArticleShell instanceof HTMLElement)) {
+      return false;
+    }
+    const importedArticleShell = document.importNode(nextArticleShell, true);
+    if (importedArticleShell instanceof HTMLElement) {
+      importedArticleShell.id = "plaindoc-reader-article-shell";
+    }
+    currentArticleShell.replaceWith(importedArticleShell);
+    return true;
+  };
+
+  const markActiveTreeItemByPathname = (pathname) => {
+    const normalizedPathname = normalizePathname(pathname);
+    for (const rowNode of document.querySelectorAll(TREE_ROW_SELECTOR)) {
+      if (!(rowNode instanceof HTMLElement)) {
+        continue;
+      }
+      rowNode.removeAttribute("data-reader-active");
+      rowNode.classList.remove(TREE_ROW_ACTIVE_CLASS);
+    }
+    for (const labelNode of document.querySelectorAll(TREE_LABEL_SELECTOR)) {
+      if (!(labelNode instanceof HTMLElement)) {
+        continue;
+      }
+      labelNode.removeAttribute("data-reader-label-active");
+      labelNode.classList.remove(TREE_LABEL_ACTIVE_CLASS);
+    }
+
+    let matchedLink = null;
+    for (const linkNode of document.querySelectorAll(DOC_LINK_SELECTOR)) {
+      if (!(linkNode instanceof HTMLAnchorElement)) {
+        continue;
+      }
+      const linkURL = toSameOriginURL(linkNode.href);
+      if (!linkURL) {
+        continue;
+      }
+      if (normalizePathname(linkURL.pathname) === normalizedPathname) {
+        matchedLink = linkNode;
+        break;
+      }
+    }
+    if (!(matchedLink instanceof HTMLAnchorElement)) {
+      return;
+    }
+
+    const rowElement = matchedLink.closest(TREE_ROW_SELECTOR);
+    if (rowElement instanceof HTMLElement) {
+      rowElement.setAttribute("data-reader-active", "1");
+      rowElement.classList.add(TREE_ROW_ACTIVE_CLASS);
+      rowElement.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    const labelElement =
+      matchedLink.matches(TREE_LABEL_SELECTOR)
+        ? matchedLink
+        : matchedLink.querySelector(TREE_LABEL_SELECTOR);
+    if (labelElement instanceof HTMLElement) {
+      labelElement.setAttribute("data-reader-label-active", "1");
+      labelElement.classList.add(TREE_LABEL_ACTIVE_CLASS);
+    }
+
+    const activeDetails = rowElement instanceof HTMLElement ? rowElement.closest(TREE_DETAILS_SELECTOR) : null;
+    const activeSummaryElement = rowElement instanceof HTMLElement ? rowElement.closest(TREE_SUMMARY_SELECTOR) : null;
+    const isActiveInsideOwnSummary =
+      activeDetails instanceof HTMLDetailsElement &&
+      activeSummaryElement instanceof HTMLElement &&
+      activeDetails.firstElementChild === activeSummaryElement;
+    let parentNode =
+      activeDetails instanceof HTMLDetailsElement
+        ? isActiveInsideOwnSummary
+          ? activeDetails.parentElement
+          : activeDetails
+        : matchedLink.parentElement;
+    while (parentNode) {
+      if (parentNode instanceof HTMLDetailsElement) {
+        parentNode.open = true;
+      }
+      parentNode = parentNode.parentElement;
+    }
+  };
+
+  let inflightController = null;
+  let inflightSeq = 0;
+  const loadReaderPage = async (targetURL, pushHistory) => {
+    if (!(targetURL instanceof URL)) {
+      return;
+    }
+    const targetPathname = normalizePathname(targetURL.pathname);
+    if (pushHistory && targetPathname === normalizePathname(window.location.pathname)) {
+      return;
+    }
+
+    inflightSeq += 1;
+    const currentSeq = inflightSeq;
+    if (inflightController instanceof AbortController) {
+      inflightController.abort();
+    }
+    inflightController = new AbortController();
+    startProgress();
+
+    try {
+      const response = await fetch(targetURL.toString(), {
+        method: "GET",
+        credentials: "include",
+        signal: inflightController.signal,
+        headers: {
+          Accept: "text/html",
+          "X-Requested-With": "plaindoc-reader-async"
+        }
+      });
+      if (currentSeq !== inflightSeq) {
+        return;
+      }
+      if (!response.ok) {
+        window.location.assign(targetURL.toString());
+        return;
+      }
+      const htmlText = await response.text();
+      if (currentSeq !== inflightSeq) {
+        return;
+      }
+      const parsedDocument = new DOMParser().parseFromString(htmlText, "text/html");
+      if (!replaceArticleShell(parsedDocument)) {
+        window.location.assign(targetURL.toString());
+        return;
+      }
+
+      syncDocumentHead(parsedDocument, targetURL);
+      syncHeadStyleByID(THEME_STYLE_ID, parsedDocument);
+      syncHeadStyleByID(THEME_CUSTOM_STYLE_ID, parsedDocument);
+      syncReaderStateScript(parsedDocument);
+      markActiveTreeItemByPathname(targetPathname);
+
+      const readerMain = document.querySelector(MAIN_SELECTOR);
+      if (readerMain instanceof HTMLElement) {
+        readerMain.scrollTop = 0;
+      }
+      if (pushHistory) {
+        window.history.pushState({ reader: true }, "", targetURL.toString());
+      }
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "name" in error &&
+        (error).name === "AbortError"
+      ) {
+        return;
+      }
+      window.location.assign(targetURL.toString());
+    } finally {
+      if (currentSeq === inflightSeq) {
+        finishProgress();
+      }
+    }
+  };
+
+  try {
+    expandAncestorsForActiveRow();
+    markActiveTreeItemByPathname(window.location.pathname);
   } catch {
-    // no-op: SSR fallback enhancement should never block rendering.
+    // no-op: initialization enhancement should never block rendering.
   }
 
   try {
@@ -807,54 +1160,43 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
         if (!(event.target instanceof Element)) {
           return;
         }
-        const summaryElement = event.target.closest(".reader-tree__summary");
-        if (!(summaryElement instanceof HTMLElement)) {
-          return;
-        }
 
-        const docLink = event.target.closest("a[data-reader-doc-link='1']");
+        const docLink = event.target.closest(DOC_LINK_SELECTOR);
         if (docLink instanceof HTMLAnchorElement) {
-          if (
-            event instanceof MouseEvent &&
-            (event.defaultPrevented ||
-              event.button !== 0 ||
-              event.metaKey ||
-              event.ctrlKey ||
-              event.shiftKey ||
-              event.altKey)
-          ) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          const targetURL = toSameOriginURL(docLink.getAttribute("href") || docLink.href);
+          if (!targetURL) {
             return;
           }
           event.preventDefault();
           event.stopPropagation();
-          const targetHref = docLink.getAttribute("href");
-          if (!targetHref) {
-            return;
-          }
-          window.location.assign(targetHref);
+          void loadReaderPage(targetURL, true);
           return;
         }
 
-        if (event.target.closest(".reader-tree__arrow--expandable")) {
+        const summaryElement = event.target.closest(TREE_SUMMARY_SELECTOR);
+        if (!(summaryElement instanceof HTMLElement)) {
+          return;
+        }
+        if (event.target.closest(TREE_ARROW_SELECTOR)) {
           const detailsElement = summaryElement.parentElement;
           if (detailsElement instanceof HTMLDetailsElement) {
             window.requestAnimationFrame(() => {
               if (!detailsElement.open) {
                 return;
               }
-              const nestedDetails = detailsElement.querySelectorAll(".reader-tree__details");
+              const nestedDetails = detailsElement.querySelectorAll(TREE_DETAILS_SELECTOR);
+              const activeRow = queryActiveRow();
               for (const nestedDetail of nestedDetails) {
-                if (!(nestedDetail instanceof HTMLDetailsElement)) {
+                if (!(nestedDetail instanceof HTMLDetailsElement) || nestedDetail === detailsElement) {
                   continue;
                 }
-	              if (nestedDetail === detailsElement) {
-	                  continue;
-	                }
-	                const currentActiveRow = queryActiveRow();
-	                if (currentActiveRow instanceof HTMLElement && nestedDetail.contains(currentActiveRow)) {
-	                  nestedDetail.open = true;
-	                  continue;
-	                }
+                if (activeRow instanceof HTMLElement && nestedDetail.contains(activeRow)) {
+                  nestedDetail.open = true;
+                  continue;
+                }
                 nestedDetail.open = false;
               }
             });
@@ -872,7 +1214,19 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   }
 
   try {
-    const tooltipTargetSelector = ".reader-tree__title-tooltip[data-tooltip]";
+    window.addEventListener("popstate", () => {
+      const targetURL = toSameOriginURL(window.location.href);
+      if (!targetURL) {
+        return;
+      }
+      void loadReaderPage(targetURL, false);
+    });
+  } catch {
+    // no-op: history enhancement should never block rendering.
+  }
+
+  try {
+    const tooltipTargetSelector = TREE_TITLE_TOOLTIP_SELECTOR;
     const tooltipClassName = "reader-floating-tooltip";
     const tooltipVisibleClassName = "reader-floating-tooltip--visible";
     const viewportPadding = 10;
