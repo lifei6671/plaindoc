@@ -345,14 +345,6 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   }, [nodeById]);
   const expandableNodeIds = useMemo(() => collectExpandableNodeIds(mergedNodes), [mergedNodes]);
   const expandableNodeIdSet = useMemo(() => new Set(expandableNodeIds), [expandableNodeIds]);
-  const autoExpandedNodeIds = useMemo(() => {
-    if (!activeTreeItemId) {
-      return [];
-    }
-    return collectAncestorNodeIds(activeTreeItemId, parentNodeIdByNodeID).filter((nodeID) =>
-      expandableNodeIdSet.has(nodeID)
-    );
-  }, [activeTreeItemId, expandableNodeIdSet, parentNodeIdByNodeID]);
   const draftNodeByID = useMemo(() => {
     const mappedDraftNodes = new Map<string, PendingCreateDraftNode>();
     for (const draftNode of draftNodes) {
@@ -360,6 +352,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     }
     return mappedDraftNodes;
   }, [draftNodes]);
+  const hasInitialAutoExpandedRef = useRef(false);
   const lastAutoScrolledActiveTreeItemIDRef = useRef<string | null>(null);
   const actionMenuRootRef = useRef<HTMLDivElement | null>(null);
   const inlineEditInputRef = useRef<HTMLInputElement | null>(null);
@@ -367,19 +360,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const isCommittingInlineEditRef = useRef(false);
   // 默认全折叠：首次进入目录树时不自动展开任何节点。
   const [manuallyExpandedNodeIds, setManuallyExpandedNodeIds] = useState<string[]>([]);
-  const expandedNodeIds = useMemo(() => {
-    if (autoExpandedNodeIds.length === 0) {
-      return manuallyExpandedNodeIds;
-    }
-    const mergedExpandedNodeIDs = new Set(autoExpandedNodeIds);
-    for (const nodeID of manuallyExpandedNodeIds) {
-      if (!expandableNodeIdSet.has(nodeID)) {
-        continue;
-      }
-      mergedExpandedNodeIDs.add(nodeID);
-    }
-    return Array.from(mergedExpandedNodeIDs);
-  }, [autoExpandedNodeIds, expandableNodeIdSet, manuallyExpandedNodeIds]);
+  const expandedNodeIds = manuallyExpandedNodeIds;
   const [openActionNodeId, setOpenActionNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
@@ -395,6 +376,22 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       return previousExpandedNodeIds.filter((nodeId) => currentExpandableNodeIdSet.has(nodeId));
     });
   }, [expandableNodeIds]);
+
+  // 仅在页面首次进入且已拿到激活文档时自动展开一次祖先链路。
+  // 后续异步切换文档不再改动折叠状态，避免覆盖用户手动展开/收起操作。
+  useEffect(() => {
+    if (hasInitialAutoExpandedRef.current) {
+      return;
+    }
+    if (!activeTreeItemId) {
+      return;
+    }
+    const ancestorNodeIds = collectAncestorNodeIds(activeTreeItemId, parentNodeIdByNodeID).filter((nodeID) =>
+      expandableNodeIdSet.has(nodeID)
+    );
+    setManuallyExpandedNodeIds(ancestorNodeIds);
+    hasInitialAutoExpandedRef.current = true;
+  }, [activeTreeItemId, expandableNodeIdSet, parentNodeIdByNodeID]);
 
   // 自动滚动到当前激活文档，避免刷新后需要手动在树里二次定位。
   useEffect(() => {
