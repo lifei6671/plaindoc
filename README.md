@@ -52,9 +52,7 @@ PlainDoc 是一个真正可落地的文档平台，而不是“仅能写 Markdow
 - 双 SSR 架构：
   - 首页/分类页：Go 模板 SSR
   - 阅读页：React SSR（由 Go 调度 Worker）
-- 开发和生产都顺手：前端可双模式运行
-  - `local`：纯本地 IndexedDB（离线开发快）
-  - `http`：后端 API 模式（联调与生产一致）
+- 开发和生产都顺手：前端统一走后端 API 模式（`http`），联调与生产一致
 - 工程化可维护：统一响应协议、错误码体系、Docker + Compose 开箱部署
 
 ---
@@ -189,19 +187,7 @@ npm run web:dev
 
 默认前端地址：`http://localhost:3001`
 
-> 提示：如果前端使用 `VITE_DATA_DRIVER=http`，开发时建议通过 Vite 反向代理访问后端，不要直接在浏览器跨端口访问 `/api`。
-
----
-
-### 4.3 本地仅前端（离线 local 模式）
-
-```bash
-cp apps/web/.env.example apps/web/.env.local
-# 确保 VITE_DATA_DRIVER=local
-npm run web:dev
-```
-
-该模式不依赖后端，数据存储在浏览器 IndexedDB。
+> 提示：开发时建议通过 Vite 反向代理访问后端，不要直接在浏览器跨端口访问 `/api`。
 
 ---
 
@@ -455,7 +441,6 @@ docker compose up -d
 
 核心项：
 
-- `VITE_DATA_DRIVER=local|http`
 - `VITE_API_BASE_URL`
 - `VITE_DEV_PROXY_TARGET`
 

@@ -135,12 +135,7 @@ const LOGIN_ROUTE_PATH = "/login";
 const REGISTER_ROUTE_PATH = "/register";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
 const ADMIN_SPACES_ROUTE_PATH = `${ADMIN_ROUTE_BASE_PATH}/spaces`;
-const LOCAL_AUTO_SAVE_DEBOUNCE_MS = 800;
-const HTTP_AUTO_SAVE_DEBOUNCE_MS = 800;
-const AUTO_SAVE_DEBOUNCE_MS =
-  import.meta.env.VITE_DATA_DRIVER === "http"
-    ? HTTP_AUTO_SAVE_DEBOUNCE_MS
-    : LOCAL_AUTO_SAVE_DEBOUNCE_MS;
+const AUTO_SAVE_DEBOUNCE_MS = 800;
 
 export type AppRoute =
   | { kind: "login" }
