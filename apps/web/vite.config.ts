@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
     define: {
       PACKAGE_VERSION: JSON.stringify("3.2.1")
     },
+    build: {
+      // 与首页 SSR 模板静态资源路由 /assets 隔离，避免构建产物冲突。
+      assetsDir: "web-assets"
+    },
     server: {
       port: 3001,
       host: "0.0.0.0",

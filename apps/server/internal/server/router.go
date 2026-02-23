@@ -121,6 +121,8 @@ func newRouter(
 	router.POST("/logout", homeHandler.Logout)
 	// 本地图片公开访问路径（不带 /api），便于前端 Markdown 直接渲染。
 	router.GET("/uploads/*path", imageHostingHandler.ServeLocalImage)
+	// Web SPA（登录/编辑/后台）生产托管路由：仅在 dist 产物存在时启用。
+	registerWebSPARoutes(router, cfg, logger)
 
 	// ---- 业务 API 根组 ----
 	api := router.Group("/api")

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.idea
+.vscode
+node_modules
+apps/web/node_modules
+apps/web/dist
+apps/web/dist-ssr
+apps/server/.env
+apps/server/cmd/server/.env
+apps/server/plaindoc.db
+apps/server/plaindoc.db-shm
+apps/server/plaindoc.db-wal
+**/*.tsbuildinfo

@@ -15,6 +15,7 @@ type Config struct {
 	Env            string
 	Addr           string
 	WebOrigin      string
+	WebDistDir     string
 	LogLevel       slog.Level
 	LogOutput      string
 	LogFilePath    string
@@ -56,9 +57,10 @@ type SSRWorkerConfig struct {
 // Load 解析并校验环境变量；配置非法时返回明确错误，避免服务带病启动。
 func Load() (Config, error) {
 	cfg := Config{
-		Env:       getenv("APP_ENV", "development"),
-		Addr:      getenv("APP_ADDR", ":8080"),
-		WebOrigin: getenv("WEB_ORIGIN", "http://localhost:3001"),
+		Env:        getenv("APP_ENV", "development"),
+		Addr:       getenv("APP_ADDR", ":8080"),
+		WebOrigin:  getenv("WEB_ORIGIN", "http://localhost:3001"),
+		WebDistDir: getenv("WEB_DIST_DIR", "apps/web/dist"),
 		Database: DatabaseConfig{
 			Driver: getenv("DB_DRIVER", "sqlite"),
 			DSN:    getenv("DB_DSN", "file:plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"),
@@ -171,6 +173,9 @@ func (c Config) Validate() error {
 	}
 	if c.WebOrigin == "" {
 		return errors.New("WEB_ORIGIN must not be empty")
+	}
+	if c.WebDistDir == "" {
+		return errors.New("WEB_DIST_DIR must not be empty")
 	}
 	if c.Database.DSN == "" {
 		return errors.New("DB_DSN must not be empty")

@@ -124,6 +124,7 @@ func main() {
 		"env", cfg.Env,
 		"log_level", cfg.LogLevel.String(),
 		"log_output", cfg.LogOutput,
+		"web_dist_dir", cfg.WebDistDir,
 		"ssr_worker_enabled", cfg.SSRWorker.Enabled,
 		"ssr_worker_count", cfg.SSRWorker.Count,
 		"ssr_render_timeout", cfg.SSRWorker.RenderTimeout.String(),
