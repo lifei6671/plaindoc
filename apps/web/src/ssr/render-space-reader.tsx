@@ -13,6 +13,8 @@ import {
 import { buildReaderMarkdownRenderer } from "./markdown-shared";
 import type { ReaderPagePayload, ReaderTreeNode } from "./ssr-types";
 
+const SEO_TITLE_SUFFIX = "PlainDoc - 一个适合中小团队文档在线管理系统";
+
 const READER_BASE_STYLE = `
 :root {
   color-scheme: light;
@@ -698,6 +700,14 @@ function escapeJSONForScript(rawJSON: string): string {
   return rawJSON.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
 
+function composeSEOTitle(title: string): string {
+  const normalizedTitle = title.trim();
+  if (!normalizedTitle) {
+    return SEO_TITLE_SUFFIX;
+  }
+  return `${normalizedTitle} - ${SEO_TITLE_SUFFIX}`;
+}
+
 // renderSpaceReader 将阅读页 payload 渲染为完整 HTML 文档字符串。
 export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRenderResult {
   const startedAt = Date.now();
@@ -716,6 +726,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
 
   const articleTitle = payload.document.title.trim() || "未命名文档";
   const spaceTitle = payload.space.name.trim() || "未命名空间";
+  const seoTitle = composeSEOTitle(payload.space.title || articleTitle);
   const hasDeniedAccess = Boolean(payload.access?.code?.trim());
   const updatedMeta = hasDeniedAccess ? "" : formatUpdatedMeta(payload.document.updatedAt, renderedAt);
   const documentMeta = `空间：${spaceTitle} · 版本：v${payload.document.version} · ${updatedMeta}`;
@@ -728,7 +739,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{payload.space.title || articleTitle}</title>
+        <title>{seoTitle}</title>
         <link rel="canonical" href={canonicalPath} />
         <style>{appStyleText}</style>
         <style>{READER_BASE_STYLE}</style>
@@ -1357,7 +1368,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   return {
     html,
     head: {
-      title: payload.space.title || articleTitle,
+      title: seoTitle,
       canonical: canonicalPath
     },
     metrics: {

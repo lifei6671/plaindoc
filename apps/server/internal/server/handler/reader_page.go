@@ -489,7 +489,7 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
 	}
 	stateJSON := escapeJSONForHTMLScript(string(stateJSONBytes))
 
-	escapedPageTitle := template.HTMLEscapeString(pageTitle)
+	escapedPageTitle := template.HTMLEscapeString(composeSEOTitle(pageTitle))
 	escapedDocumentTitle := template.HTMLEscapeString(documentTitle)
 	escapedSpaceName := template.HTMLEscapeString(spaceName)
 	escapedDocument := template.HTMLEscapeString(payload.Document.ContentMD)
@@ -566,7 +566,8 @@ func buildReaderErrorHTML(statusCode int, title string, description string) stri
 		pageDescription = "阅读页面暂时不可用，请稍后重试。"
 	}
 
-	escapedPageTitle := template.HTMLEscapeString(pageTitle)
+	escapedPageTitle := template.HTMLEscapeString(composeSEOTitle(pageTitle))
+	escapedErrorTitle := template.HTMLEscapeString(pageTitle)
 	escapedDescription := template.HTMLEscapeString(pageDescription)
 	escapedStatusCode := template.HTMLEscapeString(fmt.Sprintf("%d", statusCode))
 
@@ -575,7 +576,7 @@ func buildReaderErrorHTML(statusCode int, title string, description string) stri
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>%s - PlainDoc 阅读页</title>
+    <title>%s</title>
     <style>
       body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: linear-gradient(180deg, #f8fafc 0%%, #eef2ff 100%%); }
       .error-shell { width: 100%%; max-width: 560px; background: #fff; border: 1px solid #dbe2ea; border-radius: 16px; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08); padding: 24px; }
@@ -600,7 +601,7 @@ func buildReaderErrorHTML(statusCode int, title string, description string) stri
       </div>
     </main>
   </body>
-</html>`, escapedPageTitle, escapedStatusCode, escapedPageTitle, escapedDescription)
+</html>`, escapedPageTitle, escapedStatusCode, escapedErrorTitle, escapedDescription)
 }
 
 const readerFallbackUnavailableHTML = `<!doctype html>
@@ -608,9 +609,17 @@ const readerFallbackUnavailableHTML = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PlainDoc 阅读页</title>
+    <title>PlainDoc 阅读页 - PlainDoc - 一个适合中小团队文档在线管理系统</title>
   </head>
   <body>
     <p>reader page is temporarily unavailable</p>
   </body>
 </html>`
+
+func composeSEOTitle(pageTitle string) string {
+	normalizedTitle := strings.TrimSpace(pageTitle)
+	if normalizedTitle == "" {
+		return seoTitleSuffix
+	}
+	return normalizedTitle + " - " + seoTitleSuffix
+}

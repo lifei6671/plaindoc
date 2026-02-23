@@ -11,9 +11,9 @@ import {
   type WheelEvent as ReactWheelEvent
 } from "react";
 import { createPortal } from "react-dom";
-import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { showToast } from "../../components/ui/toast";
 import { type AdminProfile, type DataGateway } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
@@ -154,6 +154,17 @@ function resolveAvatarFallback(profile: AdminProfile | null): string {
   return "A";
 }
 
+function resolvePrimaryAdminRole(profile: AdminProfile | null): "platform_admin" | "space_admin" | "none" {
+  const roles = profile?.roles ?? [];
+  if (roles.includes("platform_admin")) {
+    return "platform_admin";
+  }
+  if (roles.includes("space_admin")) {
+    return "space_admin";
+  }
+  return "none";
+}
+
 export function AdminProfilePage({ dataGateway, onProfileUpdated }: AdminProfilePageProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarDragStartRef = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
@@ -176,6 +187,7 @@ export function AdminProfilePage({ dataGateway, onProfileUpdated }: AdminProfile
   const [avatarOffsetY, setAvatarOffsetY] = useState(0);
 
   const avatarPreviewURL = useMemo(() => (profile?.avatarUrl ?? "").trim(), [profile?.avatarUrl]);
+  const primaryAdminRole = useMemo(() => resolvePrimaryAdminRole(profile), [profile]);
   const avatarFrameInfo = useMemo(
     () => computeAvatarFrameScale(loadedAvatarImage, avatarZoom),
     [loadedAvatarImage, avatarZoom]
@@ -503,17 +515,29 @@ export function AdminProfilePage({ dataGateway, onProfileUpdated }: AdminProfile
             </label>
           </div>
 
-          <label className="grid gap-1.5 text-sm text-slate-700">
-            <span className="font-medium">昵称</span>
-            <Input value={nameInput} onChange={(event) => setNameInput(event.target.value)} placeholder="输入昵称" />
-          </label>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {(profile?.roles ?? []).map((role) => (
-              <Badge key={role} variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
-                {role}
-              </Badge>
-            ))}
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,360px)_minmax(0,220px)]">
+            <label className="grid gap-1.5 text-sm text-slate-700">
+              <span className="font-medium">昵称</span>
+              <Input
+                value={nameInput}
+                onChange={(event) => setNameInput(event.target.value)}
+                placeholder="输入昵称"
+                className="max-w-[360px]"
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm text-slate-700">
+              <span className="font-medium">角色</span>
+              <Select value={primaryAdminRole} disabled>
+                <SelectTrigger className="max-w-[220px] bg-slate-50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="platform_admin">全站管理员</SelectItem>
+                  <SelectItem value="space_admin">空间管理员</SelectItem>
+                  <SelectItem value="none">普通用户</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
           </div>
 
           <div className="flex justify-end">

@@ -19,6 +19,7 @@ type homeHandler struct {
 }
 
 const exploreAllCategoryRouteToken = "all"
+const seoTitleSuffix = "PlainDoc - 一个适合中小团队文档在线管理系统"
 
 type homeViewerIdentity struct {
 	UserID        string
@@ -349,9 +350,11 @@ func renderHomeFallback(c *gin.Context) {
 	c.Header("Cache-Control", "private, no-store, max-age=0")
 	appendVaryHeader(c, "Authorization")
 	appendVaryHeader(c, "Cookie")
+	pageTitle := "空间探索"
+	seoTitle := pageTitle + " - " + seoTitleSuffix
 	c.Data(
 		http.StatusOK,
 		"text/html; charset=utf-8",
-		[]byte("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>空间探索</title></head><body><main><h1>空间探索</h1><p>页面正在初始化，请稍后刷新。</p></main></body></html>"),
+		[]byte("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>"+seoTitle+"</title></head><body><main><h1>空间探索</h1><p>页面正在初始化，请稍后刷新。</p></main></body></html>"),
 	)
 }
