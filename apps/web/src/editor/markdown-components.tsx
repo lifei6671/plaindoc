@@ -9,7 +9,30 @@ import {
   type ReactNode
 } from "react";
 import type { Components } from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
+import prismBash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
+import prismC from "react-syntax-highlighter/dist/esm/languages/prism/c";
+import prismClike from "react-syntax-highlighter/dist/esm/languages/prism/clike";
+import prismCpp from "react-syntax-highlighter/dist/esm/languages/prism/cpp";
+import prismCss from "react-syntax-highlighter/dist/esm/languages/prism/css";
+import prismDiff from "react-syntax-highlighter/dist/esm/languages/prism/diff";
+import prismDocker from "react-syntax-highlighter/dist/esm/languages/prism/docker";
+import prismGo from "react-syntax-highlighter/dist/esm/languages/prism/go";
+import prismIni from "react-syntax-highlighter/dist/esm/languages/prism/ini";
+import prismJava from "react-syntax-highlighter/dist/esm/languages/prism/java";
+import prismJavascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
+import prismJson from "react-syntax-highlighter/dist/esm/languages/prism/json";
+import prismJsx from "react-syntax-highlighter/dist/esm/languages/prism/jsx";
+import prismMarkdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
+import prismMarkup from "react-syntax-highlighter/dist/esm/languages/prism/markup";
+import prismPython from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import prismRust from "react-syntax-highlighter/dist/esm/languages/prism/rust";
+import prismShellSession from "react-syntax-highlighter/dist/esm/languages/prism/shell-session";
+import prismSql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
+import prismToml from "react-syntax-highlighter/dist/esm/languages/prism/toml";
+import prismTsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
+import prismTypescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
+import prismYaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 import {
   extractCodeText,
   isTocMarkerText,
@@ -21,6 +44,57 @@ import {
   PREVIEW_SYNTAX_THEMES,
   type PreviewThemeTemplate
 } from "../preview-themes";
+
+// 使用 Prism light 版本按需注册语言，避免触发 refractor/all 的全量语言加载。
+const PRISM_LANGUAGE_REGISTRATIONS = [
+  ["markup", prismMarkup],
+  ["markdown", prismMarkdown],
+  ["bash", prismBash],
+  ["shell-session", prismShellSession],
+  ["diff", prismDiff],
+  ["json", prismJson],
+  ["yaml", prismYaml],
+  ["toml", prismToml],
+  ["ini", prismIni],
+  ["sql", prismSql],
+  ["css", prismCss],
+  ["clike", prismClike],
+  ["javascript", prismJavascript],
+  ["jsx", prismJsx],
+  ["typescript", prismTypescript],
+  ["tsx", prismTsx],
+  ["c", prismC],
+  ["cpp", prismCpp],
+  ["go", prismGo],
+  ["java", prismJava],
+  ["python", prismPython],
+  ["rust", prismRust],
+  ["docker", prismDocker]
+] as const;
+
+let hasRegisteredPrismLanguages = false;
+
+function ensurePrismLanguagesRegistered() {
+  if (hasRegisteredPrismLanguages) {
+    return;
+  }
+
+  for (const [name, language] of PRISM_LANGUAGE_REGISTRATIONS) {
+    SyntaxHighlighter.registerLanguage(name, language);
+  }
+
+  // 常见 fenced code block 别名，统一映射到已注册语言。
+  SyntaxHighlighter.alias("markup", ["html", "xml", "svg"]);
+  SyntaxHighlighter.alias("javascript", ["js"]);
+  SyntaxHighlighter.alias("typescript", ["ts"]);
+  SyntaxHighlighter.alias("bash", ["sh", "shell", "zsh"]);
+  SyntaxHighlighter.alias("yaml", ["yml"]);
+  SyntaxHighlighter.alias("markdown", ["md"]);
+
+  hasRegisteredPrismLanguages = true;
+}
+
+ensurePrismLanguagesRegistered();
 
 interface BuildMarkdownComponentsOptions {
   activePreviewTheme: PreviewThemeTemplate;

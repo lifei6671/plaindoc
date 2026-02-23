@@ -702,7 +702,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                   "inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] text-[#727679]",
                   isFolder ? "!cursor-pointer hover:bg-[#dde0e4]" : "pointer-events-none opacity-0"
                 )}
-                aria-hidden="true"
+                aria-hidden={isFolder ? undefined : true}
               >
               {isFolder ? context.isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} /> : null}
             </span>
