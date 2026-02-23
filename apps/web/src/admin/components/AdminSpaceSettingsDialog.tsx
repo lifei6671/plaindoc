@@ -814,6 +814,10 @@ export function AdminSpaceSettingsDialog({
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="space-y-1.5 md:col-span-2">
+                <span className="text-xs font-semibold text-slate-700">空间 ID（创建后不可修改）</span>
+                <Input value={space?.spaceId ?? ""} readOnly className="bg-slate-100 text-slate-600" />
+              </label>
+              <label className="space-y-1.5 md:col-span-2">
                 <span className="text-xs font-semibold text-slate-700">空间名称</span>
                 <Input value={name} maxLength={120} placeholder="例如：品牌设计协作空间" onChange={(event) => setName(event.target.value)} />
                 <small className="block text-[11px] text-slate-500">{name.trim().length}/120</small>

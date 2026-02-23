@@ -654,6 +654,66 @@ func TestRouter_AdminSpaceListRespectsScope(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSpaceCreateWithCustomIDAndConflict(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "create-spaceid-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/spaces",
+		bytes.NewReader([]byte(`{"spaceId":"Team_Docs-01","name":"Custom Space","visibility":"member"}`)),
+	)
+	createReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := serve(createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected create space status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	createPayload := decodeJSONResultData[struct {
+		SpaceID string `json:"spaceId"`
+		Name    string `json:"name"`
+	}](t, createRec.Body.Bytes())
+	if createPayload.SpaceID != "team_docs-01" || createPayload.Name != "Custom Space" {
+		t.Fatalf("unexpected custom space create payload: %+v", createPayload)
+	}
+
+	var persistedCount int64
+	if err := database.ORM.Table("spaces").
+		Where("space_id = ?", "team_docs-01").
+		Count(&persistedCount).Error; err != nil {
+		t.Fatalf("query custom space id failed: %v", err)
+	}
+	if persistedCount != 1 {
+		t.Fatalf("expected exactly one custom space id record, got %d", persistedCount)
+	}
+
+	duplicateReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/spaces",
+		bytes.NewReader([]byte(`{"spaceId":"team_docs-01","name":"Duplicate Space","visibility":"member"}`)),
+	)
+	duplicateReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	duplicateReq.Header.Set("Content-Type", "application/json")
+	duplicateRec := serve(duplicateReq)
+	if duplicateRec.Code != http.StatusOK {
+		t.Fatalf("expected duplicate create space status 200, got %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+	if decodeJSONResultCode(t, duplicateRec.Body.Bytes()) != response.ResolveErrorCode("SPACE_ALREADY_EXISTS") {
+		t.Fatalf(
+			"expected duplicate create code %d, got %d body=%s",
+			response.ResolveErrorCode("SPACE_ALREADY_EXISTS"),
+			decodeJSONResultCode(t, duplicateRec.Body.Bytes()),
+			duplicateRec.Body.String(),
+		)
+	}
+}
+
 func TestRouter_AdminSpaceCategoriesManageAndApply(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

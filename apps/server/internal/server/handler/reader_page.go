@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/protocol"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -37,6 +39,14 @@ type readerPagePayload struct {
 	Tree        []service.ReaderTreeNodeViewModel `json:"tree"`
 	ActiveDocID string                            `json:"activeDocId"`
 	Viewer      readerPageViewerIdentity          `json:"viewer"`
+	Access      *readerPageAccessState            `json:"access,omitempty"`
+}
+
+type readerPageAccessState struct {
+	Code          string `json:"code"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	RequiresLogin bool   `json:"requiresLogin"`
 }
 
 // NewReaderPageHandler 创建阅读页 SSR 处理器。
@@ -90,7 +100,12 @@ func (h *readerPageHandler) Space(c *gin.Context) {
 				"空间不存在，或该空间下暂无可访问文档。",
 			)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			h.redirectToLogin(c)
+			h.renderFriendlyErrorPage(
+				c,
+				http.StatusForbidden,
+				"无权限访问",
+				"当前空间需要登录后访问，且本页面不会自动跳转登录。",
+			)
 		case errors.Is(err, service.ErrSpaceAccessDenied), errors.Is(err, service.ErrDocumentAccessDenied):
 			h.renderFriendlyErrorPage(
 				c,
@@ -159,13 +174,22 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 				"文档不存在，或已被删除。",
 			)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			h.redirectToLogin(c)
-		case errors.Is(err, service.ErrSpaceAccessDenied), errors.Is(err, service.ErrDocumentAccessDenied):
-			h.renderFriendlyErrorPage(
+			h.renderReaderAccessDeniedPage(
 				c,
-				http.StatusForbidden,
-				"无权限访问",
+				spaceID,
+				documentID,
+				viewer,
+				"当前文档需要登录后访问。",
+				true,
+			)
+		case errors.Is(err, service.ErrSpaceAccessDenied), errors.Is(err, service.ErrDocumentAccessDenied):
+			h.renderReaderAccessDeniedPage(
+				c,
+				spaceID,
+				documentID,
+				viewer,
 				"你没有权限访问该文档，请联系空间管理员。",
+				false,
 			)
 		default:
 			h.logError("reader page build failed", err, "space_id", spaceID, "document_id", documentID)
@@ -187,10 +211,6 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 		return
 	}
 
-	appendVaryHeader(c, "Authorization")
-	appendVaryHeader(c, "Cookie")
-	c.Header("Cache-Control", "private, no-store, max-age=0")
-
 	payload := readerPagePayload{
 		Space:       viewModel.Space,
 		Document:    viewModel.Document,
@@ -198,6 +218,19 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 		ActiveDocID: viewModel.ActiveDocID,
 		Viewer:      viewer,
 	}
+	h.renderReaderPayload(c, http.StatusOK, spaceID, documentID, payload)
+}
+
+func (h *readerPageHandler) renderReaderPayload(
+	c *gin.Context,
+	statusCode int,
+	spaceID string,
+	documentID string,
+	payload readerPagePayload,
+) {
+	appendVaryHeader(c, "Authorization")
+	appendVaryHeader(c, "Cookie")
+	c.Header("Cache-Control", "private, no-store, max-age=0")
 
 	if h.dispatcher != nil {
 		payloadBytes, marshalErr := json.Marshal(payload)
@@ -211,7 +244,7 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 				Payload: payloadBytes,
 			})
 			if renderErr == nil && renderResponse.OK && strings.TrimSpace(renderResponse.HTML) != "" {
-				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(renderResponse.HTML))
+				c.Data(statusCode, "text/html; charset=utf-8", []byte(renderResponse.HTML))
 				return
 			}
 			if renderErr != nil {
@@ -239,7 +272,87 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 		}
 	}
 
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(buildReaderFallbackHTML(payload)))
+	c.Data(statusCode, "text/html; charset=utf-8", []byte(buildReaderFallbackHTML(payload)))
+}
+
+func (h *readerPageHandler) renderReaderAccessDeniedPage(
+	c *gin.Context,
+	spaceID string,
+	documentID string,
+	viewer readerPageViewerIdentity,
+	description string,
+	requiresLogin bool,
+) {
+	spaceTitle := "空间阅读"
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		normalizedDocumentID = "unknown"
+	}
+	accessDescription := strings.TrimSpace(description)
+	if accessDescription == "" {
+		accessDescription = "你没有权限访问该文档，请联系空间管理员。"
+	}
+
+	spaceViewModel := service.ReaderSpaceViewModel{
+		ID:    normalizedSpaceID,
+		Name:  spaceTitle,
+		Title: "无权限访问 - " + spaceTitle,
+	}
+	tree := []service.ReaderTreeNodeViewModel{}
+	activeDocID := normalizedDocumentID
+
+	// 优先复用同空间下的空间上下文（空间名称与目录树），避免无权限页出现异常标题/空目录。
+	if h != nil && h.readerPageService != nil {
+		if resolvedSpace, resolvedTree, contextErr := h.readerPageService.BuildSpaceContext(
+			c.Request.Context(),
+			normalizedSpaceID,
+			strings.TrimSpace(viewer.UserID),
+		); contextErr == nil {
+			if resolvedName := strings.TrimSpace(resolvedSpace.Name); resolvedName != "" {
+				spaceTitle = resolvedName
+			}
+			spaceViewModel = service.ReaderSpaceViewModel{
+				ID:    normalizedSpaceID,
+				Name:  spaceTitle,
+				Title: "无权限访问 - " + spaceTitle,
+			}
+			tree = resolvedTree
+			if activeDocID == "" {
+				activeDocID = normalizedDocumentID
+			}
+		}
+	}
+
+	payload := readerPagePayload{
+		Space: spaceViewModel,
+		Document: service.ReaderDocumentViewModel{
+			ID:         normalizedDocumentID,
+			NodeID:     normalizedDocumentID,
+			ThemeID:    "default",
+			Visibility: models.VisibilityMember,
+			Title:      "无权限访问",
+			ContentMD:  "",
+			Version:    0,
+			UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		Tree:        tree,
+		ActiveDocID: activeDocID,
+		Viewer:      viewer,
+		Access: &readerPageAccessState{
+			Code:          "FORBIDDEN",
+			Title:         "无权限访问",
+			Description:   accessDescription,
+			RequiresLogin: requiresLogin,
+		},
+	}
+	h.renderReaderPayload(
+		c,
+		http.StatusForbidden,
+		normalizedSpaceID,
+		normalizedDocumentID,
+		payload,
+	)
 }
 
 func (h *readerPageHandler) resolveOptionalViewerIdentity(c *gin.Context) readerPageViewerIdentity {
@@ -361,6 +474,14 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
 	if spaceName == "" {
 		spaceName = "未命名空间"
 	}
+	accessTitle := ""
+	accessDescription := ""
+	isAccessDenied := false
+	if payload.Access != nil {
+		accessTitle = strings.TrimSpace(payload.Access.Title)
+		accessDescription = strings.TrimSpace(payload.Access.Description)
+		isAccessDenied = accessTitle != "" || accessDescription != ""
+	}
 
 	stateJSONBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -372,6 +493,31 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
 	escapedDocumentTitle := template.HTMLEscapeString(documentTitle)
 	escapedSpaceName := template.HTMLEscapeString(spaceName)
 	escapedDocument := template.HTMLEscapeString(payload.Document.ContentMD)
+	escapedAccessTitle := template.HTMLEscapeString(accessTitle)
+	escapedAccessDescription := template.HTMLEscapeString(accessDescription)
+
+	bodyContent := fmt.Sprintf("<pre>%s</pre>", escapedDocument)
+	headerContent := fmt.Sprintf(
+		`<p class="reader-meta">空间：%s</p><h1 class="reader-title">%s</h1>`,
+		escapedSpaceName,
+		escapedDocumentTitle,
+	)
+	if isAccessDenied {
+		if accessTitle == "" {
+			accessTitle = "无权限访问"
+			escapedAccessTitle = template.HTMLEscapeString(accessTitle)
+		}
+		if accessDescription == "" {
+			accessDescription = "你没有权限访问该文档，请联系空间管理员。"
+			escapedAccessDescription = template.HTMLEscapeString(accessDescription)
+		}
+		headerContent = fmt.Sprintf(`<h1 class="reader-title">%s</h1>`, escapedAccessTitle)
+		bodyContent = fmt.Sprintf(
+			`<section class="reader-fallback-denied"><h2>%s</h2><p>%s</p></section>`,
+			escapedAccessTitle,
+			escapedAccessDescription,
+		)
+	}
 
 	return fmt.Sprintf(`<!doctype html>
 <html lang="zh-CN">
@@ -385,19 +531,21 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
       .reader-meta { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
       .reader-title { font-size: 28px; font-weight: 700; margin: 0 0 18px; }
       .reader-fallback-notice { margin: 0 0 14px; color: #92400e; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 10px 12px; }
+      .reader-fallback-denied { margin: 0; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 12px; padding: 16px; }
+      .reader-fallback-denied h2 { margin: 0; color: #0f172a; font-size: 18px; line-height: 1.4; }
+      .reader-fallback-denied p { margin: 8px 0 0; color: #475569; font-size: 14px; line-height: 1.7; }
       pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 14px; line-height: 1.7; }
     </style>
   </head>
   <body>
     <main class="reader-shell">
-      <p class="reader-meta">空间：%s</p>
-      <h1 class="reader-title">%s</h1>
+      %s
       <p class="reader-fallback-notice">SSR 渲染暂时不可用，已降级为基础阅读模式。</p>
-      <pre>%s</pre>
+      %s
     </main>
     <script id="plaindoc-reader-initial-state" type="application/json">%s</script>
   </body>
-</html>`, escapedPageTitle, escapedSpaceName, escapedDocumentTitle, escapedDocument, stateJSON)
+</html>`, escapedPageTitle, headerContent, bodyContent, stateJSON)
 }
 
 func escapeJSONForHTMLScript(rawJSON string) string {

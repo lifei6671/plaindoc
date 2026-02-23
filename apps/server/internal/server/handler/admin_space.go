@@ -64,6 +64,7 @@ type adminSpaceCoverDTO struct {
 }
 
 type createAdminSpaceRequest struct {
+	SpaceID      string `json:"spaceId"`
 	Name         string `json:"name"`
 	Description  string `json:"description"`
 	CategoryID   string `json:"categoryId"`
@@ -164,6 +165,7 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 	payload, err := h.adminSpaceService.CreateSpace(c.Request.Context(), service.CreateAdminSpaceInput{
 		ActorUserID:  actorUserID,
 		RequestID:    response.RequestIDFromContext(c),
+		SpaceID:      req.SpaceID,
 		Name:         req.Name,
 		Description:  req.Description,
 		CategoryID:   req.CategoryID,
@@ -176,12 +178,16 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
 		case errors.Is(err, service.ErrAdminSpaceInvalidName):
 			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
+		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
+			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
 			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
 			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
 		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
 			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
+		case errors.Is(err, service.ErrAdminSpaceAlreadyExists):
+			response.Error(c, http.StatusConflict, "SPACE_ALREADY_EXISTS", "space id already exists")
 		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
 			response.Error(c, http.StatusNotFound, "COVER_ASSET_NOT_FOUND", "cover asset not found")
 		default:

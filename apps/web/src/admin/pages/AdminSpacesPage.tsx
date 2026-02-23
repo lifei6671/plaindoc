@@ -1,6 +1,5 @@
 import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
-import { useNavigate } from "react-router-dom";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -122,10 +121,24 @@ function renderVisibilityBadgeClass(value: Visibility): string {
   }
 }
 
+function buildEditorPath(spaceID: string): string {
+  return `/editor/${encodeURIComponent(spaceID)}`;
+}
+
+function buildReaderPath(spaceID: string): string {
+  return `/r/${encodeURIComponent(spaceID)}`;
+}
+
+function openPathInNewTab(path: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.open(path, "_blank", "noopener,noreferrer");
+}
+
 // 空间管理页面：承载列表筛选、批量操作与空间设置入口。
 export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
-  const navigate = useNavigate();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [categoriesDialogOpen, setCategoriesDialogOpen] = useState(false);
@@ -158,10 +171,18 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
       if (!targetSpaceID) {
         return;
       }
-      navigate(`/editor/${encodeURIComponent(targetSpaceID)}`);
+      openPathInNewTab(buildEditorPath(targetSpaceID));
     },
-    [navigate]
+    []
   );
+
+  const handleOpenSpaceReader = useCallback((space: AdminSpace) => {
+    const targetSpaceID = space.spaceId.trim();
+    if (!targetSpaceID) {
+      return;
+    }
+    openPathInNewTab(buildReaderPath(targetSpaceID));
+  }, []);
 
   const loadSpaces = useCallback(async () => {
     setLoading(true);
@@ -834,23 +855,30 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                             type="button"
                             className="h-16 w-10 shrink-0 overflow-hidden rounded-md border-0 bg-transparent p-0 transition-opacity hover:opacity-90 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                             disabled={isDeleted}
-                            onClick={() => handleOpenSpaceEditor(space)}
-                            title={isDeleted ? "已删除空间不可编辑" : `打开空间：${space.name || space.spaceId}`}
+                            onClick={() => handleOpenSpaceReader(space)}
+                            title={isDeleted ? "已删除空间不可访问" : `打开空间阅读页：${space.name || space.spaceId}`}
                           >
                             {space.cover?.url ? (
                               <img src={space.cover.url} alt={`${space.name}-cover`} className="h-full w-full object-cover" />
-                            ) : <span className="sr-only">打开空间编辑器</span>}
+                            ) : <span className="sr-only">打开空间阅读页</span>}
                           </button>
                           <div className="grid min-w-0 gap-1">
-                            <button
-                              type="button"
-                              className="w-fit max-w-full truncate border-0 bg-transparent p-0 text-left text-sm font-semibold text-slate-900 transition-colors hover:text-sky-700 focus-visible:outline-none disabled:cursor-not-allowed disabled:text-slate-400"
-                              disabled={isDeleted}
-                              onClick={() => handleOpenSpaceEditor(space)}
-                              title={isDeleted ? "已删除空间不可编辑" : `打开空间：${space.name || space.spaceId}`}
-                            >
-                              {space.name || space.spaceId}
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="w-fit max-w-full truncate border-0 bg-transparent p-0 text-left text-sm font-semibold text-slate-900 transition-colors hover:text-sky-700 focus-visible:outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                                  disabled={isDeleted}
+                                  onClick={() => handleOpenSpaceEditor(space)}
+                                  title={isDeleted ? "已删除空间不可编辑" : `新窗口打开编辑器：${space.name || space.spaceId}`}
+                                >
+                                  {space.name || space.spaceId}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" align="start">
+                                {space.name || space.spaceId}
+                              </TooltipContent>
+                            </Tooltip>
                             <div className="flex min-w-0 items-center gap-1.5">
                               <code
                                 className="max-w-[220px] truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700"

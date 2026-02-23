@@ -27,12 +27,14 @@ const COVER_MAX_WIDTH = 1600;
 const COVER_MAX_HEIGHT = 2560;
 const COVER_MAX_TITLE_LINES = 3;
 const COVER_MAX_TITLE_UNITS_PER_LINE = 10.8;
+const SPACE_ID_MAX_LENGTH = 26;
 const SYSTEM_COVER_TEXT_MARGIN = 128;
 const SYSTEM_COVER_FONT_FAMILY = "PingFang SC, Microsoft YaHei, Noto Sans SC, Source Han Sans SC, sans-serif";
 const SYSTEM_COVER_LINE_HEIGHT_RATIO = 1.16;
 const SYSTEM_COVER_BG_COLOR = "#d9e3f2";
 const SYSTEM_COVER_TEXT_COLOR = "#2f3f5f";
 const SYSTEM_COVER_TITLE_BASELINE_RATIO = 0.31;
+const SPACE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 interface LoadedImageData {
   element: HTMLImageElement;
@@ -100,6 +102,24 @@ function normalizeVisibility(rawValue: string): Visibility {
     return value;
   }
   return "member";
+}
+
+function normalizeSpaceID(rawValue: string): string {
+  return rawValue.trim().toLowerCase();
+}
+
+function resolveSpaceIDValidationMessage(rawValue: string): string | null {
+  const normalized = normalizeSpaceID(rawValue);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.length > SPACE_ID_MAX_LENGTH) {
+    return `空间 ID 最多 ${SPACE_ID_MAX_LENGTH} 个字符`;
+  }
+  if (!SPACE_ID_PATTERN.test(normalized)) {
+    return "空间 ID 仅支持英文字母、数字、下划线(_)和中横线(-)";
+  }
+  return null;
 }
 
 function estimateCoverTitleUnits(text: string): number {
@@ -405,6 +425,7 @@ async function exportCroppedWebP(
 
 export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onOpenChange, onCreated }: AdminCreateSpaceDialogProps) {
   // 管理后台新建空间弹窗：负责表单、封面本地预览与创建提交流程。
+  const [spaceID, setSpaceID] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("member");
@@ -468,6 +489,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
     [normalizedCategoryOptions]
   );
   const coverPreviewUrl = pendingCover?.previewUrl?.trim() || "";
+  const spaceIDValidationMessage = useMemo(() => resolveSpaceIDValidationMessage(spaceID), [spaceID]);
 
   useEffect(() => {
     if (!open) {
@@ -489,6 +511,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
   }, []);
 
   const resetDialog = useCallback(() => {
+    setSpaceID("");
     setName("");
     setDescription("");
     setVisibility("member");
@@ -673,6 +696,13 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
   }, [name]);
 
   const handleCreateSpace = useCallback(async () => {
+    const normalizedSpaceID = normalizeSpaceID(spaceID);
+    const spaceIDValidationMessage = resolveSpaceIDValidationMessage(normalizedSpaceID);
+    if (spaceIDValidationMessage) {
+      showToast(spaceIDValidationMessage);
+      return;
+    }
+
     const trimmedName = name.trim();
     if (!trimmedName) {
       showToast("空间名称不能为空");
@@ -703,6 +733,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
         coverAssetId = payload.assetId;
       }
       await dataGateway.admin.createSpace({
+        spaceId: normalizedSpaceID || undefined,
         name: trimmedName,
         description,
         categoryId: categoryID,
@@ -718,7 +749,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
     } finally {
       setCreatingSpace(false);
     }
-  }, [categoryID, dataGateway.admin, description, name, onCreated, onOpenChange, pendingCover, resetDialog, visibility]);
+  }, [categoryID, dataGateway.admin, description, name, onCreated, onOpenChange, pendingCover, resetDialog, spaceID, visibility]);
 
   if (!open) {
     return null;
@@ -747,6 +778,18 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
         <div className="grid min-h-0 gap-5 overflow-y-auto px-5 py-4 lg:grid-cols-[minmax(0,1.1fr)_320px]">
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1.5 md:col-span-2">
+                <span className="text-xs font-semibold text-slate-700">空间 ID（可选）</span>
+                <Input
+                  value={spaceID}
+                  maxLength={SPACE_ID_MAX_LENGTH}
+                  placeholder="留空自动生成，例如：linux_docs"
+                  onChange={(event) => setSpaceID(event.target.value)}
+                />
+                <small className={`block text-[11px] ${spaceIDValidationMessage ? "text-rose-600" : "text-slate-500"}`}>
+                  {spaceIDValidationMessage ?? "仅支持英文字母、数字、下划线(_)和中横线(-)，创建后不可修改"}
+                </small>
+              </label>
               <label className="space-y-1.5 md:col-span-2">
                 <span className="text-xs font-semibold text-slate-700">空间名称</span>
                 <Input value={name} maxLength={120} placeholder="例如：品牌设计协作空间" onChange={(event) => setName(event.target.value)} />

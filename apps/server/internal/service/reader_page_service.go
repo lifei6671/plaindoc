@@ -20,6 +20,7 @@ type readerDocumentRow struct {
 	DocumentID   string `gorm:"column:document_id"`
 	NodeID       string `gorm:"column:node_id"`
 	ThemeID      string `gorm:"column:theme_id"`
+	Visibility   string `gorm:"column:visibility"`
 	Title        string `gorm:"column:title"`
 	ContentMD    string `gorm:"column:content_md"`
 	Version      int    `gorm:"column:version"`
@@ -28,20 +29,24 @@ type readerDocumentRow struct {
 }
 
 type readerTreeNodeRow struct {
-	NodeID       string          `gorm:"column:node_id"`
-	ParentNodeID *string         `gorm:"column:parent_node_id"`
-	Type         models.NodeType `gorm:"column:type"`
-	Title        string          `gorm:"column:title"`
-	Sort         int             `gorm:"column:sort"`
+	NodeID             string          `gorm:"column:node_id"`
+	DocumentID         *string         `gorm:"column:document_id"`
+	ParentNodeID       *string         `gorm:"column:parent_node_id"`
+	Type               models.NodeType `gorm:"column:type"`
+	Title              string          `gorm:"column:title"`
+	Sort               int             `gorm:"column:sort"`
+	DocumentVisibility *string         `gorm:"column:document_visibility"`
 }
 
 type readerTreeNode struct {
-	ID       string
-	ParentID *string
-	Type     models.NodeType
-	Title    string
-	Sort     int
-	Children []*readerTreeNode
+	ID         string
+	DocumentID *string
+	ParentID   *string
+	Type       models.NodeType
+	Title      string
+	Sort       int
+	Visibility *models.Visibility
+	Children   []*readerTreeNode
 }
 
 type readerDocumentIDRow struct {
@@ -191,17 +196,52 @@ func (s *ReaderPageService) BuildPage(
 			Title: pageTitle,
 		},
 		Document: ReaderDocumentViewModel{
-			ID:        strings.TrimSpace(documentRow.DocumentID),
-			NodeID:    strings.TrimSpace(documentRow.NodeID),
-			ThemeID:   strings.TrimSpace(documentRow.ThemeID),
-			Title:     documentTitle,
-			ContentMD: documentRow.ContentMD,
-			Version:   documentRow.Version,
-			UpdatedAt: updatedAt,
+			ID:         strings.TrimSpace(documentRow.DocumentID),
+			NodeID:     strings.TrimSpace(documentRow.NodeID),
+			ThemeID:    strings.TrimSpace(documentRow.ThemeID),
+			Visibility: normalizeReaderVisibility(documentRow.Visibility),
+			Title:      documentTitle,
+			ContentMD:  documentRow.ContentMD,
+			Version:    documentRow.Version,
+			UpdatedAt:  updatedAt,
 		},
 		Tree:        tree,
 		ActiveDocID: strings.TrimSpace(documentRow.DocumentID),
 	}, nil
+}
+
+// BuildSpaceContext 按 space/viewer 组装阅读页左侧所需的空间与目录树上下文。
+func (s *ReaderPageService) BuildSpaceContext(
+	ctx context.Context,
+	spaceID string,
+	viewerUserID string,
+) (ReaderSpaceViewModel, []ReaderTreeNodeViewModel, error) {
+	if s == nil || s.db == nil || s.visibilityService == nil {
+		return ReaderSpaceViewModel{}, nil, errors.New("reader page service dependencies are nil")
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedViewerUserID := strings.TrimSpace(viewerUserID)
+	if normalizedSpaceID == "" {
+		return ReaderSpaceViewModel{}, nil, errors.New("space id is required")
+	}
+
+	space, err := s.visibilityService.GetSpace(ctx, normalizedSpaceID, normalizedViewerUserID)
+	if err != nil {
+		return ReaderSpaceViewModel{}, nil, err
+	}
+
+	tree, err := s.loadTree(ctx, normalizedSpaceID)
+	if err != nil {
+		return ReaderSpaceViewModel{}, nil, err
+	}
+
+	spaceName := strings.TrimSpace(space.Name)
+	return ReaderSpaceViewModel{
+		ID:    normalizedSpaceID,
+		Name:  spaceName,
+		Title: spaceName,
+	}, tree, nil
 }
 
 func (s *ReaderPageService) resolveDocumentID(
@@ -291,6 +331,7 @@ func (s *ReaderPageService) loadDocumentRow(
 			"d.document_id",
 			"d.node_id",
 			"d.theme_id",
+			"d.visibility",
 			"d.title",
 			"d.content_md",
 			"d.version",
@@ -331,10 +372,19 @@ func (s *ReaderPageService) loadTree(
 ) ([]ReaderTreeNodeViewModel, error) {
 	var rows []readerTreeNodeRow
 	if err := s.db.WithContext(ctx).
-		Table("nodes").
-		Select("node_id", "parent_node_id", "type", "title", "sort").
-		Where("space_id = ?", spaceID).
-		Order("parent_node_id ASC, sort ASC, id ASC").
+		Table("nodes AS n").
+		Select(
+			"n.node_id",
+			"d.document_id AS document_id",
+			"n.parent_node_id",
+			"n.type",
+			"n.title",
+			"n.sort",
+			"d.visibility AS document_visibility",
+		).
+		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
+		Where("n.space_id = ?", spaceID).
+		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -345,13 +395,17 @@ func (s *ReaderPageService) loadTree(
 		if nodeID == "" {
 			continue
 		}
+		documentID := normalizeReaderOptionalString(row.DocumentID)
+		documentVisibility := normalizeReaderDocumentVisibility(row.Type, row.DocumentVisibility)
 		treeNodes[nodeID] = &readerTreeNode{
-			ID:       nodeID,
-			ParentID: normalizeReaderOptionalString(row.ParentNodeID),
-			Type:     normalizeReaderNodeType(row.Type),
-			Title:    strings.TrimSpace(row.Title),
-			Sort:     row.Sort,
-			Children: make([]*readerTreeNode, 0),
+			ID:         nodeID,
+			DocumentID: documentID,
+			ParentID:   normalizeReaderOptionalString(row.ParentNodeID),
+			Type:       normalizeReaderNodeType(row.Type),
+			Title:      strings.TrimSpace(row.Title),
+			Sort:       row.Sort,
+			Visibility: documentVisibility,
+			Children:   make([]*readerTreeNode, 0),
 		}
 	}
 
@@ -403,15 +457,40 @@ func mapReaderTreeNodes(nodes []*readerTreeNode) []ReaderTreeNodeViewModel {
 			continue
 		}
 		items = append(items, ReaderTreeNodeViewModel{
-			ID:       node.ID,
-			ParentID: node.ParentID,
-			Type:     normalizeReaderNodeType(node.Type),
-			Title:    node.Title,
-			Sort:     node.Sort,
-			Children: mapReaderTreeNodes(node.Children),
+			ID:         node.ID,
+			DocumentID: node.DocumentID,
+			ParentID:   node.ParentID,
+			Type:       normalizeReaderNodeType(node.Type),
+			Title:      node.Title,
+			Sort:       node.Sort,
+			Visibility: node.Visibility,
+			Children:   mapReaderTreeNodes(node.Children),
 		})
 	}
 	return items
+}
+
+func normalizeReaderVisibility(raw string) models.Visibility {
+	value := models.Visibility(strings.TrimSpace(raw))
+	if !models.IsValidVisibility(value) {
+		return models.VisibilityMember
+	}
+	return value
+}
+
+func normalizeReaderDocumentVisibility(
+	nodeType models.NodeType,
+	rawVisibility *string,
+) *models.Visibility {
+	if normalizeReaderNodeType(nodeType) != models.NodeTypeDoc {
+		return nil
+	}
+	if rawVisibility == nil {
+		visibility := models.VisibilityMember
+		return &visibility
+	}
+	visibility := normalizeReaderVisibility(*rawVisibility)
+	return &visibility
 }
 
 func formatReaderTime(raw string) string {

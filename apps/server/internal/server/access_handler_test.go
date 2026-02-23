@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,7 +112,7 @@ func TestRouter_GetSpace_AuthenticatedVisibility(t *testing.T) {
 	}
 }
 
-func TestRouter_UpdateVisibility_OnlyOwnerCanUpdate(t *testing.T) {
+func TestRouter_UpdateVisibility_AccessControl(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
 		_ = database.Close()
@@ -119,6 +120,8 @@ func TestRouter_UpdateVisibility_OnlyOwnerCanUpdate(t *testing.T) {
 
 	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "owner-update@example.com")
 	_, _, viewerToken := registerAccessUser(t, serve, "viewer-update@example.com")
+	collaboratorUserID, _, collaboratorToken := registerAccessUser(t, serve, "collaborator-update@example.com")
+	readerUserID, _, readerToken := registerAccessUser(t, serve, "reader-update@example.com")
 
 	spaceID := "01h1spaceupdate0000000000001"
 	nodeID := "01h1nodeupdate00000000000002"
@@ -148,10 +151,32 @@ func TestRouter_UpdateVisibility_OnlyOwnerCanUpdate(t *testing.T) {
 	updateDocumentByViewerReq.Header.Set("Content-Type", "application/json")
 	updateDocumentByViewerRec := serve(updateDocumentByViewerReq)
 	if updateDocumentByViewerRec.Code != http.StatusForbidden {
-		t.Fatalf("expected non-owner update document status 403, got %d body=%s", updateDocumentByViewerRec.Code, updateDocumentByViewerRec.Body.String())
+		t.Fatalf("expected non-member update document status 403, got %d body=%s", updateDocumentByViewerRec.Code, updateDocumentByViewerRec.Body.String())
 	}
 
-	updateDocumentByOwnerReq := httptest.NewRequest(http.MethodPut, "/api/docs/"+docID+"/visibility", bytes.NewReader(updateDocumentBody))
+	seedSpaceMemberForAccess(t, database, spaceID, collaboratorUserID, "collaborator")
+	updateDocumentByCollaboratorReq := httptest.NewRequest(http.MethodPut, "/api/docs/"+docID+"/visibility", bytes.NewReader(updateDocumentBody))
+	updateDocumentByCollaboratorReq.Header.Set("Authorization", "Bearer "+collaboratorToken)
+	updateDocumentByCollaboratorReq.Header.Set("Content-Type", "application/json")
+	updateDocumentByCollaboratorRec := serve(updateDocumentByCollaboratorReq)
+	if updateDocumentByCollaboratorRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected collaborator update document status 200, got %d body=%s",
+			updateDocumentByCollaboratorRec.Code,
+			updateDocumentByCollaboratorRec.Body.String(),
+		)
+	}
+
+	seedSpaceMemberForAccess(t, database, spaceID, readerUserID, "reader")
+	updateDocumentByReaderReq := httptest.NewRequest(http.MethodPut, "/api/docs/"+docID+"/visibility", bytes.NewReader([]byte(`{"visibility":"member"}`)))
+	updateDocumentByReaderReq.Header.Set("Authorization", "Bearer "+readerToken)
+	updateDocumentByReaderReq.Header.Set("Content-Type", "application/json")
+	updateDocumentByReaderRec := serve(updateDocumentByReaderReq)
+	if updateDocumentByReaderRec.Code != http.StatusForbidden {
+		t.Fatalf("expected reader update document status 403, got %d body=%s", updateDocumentByReaderRec.Code, updateDocumentByReaderRec.Body.String())
+	}
+
+	updateDocumentByOwnerReq := httptest.NewRequest(http.MethodPut, "/api/docs/"+docID+"/visibility", bytes.NewReader([]byte(`{"visibility":"public"}`)))
 	updateDocumentByOwnerReq.Header.Set("Authorization", "Bearer "+ownerToken)
 	updateDocumentByOwnerReq.Header.Set("Content-Type", "application/json")
 	updateDocumentByOwnerRec := serve(updateDocumentByOwnerReq)
@@ -168,8 +193,101 @@ func TestRouter_UpdateVisibility_OnlyOwnerCanUpdate(t *testing.T) {
 		Scan(&persistedDoc).Error; err != nil {
 		t.Fatalf("query document visibility failed: %v", err)
 	}
-	if persistedDoc.Visibility != "authenticated" {
-		t.Fatalf("expected persisted document visibility authenticated, got %s", persistedDoc.Visibility)
+	if persistedDoc.Visibility != "public" {
+		t.Fatalf("expected persisted document visibility public, got %s", persistedDoc.Visibility)
+	}
+}
+
+func TestRouter_CreateNode_DocumentVisibilityInheritsSpace(t *testing.T) {
+	testCases := []struct {
+		name            string
+		spaceVisibility string
+	}{
+		{name: "PublicSpace", spaceVisibility: "public"},
+		{name: "AuthenticatedSpace", spaceVisibility: "authenticated"},
+		{name: "MemberSpace", spaceVisibility: "member"},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			database, serve := setupAuthTestRouter(t)
+			defer func() {
+				_ = database.Close()
+			}()
+
+			ownerUserID, _, ownerToken := registerAccessUser(t, serve, "owner-create-node-"+testCase.name+"@example.com")
+			spaceID := "01h1createnodespace" + strings.ToLower(testCase.name) + "0000001"
+			seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, testCase.spaceVisibility)
+
+			body := []byte(`{"parentId":null,"type":"doc","title":"Inherited Visibility Doc"}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/spaces/"+spaceID+"/nodes", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+ownerToken)
+			req.Header.Set("Content-Type", "application/json")
+			rec := serve(req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected create node status 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+
+			payload := decodeJSONResultData[struct {
+				NodeID string `json:"nodeId"`
+				DocID  string `json:"docId"`
+			}](t, rec.Body.Bytes())
+			if payload.DocID == "" {
+				t.Fatalf("expected created doc id in response, body=%s", rec.Body.String())
+			}
+
+			var persistedDoc struct {
+				Visibility string `gorm:"column:visibility"`
+			}
+			if err := database.ORM.Table("documents").
+				Select("visibility").
+				Where("document_id = ?", payload.DocID).
+				Take(&persistedDoc).Error; err != nil {
+				t.Fatalf("query created document visibility failed: %v", err)
+			}
+			if persistedDoc.Visibility != testCase.spaceVisibility {
+				t.Fatalf(
+					"expected created document visibility %s, got %s",
+					testCase.spaceVisibility,
+					persistedDoc.Visibility,
+				)
+			}
+		})
+	}
+}
+
+func TestRouter_ReaderPage_UnauthorizedRendersForbiddenInsteadOfRedirect(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, _ := registerAccessUser(t, serve, "owner-reader-page@example.com")
+	spaceID := "01h1readerpageauth000000000001"
+	nodeID := "01h1readerpagenode000000000002"
+	docID := "01h1readerpagedoc0000000000003"
+	seedSpaceAndDocumentForAccess(t, database, ownerUserID, spaceID, nodeID, docID, "authenticated", "authenticated")
+
+	pageReq := httptest.NewRequest(http.MethodGet, "/r/"+spaceID+"/"+docID, nil)
+	pageRec := serve(pageReq)
+	if pageRec.Code != http.StatusForbidden {
+		t.Fatalf("expected reader page unauthorized status 403, got %d body=%s", pageRec.Code, pageRec.Body.String())
+	}
+	if location := pageRec.Header().Get("Location"); location != "" {
+		t.Fatalf("expected no redirect location, got %q", location)
+	}
+	if !strings.Contains(pageRec.Body.String(), "无权限访问") {
+		t.Fatalf("expected forbidden body contains 无权限访问, body=%s", pageRec.Body.String())
+	}
+
+	spaceReq := httptest.NewRequest(http.MethodGet, "/r/"+spaceID, nil)
+	spaceRec := serve(spaceReq)
+	if spaceRec.Code != http.StatusForbidden {
+		t.Fatalf("expected reader space unauthorized status 403, got %d body=%s", spaceRec.Code, spaceRec.Body.String())
+	}
+	if location := spaceRec.Header().Get("Location"); location != "" {
+		t.Fatalf("expected no redirect location for reader space, got %q", location)
 	}
 }
 
@@ -251,5 +369,49 @@ func seedSpaceAndDocumentForAccess(
 		"updated_at":         now,
 	}).Error; err != nil {
 		t.Fatalf("insert document failed: %v", err)
+	}
+}
+
+func seedSpaceForWorkspaceCreateNode(
+	t *testing.T,
+	database *storage.Database,
+	ownerUserID string,
+	spaceID string,
+	spaceVisibility string,
+) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("spaces").Create(map[string]any{
+		"space_id":      spaceID,
+		"name":          "Workspace Create Node Space",
+		"owner_user_id": ownerUserID,
+		"visibility":    spaceVisibility,
+		"status":        "active",
+		"created_at":    now,
+		"updated_at":    now,
+	}).Error; err != nil {
+		t.Fatalf("insert space for create node test failed: %v", err)
+	}
+}
+
+func seedSpaceMemberForAccess(
+	t *testing.T,
+	database *storage.Database,
+	spaceID string,
+	userID string,
+	role string,
+) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("space_members").Create(map[string]any{
+		"space_id":   spaceID,
+		"user_id":    userID,
+		"role":       role,
+		"created_at": now,
+		"updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("insert space member failed: %v", err)
 	}
 }

@@ -62,19 +62,53 @@ func resolveWebDistDir(pathValue string) (string, bool) {
 		return "", false
 	}
 
-	candidates := []string{
-		trimmed,
-		filepath.Clean(trimmed),
-		filepath.Join("..", "web", "dist"),
-		filepath.Join("apps", "web", "dist"),
-	}
-	for _, candidate := range candidates {
+	seen := make(map[string]struct{}, 32)
+	appendCandidate := func(candidates []string, candidate string) []string {
 		normalized := strings.TrimSpace(candidate)
 		if normalized == "" {
-			continue
+			return candidates
 		}
-		absolutePath, err := filepath.Abs(filepath.Clean(normalized))
-		if err != nil {
+		cleaned := filepath.Clean(normalized)
+		if cleaned == "" || cleaned == "." {
+			return candidates
+		}
+		if _, exists := seen[cleaned]; exists {
+			return candidates
+		}
+		seen[cleaned] = struct{}{}
+		return append(candidates, cleaned)
+	}
+
+	candidates := make([]string, 0, 16)
+	candidates = appendCandidate(candidates, trimmed)
+	candidates = appendCandidate(candidates, filepath.Join("apps", "web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("..", "web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("..", "apps", "web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("..", "..", "web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("..", "..", "apps", "web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("..", "..", "..", "web", "dist"))
+	candidates = appendCandidate(candidates, filepath.Join("..", "..", "..", "apps", "web", "dist"))
+
+	cwd, err := os.Getwd()
+	if err == nil {
+		current := filepath.Clean(cwd)
+		for i := 0; i < 8; i++ {
+			candidates = appendCandidate(candidates, filepath.Join(current, trimmed))
+			candidates = appendCandidate(candidates, filepath.Join(current, "apps", "web", "dist"))
+			candidates = appendCandidate(candidates, filepath.Join(current, "web", "dist"))
+
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
+
+	for _, candidate := range candidates {
+		absolutePath, absErr := filepath.Abs(candidate)
+		if absErr != nil {
 			continue
 		}
 		fileInfo, statErr := os.Stat(absolutePath)

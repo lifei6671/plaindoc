@@ -42,6 +42,13 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function resolveLocalDocumentVisibility(value: unknown): "public" | "authenticated" | "member" {
+  if (value === "public" || value === "authenticated" || value === "member") {
+    return value;
+  }
+  return "member";
+}
+
 const authGateway: AuthGateway = {
   async getSession() {
     return useDatabase(async (database) => {
@@ -150,7 +157,15 @@ const workspaceGateway: WorkspaceGateway = {
   async getTree(spaceId: string): Promise<TreeNode[]> {
     return useDatabase(async (database) => {
       const nodes = await database.nodesTable.where("spaceUlid").equals(spaceId).toArray();
-      return buildTree(nodes, null);
+      const documents = await database.documentsTable.toArray();
+      const documentMetaByNodeUlid = new Map<string, { documentId: string; visibility: "public" | "authenticated" | "member" }>();
+      for (const document of documents) {
+        documentMetaByNodeUlid.set(document.nodeUlid, {
+          documentId: document.ulid,
+          visibility: document.visibility || "member"
+        });
+      }
+      return buildTree(nodes, null, documentMetaByNodeUlid);
     });
   },
 
@@ -186,6 +201,9 @@ const workspaceGateway: WorkspaceGateway = {
       });
 
       const space = await database.spacesTable.where("ulid").equals(input.spaceId).first();
+      const defaultDocumentVisibility = resolveLocalDocumentVisibility(
+        (space as { visibility?: unknown } | undefined)?.visibility
+      );
       if (typeof space?.id === "number") {
         await database.spacesTable.update(space.id, { updatedAt: now });
       }
@@ -198,6 +216,7 @@ const workspaceGateway: WorkspaceGateway = {
           ulid: nodeUlid,
           nodeUlid,
           themeId: DEFAULT_THEME_ID,
+          visibility: defaultDocumentVisibility,
           title: input.title,
           contentMd: "",
           version: 1,
@@ -393,6 +412,27 @@ const documentGateway: DocumentGateway = {
       const now = nowIso();
       await database.documentsTable.update(document.id, {
         themeId,
+        updatedAt: now
+      });
+
+      const latest = await database.documentsTable.where("ulid").equals(docId).first();
+      if (!latest) {
+        throw new Error("文档不存在");
+      }
+      return mapLocalDocument(latest);
+    });
+  },
+
+  async updateDocumentVisibility(docId: string, visibility: "public" | "authenticated" | "member"): Promise<Document> {
+    return useDatabaseTransaction("rw", async (database) => {
+      const document = await database.documentsTable.where("ulid").equals(docId).first();
+      if (!document || typeof document.id !== "number") {
+        throw new Error("文档不存在");
+      }
+
+      const now = nowIso();
+      await database.documentsTable.update(document.id, {
+        visibility,
         updatedAt: now
       });
 

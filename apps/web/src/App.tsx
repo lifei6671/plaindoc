@@ -243,6 +243,15 @@ function resolveAuthRedirectTarget(rawValue: string | null): string | null {
   }
 }
 
+function buildAuthEntryPath(path: string, redirectTarget: string | null): string {
+  const normalizedPath = path.trim() || "/";
+  const normalizedRedirectTarget = redirectTarget?.trim() ?? "";
+  if (!normalizedRedirectTarget) {
+    return normalizedPath;
+  }
+  return `${normalizedPath}?redirect=${encodeURIComponent(normalizedRedirectTarget)}`;
+}
+
 // 根据后端错误文本生成可展示给用户的空间访问失败说明。
 function resolveEditorAccessDescription(rawMessage: string): string {
   const normalizedMessage = rawMessage.trim();
@@ -587,6 +596,7 @@ export default function App() {
     lastSavedAt,
     bootstrapWorkspace,
     createNode,
+    updateDocumentVisibility,
     renameNode,
     deleteNode,
     openDocument,
@@ -736,7 +746,8 @@ export default function App() {
       if (!node) {
         continue;
       }
-      if (node.id === routeDocId && node.type === "doc") {
+      const resolvedDocumentID = (node.documentId ?? node.id ?? "").trim();
+      if (node.type === "doc" && resolvedDocumentID === routeDocId) {
         return true;
       }
       if (node.children.length) {
@@ -745,6 +756,27 @@ export default function App() {
     }
     return false;
   }, [routeDocId, workspaceTree]);
+
+  const activeDocExistsInTree = useMemo(() => {
+    if (!activeDocId) {
+      return false;
+    }
+    const stack = [...workspaceTree];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      const resolvedDocumentID = (node.documentId ?? node.id ?? "").trim();
+      if (node.type === "doc" && resolvedDocumentID === activeDocId) {
+        return true;
+      }
+      if (node.children.length) {
+        stack.push(...node.children);
+      }
+    }
+    return false;
+  }, [activeDocId, workspaceTree]);
 
   // 启动时先校验会话，避免未登录就触发工作区加载请求。
   useEffect(() => {
@@ -793,7 +825,9 @@ export default function App() {
         return;
       }
       if (route.kind !== "login" && route.kind !== "register") {
-        navigate(LOGIN_ROUTE_PATH, { replace: true });
+        const currentPathWithSearch =
+          `${location.pathname}${location.search}${location.hash}` || "/";
+        navigate(buildAuthEntryPath(LOGIN_ROUTE_PATH, currentPathWithSearch), { replace: true });
       }
       return;
     }
@@ -820,7 +854,9 @@ export default function App() {
     isAuthChecking,
     isAdminRoute,
     isEditorRoute,
+    location.hash,
     location.pathname,
+    location.search,
     route.kind
   ]);
 
@@ -1412,6 +1448,40 @@ export default function App() {
     editorAccessRetryCount
   ]);
 
+  // 路由同步过程中若文档已就绪但仍停留在 loading，主动回收为 ready，避免自动保存被阻塞。
+  useEffect(() => {
+    if (!isEditorRoute || isAuthChecking || !activeUser) {
+      return;
+    }
+    if (saveStatus !== "loading" || !activeSpaceId || !activeDocId || !activeDocExistsInTree) {
+      return;
+    }
+
+    const routeSpaceMatched = !routeSpaceId || routeSpaceId === activeSpaceId;
+    const routeDocMatched = !routeDocId || routeDocId === activeDocId;
+    if (!routeSpaceMatched || !routeDocMatched) {
+      return;
+    }
+
+    setSaveStatus("ready");
+    if (baseVersion > 0) {
+      setStatusMessage(`已加载文档 v${baseVersion}`);
+    } else {
+      setStatusMessage("文档已加载");
+    }
+  }, [
+    activeDocExistsInTree,
+    activeDocId,
+    activeSpaceId,
+    activeUser,
+    baseVersion,
+    isAuthChecking,
+    isEditorRoute,
+    routeDocId,
+    routeSpaceId,
+    saveStatus
+  ]);
+
   // 重新校验空间访问权限：触发一次路由同步 effect 即可。
   const retryEditorAccessCheck = useCallback(() => {
     setEditorAccessError(null);
@@ -1473,6 +1543,28 @@ export default function App() {
       }
     },
     [deleteNode]
+  );
+
+  // 文档可见性动作：供目录树右侧菜单直接切换 public/authenticated/member。
+  const handleUpdateWorkspaceDocumentVisibility = useCallback(
+    async (docId: string, visibility: "public" | "authenticated" | "member"): Promise<void> => {
+      try {
+        const updated = await updateDocumentVisibility(docId, visibility);
+        const visibilityLabel =
+          updated.visibility === "public"
+            ? "完全公开"
+            : updated.visibility === "authenticated"
+              ? "登录可见"
+              : "成员可见";
+        setStatusMessage(`文档可见性已更新：${visibilityLabel}`);
+        toast.success(`文档可见性已更新：${visibilityLabel}`);
+      } catch (error) {
+        setStatusMessage(`更新文档可见性失败：${formatError(error)}`);
+        toast.error(`更新文档可见性失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [updateDocumentVisibility]
   );
 
   // 侧栏拖拽移动：按起始宽度和鼠标偏移计算目标宽度。
@@ -1754,8 +1846,23 @@ export default function App() {
     );
   }
 
-  // 登录前只展示认证面板，不渲染编辑器布局。
-  if (isAuthChecking || !activeUser) {
+  // 会话校验进行中只展示加载占位，避免在编辑页短暂闪出登录表单。
+  if (isAuthChecking) {
+    return (
+      <>
+        <Toaster />
+        <div className="admin-auth-page">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <LoaderCircle size={16} className="animate-spin" />
+            <span>检查登录状态中...</span>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // 未登录时展示认证面板，不渲染编辑器布局。
+  if (!activeUser) {
     return (
       <>
         <Toaster />
@@ -1990,6 +2097,7 @@ export default function App() {
             workspaceTree={workspaceTree}
             onOpenDocument={handleOpenWorkspaceDocument}
             onCreateNode={handleCreateWorkspaceNode}
+            onUpdateDocumentVisibility={handleUpdateWorkspaceDocumentVisibility}
             onRenameNode={handleRenameWorkspaceNode}
             onDeleteNode={handleDeleteWorkspaceNode}
           />
@@ -2028,7 +2136,7 @@ export default function App() {
             onChange={(value) => {
               // 录入编辑内容，并将状态切回可保存。
               setContent(value);
-              if (saveStatus !== "loading") {
+              if (saveStatus !== "loading" || Boolean(activeDocId)) {
                 setSaveStatus("ready");
               }
             }}

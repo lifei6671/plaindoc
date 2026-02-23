@@ -78,6 +78,7 @@ var errorCodeRegistry = map[string]int{
 	"OPERATION_TOKEN_INVALID":        4008,
 	"SPACE_CATEGORY_NAME_EXISTS":     4009,
 	"DOCUMENT_VERSION_CONFLICT":      4010,
+	"SPACE_ALREADY_EXISTS":           4011,
 
 	// 5000 段：业务约束。
 	"SPACE_DELETED":                    5001,

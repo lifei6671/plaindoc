@@ -1,4 +1,17 @@
-import { ChevronDown, ChevronRight, FilePlus2, FolderPlus, PencilLine, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FilePlus2,
+  FolderPlus,
+  Globe,
+  Lock,
+  LockOpen,
+  PencilLine,
+  Plus,
+  Trash2,
+  Users
+} from "lucide-react";
 import {
   memo,
   useCallback,
@@ -20,7 +33,7 @@ import {
   type TreeItemRenderContext,
   type TreeViewState
 } from "react-complex-tree";
-import type { CreateNodeResult, NodeType, TreeNode } from "../data-access";
+import type { CreateNodeResult, NodeType, TreeNode, Visibility } from "../data-access";
 import { formatError } from "../editor/status-utils";
 import { useConfirmDialog } from "./ConfirmDialog";
 import {
@@ -29,6 +42,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "./ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { toast } from "sonner";
 
 const WORKSPACE_TREE_ID = "workspace-doc-tree";
 const WORKSPACE_TREE_ROOT_ID = "__workspace_doc_tree_root__";
@@ -61,6 +76,7 @@ interface WorkspaceTreeProps {
     type: NodeType;
     title: string;
   }) => Promise<CreateNodeResult>;
+  onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
 }
@@ -176,6 +192,69 @@ function buildDraftNodeID(): string {
   return `draft-${Date.now().toString(36)}-${randomValue}`;
 }
 
+function collectAncestorNodeIds(
+  nodeId: string,
+  parentNodeIdByNodeID: Map<string, string | null>
+): string[] {
+  const ancestorNodeIds: string[] = [];
+  const visitedNodeIds = new Set<string>();
+  let currentNodeID = parentNodeIdByNodeID.get(nodeId) ?? null;
+
+  while (currentNodeID && !visitedNodeIds.has(currentNodeID)) {
+    ancestorNodeIds.push(currentNodeID);
+    visitedNodeIds.add(currentNodeID);
+    currentNodeID = parentNodeIdByNodeID.get(currentNodeID) ?? null;
+  }
+
+  return ancestorNodeIds;
+}
+
+function collectDescendantNodeIds(nodeId: string, nodeById: Map<string, TreeNode>): string[] {
+  const rootNode = nodeById.get(nodeId);
+  if (!rootNode || rootNode.children.length === 0) {
+    return [];
+  }
+
+  const descendantNodeIds: string[] = [];
+  const pendingNodes: TreeNode[] = [...rootNode.children];
+  while (pendingNodes.length > 0) {
+    const currentNode = pendingNodes.pop();
+    if (!currentNode) {
+      continue;
+    }
+    descendantNodeIds.push(currentNode.id);
+    if (currentNode.children.length > 0) {
+      pendingNodes.push(...currentNode.children);
+    }
+  }
+  return descendantNodeIds;
+}
+
+function resolveVisibilityMarkerConfig(
+  visibilityInput: Visibility | undefined
+): { label: string; variant: "public" | "authenticated" | "member"; className: string } {
+  const visibility = visibilityInput ?? "member";
+  if (visibility === "public") {
+    return {
+      label: "公开",
+      variant: "public",
+      className: "text-[#166534]"
+    };
+  }
+  if (visibility === "authenticated") {
+    return {
+      label: "登录可见",
+      variant: "authenticated",
+      className: "text-[#1d4ed8]"
+    };
+  }
+  return {
+    label: "成员可见",
+    variant: "member",
+    className: "text-[#334155]"
+  };
+}
+
 function mergeDraftNodesIntoTree(
   baseNodes: TreeNode[],
   draftNodes: PendingCreateDraftNode[]
@@ -228,6 +307,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   activeDocId,
   onOpenDocument,
   onCreateNode,
+  onUpdateDocumentVisibility,
   onRenameNode,
   onDeleteNode
 }: WorkspaceTreeProps) {
@@ -238,7 +318,41 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     [draftNodes, nodes]
   );
   const { items, nodeById } = useMemo(() => buildTreeItems(mergedNodes), [mergedNodes]);
+  const activeTreeItemId = useMemo(() => {
+    if (!activeDocId) {
+      return null;
+    }
+    if (items[activeDocId]) {
+      return activeDocId;
+    }
+    for (const [nodeId, node] of nodeById.entries()) {
+      if (node.type !== "doc") {
+        continue;
+      }
+      if ((node.documentId ?? node.id) === activeDocId) {
+        return nodeId;
+      }
+    }
+    return null;
+  }, [activeDocId, items, nodeById]);
+  const parentNodeIdByNodeID = useMemo(() => {
+    const mappedParentNodeIDs = new Map<string, string | null>();
+    for (const [nodeID, node] of nodeById.entries()) {
+      const normalizedParentNodeID = (node.parentId ?? "").trim();
+      mappedParentNodeIDs.set(nodeID, normalizedParentNodeID || null);
+    }
+    return mappedParentNodeIDs;
+  }, [nodeById]);
   const expandableNodeIds = useMemo(() => collectExpandableNodeIds(mergedNodes), [mergedNodes]);
+  const expandableNodeIdSet = useMemo(() => new Set(expandableNodeIds), [expandableNodeIds]);
+  const autoExpandedNodeIds = useMemo(() => {
+    if (!activeTreeItemId) {
+      return [];
+    }
+    return collectAncestorNodeIds(activeTreeItemId, parentNodeIdByNodeID).filter((nodeID) =>
+      expandableNodeIdSet.has(nodeID)
+    );
+  }, [activeTreeItemId, expandableNodeIdSet, parentNodeIdByNodeID]);
   const draftNodeByID = useMemo(() => {
     const mappedDraftNodes = new Map<string, PendingCreateDraftNode>();
     for (const draftNode of draftNodes) {
@@ -246,13 +360,26 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     }
     return mappedDraftNodes;
   }, [draftNodes]);
-  const knownExpandableNodeIdsRef = useRef<Set<string>>(new Set());
+  const lastAutoScrolledActiveTreeItemIDRef = useRef<string | null>(null);
   const actionMenuRootRef = useRef<HTMLDivElement | null>(null);
   const inlineEditInputRef = useRef<HTMLInputElement | null>(null);
   const pendingInlineEditFocusNodeIdRef = useRef<string | null>(null);
   const isCommittingInlineEditRef = useRef(false);
   // 默认全折叠：首次进入目录树时不自动展开任何节点。
-  const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
+  const [manuallyExpandedNodeIds, setManuallyExpandedNodeIds] = useState<string[]>([]);
+  const expandedNodeIds = useMemo(() => {
+    if (autoExpandedNodeIds.length === 0) {
+      return manuallyExpandedNodeIds;
+    }
+    const mergedExpandedNodeIDs = new Set(autoExpandedNodeIds);
+    for (const nodeID of manuallyExpandedNodeIds) {
+      if (!expandableNodeIdSet.has(nodeID)) {
+        continue;
+      }
+      mergedExpandedNodeIDs.add(nodeID);
+    }
+    return Array.from(mergedExpandedNodeIDs);
+  }, [autoExpandedNodeIds, expandableNodeIdSet, manuallyExpandedNodeIds]);
   const [openActionNodeId, setOpenActionNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
@@ -264,11 +391,44 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   // 这样可以保持“默认全折叠”与“用户手动展开优先”。
   useEffect(() => {
     const currentExpandableNodeIdSet = new Set(expandableNodeIds);
-    setExpandedNodeIds((previousExpandedNodeIds) => {
+    setManuallyExpandedNodeIds((previousExpandedNodeIds) => {
       return previousExpandedNodeIds.filter((nodeId) => currentExpandableNodeIdSet.has(nodeId));
     });
-    knownExpandableNodeIdsRef.current = currentExpandableNodeIdSet;
   }, [expandableNodeIds]);
+
+  // 自动滚动到当前激活文档，避免刷新后需要手动在树里二次定位。
+  useEffect(() => {
+    if (!activeTreeItemId) {
+      return;
+    }
+    if (lastAutoScrolledActiveTreeItemIDRef.current === activeTreeItemId) {
+      return;
+    }
+
+    const targetElementID = `workspace-tree-item-${activeTreeItemId}`;
+    const rafID = window.requestAnimationFrame(() => {
+      const targetElement = document.getElementById(targetElementID);
+      if (!(targetElement instanceof HTMLElement)) {
+        return;
+      }
+      targetElement.scrollIntoView({
+        block: "nearest",
+        inline: "nearest"
+      });
+      lastAutoScrolledActiveTreeItemIDRef.current = activeTreeItemId;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafID);
+    };
+  }, [activeTreeItemId, expandedNodeIds]);
+
+  useEffect(() => {
+    if (activeTreeItemId) {
+      return;
+    }
+    lastAutoScrolledActiveTreeItemIDRef.current = null;
+  }, [activeTreeItemId]);
 
   // 目录刷新后若菜单目标已不存在，自动关闭动作菜单。
   useEffect(() => {
@@ -372,19 +532,15 @@ export const WorkspaceTree = memo(function WorkspaceTree({
 
   const viewState = useMemo<TreeViewState>(() => {
     // 行内编辑期间不让树组件接管焦点，避免输入框因焦点切换触发 onBlur 误提交。
-    const focusedItem = editingNodeId
-      ? undefined
-      : activeDocId && items[activeDocId]
-        ? activeDocId
-        : undefined;
+    const focusedItem = editingNodeId ? undefined : activeTreeItemId ?? undefined;
     return {
       [WORKSPACE_TREE_ID]: {
         expandedItems: expandedNodeIds,
-        selectedItems: activeDocId ? [activeDocId] : [],
+        selectedItems: activeTreeItemId ? [activeTreeItemId] : [],
         focusedItem
       }
     };
-  }, [activeDocId, editingNodeId, expandedNodeIds, items]);
+  }, [activeTreeItemId, editingNodeId, expandedNodeIds]);
 
   // 阻止菜单按钮冒泡到树项主操作，避免误触发文档打开。
   const stopTreeItemEvent = useCallback((event: MouseEvent<HTMLElement>) => {
@@ -403,7 +559,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       await task();
       setOpenActionNodeId(null);
     } catch (error) {
-      window.alert(`操作失败：${formatError(error)}`);
+      toast.error(`操作失败：${formatError(error)}`);
     }
   }, []);
 
@@ -518,7 +674,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         }
       ]);
       if (input.parentId) {
-        setExpandedNodeIds((previousExpandedNodeIds) => {
+        setManuallyExpandedNodeIds((previousExpandedNodeIds) => {
           if (previousExpandedNodeIds.includes(input.parentId!)) {
             return previousExpandedNodeIds;
           }
@@ -533,20 +689,25 @@ export const WorkspaceTree = memo(function WorkspaceTree({
 
   const handleExpandNode = useCallback((item: TreeItem<WorkspaceTreeItemData>) => {
     const nodeId = String(item.index);
-    setExpandedNodeIds((previousExpandedNodeIds) => {
-      if (previousExpandedNodeIds.includes(nodeId)) {
-        return previousExpandedNodeIds;
+    const descendantNodeIdSet = new Set(collectDescendantNodeIds(nodeId, nodeById));
+    setManuallyExpandedNodeIds((previousExpandedNodeIds) => {
+      const filteredExpandedNodeIds = previousExpandedNodeIds.filter(
+        (expandedNodeID) => !descendantNodeIdSet.has(expandedNodeID)
+      );
+      if (filteredExpandedNodeIds.includes(nodeId)) {
+        return filteredExpandedNodeIds;
       }
-      return [...previousExpandedNodeIds, nodeId];
+      return [...filteredExpandedNodeIds, nodeId];
     });
-  }, []);
+  }, [nodeById]);
 
   const handleCollapseNode = useCallback((item: TreeItem<WorkspaceTreeItemData>) => {
     const nodeId = String(item.index);
-    setExpandedNodeIds((previousExpandedNodeIds) =>
-      previousExpandedNodeIds.filter((expandedNodeId) => expandedNodeId !== nodeId)
+    const collapsedNodeIdSet = new Set([nodeId, ...collectDescendantNodeIds(nodeId, nodeById)]);
+    setManuallyExpandedNodeIds((previousExpandedNodeIds) =>
+      previousExpandedNodeIds.filter((expandedNodeId) => !collapsedNodeIdSet.has(expandedNodeId))
     );
-  }, []);
+  }, [nodeById]);
 
   // 主操作仅用于打开文档；目录展开收起交给箭头交互管理。
   const handlePrimaryAction = useCallback(
@@ -554,15 +715,23 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (item.data.type !== "doc" || !item.data.nodeId) {
         return;
       }
-      if (draftNodeByID.has(item.data.nodeId)) {
+      const currentNode = nodeById.get(item.data.nodeId);
+      if (!currentNode || currentNode.type !== "doc") {
+        return;
+      }
+      if (draftNodeByID.has(currentNode.id)) {
+        return;
+      }
+      const documentID = (currentNode.documentId ?? currentNode.id ?? "").trim();
+      if (!documentID) {
         return;
       }
       setOpenActionNodeId(null);
-      void onOpenDocument(item.data.nodeId).catch(() => {
+      void onOpenDocument(documentID).catch(() => {
         // 上层会统一更新状态与路由，这里吞掉 Promise rejection 避免控制台噪音。
       });
     },
-    [draftNodeByID, onOpenDocument]
+    [draftNodeByID, nodeById, onOpenDocument]
   );
 
   const handleCreateChildDocument = useCallback(
@@ -639,6 +808,24 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     [confirmByModal, nodeById, onDeleteNode]
   );
 
+  const handleUpdateNodeVisibility = useCallback(
+    async (nodeId: string, visibility: Visibility): Promise<void> => {
+      const currentNode = nodeById.get(nodeId);
+      if (!currentNode) {
+        throw new Error("目录节点不存在");
+      }
+      if (currentNode.type !== "doc") {
+        throw new Error("仅文档支持可见性设置");
+      }
+      const documentID = (currentNode.documentId ?? currentNode.id ?? "").trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不存在");
+      }
+      await onUpdateDocumentVisibility(documentID, visibility);
+    },
+    [nodeById, onUpdateDocumentVisibility]
+  );
+
   const handleCreateRootDocument = useCallback(async () => {
     if (isCreatingFirstDocument) {
       return;
@@ -671,12 +858,18 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           </li>
         );
       }
+      const currentNode = nodeById.get(nodeId) ?? null;
+      const currentDocumentID =
+        currentNode?.type === "doc" ? (currentNode.documentId ?? currentNode.id ?? "").trim() : "";
       const isFolder = item.data.type === "folder" || item.isFolder;
-      const isActive = nodeId === activeDocId;
+      const isActive = nodeId === activeDocId || (currentDocumentID !== "" && currentDocumentID === activeDocId);
       const isActionMenuOpen = openActionNodeId === nodeId;
       const isInlineEditing = editingNodeId === nodeId;
       const isDraftNode = draftNodeByID.has(nodeId);
       const isCreatingDraftNode = creatingDraftNodeIdSet.has(nodeId);
+      const currentDocumentVisibility: Visibility =
+        currentNode?.type === "doc" ? currentNode.visibility ?? "member" : "member";
+      const nodeTitleText = (currentNode?.title ?? item.data.title ?? "").trim() || "未命名文档";
       const rowStyle = {
         ...(context.itemContainerWithoutChildrenProps.style ?? {}),
         paddingLeft: `${8 + depth * 20}px`,
@@ -684,11 +877,26 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       };
       const interactiveType = context.isRenaming || isInlineEditing ? undefined : "button";
       const InteractiveComponent = context.isRenaming || isInlineEditing ? "div" : "button";
+      const treeInteractiveElementProps =
+        !isInlineEditing && currentNode?.type !== "doc"
+          ? ((context.interactiveElementProps as any) ?? {})
+          : {};
+
+      const openCurrentDocument = () => {
+        if (!currentDocumentID || isDraftNode) {
+          return;
+        }
+        setOpenActionNodeId(null);
+        void onOpenDocument(currentDocumentID).catch(() => {
+          // 上层会统一更新状态与路由，这里吞掉 Promise rejection 避免控制台噪音。
+        });
+      };
 
       return (
         <li {...(context.itemContainerWithChildrenProps as any)} className="m-0 p-0">
           <div
             {...(context.itemContainerWithoutChildrenProps as any)}
+            id={`workspace-tree-item-${nodeId}`}
             className={mergeClassNames(
               "group relative flex min-h-[36px] w-full cursor-pointer items-center rounded-[10px] pr-2 text-[14px] text-[#2f2f30]",
               isActive ? "bg-[#d9dade]" : "bg-transparent hover:bg-[#e8e8ea]",
@@ -708,7 +916,28 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             </span>
             <InteractiveComponent
               type={interactiveType}
-              {...(!isInlineEditing ? (context.interactiveElementProps as any) : {})}
+              {...treeInteractiveElementProps}
+              onClick={
+                !isInlineEditing && currentNode?.type === "doc"
+                  ? (event: MouseEvent<HTMLElement>) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      openCurrentDocument();
+                    }
+                  : treeInteractiveElementProps.onClick
+              }
+              onKeyDown={
+                !isInlineEditing && currentNode?.type === "doc"
+                  ? (event: ReactKeyboardEvent<HTMLElement>) => {
+                      if (event.key !== "Enter" && event.key !== " ") {
+                        return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      openCurrentDocument();
+                    }
+                  : treeInteractiveElementProps.onKeyDown
+              }
               className="flex min-h-[36px] min-w-0 flex-1 !cursor-pointer items-center border-0 bg-transparent p-0 text-left text-[14px] text-[#2f2f30] focus-visible:outline-none disabled:!cursor-pointer"
             >
               {isInlineEditing ? (
@@ -748,15 +977,49 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                 />
               ) : (
                 <>
-                  <span
-                    className={mergeClassNames(
-                      "min-w-0 truncate leading-[1.3]",
-                      isActive && "font-semibold"
-                    )}
-                    title={item.data.title}
-                  >
-                    {title}
-                  </span>
+                  {currentNode?.type === "doc" ? (
+                    (() => {
+                      const marker = resolveVisibilityMarkerConfig(currentDocumentVisibility);
+                      return (
+                        <Tooltip delayDuration={120}>
+                          <TooltipTrigger asChild>
+                            <span
+                              className={mergeClassNames(
+                                "mr-1 inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center",
+                                marker.className
+                              )}
+                              aria-label={`可见性：${marker.label}`}
+                            >
+                              {marker.variant === "member" ? <Lock size={14} /> : null}
+                              {marker.variant === "authenticated" ? <LockOpen size={14} /> : null}
+                              {marker.variant === "public" ? (
+                                <span className="relative inline-flex h-[14px] w-[14px] items-center justify-center">
+                                  <Lock size={14} />
+                                  <span className="pointer-events-none absolute h-[2px] w-[15px] rotate-[-35deg] rounded-full bg-current" />
+                                </span>
+                              ) : null}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">可见性：{marker.label}</TooltipContent>
+                        </Tooltip>
+                      );
+                    })()
+                  ) : null}
+                  <Tooltip delayDuration={120}>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={mergeClassNames(
+                          "min-w-0 truncate leading-[1.3]",
+                          isActive && "font-semibold"
+                        )}
+                      >
+                        {title}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" className="max-w-[320px] whitespace-pre-wrap break-words">
+                      {nodeTitleText}
+                    </TooltipContent>
+                  </Tooltip>
                   {isDraftNode && isCreatingDraftNode ? (
                     <span className="ml-2 shrink-0 text-[11px] text-[#8a8d90]">创建中...</span>
                   ) : null}
@@ -829,6 +1092,62 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                       <FolderPlus size={14} />
                       <span>新建子目录</span>
                     </button>
+                    {currentNode?.type === "doc" ? (
+                      <>
+                        <div className="my-1 h-px bg-[#eceff3]" />
+                        <button
+                          type="button"
+                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          role="menuitemradio"
+                          aria-checked={currentDocumentVisibility === "public"}
+                          onMouseDown={stopTreeItemEvent}
+                          onClick={(event) => {
+                            stopTreeItemEvent(event);
+                            void runActionMenuTask(() => handleUpdateNodeVisibility(nodeId, "public"));
+                          }}
+                        >
+                          <Globe size={14} />
+                          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                            <span>设为完全公开</span>
+                            {currentDocumentVisibility === "public" ? <Check size={13} /> : null}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          role="menuitemradio"
+                          aria-checked={currentDocumentVisibility === "authenticated"}
+                          onMouseDown={stopTreeItemEvent}
+                          onClick={(event) => {
+                            stopTreeItemEvent(event);
+                            void runActionMenuTask(() => handleUpdateNodeVisibility(nodeId, "authenticated"));
+                          }}
+                        >
+                          <Lock size={14} />
+                          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                            <span>设为登录可见</span>
+                            {currentDocumentVisibility === "authenticated" ? <Check size={13} /> : null}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          role="menuitemradio"
+                          aria-checked={currentDocumentVisibility === "member"}
+                          onMouseDown={stopTreeItemEvent}
+                          onClick={(event) => {
+                            stopTreeItemEvent(event);
+                            void runActionMenuTask(() => handleUpdateNodeVisibility(nodeId, "member"));
+                          }}
+                        >
+                          <Users size={14} />
+                          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                            <span>设为成员可见</span>
+                            {currentDocumentVisibility === "member" ? <Check size={13} /> : null}
+                          </span>
+                        </button>
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
@@ -873,9 +1192,11 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       handleCreateSiblingDocument,
       handleDeleteNode,
       handleRenameNode,
+      handleUpdateNodeVisibility,
       cancelInlineEdit,
       commitInlineEdit,
       editingNodeId,
+      nodeById,
       removeDraftNode,
       editingNodeTitle,
       openActionNodeId,
@@ -886,7 +1207,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   );
 
   return (
-    <>
+    <TooltipProvider delayDuration={120}>
       {confirmDialog}
       <div className="mb-2 flex h-11 items-center justify-between border-b border-[#d9dade] px-2">
         <span className="text-[18px] font-semibold text-[#1f2328]">目录</span>
@@ -948,8 +1269,6 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           canReorderItems={false}
           canSearch={false}
           canRename={false}
-          // 允许“可展开文档”点击触发主动作，避免仅叶子文档可打开。
-          canInvokePrimaryActionOnItemContainer
           onExpandItem={handleExpandNode}
           onCollapseItem={handleCollapseNode}
           onPrimaryAction={handlePrimaryAction}
@@ -974,6 +1293,6 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           <Tree treeId={WORKSPACE_TREE_ID} rootItem={WORKSPACE_TREE_ROOT_ID} treeLabel="工作区目录树" />
         </ControlledTreeEnvironment>
       )}
-    </>
+    </TooltipProvider>
   );
 });

@@ -102,6 +102,14 @@ function renderVisibilityBadgeClass(value: Visibility): string {
   }
 }
 
+function buildSpaceReaderPath(spaceId: string): string {
+  return `/r/${encodeURIComponent(spaceId)}`;
+}
+
+function buildDocumentReaderPath(spaceId: string, documentId: string): string {
+  return `${buildSpaceReaderPath(spaceId)}/${encodeURIComponent(documentId)}`;
+}
+
 export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
 
@@ -543,7 +551,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
           </AdminBulkActionBar>
 
           <AdminTableContainer>
-              <table className="w-full min-w-[1240px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[1240px] table-fixed border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                   <tr className="text-xs uppercase tracking-wide text-slate-600">
                     <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
@@ -554,12 +562,12 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                         aria-label="全选文档"
                       />
                     </th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">文档信息</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">所属空间</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
+                    <th className="w-[360px] border-b border-slate-200 px-3 py-2 font-semibold">文档信息</th>
+                    <th className="w-[300px] border-b border-slate-200 px-3 py-2 font-semibold">所属空间</th>
+                    <th className="w-[120px] border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
+                    <th className="w-[140px] border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                    <th className="w-[170px] border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                    <th className="w-[240px] border-b border-slate-200 px-3 py-2 font-semibold">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -582,9 +590,11 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                     documentsState.items.map((document) => {
                       const isActioning = actioningDocumentID === document.documentId || batchActioning;
                       const isDeleted = document.status === "deleted";
+                      const spaceReaderPath = buildSpaceReaderPath(document.spaceId);
+                      const documentReaderPath = buildDocumentReaderPath(document.spaceId, document.documentId);
                       return (
                         <tr key={document.documentId} className="border-b border-slate-100 align-top text-slate-700">
-                          <td className="px-3 py-3">
+                          <td className="min-w-0 px-3 py-3">
                             <Checkbox
                               checked={selectedDocumentSet.has(document.documentId)}
                               disabled={selectionDisabled || isDeleted}
@@ -592,20 +602,58 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                               aria-label={`选择文档 ${document.title || document.documentId}`}
                             />
                           </td>
-                          <td className="px-3 py-3">
+                          <td className="min-w-0 px-3 py-3">
                             <div className="grid gap-1">
-                              <strong className="text-sm font-semibold text-slate-900">{document.title || "未命名文档"}</strong>
-                              <code className="w-fit rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
-                                {document.documentId}
-                              </code>
-                              <code className="w-fit rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-                                {document.nodeId}
-                              </code>
+                              <a
+                                className={`w-fit text-sm font-semibold no-underline transition-colors hover:no-underline ${
+                                  isDeleted
+                                    ? "pointer-events-none text-slate-400"
+                                    : "text-slate-900 hover:text-sky-700"
+                                }`}
+                                href={documentReaderPath}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={isDeleted ? "已删除文档不可访问" : "打开文档阅读页"}
+                                aria-disabled={isDeleted}
+                              >
+                                {document.title || "未命名文档"}
+                              </a>
+                              <div className="flex min-w-0 items-center gap-1.5 text-xs">
+                                <span className="shrink-0 text-slate-500">文档 ID</span>
+                                <code
+                                  className="max-w-[280px] truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-sky-700"
+                                  title={document.documentId}
+                                >
+                                  {document.documentId}
+                                </code>
+                              </div>
+                              <div className="flex min-w-0 items-center gap-1.5 text-xs">
+                                <span className="shrink-0 text-slate-500">节点 ID</span>
+                                <code
+                                  className="max-w-[280px] truncate rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-slate-600"
+                                  title={document.nodeId}
+                                >
+                                  {document.nodeId}
+                                </code>
+                              </div>
                             </div>
                           </td>
                           <td className="px-3 py-3">
                             <div className="grid gap-1 text-xs text-slate-600">
-                              <strong className="font-semibold text-slate-800">{document.spaceName || "-"}</strong>
+                              <a
+                                className={`w-fit font-semibold no-underline transition-colors hover:no-underline ${
+                                  isDeleted
+                                    ? "pointer-events-none text-slate-400"
+                                    : "text-slate-800 hover:text-sky-700"
+                                }`}
+                                href={spaceReaderPath}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={isDeleted ? "已删除文档所属空间不可访问" : "打开空间阅读页"}
+                                aria-disabled={isDeleted}
+                              >
+                                {document.spaceName || "-"}
+                              </a>
                               <span>
                                 {document.spaceOwnerName || "-"} / {document.spaceOwnerEmail || "-"}
                               </span>

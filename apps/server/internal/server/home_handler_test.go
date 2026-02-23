@@ -53,6 +53,49 @@ func TestRouter_Home_AnonymousUsesPublicCacheAndVisibility(t *testing.T) {
 		CategoryID:   categoryID,
 		CategoryName: "产品文档",
 	})
+	seedHomepageSpace(t, database, homepageSeedSpaceInput{
+		SpaceID:      "01homeanonspace00000000000005",
+		Name:         "Public With AuthDoc Hidden",
+		OwnerUserID:  ownerUserID,
+		Visibility:   "public",
+		CategoryID:   categoryID,
+		CategoryName: "产品文档",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeanonspace00000000000001",
+		NodeID:     "01homeanondocnode000000000001",
+		DocumentID: "01homeanondocument000000000001",
+		Title:      "Public Space A - Doc",
+		Visibility: "public",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeanonspace00000000000002",
+		NodeID:     "01homeanondocnode000000000002",
+		DocumentID: "01homeanondocument000000000002",
+		Title:      "Public Space B - Doc",
+		Visibility: "public",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeanonspace00000000000003",
+		NodeID:     "01homeanondocnode000000000003",
+		DocumentID: "01homeanondocument000000000003",
+		Title:      "Authenticated Hidden - Doc",
+		Visibility: "authenticated",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeanonspace00000000000004",
+		NodeID:     "01homeanondocnode000000000004",
+		DocumentID: "01homeanondocument000000000004",
+		Title:      "Member Hidden - Doc",
+		Visibility: "member",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeanonspace00000000000005",
+		NodeID:     "01homeanondocnode000000000005",
+		DocumentID: "01homeanondocument000000000005",
+		Title:      "Public With AuthDoc Hidden - Doc",
+		Visibility: "authenticated",
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := serve(req)
@@ -86,7 +129,7 @@ func TestRouter_Home_AnonymousUsesPublicCacheAndVisibility(t *testing.T) {
 	if !strings.Contains(body, "Public Space A") || !strings.Contains(body, "Public Space B") {
 		t.Fatalf("expected anonymous page contains public spaces, body=%s", body)
 	}
-	if strings.Contains(body, "Authenticated Hidden") || strings.Contains(body, "Member Hidden") {
+	if strings.Contains(body, "Authenticated Hidden") || strings.Contains(body, "Member Hidden") || strings.Contains(body, "Public With AuthDoc Hidden") {
 		t.Fatalf("expected anonymous page hide non-public spaces, body=%s", body)
 	}
 	if !strings.Contains(body, "/explore/"+categoryID) {
@@ -148,6 +191,34 @@ func TestRouter_Explore_LoggedInUsesNoStoreAndCategoryFilter(t *testing.T) {
 		Visibility:   "public",
 		CategoryID:   models.DefaultSpaceCategoryID,
 		CategoryName: models.DefaultSpaceCategoryName,
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeexplorespace000000000001",
+		NodeID:     "01homeexploredocnode000000000001",
+		DocumentID: "01homeexploredocument000000000001",
+		Title:      "Public In Category - Doc",
+		Visibility: "public",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeexplorespace000000000002",
+		NodeID:     "01homeexploredocnode000000000002",
+		DocumentID: "01homeexploredocument000000000002",
+		Title:      "Authenticated In Category - Doc",
+		Visibility: "authenticated",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeexplorespace000000000003",
+		NodeID:     "01homeexploredocnode000000000003",
+		DocumentID: "01homeexploredocument000000000003",
+		Title:      "Member In Category - Doc",
+		Visibility: "member",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homeexplorespace000000000004",
+		NodeID:     "01homeexploredocnode000000000004",
+		DocumentID: "01homeexploredocument000000000004",
+		Title:      "Public In Other Category - Doc",
+		Visibility: "public",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/explore/"+categoryID, nil)
@@ -246,6 +317,14 @@ type homepageSeedSpaceInput struct {
 	CategoryName string
 }
 
+type homepageSeedDocumentInput struct {
+	SpaceID    string
+	NodeID     string
+	DocumentID string
+	Title      string
+	Visibility string
+}
+
 func seedHomepageCategory(
 	t *testing.T,
 	database *storage.Database,
@@ -306,5 +385,38 @@ func seedHomepageSpaceMember(
 		"updated_at": now,
 	}).Error; err != nil {
 		t.Fatalf("insert homepage space member failed: %v", err)
+	}
+}
+
+func seedHomepageDocument(t *testing.T, database *storage.Database, input homepageSeedDocumentInput) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("nodes").Create(map[string]any{
+		"node_id":        input.NodeID,
+		"space_id":       input.SpaceID,
+		"parent_node_id": nil,
+		"type":           "doc",
+		"title":          input.Title,
+		"sort":           1,
+		"created_at":     now,
+		"updated_at":     now,
+	}).Error; err != nil {
+		t.Fatalf("insert homepage doc node failed: %v", err)
+	}
+
+	if err := database.ORM.Table("documents").Create(map[string]any{
+		"document_id": input.DocumentID,
+		"node_id":     input.NodeID,
+		"theme_id":    "default",
+		"visibility":  input.Visibility,
+		"status":      "active",
+		"title":       input.Title,
+		"content_md":  "# " + input.Title,
+		"version":     1,
+		"created_at":  now,
+		"updated_at":  now,
+	}).Error; err != nil {
+		t.Fatalf("insert homepage document failed: %v", err)
 	}
 }

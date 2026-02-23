@@ -189,7 +189,7 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 	})
 }
 
-// UpdateDocumentVisibility 更新文档公开级别（仅空间 owner 可操作）。
+// UpdateDocumentVisibility 更新文档公开级别（空间 owner / collaborator 可操作）。
 func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 	if h == nil || h.visibilityService == nil {
 		response.InternalError(c)
@@ -223,7 +223,7 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 		case errors.Is(err, service.ErrDocumentNotFound):
 			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
 		case errors.Is(err, service.ErrDocumentAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "only owner can update document visibility")
+			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient document permission")
 		default:
 			response.InternalError(c)
 		}

@@ -314,6 +314,55 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 			)
 	}
 
+	// 首页空间展示与阅读页权限必须一致：
+	// 至少存在一篇当前访问者可读（有效状态）的文档时，空间才进入首页/分类列表。
+	const normalizedSpaceVisibilityExpr = "CASE WHEN s.visibility IN ('public','authenticated','member') THEN s.visibility ELSE 'member' END"
+	const normalizedDocumentVisibilityExpr = "CASE WHEN d.visibility IN ('public','authenticated','member') THEN d.visibility ELSE 'member' END"
+	const normalizedDocumentStatusExpr = "CASE WHEN d.status IN ('active','banned','deleted') THEN d.status ELSE 'active' END"
+
+	documentVisibilityQuery := r.db.WithContext(ctx).
+		Table("documents AS d").
+		Select("1").
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Where("n.space_id = s.space_id").
+		Where(normalizedDocumentStatusExpr+" = ?", models.EntityStatusActive)
+
+	if viewerUserID == "" {
+		documentVisibilityQuery = documentVisibilityQuery.Where(
+			normalizedSpaceVisibilityExpr+" = ? AND "+normalizedDocumentVisibilityExpr+" = ?",
+			models.VisibilityPublic,
+			models.VisibilityPublic,
+		)
+	} else {
+		documentVisibilityQuery = documentVisibilityQuery.
+			Joins("LEFT JOIN space_members AS sm_doc ON sm_doc.space_id = s.space_id AND sm_doc.user_id = ?", viewerUserID).
+			Where(
+				"("+
+					"s.owner_user_id = ? OR "+
+					"(("+normalizedSpaceVisibilityExpr+" IN (?,?)) AND ("+normalizedDocumentVisibilityExpr+" IN (?,?))) OR "+
+					"(("+normalizedSpaceVisibilityExpr+" = ? OR "+normalizedDocumentVisibilityExpr+" = ?) AND sm_doc.id IS NOT NULL)"+
+					")",
+				viewerUserID,
+				models.VisibilityPublic,
+				models.VisibilityAuthenticated,
+				models.VisibilityPublic,
+				models.VisibilityAuthenticated,
+				models.VisibilityMember,
+				models.VisibilityMember,
+			)
+	}
+
+	// 空间无文档时也允许展示（点击后会进入“无可读文档”的友好提示），
+	// 仅在存在文档时要求至少有一篇可读文档。
+	spaceHasAnyDocumentQuery := r.db.WithContext(ctx).
+		Table("documents AS d_any").
+		Select("1").
+		Joins("JOIN nodes AS n_any ON n_any.node_id = d_any.node_id").
+		Where("n_any.space_id = s.space_id").
+		Where("d_any.deleted_at IS NULL")
+
+	baseQuery = baseQuery.Where("(NOT EXISTS (?) OR EXISTS (?))", spaceHasAnyDocumentQuery, documentVisibilityQuery)
+
 	var total int64
 	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err

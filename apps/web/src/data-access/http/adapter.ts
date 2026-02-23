@@ -508,6 +508,12 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         method: "PUT",
         body: JSON.stringify({ themeId })
       });
+    },
+    async updateDocumentVisibility(docId: string, visibility: "public" | "authenticated" | "member") {
+      return request<Document>(`/docs/${docId}/visibility`, {
+        method: "PUT",
+        body: JSON.stringify({ visibility })
+      });
     }
   };
 
@@ -652,14 +658,23 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
-    async createSpace(input: { name: string; description?: string; categoryId?: string; visibility?: "public" | "authenticated" | "member"; coverAssetId?: string }) {
+    async createSpace(input: {
+      spaceId?: string;
+      name: string;
+      description?: string;
+      categoryId?: string;
+      visibility?: "public" | "authenticated" | "member";
+      coverAssetId?: string;
+    }) {
       const name = input.name.trim();
       if (!name) {
         throw new Error("空间名称不能为空");
       }
+      const spaceId = (input.spaceId ?? "").trim();
       const space = await request<AdminSpace>("/admin/spaces", {
         method: "POST",
         body: JSON.stringify({
+          spaceId,
           name,
           description: input.description ?? "",
           categoryId: input.categoryId ?? "",

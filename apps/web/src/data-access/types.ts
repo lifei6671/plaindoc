@@ -24,11 +24,13 @@ export interface Space {
 
 export interface TreeNode {
   id: string;
+  documentId?: string;
   spaceId: string;
   parentId: string | null;
   type: NodeType;
   title: string;
   sort: number;
+  visibility?: Visibility;
   children: TreeNode[];
 }
 
@@ -40,6 +42,7 @@ export interface Document {
   contentMd: string;
   version: number;
   updatedAt: string;
+  visibility?: Visibility;
 }
 
 export interface DocumentRevision {
@@ -142,6 +145,7 @@ export interface DocumentGateway {
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
   listRevisions(docId: string): Promise<DocumentRevision[]>;
   setDocumentTheme(docId: string, themeId: string): Promise<Document>;
+  updateDocumentVisibility(docId: string, visibility: Visibility): Promise<Document>;
 }
 
 export interface Theme {
@@ -382,7 +386,14 @@ export interface AdminGateway {
   updateUserRole(input: { userId: string; role: "user" | AdminRole }): Promise<AdminUser>;
   updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }): Promise<AdminUser>;
   deleteUser(userId: string): Promise<void>;
-  createSpace(input: { name: string; description?: string; categoryId?: string; visibility?: Visibility; coverAssetId?: string }): Promise<AdminSpace>;
+  createSpace(input: {
+    spaceId?: string;
+    name: string;
+    description?: string;
+    categoryId?: string;
+    visibility?: Visibility;
+    coverAssetId?: string;
+  }): Promise<AdminSpace>;
   createSpaceCoverAsset(input: {
     source: AdminSpaceCoverSource;
     file?: File;

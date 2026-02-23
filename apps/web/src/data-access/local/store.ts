@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie";
-import type { Document, DocumentRevision, NodeType, Space, Theme, TreeNode, User } from "../types";
+import type { Document, DocumentRevision, NodeType, Space, Theme, TreeNode, User, Visibility } from "../types";
 import { BUILTIN_THEME_PRESETS } from "../../theme-presets";
 import { generateLowercaseUlid } from "./ulid";
 
@@ -44,6 +44,7 @@ export interface LocalDocument {
   ulid: string;
   nodeUlid: string;
   themeId: string;
+  visibility: Visibility;
   title: string;
   contentMd: string;
   version: number;
@@ -163,6 +164,30 @@ class LocalWorkspaceDatabase extends Dexie {
         await documentsTable.toCollection().modify((record) => {
           if (!record.themeId) {
             record.themeId = DEFAULT_THEME_ID;
+          }
+          if (!record.visibility) {
+            record.visibility = "member";
+          }
+        });
+      });
+
+    // v3: documents 增加 visibility 字段，统一使用 public/authenticated/member。
+    this.version(3)
+      .stores({
+        users: "++id,&ulid,&email,updatedAt,createdAt",
+        meta: "&key,updatedAt",
+        spaces: "++id,&ulid,updatedAt,createdAt,name",
+        nodes:
+          "++id,&ulid,spaceUlid,parentUlid,type,sort,updatedAt,[spaceUlid+parentUlid],[spaceUlid+parentUlid+sort]",
+        documents: "++id,&ulid,&nodeUlid,themeId,visibility,updatedAt,version",
+        revisions: "++id,&ulid,documentUlid,version,createdAt,[documentUlid+version],[documentUlid+createdAt]",
+        themes: "++id,&themeId,updatedAt,createdAt,builtIn,name"
+      })
+      .upgrade(async (tx) => {
+        const documentsTable = tx.table<LocalDocument, number>("documents");
+        await documentsTable.toCollection().modify((record) => {
+          if (!record.visibility) {
+            record.visibility = "member";
           }
         });
       });
@@ -303,6 +328,7 @@ async function ensureSeeded(): Promise<void> {
       ulid: nodeUlid,
       nodeUlid,
       themeId: DEFAULT_THEME_ID,
+      visibility: "member",
       title: "欢迎文档",
       contentMd: WELCOME_CONTENT,
       version: 1,
@@ -385,7 +411,8 @@ export function mapLocalDocument(record: LocalDocument): Document {
     title: record.title,
     contentMd: record.contentMd,
     version: record.version,
-    updatedAt: record.updatedAt
+    updatedAt: record.updatedAt,
+    visibility: record.visibility || "member"
   };
 }
 
@@ -416,17 +443,31 @@ export function mapLocalRevision(record: LocalDocumentRevision): DocumentRevisio
   };
 }
 
-export function buildTree(nodes: LocalNode[], parentId: string | null): TreeNode[] {
+interface LocalTreeDocumentMeta {
+  documentId: string;
+  visibility: Visibility;
+}
+
+export function buildTree(
+  nodes: LocalNode[],
+  parentId: string | null,
+  documentMetaByNodeUlid?: Map<string, LocalTreeDocumentMeta>
+): TreeNode[] {
   return nodes
     .filter((node) => node.parentUlid === parentId)
     .sort((left, right) => left.sort - right.sort || left.title.localeCompare(right.title))
-    .map((node) => ({
-      id: node.ulid,
-      spaceId: node.spaceUlid,
-      parentId: node.parentUlid,
-      type: node.type,
-      title: node.title,
-      sort: node.sort,
-      children: buildTree(nodes, node.ulid)
-    }));
+    .map((node) => {
+      const documentMeta = documentMetaByNodeUlid?.get(node.ulid);
+      return {
+        id: node.ulid,
+        documentId: documentMeta?.documentId ?? (node.type === "doc" ? node.ulid : undefined),
+        spaceId: node.spaceUlid,
+        parentId: node.parentUlid,
+        type: node.type,
+        title: node.title,
+        sort: node.sort,
+        visibility: node.type === "doc" ? (documentMeta?.visibility ?? "member") : undefined,
+        children: buildTree(nodes, node.ulid, documentMetaByNodeUlid)
+      };
+    });
 }

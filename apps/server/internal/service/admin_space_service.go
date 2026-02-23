@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,15 +17,19 @@ const (
 	defaultAdminSpacePage     = 1
 	defaultAdminSpacePageSize = 20
 	maxAdminSpacePageSize     = 100
+	maxAdminSpaceIDLength     = 26
 	maxAdminSpaceNameLength   = 120
 	maxAdminSpaceDescLength   = 280
 	maxAdminSpaceCategoryLen  = 40
 )
 
+var adminSpaceIDPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
+
 var (
 	ErrAdminSpaceInvalidStatusFilter      = errors.New("invalid admin space status filter")
 	ErrAdminSpaceInvalidVisibilityFilter  = errors.New("invalid admin space visibility filter")
 	ErrAdminSpaceInvalidSpaceID           = errors.New("admin space id is invalid")
+	ErrAdminSpaceAlreadyExists            = errors.New("admin space id already exists")
 	ErrAdminSpaceInvalidName              = errors.New("admin space name is invalid")
 	ErrAdminSpaceInvalidVisibility        = errors.New("admin space visibility is invalid")
 	ErrAdminSpaceInvalidStatus            = errors.New("admin space status is invalid")
@@ -84,6 +89,7 @@ type AdminSpaceCoverAsset struct {
 type CreateAdminSpaceInput struct {
 	ActorUserID  string
 	RequestID    string
+	SpaceID      string
 	Name         string
 	Description  string
 	CategoryID   string
@@ -935,6 +941,22 @@ func (s *AdminSpaceService) CreateSpace(
 		return AdminSpaceRecord{}, ErrAdminForbidden
 	}
 
+	spaceID, hasCustomSpaceID, err := normalizeAdminSpaceID(input.SpaceID)
+	if err != nil {
+		return AdminSpaceRecord{}, err
+	}
+	if hasCustomSpaceID {
+		existingSpace, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
+		if err == nil && existingSpace != nil {
+			return AdminSpaceRecord{}, ErrAdminSpaceAlreadyExists
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminSpaceRecord{}, err
+		}
+	} else {
+		spaceID = strings.ToLower(ulid.Make().String())
+	}
+
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len([]rune(name)) > maxAdminSpaceNameLength {
 		return AdminSpaceRecord{}, ErrAdminSpaceInvalidName
@@ -985,7 +1007,7 @@ func (s *AdminSpaceService) CreateSpace(
 
 	now := time.Now().UTC()
 	space := &models.Space{
-		SpaceID:      strings.ToLower(ulid.Make().String()),
+		SpaceID:      spaceID,
 		Name:         name,
 		Description:  description,
 		CategoryID:   resolvedCategory.CategoryID,
@@ -1066,6 +1088,20 @@ func (s *AdminSpaceService) CreateSpace(
 	}
 
 	return record, nil
+}
+
+func normalizeAdminSpaceID(rawSpaceID string) (spaceID string, hasCustom bool, err error) {
+	normalized := strings.ToLower(strings.TrimSpace(rawSpaceID))
+	if normalized == "" {
+		return "", false, nil
+	}
+	if len(normalized) > maxAdminSpaceIDLength {
+		return "", true, ErrAdminSpaceInvalidSpaceID
+	}
+	if !adminSpaceIDPattern.MatchString(normalized) {
+		return "", true, ErrAdminSpaceInvalidSpaceID
+	}
+	return normalized, true, nil
 }
 
 // CreateCoverAsset 创建空间封面资产（用户上传或系统生成）。

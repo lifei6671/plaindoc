@@ -37,13 +37,15 @@ type workspaceSpaceResponse struct {
 }
 
 type workspaceTreeNodeResponse struct {
-	ID       string                      `json:"id"`
-	SpaceID  string                      `json:"spaceId"`
-	ParentID *string                     `json:"parentId"`
-	Type     models.NodeType             `json:"type"`
-	Title    string                      `json:"title"`
-	Sort     int                         `json:"sort"`
-	Children []workspaceTreeNodeResponse `json:"children"`
+	ID         string                      `json:"id"`
+	DocumentID *string                     `json:"documentId,omitempty"`
+	SpaceID    string                      `json:"spaceId"`
+	ParentID   *string                     `json:"parentId"`
+	Type       models.NodeType             `json:"type"`
+	Title      string                      `json:"title"`
+	Sort       int                         `json:"sort"`
+	Visibility *models.Visibility          `json:"visibility,omitempty"`
+	Children   []workspaceTreeNodeResponse `json:"children"`
 }
 
 type workspaceDocumentResponse struct {
@@ -108,13 +110,15 @@ type saveWorkspaceDocumentResponse struct {
 }
 
 type workspaceTreeNode struct {
-	ID       string
-	SpaceID  string
-	ParentID *string
-	Type     models.NodeType
-	Title    string
-	Sort     int
-	Children []*workspaceTreeNode
+	ID         string
+	DocumentID *string
+	SpaceID    string
+	ParentID   *string
+	Type       models.NodeType
+	Title      string
+	Sort       int
+	Visibility *models.Visibility
+	Children   []*workspaceTreeNode
 }
 
 // NewWorkspaceHandler 创建编辑器工作区处理器。
@@ -292,20 +296,32 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 	}
 
 	type nodeRow struct {
-		NodeID       string          `gorm:"column:node_id"`
-		SpaceID      string          `gorm:"column:space_id"`
-		ParentNodeID *string         `gorm:"column:parent_node_id"`
-		Type         models.NodeType `gorm:"column:type"`
-		Title        string          `gorm:"column:title"`
-		Sort         int             `gorm:"column:sort"`
+		NodeID             string          `gorm:"column:node_id"`
+		DocumentID         *string         `gorm:"column:document_id"`
+		SpaceID            string          `gorm:"column:space_id"`
+		ParentNodeID       *string         `gorm:"column:parent_node_id"`
+		Type               models.NodeType `gorm:"column:type"`
+		Title              string          `gorm:"column:title"`
+		Sort               int             `gorm:"column:sort"`
+		DocumentVisibility *string         `gorm:"column:document_visibility"`
 	}
 
 	var rows []nodeRow
 	if err := h.db.WithContext(c.Request.Context()).
-		Table("nodes").
-		Select("node_id", "space_id", "parent_node_id", "type", "title", "sort").
-		Where("space_id = ?", spaceID).
-		Order("parent_node_id ASC, sort ASC, id ASC").
+		Table("nodes AS n").
+		Select(
+			"n.node_id",
+			"d.document_id AS document_id",
+			"n.space_id",
+			"n.parent_node_id",
+			"n.type",
+			"n.title",
+			"n.sort",
+			"d.visibility AS document_visibility",
+		).
+		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
+		Where("n.space_id = ?", spaceID).
+		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
 		Find(&rows).Error; err != nil {
 		response.InternalError(c)
 		return
@@ -317,14 +333,18 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 		if nodeID == "" {
 			continue
 		}
+		documentID := normalizeOptionalString(row.DocumentID)
+		documentVisibility := normalizeWorkspaceDocumentVisibility(row.Type, row.DocumentVisibility)
 		treeNodes[nodeID] = &workspaceTreeNode{
-			ID:       nodeID,
-			SpaceID:  strings.TrimSpace(row.SpaceID),
-			ParentID: normalizeOptionalString(row.ParentNodeID),
-			Type:     normalizeWorkspaceNodeType(row.Type),
-			Title:    strings.TrimSpace(row.Title),
-			Sort:     row.Sort,
-			Children: make([]*workspaceTreeNode, 0),
+			ID:         nodeID,
+			DocumentID: documentID,
+			SpaceID:    strings.TrimSpace(row.SpaceID),
+			ParentID:   normalizeOptionalString(row.ParentNodeID),
+			Type:       normalizeWorkspaceNodeType(row.Type),
+			Title:      strings.TrimSpace(row.Title),
+			Sort:       row.Sort,
+			Visibility: documentVisibility,
+			Children:   make([]*workspaceTreeNode, 0),
 		}
 	}
 
@@ -373,6 +393,16 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
 		case errors.Is(err, service.ErrSpaceAccessDenied):
 			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+	spaceAccess, err := h.loadSpaceAccess(c.Request.Context(), spaceID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
 		default:
 			response.InternalError(c)
 		}
@@ -456,6 +486,10 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 	responseBody := createWorkspaceNodeResponse{
 		NodeID: node.NodeID,
 	}
+	defaultDocumentVisibility := spaceAccess.Visibility
+	if !models.IsValidVisibility(defaultDocumentVisibility) {
+		defaultDocumentVisibility = models.VisibilityMember
+	}
 
 	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(node).Error; err != nil {
@@ -467,7 +501,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 				DocumentID:      documentID,
 				NodeID:          node.NodeID,
 				ThemeID:         "default",
-				Visibility:      models.VisibilityMember,
+				Visibility:      defaultDocumentVisibility,
 				Status:          models.EntityStatusActive,
 				Title:           title,
 				ContentMD:       "",
@@ -1146,13 +1180,15 @@ func mapWorkspaceTreeResponses(nodes []*workspaceTreeNode) []workspaceTreeNodeRe
 			continue
 		}
 		items = append(items, workspaceTreeNodeResponse{
-			ID:       node.ID,
-			SpaceID:  node.SpaceID,
-			ParentID: node.ParentID,
-			Type:     normalizeWorkspaceNodeType(node.Type),
-			Title:    node.Title,
-			Sort:     node.Sort,
-			Children: mapWorkspaceTreeResponses(node.Children),
+			ID:         node.ID,
+			DocumentID: node.DocumentID,
+			SpaceID:    node.SpaceID,
+			ParentID:   node.ParentID,
+			Type:       normalizeWorkspaceNodeType(node.Type),
+			Title:      node.Title,
+			Sort:       node.Sort,
+			Visibility: node.Visibility,
+			Children:   mapWorkspaceTreeResponses(node.Children),
 		})
 	}
 	return items
@@ -1179,6 +1215,26 @@ func normalizeOptionalString(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func normalizeWorkspaceDocumentVisibility(
+	nodeType models.NodeType,
+	rawVisibility *string,
+) *models.Visibility {
+	if normalizeWorkspaceNodeType(nodeType) != models.NodeTypeDoc {
+		return nil
+	}
+
+	if rawVisibility == nil {
+		visibility := models.VisibilityMember
+		return &visibility
+	}
+
+	visibility := models.Visibility(strings.TrimSpace(*rawVisibility))
+	if !models.IsValidVisibility(visibility) {
+		visibility = models.VisibilityMember
+	}
+	return &visibility
 }
 
 func normalizeWorkspaceNodeType(value models.NodeType) models.NodeType {

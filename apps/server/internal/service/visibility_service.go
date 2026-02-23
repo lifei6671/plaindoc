@@ -174,14 +174,14 @@ func (s *VisibilityService) GetDocument(
 	return &documentAccess.Document, nil
 }
 
-// UpdateDocumentVisibility 仅允许空间 owner 修改文档可见性。
+// UpdateDocumentVisibility 允许空间 owner / collaborator 修改文档可见性。
 func (s *VisibilityService) UpdateDocumentVisibility(
 	ctx context.Context,
 	documentID string,
 	actorUserID string,
 	visibility models.Visibility,
 ) (*models.Document, error) {
-	if s == nil || s.documentRepo == nil {
+	if s == nil || s.spaceRepo == nil || s.documentRepo == nil {
 		return nil, errors.New("visibility service dependencies are nil")
 	}
 	if actorUserID == "" {
@@ -198,15 +198,21 @@ func (s *VisibilityService) UpdateDocumentVisibility(
 		}
 		return nil, err
 	}
-	if documentAccess.SpaceOwnerUserID != actorUserID {
-		return nil, ErrDocumentAccessDenied
-	}
 	if err := EnsureEntityActive(
 		documentAccess.SpaceStatus,
 		documentAccess.SpaceBannedAt,
 		documentAccess.SpaceDeletedAt,
 	); err != nil {
 		return nil, ErrDocumentAccessDenied
+	}
+	if strings.TrimSpace(documentAccess.SpaceOwnerUserID) != strings.TrimSpace(actorUserID) {
+		hasWriterAccess, accessErr := s.spaceRepo.HasWriterAccess(ctx, documentAccess.SpaceID, actorUserID)
+		if accessErr != nil {
+			return nil, accessErr
+		}
+		if !hasWriterAccess {
+			return nil, ErrDocumentAccessDenied
+		}
 	}
 
 	updated, err := s.documentRepo.UpdateVisibility(ctx, documentID, visibility)
