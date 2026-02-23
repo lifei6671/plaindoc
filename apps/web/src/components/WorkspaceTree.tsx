@@ -558,7 +558,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         return;
       }
       setOpenActionNodeId(null);
-      void onOpenDocument(item.data.nodeId);
+      void onOpenDocument(item.data.nodeId).catch(() => {
+        // 上层会统一更新状态与路由，这里吞掉 Promise rejection 避免控制台噪音。
+      });
     },
     [draftNodeByID, onOpenDocument]
   );

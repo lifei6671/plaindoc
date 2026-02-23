@@ -29,3 +29,4 @@ export function getDataGateway(): DataGateway {
 }
 
 export * from "./types";
+export * from "./auth-events";

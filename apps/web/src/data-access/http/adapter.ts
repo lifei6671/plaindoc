@@ -39,6 +39,7 @@ import {
   type UpdateNodeInput,
   type WorkspaceGateway
 } from "../types";
+import { AUTH_UNAUTHORIZED_EVENT, type AuthUnauthorizedEventDetail } from "../auth-events";
 import { createIndexedDbUserConfigGateway } from "../user-config/indexeddb-gateway";
 
 interface HttpAdapterOptions {
@@ -229,6 +230,24 @@ function normalizeUploadEndpoint(uploadEndpoint: string | undefined, apiBaseUrl:
 export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   let accessToken: string | null = readStoredValue(ACCESS_TOKEN_STORAGE_KEY);
   let refreshToken: string | null = readStoredValue(REFRESH_TOKEN_STORAGE_KEY);
+  let hasNotifiedUnauthorized = false;
+
+  const notifyUnauthorized = (status: number, code?: number, message?: string) => {
+    if (hasNotifiedUnauthorized) {
+      return;
+    }
+    hasNotifiedUnauthorized = true;
+    clearStoredTokens();
+    if (
+      typeof window === "undefined" ||
+      typeof window.dispatchEvent !== "function" ||
+      typeof CustomEvent !== "function"
+    ) {
+      return;
+    }
+    const detail: AuthUnauthorizedEventDetail = { status, code, message };
+    window.dispatchEvent(new CustomEvent<AuthUnauthorizedEventDetail>(AUTH_UNAUTHORIZED_EVENT, { detail }));
+  };
 
   const clearStoredTokens = () => {
     accessToken = null;
@@ -238,6 +257,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   };
 
   const saveSessionTokens = (session: HttpAuthSession) => {
+    hasNotifiedUnauthorized = false;
     if (typeof session.token === "string") {
       accessToken = session.token.trim() || null;
     }
@@ -319,6 +339,9 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
 
     if (!response.ok) {
       const message = extractErrorMessage(response.status, payload, rawBody);
+      if (response.status === 403 && resultCode === JSON_RESULT_UNAUTHORIZED_CODE) {
+        notifyUnauthorized(response.status, resultCode, message);
+      }
       throw toRequestError(response.status, message, resultCode);
     }
 

@@ -6,6 +6,7 @@ import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import {
   AlertCircle,
+  ArrowLeft,
   Bold,
   Code2,
   CheckCircle2,
@@ -64,7 +65,14 @@ import {
 } from "./components/ui/tooltip";
 import { AdminApp } from "./admin/AdminApp";
 import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./admin/routes";
-import { ConflictError, getDataGateway, type AuthSession, type CreateNodeResult } from "./data-access";
+import {
+  AUTH_UNAUTHORIZED_EVENT,
+  ConflictError,
+  getDataGateway,
+  type AuthSession,
+  type AuthUnauthorizedEventDetail,
+  type CreateNodeResult
+} from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
   FALLBACK_CONTENT,
@@ -131,6 +139,7 @@ const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode"
 const LOGIN_ROUTE_PATH = "/login";
 const REGISTER_ROUTE_PATH = "/register";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
+const ADMIN_SPACES_ROUTE_PATH = `${ADMIN_ROUTE_BASE_PATH}/spaces`;
 const LOCAL_AUTO_SAVE_DEBOUNCE_MS = 800;
 const HTTP_AUTO_SAVE_DEBOUNCE_MS = 800;
 const AUTO_SAVE_DEBOUNCE_MS =
@@ -697,6 +706,30 @@ export default function App() {
     command(view);
     view.focus();
   }, []);
+
+  // 全局监听会话过期事件：任意接口鉴权失败后都回到未登录态，交由路由守卫跳转登录页。
+  useEffect(() => {
+    const handleUnauthorized = (event: Event) => {
+      const detail = (event as CustomEvent<AuthUnauthorizedEventDetail>).detail;
+      pendingRouteDocumentIDRef.current = null;
+      setAuthSession({ user: null });
+      setAuthErrorMessage(null);
+      setIsAuthSubmitting(false);
+      setSaveStatus("loading");
+      setLastSavedAt(null);
+      const suffix = detail?.message?.trim() ? `：${detail.message.trim()}` : "";
+      setStatusMessage(`登录已过期，请重新登录${suffix}`);
+    };
+
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized as EventListener);
+    return () => {
+      window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized as EventListener);
+    };
+  }, [setLastSavedAt]);
+
+  const handleBackToAdminSpaces = useCallback(() => {
+    navigate(ADMIN_SPACES_ROUTE_PATH);
+  }, [navigate]);
 
   const routeDocExistsInTree = useMemo(() => {
     if (!routeDocId) {
@@ -1790,6 +1823,15 @@ export default function App() {
       <header className="header">
         <TooltipProvider delayDuration={120}>
           <div className="editor-toolbar" role="toolbar" aria-label="Markdown 常用语法工具栏">
+            <div className="editor-toolbar__group editor-toolbar__group--plain">
+              <EditorToolbarButton
+                label="返回后台空间管理"
+                className="editor-toolbar__button--highlight"
+                onClick={handleBackToAdminSpaces}
+              >
+                <ArrowLeft size={20} />
+              </EditorToolbarButton>
+            </div>
             <div className="editor-toolbar__group">
               <EditorToolbarButton label="撤销" onClick={() => runEditorToolbarCommand(undo)}>
                 <Undo2 size={15} />

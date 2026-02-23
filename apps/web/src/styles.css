@@ -79,6 +79,12 @@ input[type="reset"]:not(:disabled) {
   background: #f3f4f6;
 }
 
+.editor-toolbar__group--plain {
+  padding: 0px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
 .editor-toolbar__button {
   min-width: 30px;
   height: 30px;
@@ -107,6 +113,37 @@ input[type="reset"]:not(:disabled) {
   font-size: 14px;
   font-weight: 600;
   line-height: 1;
+}
+
+.editor-toolbar__button--with-label {
+  min-width: auto;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.editor-toolbar__button-label {
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.editor-toolbar__button--highlight {
+  padding: 10px;
+  height: 35px;
+  background: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.editor-toolbar__button--highlight:hover {
+  background: #15803d;
+  color: #ffffff;
+}
+
+.editor-toolbar__button--highlight:focus-visible {
+  outline: 2px solid #15803d;
+  outline-offset: 1px;
 }
 
 .editor-image-file-input {
@@ -2644,6 +2681,14 @@ input[type="reset"]:not(:disabled) {
     order: 2;
     flex-basis: 100%;
     width: 100%;
+  }
+
+  .editor-toolbar__button--with-label {
+    padding: 0 8px;
+  }
+
+  .editor-toolbar__button-label {
+    display: none;
   }
 
   .header-actions {
