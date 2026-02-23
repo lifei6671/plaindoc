@@ -5,7 +5,10 @@ import type { SaveIndicatorVariant, SaveStatus } from "./types";
 export function findFirstDocId(nodes: TreeNode[]): string | null {
   for (const node of nodes) {
     if (node.type === "doc") {
-      return node.id;
+      const resolvedDocumentID = (node.documentId ?? node.id ?? "").trim();
+      if (resolvedDocumentID) {
+        return resolvedDocumentID;
+      }
     }
     const childDocId = findFirstDocId(node.children);
     if (childDocId) {
