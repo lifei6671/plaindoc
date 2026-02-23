@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
@@ -147,11 +148,18 @@ func (s *VisibilityService) GetDocument(
 		return nil, ErrDocumentAccessDenied
 	}
 
+	// 空间 owner 恒具备读权限：直接短路返回，避免 member 可见性下的额外成员查询。
+	trimmedViewerUserID := strings.TrimSpace(viewerUserID)
+	if trimmedViewerUserID != "" && trimmedViewerUserID == strings.TrimSpace(documentAccess.SpaceOwnerUserID) {
+		documentAccess.Document.Visibility = normalizeVisibility(documentAccess.Document.Visibility)
+		return &documentAccess.Document, nil
+	}
+
 	effectiveVisibility := stricterVisibility(
 		normalizeVisibility(documentAccess.SpaceVisibility),
 		normalizeVisibility(documentAccess.Document.Visibility),
 	)
-	if err := s.authorizeRead(ctx, documentAccess.SpaceID, effectiveVisibility, viewerUserID); err != nil {
+	if err := s.authorizeRead(ctx, documentAccess.SpaceID, effectiveVisibility, trimmedViewerUserID); err != nil {
 		switch {
 		case errors.Is(err, ErrViewerLoginRequired):
 			return nil, ErrViewerLoginRequired

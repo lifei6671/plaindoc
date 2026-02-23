@@ -547,7 +547,11 @@ const imageHostingGateway = {
     // 中文注释：本地驱动没有管理后台系统配置，返回默认模板保证编辑器链路可用。
     return cloneImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG) as unknown as Record<string, unknown>;
   },
-  async uploadLocalImage(file: File): Promise<UploadLocalImageResult> {
+  async uploadLocalImage(
+    file: File,
+    _uploadEndpoint?: string,
+    _options?: { spaceId?: string | null }
+  ): Promise<UploadLocalImageResult> {
     // 中文注释：本地驱动下使用 data URL 兜底，便于离线体验粘贴上传流程。
     const dataURL = await readFileAsDataURL(file);
     return {

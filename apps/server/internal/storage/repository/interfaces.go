@@ -115,6 +115,7 @@ type SpaceRepository interface {
 	TransferOwnership(ctx context.Context, spaceID string, fromUserID string, toUserID string, updatedAt time.Time) (bool, error)
 	SoftDelete(ctx context.Context, spaceID string, deletedAt time.Time) (bool, error)
 	HasReaderAccess(ctx context.Context, spaceID string, userID string) (bool, error)
+	HasWriterAccess(ctx context.Context, spaceID string, userID string) (bool, error)
 }
 
 // ListVisibleHomepageSpacesParams 首页/分类页可见空间查询参数。

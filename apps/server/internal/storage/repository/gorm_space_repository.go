@@ -1085,9 +1085,13 @@ func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID strin
 		return false, nil
 	}
 
-	var count int64
+	// 使用 LIMIT 1 探测存在性，避免 COUNT(*) 在大表场景的额外扫描成本。
+	var probe struct {
+		Hit int `gorm:"column:hit"`
+	}
 	if err := r.db.WithContext(ctx).
 		Table("spaces AS s").
+		Select("1 AS hit").
 		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", userID).
 		Where(
 			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND (s.owner_user_id = ? OR (sm.id IS NOT NULL AND sm.role IN ?))",
@@ -1096,11 +1100,49 @@ func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID strin
 			userID,
 			[]models.Role{models.RoleOwner, models.RoleCollaborator, models.RoleReader},
 		).
-		Count(&count).Error; err != nil {
+		Limit(1).
+		Take(&probe).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
 		return false, err
 	}
 
-	return count > 0, nil
+	return true, nil
+}
+
+func (r *gormSpaceRepository) HasWriterAccess(ctx context.Context, spaceID string, userID string) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+	if userID == "" {
+		return false, nil
+	}
+
+	// writer 仅允许 owner / collaborator；reader 不具备写能力。
+	var probe struct {
+		Hit int `gorm:"column:hit"`
+	}
+	if err := r.db.WithContext(ctx).
+		Table("spaces AS s").
+		Select("1 AS hit").
+		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", userID).
+		Where(
+			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND (s.owner_user_id = ? OR (sm.id IS NOT NULL AND sm.role IN ?))",
+			spaceID,
+			models.EntityStatusActive,
+			userID,
+			[]models.Role{models.RoleOwner, models.RoleCollaborator},
+		).
+		Limit(1).
+		Take(&probe).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }
 
 func normalizeSpaceMemberRole(value models.Role) models.Role {

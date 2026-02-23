@@ -28,13 +28,17 @@ func AccessLog(logger *slog.Logger) gin.HandlerFunc {
 		} else if status >= 400 {
 			level = slog.LevelWarn
 		}
+		latency := time.Since(start)
 
 		baseAttrs := []slog.Attr{
 			logit.String("request_id", response.RequestIDFromContext(c)),
 			logit.String("method", c.Request.Method),
 			logit.String("route", route),
 			logit.Int("status", status),
-			logit.Duration("latency", time.Since(start)),
+			// latency 保留原始 duration 类型，便于机器统计与告警聚合。
+			logit.Duration("latency", latency),
+			// latency_human 额外提供可读字符串，便于人工排查日志。
+			logit.String("latency_human", latency.String()),
 			logit.String("client_ip", c.ClientIP()),
 			logit.String("user_agent", c.Request.UserAgent()),
 		}

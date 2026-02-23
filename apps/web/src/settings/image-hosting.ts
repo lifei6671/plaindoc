@@ -49,7 +49,7 @@ export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
   },
   local: {
     uploadEndpoint: "/api/uploads/images",
-    publicBaseUrl: "/api/uploads/local"
+    publicBaseUrl: "/uploads"
   }
 };
 

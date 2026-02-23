@@ -1,20 +1,35 @@
+import { ListTree } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "./ui/tooltip";
 import type { TocItem } from "../editor/types";
 
 // 目录菜单组件入参：由父组件提供 TOC 数据和跳转行为。
 interface TocMenuProps {
   items: TocItem[];
   onSelectItem: (item: TocItem) => void;
+  triggerMode?: "default" | "icon";
+  tooltipText?: string;
 }
 
 // 目录菜单：仅控制自身开关状态，目录点击后导航到对应标题。
-export const TocMenu = memo(function TocMenu({ items, onSelectItem }: TocMenuProps) {
+export const TocMenu = memo(function TocMenu({
+  items,
+  onSelectItem,
+  triggerMode = "default",
+  tooltipText = "目录导航"
+}: TocMenuProps) {
   // 目录菜单展开状态独立维护，避免影响主视图。
   const [isTocMenuOpen, setIsTocMenuOpen] = useState(false);
   // 菜单根节点引用：用于判断是否点击了菜单外部。
   const tocMenuRef = useRef<HTMLDivElement | null>(null);
   // 目录是否为空。
   const hasItems = items.length > 0;
+  const isIconTrigger = triggerMode === "icon";
 
   // 切换目录菜单显示状态。
   const toggleTocMenu = useCallback(() => {
@@ -61,19 +76,38 @@ export const TocMenu = memo(function TocMenu({ items, onSelectItem }: TocMenuPro
     };
   }, [isTocMenuOpen]);
 
+  const triggerButton = (
+    <button
+      type="button"
+      className={`toc-menu__trigger ${isIconTrigger ? "toc-menu__trigger--icon" : ""}`}
+      aria-label="打开目录"
+      aria-haspopup="listbox"
+      aria-expanded={isTocMenuOpen}
+      onClick={toggleTocMenu}
+    >
+      {isIconTrigger ? (
+        <ListTree size={15} />
+      ) : (
+        <>
+          <span className="toc-menu__trigger-label">目录</span>
+          <span className="toc-menu__trigger-value">{hasItems ? `${items.length} 项` : "暂无"}</span>
+        </>
+      )}
+    </button>
+  );
+
   return (
     <div className="toc-menu" ref={tocMenuRef}>
-      <button
-        type="button"
-        className="toc-menu__trigger"
-        aria-label="打开目录"
-        aria-haspopup="listbox"
-        aria-expanded={isTocMenuOpen}
-        onClick={toggleTocMenu}
-      >
-        <span className="toc-menu__trigger-label">目录</span>
-        <span className="toc-menu__trigger-value">{hasItems ? `${items.length} 项` : "暂无"}</span>
-      </button>
+      {isIconTrigger ? (
+        <TooltipProvider delayDuration={120}>
+          <Tooltip>
+            <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+            <TooltipContent side="bottom">{tooltipText}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        triggerButton
+      )}
       {isTocMenuOpen ? (
         <div className="toc-menu__dropdown">
           {hasItems ? (

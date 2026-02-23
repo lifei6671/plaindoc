@@ -1,5 +1,12 @@
+import { Palette } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolvePreviewTheme, type PreviewThemeTemplate } from "../preview-themes";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "./ui/tooltip";
 import { StyleDetailsDrawer } from "./StyleDetailsDrawer";
 
 // 主题菜单组件入参：由父组件提供当前主题和切换回调。
@@ -8,6 +15,8 @@ interface ThemeMenuProps {
   activeThemeId: string;
   onSelectTheme: (themeId: string) => void;
   customPreviewStyleText: string;
+  triggerMode?: "default" | "icon";
+  tooltipText?: string;
 }
 
 // 独立主题菜单：开关状态内聚在子组件中，避免影响整页渲染。
@@ -15,7 +24,9 @@ export const ThemeMenu = memo(function ThemeMenu({
   themes,
   activeThemeId,
   onSelectTheme,
-  customPreviewStyleText
+  customPreviewStyleText,
+  triggerMode = "default",
+  tooltipText = "主题设置"
 }: ThemeMenuProps) {
   // 菜单展开状态仅影响当前子树，不触发父组件重渲染。
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
@@ -23,6 +34,7 @@ export const ThemeMenu = memo(function ThemeMenu({
   const [detailsThemeId, setDetailsThemeId] = useState<string | null>(null);
   // 菜单根节点引用：用于判断点击是否发生在菜单外部。
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
+  const isIconTrigger = triggerMode === "icon";
 
   // 当前主题文案显示。
   const activeTheme = useMemo(() => {
@@ -93,20 +105,39 @@ export const ThemeMenu = memo(function ThemeMenu({
     };
   }, [isThemeMenuOpen]);
 
+  const triggerButton = (
+    <button
+      type="button"
+      className={`theme-menu__trigger ${isIconTrigger ? "theme-menu__trigger--icon" : ""}`}
+      aria-label="选择预览主题"
+      aria-haspopup="listbox"
+      aria-expanded={isThemeMenuOpen}
+      onClick={toggleThemeMenu}
+    >
+      {isIconTrigger ? (
+        <Palette size={15} />
+      ) : (
+        <>
+          <span className="theme-menu__trigger-label">主题</span>
+          <span className="theme-menu__trigger-value">{activeTheme.name}</span>
+        </>
+      )}
+    </button>
+  );
+
   return (
     <>
       <div className="theme-menu" ref={themeMenuRef}>
-        <button
-          type="button"
-          className="theme-menu__trigger"
-          aria-label="选择预览主题"
-          aria-haspopup="listbox"
-          aria-expanded={isThemeMenuOpen}
-          onClick={toggleThemeMenu}
-        >
-          <span className="theme-menu__trigger-label">主题</span>
-          <span className="theme-menu__trigger-value">{activeTheme.name}</span>
-        </button>
+        {isIconTrigger ? (
+          <TooltipProvider delayDuration={120}>
+            <Tooltip>
+              <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+              <TooltipContent side="bottom">{tooltipText}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          triggerButton
+        )}
         {isThemeMenuOpen ? (
           <ul className="theme-menu__dropdown" role="listbox" aria-label="预览主题列表">
             {themes.map((themeTemplate) => {

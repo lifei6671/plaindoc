@@ -124,10 +124,13 @@ func resolveDialector(driver string, dsn string) (gorm.Dialector, error) {
 func applyDefaultPoolConfig(db *sql.DB, driver string) {
 	switch driver {
 	case DriverSQLite:
-		// 中文注释：SQLite 文件锁较敏感，默认单连接更稳妥。
-		db.SetMaxOpenConns(1)
-		db.SetMaxIdleConns(1)
+		// 中文注释：编辑器存在“写后立即读”（PUT 后 GET）场景。
+		// 在开启 WAL 的前提下使用小连接池可显著降低串行排队耗时。
+		// 这里保持保守并发（4/2），避免过高并发触发锁竞争放大。
+		db.SetMaxOpenConns(4)
+		db.SetMaxIdleConns(2)
 		db.SetConnMaxLifetime(0)
+		db.SetConnMaxIdleTime(5 * time.Minute)
 	case DriverPostgres, DriverMySQL:
 		db.SetMaxOpenConns(20)
 		db.SetMaxIdleConns(5)

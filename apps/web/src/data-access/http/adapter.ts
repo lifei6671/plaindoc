@@ -1218,16 +1218,29 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     async getConfig() {
       return request<Record<string, unknown>>("/image-hosting");
     },
-    async uploadLocalImage(file: File, uploadEndpoint?: string) {
+    async uploadLocalImage(
+      file: File,
+      uploadEndpoint?: string,
+      uploadOptions?: { spaceId?: string | null }
+    ) {
       const formData = new FormData();
       formData.append("file", file);
-      return request<UploadLocalImageResult>(
+      const spaceID = typeof uploadOptions?.spaceId === "string" ? uploadOptions.spaceId.trim() : "";
+      if (spaceID) {
+        formData.append("spaceId", spaceID);
+      }
+      const uploaded = await request<UploadLocalImageResult>(
         normalizeUploadEndpoint(uploadEndpoint, options.baseUrl),
         {
           method: "POST",
           body: formData
         }
       );
+      const rawUrl = typeof uploaded.url === "string" ? uploaded.url.trim() : "";
+      return {
+        ...uploaded,
+        url: resolveBackendPublicUrl(rawUrl, options.baseUrl)
+      };
     }
   };
 

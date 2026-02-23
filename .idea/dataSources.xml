@@ -8,5 +8,12 @@
       <jdbc-url>jdbc:sqlite:file:\\wsl.localhost\Ubuntu-22.04\home\lifei6671\src\plaindoc\apps\server\cmd\server\plaindoc.db?nolock=1</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
+    <data-source source="LOCAL" name="plaindoc.db [2]" uuid="84125aaf-9c24-4d57-896f-3e3f08f06e4c">
+      <driver-ref>sqlite.xerial</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
+      <jdbc-url>jdbc:sqlite:E:\plaindoc.db</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
   </component>
 </project>

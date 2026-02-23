@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X7uQAAAAASUVORK5CYII="
@@ -23,7 +25,9 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 		_ = os.RemoveAll("uploads")
 	}()
 
-	_, _, accessToken := registerAccessUser(t, serve, "image-hosting@example.com")
+	ownerUserID, _, accessToken := registerAccessUser(t, serve, "image-hosting@example.com")
+	spaceID := "01kz8j1x8s0c9n6f2m4b7v3q5r"
+	seedImageUploadSpace(t, database, spaceID, ownerUserID)
 
 	getConfigReq := httptest.NewRequest(http.MethodGet, "/api/image-hosting", nil)
 	getConfigReq.Header.Set("Authorization", "Bearer "+accessToken)
@@ -45,12 +49,14 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	if configPayload.Local.UploadEndpoint != "/api/uploads/images" {
 		t.Fatalf("expected local upload endpoint /api/uploads/images, got %s", configPayload.Local.UploadEndpoint)
 	}
-	if configPayload.Local.PublicBaseURL != "/api/uploads/local" {
-		t.Fatalf("expected local public base url /api/uploads/local, got %s", configPayload.Local.PublicBaseURL)
+	if configPayload.Local.PublicBaseURL != "/uploads" {
+		t.Fatalf("expected local public base url /uploads, got %s", configPayload.Local.PublicBaseURL)
 	}
 
 	imageBytes := decodeTinyPNG(t)
-	uploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes)
+	uploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes, map[string]string{
+		"spaceId": spaceID,
+	})
 	uploadReq.Header.Set("Authorization", "Bearer "+accessToken)
 	uploadRec := serve(uploadReq)
 	if uploadRec.Code != http.StatusOK {
@@ -64,8 +70,8 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	if uploadPayload.Key == "" || uploadPayload.URL == "" {
 		t.Fatalf("expected upload key/url in response, got %+v", uploadPayload)
 	}
-	if !strings.HasPrefix(uploadPayload.URL, "/api/uploads/local/") {
-		t.Fatalf("expected local upload url prefix /api/uploads/local/, got %s", uploadPayload.URL)
+	if !strings.HasPrefix(uploadPayload.URL, "/uploads/") {
+		t.Fatalf("expected local upload url prefix /uploads/, got %s", uploadPayload.URL)
 	}
 
 	fetchUploadedReq := httptest.NewRequest(http.MethodGet, uploadPayload.URL, nil)
@@ -75,6 +81,12 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	}
 	if !strings.HasPrefix(fetchUploadedRec.Header().Get("Content-Type"), "image/") {
 		t.Fatalf("expected image content type, got %s", fetchUploadedRec.Header().Get("Content-Type"))
+	}
+	legacyPath := strings.Replace(uploadPayload.URL, "/uploads/", "/uploads/local/", 1)
+	fetchLegacyReq := httptest.NewRequest(http.MethodGet, legacyPath, nil)
+	fetchLegacyRec := serve(fetchLegacyReq)
+	if fetchLegacyRec.Code != http.StatusOK {
+		t.Fatalf("expected fetch legacy local upload status 200, got %d body=%s", fetchLegacyRec.Code, fetchLegacyRec.Body.String())
 	}
 
 	now := time.Now().UTC()
@@ -89,12 +101,76 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("insert image-hosting system config failed: %v", err)
 	}
+	getConfigAfterInsertReq := httptest.NewRequest(http.MethodGet, "/api/image-hosting", nil)
+	getConfigAfterInsertReq.Header.Set("Authorization", "Bearer "+accessToken)
+	getConfigAfterInsertRec := serve(getConfigAfterInsertReq)
+	if getConfigAfterInsertRec.Code != http.StatusOK {
+		t.Fatalf("expected get image-hosting config status 200 after insert, got %d body=%s", getConfigAfterInsertRec.Code, getConfigAfterInsertRec.Body.String())
+	}
+	configAfterInsertPayload := decodeJSONResultData[struct {
+		Local struct {
+			PublicBaseURL string `json:"publicBaseUrl"`
+		} `json:"local"`
+	}](t, getConfigAfterInsertRec.Body.Bytes())
+	if configAfterInsertPayload.Local.PublicBaseURL != "/uploads" {
+		t.Fatalf("expected normalized local public base url /uploads, got %s", configAfterInsertPayload.Local.PublicBaseURL)
+	}
 
-	disabledUploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes)
+	disabledUploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes, map[string]string{
+		"spaceId": spaceID,
+	})
 	disabledUploadReq.Header.Set("Authorization", "Bearer "+accessToken)
 	disabledUploadRec := serve(disabledUploadReq)
 	if disabledUploadRec.Code != http.StatusOK {
 		t.Fatalf("expected upload disabled status 400, got %d body=%s", disabledUploadRec.Code, disabledUploadRec.Body.String())
+	}
+}
+
+func TestRouter_ImageUploadSpacePermission(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+	defer func() {
+		_ = os.RemoveAll("uploads")
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "upload-owner@example.com")
+	readerUserID, _, readerToken := registerAccessUser(t, serve, "upload-reader@example.com")
+	collaboratorUserID, _, collaboratorToken := registerAccessUser(t, serve, "upload-collaborator@example.com")
+
+	spaceID := "01kz8j7yp4d2x3m6n9c1v5b8q0"
+	seedImageUploadSpace(t, database, spaceID, ownerUserID)
+	seedImageUploadMember(t, database, spaceID, readerUserID, "reader")
+	seedImageUploadMember(t, database, spaceID, collaboratorUserID, "collaborator")
+
+	imageBytes := decodeTinyPNG(t)
+
+	ownerReq := buildImageUploadRequest(t, "/api/uploads/images", "owner.png", imageBytes, map[string]string{
+		"spaceId": spaceID,
+	})
+	ownerReq.Header.Set("Authorization", "Bearer "+ownerToken)
+	ownerRec := serve(ownerReq)
+	if ownerRec.Code != http.StatusOK {
+		t.Fatalf("expected owner upload status 200, got %d body=%s", ownerRec.Code, ownerRec.Body.String())
+	}
+
+	collaboratorReq := buildImageUploadRequest(t, "/api/uploads/images", "collaborator.png", imageBytes, map[string]string{
+		"spaceId": spaceID,
+	})
+	collaboratorReq.Header.Set("Authorization", "Bearer "+collaboratorToken)
+	collaboratorRec := serve(collaboratorReq)
+	if collaboratorRec.Code != http.StatusOK {
+		t.Fatalf("expected collaborator upload status 200, got %d body=%s", collaboratorRec.Code, collaboratorRec.Body.String())
+	}
+
+	readerReq := buildImageUploadRequest(t, "/api/uploads/images", "reader.png", imageBytes, map[string]string{
+		"spaceId": spaceID,
+	})
+	readerReq.Header.Set("Authorization", "Bearer "+readerToken)
+	readerRec := serve(readerReq)
+	if readerRec.Code != http.StatusForbidden {
+		t.Fatalf("expected reader upload status 403, got %d body=%s", readerRec.Code, readerRec.Body.String())
 	}
 }
 
@@ -103,11 +179,17 @@ func buildImageUploadRequest(
 	uploadPath string,
 	fileName string,
 	content []byte,
+	formFields map[string]string,
 ) *http.Request {
 	t.Helper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	for key, value := range formFields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write multipart field %s failed: %v", key, err)
+		}
+	}
 	fileWriter, err := writer.CreateFormFile("file", fileName)
 	if err != nil {
 		t.Fatalf("create multipart file failed: %v", err)
@@ -122,6 +204,43 @@ func buildImageUploadRequest(
 	req := httptest.NewRequest(http.MethodPost, uploadPath, &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	return req
+}
+
+func seedImageUploadSpace(t *testing.T, database *storage.Database, spaceID string, ownerUserID string) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("spaces").Create(map[string]any{
+		"space_id":      spaceID,
+		"name":          "Image Upload Space",
+		"owner_user_id": ownerUserID,
+		"visibility":    "member",
+		"created_at":    now,
+		"updated_at":    now,
+	}).Error; err != nil {
+		t.Fatalf("insert image upload space failed: %v", err)
+	}
+}
+
+func seedImageUploadMember(
+	t *testing.T,
+	database *storage.Database,
+	spaceID string,
+	userID string,
+	role string,
+) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("space_members").Create(map[string]any{
+		"space_id":   spaceID,
+		"user_id":    userID,
+		"role":       role,
+		"created_at": now,
+		"updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("insert image upload member failed: %v", err)
+	}
 }
 
 func decodeTinyPNG(t *testing.T) []byte {

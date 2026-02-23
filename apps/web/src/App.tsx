@@ -1,19 +1,32 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { redo, undo } from "@codemirror/commands";
 import { languages } from "@codemirror/language-data";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import {
   AlertCircle,
+  Bold,
+  Code2,
   CheckCircle2,
   GripVertical,
+  Image as ImageIcon,
+  Italic,
+  List,
+  ListChecks,
+  ListOrdered,
   Link2,
   LoaderCircle,
-  LogOut,
   Monitor,
+  Minus,
   PanelLeftClose,
   PanelLeftOpen,
-  Smartphone
+  Quote,
+  Redo2,
+  Smartphone,
+  Strikethrough,
+  Table2,
+  Undo2
 } from "lucide-react";
 import MarkdownIt from "markdown-it";
 // KaTeX mhchem 扩展：支持 `\\ce{}` 化学公式语法。
@@ -25,6 +38,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ChangeEvent,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -41,6 +56,12 @@ import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { useConfirmDialog } from "./components/ConfirmDialog";
 import { Toaster } from "./components/ui/sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "./components/ui/tooltip";
 import { AdminApp } from "./admin/AdminApp";
 import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./admin/routes";
 import { ConflictError, getDataGateway, type AuthSession, type CreateNodeResult } from "./data-access";
@@ -79,7 +100,6 @@ import {
 } from "./editor/status-utils";
 import type { PreviewLinkRenderMode, PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
-import { copyPreviewToWechat } from "./editor/wechat-export";
 import {
   DEFAULT_PREVIEW_THEME_TEMPLATE,
   resolvePreviewTheme,
@@ -91,7 +111,6 @@ import {
   normalizeImageHostingConfig,
   type ImageHostingConfig
 } from "./settings/image-hosting";
-import { uploadImageToDefaultHosting } from "./settings/image-hosting-upload";
 import { useWorkspace } from "./workspace/use-workspace";
 
 // 扩展 window 类型，支持外部注入预览样式字符串。
@@ -112,6 +131,12 @@ const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode"
 const LOGIN_ROUTE_PATH = "/login";
 const REGISTER_ROUTE_PATH = "/register";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
+const LOCAL_AUTO_SAVE_DEBOUNCE_MS = 800;
+const HTTP_AUTO_SAVE_DEBOUNCE_MS = 800;
+const AUTO_SAVE_DEBOUNCE_MS =
+  import.meta.env.VITE_DATA_DRIVER === "http"
+    ? HTTP_AUTO_SAVE_DEBOUNCE_MS
+    : LOCAL_AUTO_SAVE_DEBOUNCE_MS;
 
 export type AppRoute =
   | { kind: "login" }
@@ -352,6 +377,174 @@ function insertImageMarkdown(view: EditorView, markdownLines: string[]): void {
   });
 }
 
+function replacePrimarySelection(
+  view: EditorView,
+  insertText: string,
+  nextSelection?: { from: number; to: number }
+): void {
+  const selectedRange = view.state.selection.main;
+  const fallbackCursor = selectedRange.from + insertText.length;
+  view.dispatch({
+    changes: {
+      from: selectedRange.from,
+      to: selectedRange.to,
+      insert: insertText
+    },
+    selection: nextSelection
+      ? EditorSelection.range(nextSelection.from, nextSelection.to)
+      : EditorSelection.cursor(fallbackCursor),
+    scrollIntoView: true
+  });
+}
+
+function wrapPrimarySelection(
+  view: EditorView,
+  prefix: string,
+  suffix: string,
+  placeholder: string
+): void {
+  const selectedRange = view.state.selection.main;
+  const selectedText = view.state.doc.sliceString(selectedRange.from, selectedRange.to);
+  const body = selectedText || placeholder;
+  const insertText = `${prefix}${body}${suffix}`;
+  const selectionFrom = selectedRange.from + prefix.length;
+  const selectionTo = selectionFrom + body.length;
+  replacePrimarySelection(view, insertText, {
+    from: selectionFrom,
+    to: selectionTo
+  });
+}
+
+function transformPrimarySelectionLines(
+  view: EditorView,
+  transformLine: (lineText: string, index: number) => string
+): void {
+  const selectedRange = view.state.selection.main;
+  const startLine = view.state.doc.lineAt(selectedRange.from);
+  const endLine = view.state.doc.lineAt(Math.max(selectedRange.to, selectedRange.from));
+  const lines: string[] = [];
+  for (let lineNumber = startLine.number; lineNumber <= endLine.number; lineNumber += 1) {
+    lines.push(transformLine(view.state.doc.line(lineNumber).text, lineNumber - startLine.number));
+  }
+  const insertText = lines.join("\n");
+  view.dispatch({
+    changes: {
+      from: startLine.from,
+      to: endLine.to,
+      insert: insertText
+    },
+    selection: EditorSelection.range(startLine.from, startLine.from + insertText.length),
+    scrollIntoView: true
+  });
+}
+
+function normalizeListLine(lineText: string): string {
+  const normalized = lineText
+    .replace(/^\s*(?:[-*+]\s+|\d+\.\s+|-\s\[\s\]\s+|>\s+)/, "")
+    .trim();
+  return normalized || "列表项";
+}
+
+function applyHeadingSyntax(view: EditorView, level: 1 | 2 | 3 | 4): void {
+  const marker = `${"#".repeat(level)} `;
+  transformPrimarySelectionLines(view, (lineText) => {
+    const normalized = lineText.replace(/^\s{0,3}#{1,6}\s+/, "").trim();
+    return `${marker}${normalized || "标题"}`;
+  });
+}
+
+function applyBulletListSyntax(view: EditorView): void {
+  transformPrimarySelectionLines(view, (lineText) => `- ${normalizeListLine(lineText)}`);
+}
+
+function applyOrderedListSyntax(view: EditorView): void {
+  transformPrimarySelectionLines(view, (lineText, index) => `${index + 1}. ${normalizeListLine(lineText)}`);
+}
+
+function applyTaskListSyntax(view: EditorView): void {
+  transformPrimarySelectionLines(view, (lineText) => `- [ ] ${normalizeListLine(lineText)}`);
+}
+
+function applyQuoteSyntax(view: EditorView): void {
+  transformPrimarySelectionLines(view, (lineText) => {
+    const normalized = lineText.replace(/^\s*>\s+/, "").trim();
+    return `> ${normalized || "引用内容"}`;
+  });
+}
+
+function insertCodeBlockSyntax(view: EditorView): void {
+  const selectedRange = view.state.selection.main;
+  const selectedText = view.state.doc.sliceString(selectedRange.from, selectedRange.to);
+  const body = selectedText || "在此输入代码";
+  const insertText = `\`\`\`\n${body}\n\`\`\``;
+  const selectionFrom = selectedRange.from + 4;
+  const selectionTo = selectionFrom + body.length;
+  replacePrimarySelection(view, insertText, {
+    from: selectionFrom,
+    to: selectionTo
+  });
+}
+
+function insertHorizontalRuleSyntax(view: EditorView): void {
+  replacePrimarySelection(view, "---\n");
+}
+
+function insertTableSyntax(view: EditorView): void {
+  const insertText = [
+    "| 列 1 | 列 2 |",
+    "| --- | --- |",
+    "| 内容 1 | 内容 2 |"
+  ].join("\n");
+  const selectionBody = "内容 1";
+  const selectionOffset = insertText.indexOf(selectionBody);
+  const selectedRange = view.state.selection.main;
+  replacePrimarySelection(view, insertText, {
+    from: selectedRange.from + selectionOffset,
+    to: selectedRange.from + selectionOffset + selectionBody.length
+  });
+}
+
+function insertLinkSyntax(view: EditorView): void {
+  const selectedRange = view.state.selection.main;
+  const selectedText = view.state.doc.sliceString(selectedRange.from, selectedRange.to).trim();
+  const linkText = selectedText || "链接文本";
+  const urlPlaceholder = "https://";
+  const insertText = `[${linkText}](${urlPlaceholder})`;
+  const urlSelectionFrom = selectedRange.from + linkText.length + 3;
+  replacePrimarySelection(view, insertText, {
+    from: urlSelectionFrom,
+    to: urlSelectionFrom + urlPlaceholder.length
+  });
+}
+
+interface EditorToolbarButtonProps {
+  label: string;
+  onClick: () => void;
+  className?: string;
+  children: ReactNode;
+}
+
+function EditorToolbarButton({
+  label,
+  onClick,
+  className,
+  children
+}: EditorToolbarButtonProps) {
+  const resolvedClassName = className
+    ? `editor-toolbar__button ${className}`
+    : "editor-toolbar__button";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className={resolvedClassName} aria-label={label} onClick={onClick}>
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export default function App() {
   // 数据网关单例。
   const dataGateway = useMemo(() => getDataGateway(), []);
@@ -415,12 +608,11 @@ export default function App() {
   const [customPreviewStyleText, setCustomPreviewStyleText] = useState("");
   // 预览视口模式：desktop 保持现状，mobile 模拟窄屏阅读。
   const [previewViewportMode, setPreviewViewportMode] = useState<PreviewViewportMode>("desktop");
-  // 链接渲染模式：支持“原始链接”与“脚注+角标”双模式切换。
-  const [previewLinkRenderMode, setPreviewLinkRenderMode] = useState<PreviewLinkRenderMode>(
-    readStoredPreviewLinkRenderMode
+  // 链接渲染模式：当前固定读取本地偏好值，不在顶部提供切换入口。
+  const previewLinkRenderMode = useMemo<PreviewLinkRenderMode>(
+    () => readStoredPreviewLinkRenderMode(),
+    []
   );
-  // 复制到公众号时的进行中状态：防止重复点击触发并发复制。
-  const [isWechatCopying, setIsWechatCopying] = useState(false);
   // 粘贴图片上传状态：用于防止重复触发并展示状态文案。
   const [isImageUploading, setIsImageUploading] = useState(false);
   // 当前上传任务总数与已处理数量：用于展示实时上传进度。
@@ -441,6 +633,10 @@ export default function App() {
   const imageHostingConfigErrorRef = useRef(imageHostingConfigError);
   // 上传中引用：用于 paste 事件同步分支判断，避免并发上传。
   const isImageUploadingRef = useRef(isImageUploading);
+  // 当前空间引用：用于上传请求附带空间上下文，服务端可做写权限校验。
+  const activeSpaceIDRef = useRef(activeSpaceId);
+  // 图片选择器引用：供“插入图片”按钮主动触发系统文件选择框。
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   // 工作区宽度与折叠状态：支持侧栏拖拽调宽与隐藏。
   const [workspaceSidebarWidth, setWorkspaceSidebarWidth] = useState(readStoredWorkspaceSidebarWidth);
   const [isWorkspaceSidebarCollapsed, setIsWorkspaceSidebarCollapsed] = useState(
@@ -453,6 +649,12 @@ export default function App() {
   const workspaceSidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
   // 记录“由本地动作触发的目标文档路由”，避免路由 effect 在状态尚未同步时重复请求。
   const pendingRouteDocumentIDRef = useRef<{ docId: string; startedAt: number } | null>(null);
+  // 自动保存并发保护：避免低延迟模式下出现并发 PUT 造成版本竞争。
+  const autoSaveInFlightRef = useRef(false);
+  // 自动保存计划序号：仅允许最新一轮计划执行，旧计划直接丢弃。
+  const autoSaveScheduleIDRef = useRef(0);
+  // CodeMirror 实例引用：供顶部语法工具栏直接分发编辑命令。
+  const editorViewRef = useRef<EditorView | null>(null);
 
   // 当前生效主题对象，用于渲染菜单高亮和生成样式。
   const activePreviewTheme = useMemo(
@@ -466,13 +668,35 @@ export default function App() {
   );
 
   // 滚动同步 Hook：封装编辑区/预览区双向同步与锚点重建逻辑。
-  const { handleEditorPaneRef, handlePreviewScrollerRef, handleEditorCreate, handleTocNavigate } =
+  const {
+    handleEditorPaneRef,
+    handlePreviewScrollerRef,
+    handleEditorCreate: handleScrollSyncEditorCreate,
+    handleTocNavigate
+  } =
     useScrollSync({
       content,
       previewThemeClassName: activePreviewThemeClassName,
       customPreviewStyleText,
       previewViewportMode
     });
+
+  const handleEditorCreate = useCallback(
+    (view: EditorView) => {
+      editorViewRef.current = view;
+      handleScrollSyncEditorCreate(view);
+    },
+    [handleScrollSyncEditorCreate]
+  );
+
+  const runEditorToolbarCommand = useCallback((command: (view: EditorView) => boolean | void) => {
+    const view = editorViewRef.current;
+    if (!view) {
+      return;
+    }
+    command(view);
+    view.focus();
+  }, []);
 
   const routeDocExistsInTree = useMemo(() => {
     if (!routeDocId) {
@@ -672,15 +896,6 @@ export default function App() {
     }
   }, [previewViewportMode]);
 
-  // 链接渲染模式变化时写入本地缓存，便于下次启动直接恢复。
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(PREVIEW_LINK_RENDER_MODE_STORAGE_KEY, previewLinkRenderMode);
-    } catch {
-      // localStorage 失败时忽略持久化，不影响当前显示。
-    }
-  }, [previewLinkRenderMode]);
-
   // 同步配置引用，确保粘贴上传始终使用最新“默认图床 + 凭据”。
   useEffect(() => {
     imageHostingConfigRef.current = imageHostingConfig;
@@ -700,6 +915,123 @@ export default function App() {
   useEffect(() => {
     imageHostingConfigErrorRef.current = imageHostingConfigError;
   }, [imageHostingConfigError]);
+
+  // 同步当前空间引用，保证上传时使用最新空间上下文。
+  useEffect(() => {
+    activeSpaceIDRef.current = activeSpaceId;
+  }, [activeSpaceId]);
+
+  // 统一图片上传流程：粘贴上传与“插入图片”按钮共用，避免权限与状态处理分叉。
+  const uploadImageFilesToEditor = useCallback(
+    async (view: EditorView, imageFiles: File[]) => {
+      if (!imageFiles.length) {
+        return;
+      }
+      if (isImageHostingConfigLoadingRef.current) {
+        setStatusMessage("图床配置加载中，请稍后再试");
+        return;
+      }
+      if (imageHostingConfigErrorRef.current) {
+        setStatusMessage(imageHostingConfigErrorRef.current);
+        toast.error(imageHostingConfigErrorRef.current);
+        return;
+      }
+      if (isImageUploadingRef.current) {
+        setStatusMessage("图片上传中，请稍候...");
+        return;
+      }
+
+      const spaceID = activeSpaceIDRef.current?.trim() ?? "";
+      if (!spaceID) {
+        setStatusMessage("当前未打开空间，无法上传图片");
+        toast.error("当前未打开空间，无法上传图片");
+        return;
+      }
+
+      isImageUploadingRef.current = true;
+      setIsImageUploading(true);
+      setImageUploadTotalCount(imageFiles.length);
+      setImageUploadCompletedCount(0);
+      setStatusMessage(`正在上传 ${imageFiles.length} 张图片...`);
+      const successMarkdownLines: string[] = [];
+      const failedMessages: string[] = [];
+
+      try {
+        for (const [index, imageFile] of imageFiles.entries()) {
+          try {
+            const uploadedImage = await dataGateway.imageHosting.uploadLocalImage(
+              imageFile,
+              imageHostingConfigRef.current.local.uploadEndpoint,
+              { spaceId: spaceID }
+            );
+            successMarkdownLines.push(buildImageMarkdownLine(imageFile, uploadedImage.url, index));
+          } catch (error) {
+            console.error("[editor][image-upload] 单张图片上传失败", {
+              fileName: imageFile.name || "未命名图片",
+              spaceId: spaceID,
+              error
+            });
+            failedMessages.push(`${imageFile.name || "未命名图片"}：${formatError(error)}`);
+          } finally {
+            setImageUploadCompletedCount((previousCount) => previousCount + 1);
+          }
+        }
+
+        if (successMarkdownLines.length) {
+          insertImageMarkdown(view, successMarkdownLines);
+          setStatusMessage(`已上传 ${successMarkdownLines.length} 张图片并插入链接`);
+          toast.success(`图片上传成功（${successMarkdownLines.length}/${imageFiles.length}）`);
+        }
+
+        if (failedMessages.length) {
+          const firstError = failedMessages[0];
+          console.error("[editor][image-upload] 部分图片上传失败", {
+            failedCount: failedMessages.length,
+            errors: failedMessages
+          });
+          setStatusMessage(`图片上传失败：${firstError}`);
+          toast.error(`部分图片上传失败：${firstError}`);
+        }
+      } catch (error) {
+        console.error("[editor][image-upload] 上传流程异常", error);
+        setStatusMessage(`图片上传异常：${formatError(error)}`);
+        toast.error(`图片上传异常：${formatError(error)}`);
+      } finally {
+        isImageUploadingRef.current = false;
+        setIsImageUploading(false);
+        setImageUploadTotalCount(0);
+        setImageUploadCompletedCount(0);
+      }
+    },
+    [dataGateway]
+  );
+
+  const triggerImageFilePicker = useCallback(() => {
+    const input = imageFileInputRef.current;
+    if (!input) {
+      return;
+    }
+    input.value = "";
+    input.click();
+  }, []);
+
+  const handleImageFileInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const selectedFiles = event.target.files ? Array.from(event.target.files) : [];
+      event.currentTarget.value = "";
+      const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/"));
+      if (!imageFiles.length) {
+        return;
+      }
+      const view = editorViewRef.current;
+      if (!view) {
+        setStatusMessage("编辑器尚未就绪，无法插入图片");
+        return;
+      }
+      void uploadImageFilesToEditor(view, imageFiles);
+    },
+    [uploadImageFilesToEditor]
+  );
 
   // 登录后加载后台图床配置：由管理后台统一维护。
   useEffect(() => {
@@ -746,7 +1078,7 @@ export default function App() {
     () => [
       // 编辑器软换行，避免横向滚动影响同步体验。
       EditorView.lineWrapping,
-      // 拦截粘贴图片：自动上传到默认图床并回填 Markdown 图片链接。
+      // 拦截粘贴图片：统一走后端上传接口并回填 Markdown 图片链接。
       EditorView.domEventHandlers({
         paste: (event, view) => {
           const imageFiles = extractImageFilesFromClipboard(event);
@@ -755,82 +1087,7 @@ export default function App() {
           }
 
           event.preventDefault();
-          void (async () => {
-            if (isImageHostingConfigLoadingRef.current) {
-              setStatusMessage("图床配置加载中，请稍后再试");
-              return;
-            }
-            if (imageHostingConfigErrorRef.current) {
-              setStatusMessage(imageHostingConfigErrorRef.current);
-              toast.error(imageHostingConfigErrorRef.current);
-              return;
-            }
-            if (isImageUploadingRef.current) {
-              setStatusMessage("图片上传中，请稍候...");
-              return;
-            }
-
-            isImageUploadingRef.current = true;
-            setIsImageUploading(true);
-            setImageUploadTotalCount(imageFiles.length);
-            setImageUploadCompletedCount(0);
-            setStatusMessage(`正在上传 ${imageFiles.length} 张图片...`);
-            const successMarkdownLines: string[] = [];
-            const failedMessages: string[] = [];
-
-            try {
-              for (const [index, imageFile] of imageFiles.entries()) {
-                try {
-                  const uploadedImage = await uploadImageToDefaultHosting(
-                    imageHostingConfigRef.current,
-                    imageFile,
-                    {
-                      uploadLocalImage: (file) =>
-                        dataGateway.imageHosting.uploadLocalImage(
-                          file,
-                          imageHostingConfigRef.current.local.uploadEndpoint
-                        )
-                    }
-                  );
-                  successMarkdownLines.push(buildImageMarkdownLine(imageFile, uploadedImage.url, index));
-                } catch (error) {
-                  console.error("[editor][paste-image] 单张图片上传失败", {
-                    fileName: imageFile.name || "未命名图片",
-                    provider: imageHostingConfigRef.current.defaultProvider,
-                    error
-                  });
-                  failedMessages.push(`${imageFile.name || "未命名图片"}：${formatError(error)}`);
-                } finally {
-                  setImageUploadCompletedCount((previousCount) => previousCount + 1);
-                }
-              }
-
-              if (successMarkdownLines.length) {
-                insertImageMarkdown(view, successMarkdownLines);
-                setStatusMessage(`已上传 ${successMarkdownLines.length} 张图片并插入链接`);
-                toast.success(`图片上传成功（${successMarkdownLines.length}/${imageFiles.length}）`);
-              }
-
-              if (failedMessages.length) {
-                const firstError = failedMessages[0];
-                console.error("[editor][paste-image] 部分图片上传失败", {
-                  failedCount: failedMessages.length,
-                  errors: failedMessages
-                });
-                setStatusMessage(`图片上传失败：${firstError}`);
-                toast.error(`部分图片上传失败：${firstError}`);
-              }
-            } catch (error) {
-              console.error("[editor][paste-image] 粘贴图片上传流程异常", error);
-              setStatusMessage(`图片上传异常：${formatError(error)}`);
-              toast.error(`图片上传异常：${formatError(error)}`);
-            } finally {
-              isImageUploadingRef.current = false;
-              setIsImageUploading(false);
-              setImageUploadTotalCount(0);
-              setImageUploadCompletedCount(0);
-            }
-          })();
+          void uploadImageFilesToEditor(view, imageFiles);
           return true;
         }
       }),
@@ -840,7 +1097,7 @@ export default function App() {
         codeLanguages: languages
       })
     ],
-    [dataGateway]
+    [uploadImageFilesToEditor]
   );
   // remark 插件顺序：先 GFM/数学公式，再规整样式 span 容器，再按链接模式处理脚注，最后注入锚点属性。
   const remarkPlugins = useMemo(() => {
@@ -1156,7 +1413,8 @@ export default function App() {
       try {
         const created = await createNode(input);
         if (created.docId) {
-          await handleOpenWorkspaceDocument(created.docId);
+          // 创建成功后立即返回，文档打开流程异步进行，避免目录树出现可见等待闪烁。
+          void handleOpenWorkspaceDocument(created.docId);
           return created;
         }
         setStatusMessage(input.type === "folder" ? "目录创建成功" : "文档创建成功");
@@ -1289,12 +1547,22 @@ export default function App() {
       !activeDocId ||
       content === lastSavedContent ||
       saveStatus === "loading" ||
-      saveStatus === "saving"
+      saveStatus === "saving" ||
+      saveStatus === "conflict"
     ) {
       return;
     }
 
+    const scheduleID = autoSaveScheduleIDRef.current + 1;
+    autoSaveScheduleIDRef.current = scheduleID;
     const timer = window.setTimeout(async () => {
+      if (scheduleID !== autoSaveScheduleIDRef.current) {
+        return;
+      }
+      if (autoSaveInFlightRef.current) {
+        return;
+      }
+      autoSaveInFlightRef.current = true;
       setSaveStatus("saving");
       setStatusMessage("保存中...");
       try {
@@ -1320,8 +1588,10 @@ export default function App() {
         }
         setSaveStatus("error");
         setStatusMessage(`保存失败：${formatError(error)}`);
+      } finally {
+        autoSaveInFlightRef.current = false;
       }
-    }, 800);
+    }, AUTO_SAVE_DEBOUNCE_MS);
 
     // 输入持续变化时清理上一次保存定时器。
     return () => {
@@ -1362,32 +1632,6 @@ export default function App() {
       previousMode === "desktop" ? "mobile" : "desktop"
     );
   }, []);
-
-  // 切换链接渲染模式：原始链接 <-> 脚注角标。
-  const togglePreviewLinkRenderMode = useCallback(() => {
-    setPreviewLinkRenderMode((previousMode) =>
-      previousMode === "link" ? "footnote" : "link"
-    );
-  }, []);
-
-  // 导出预览区为内联样式 HTML，并写入剪贴板供公众号编辑器粘贴。
-  const handleCopyToWechat = useCallback(async () => {
-    if (isWechatCopying) {
-      return;
-    }
-    setIsWechatCopying(true);
-    try {
-      await copyPreviewToWechat({
-        linkRenderMode: previewLinkRenderMode
-      });
-      setStatusMessage("已复制预览内容，可直接粘贴到微信公众号编辑器");
-      toast.success("复制成功，可直接粘贴到微信公众号编辑器");
-    } catch (error) {
-      setStatusMessage(`复制失败：${formatError(error)}`);
-    } finally {
-      setIsWechatCopying(false);
-    }
-  }, [isWechatCopying, previewLinkRenderMode]);
 
   // 手动同步到最新版本，用于冲突后的回拉。
   const syncLatestVersion = async () => {
@@ -1544,80 +1788,167 @@ export default function App() {
       ) : null}
       {/* 顶部状态栏。 */}
       <header className="header">
-        <h1>PlainDoc</h1>
-        <div className="header-actions">
-          <span className="auth-user-pill" title={activeUser.email}>
-            {activeUser.name}
-          </span>
-          <button
-            type="button"
-            className="auth-logout-button"
-            onClick={() => void handleAuthLogout()}
-            disabled={isAuthSubmitting}
-            title="退出当前账号"
-            aria-label="退出当前账号"
-          >
-            <LogOut size={14} />
-            <span>{isAuthSubmitting ? "退出中..." : "退出"}</span>
-          </button>
-          {/* 目录菜单：展示标题结构并支持快速跳转。 */}
-          {hasTocMarker ? <TocMenu items={tocItems} onSelectItem={handleTocNavigate} /> : null}
-          {/* 复制到公众号：将当前预览导出为内联样式 HTML。 */}
-          <button
-            type="button"
-            className="wechat-copy-button"
-            onClick={() => void handleCopyToWechat()}
-            disabled={isWechatCopying}
-            title="复制当前预览为公众号可粘贴内容"
-            aria-label="复制当前预览为公众号可粘贴内容"
-          >
-            {isWechatCopying ? "复制中..." : "复制到公众号"}
-          </button>
-          {/* 预览模式切换：在 PC 与移动端窄屏模拟之间切换。 */}
-          <button
-            type="button"
-            className={`preview-mode-toggle preview-mode-toggle--${previewViewportMode}`}
-            onClick={togglePreviewViewportMode}
-            title={previewViewportMode === "desktop" ? "切换到移动端预览" : "切换到 PC 预览"}
-            aria-label={previewViewportMode === "desktop" ? "切换到移动端预览" : "切换到 PC 预览"}
-          >
-            {previewViewportMode === "desktop" ? <Monitor size={14} /> : <Smartphone size={14} />}
-            <span className="preview-mode-toggle__label">
-              {previewViewportMode === "desktop" ? "PC 预览" : "移动预览"}
-            </span>
-          </button>
-          {/* 链接渲染开关：原始链接 / 脚注角标。 */}
-          <button
-            type="button"
-            className={`preview-mode-toggle ${
-              previewLinkRenderMode === "footnote" ? "preview-mode-toggle--footnote" : ""
-            }`}
-            onClick={togglePreviewLinkRenderMode}
-            title={
-              previewLinkRenderMode === "link"
-                ? "切换为脚注+角标渲染"
-                : "切换为原始链接渲染"
-            }
-            aria-label={
-              previewLinkRenderMode === "link"
-                ? "切换为脚注+角标渲染"
-                : "切换为原始链接渲染"
-            }
-          >
-            <Link2 size={14} />
-            <span className="preview-mode-toggle__label">
-              {previewLinkRenderMode === "link" ? "链接渲染" : "脚注渲染"}
-            </span>
-          </button>
-          {/* 主题菜单：展开/收起只更新菜单组件自身。 */}
-          <ThemeMenu
-            themes={previewThemes}
-            activeThemeId={activePreviewTheme.id}
-            onSelectTheme={handleThemeChange}
-            customPreviewStyleText={customPreviewStyleText}
-          />
-        </div>
+        <TooltipProvider delayDuration={120}>
+          <div className="editor-toolbar" role="toolbar" aria-label="Markdown 常用语法工具栏">
+            <div className="editor-toolbar__group">
+              <EditorToolbarButton label="撤销" onClick={() => runEditorToolbarCommand(undo)}>
+                <Undo2 size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="重做" onClick={() => runEditorToolbarCommand(redo)}>
+                <Redo2 size={15} />
+              </EditorToolbarButton>
+            </div>
+            <div className="editor-toolbar__group">
+              <EditorToolbarButton
+                label="一级标题"
+                className="editor-toolbar__button--text"
+                onClick={() => runEditorToolbarCommand((view) => applyHeadingSyntax(view, 1))}
+              >
+                H1
+              </EditorToolbarButton>
+              <EditorToolbarButton
+                label="二级标题"
+                className="editor-toolbar__button--text"
+                onClick={() => runEditorToolbarCommand((view) => applyHeadingSyntax(view, 2))}
+              >
+                H2
+              </EditorToolbarButton>
+              <EditorToolbarButton
+                label="三级标题"
+                className="editor-toolbar__button--text"
+                onClick={() => runEditorToolbarCommand((view) => applyHeadingSyntax(view, 3))}
+              >
+                H3
+              </EditorToolbarButton>
+              <EditorToolbarButton
+                label="四级标题"
+                className="editor-toolbar__button--text"
+                onClick={() => runEditorToolbarCommand((view) => applyHeadingSyntax(view, 4))}
+              >
+                H4
+              </EditorToolbarButton>
+            </div>
+            <div className="editor-toolbar__group">
+              <EditorToolbarButton
+                label="加粗"
+                onClick={() =>
+                  runEditorToolbarCommand((view) => {
+                    wrapPrimarySelection(view, "**", "**", "粗体文本");
+                  })
+                }
+              >
+                <Bold size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton
+                label="斜体"
+                onClick={() =>
+                  runEditorToolbarCommand((view) => {
+                    wrapPrimarySelection(view, "*", "*", "斜体文本");
+                  })
+                }
+              >
+                <Italic size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton
+                label="删除线"
+                onClick={() =>
+                  runEditorToolbarCommand((view) => {
+                    wrapPrimarySelection(view, "~~", "~~", "删除线文本");
+                  })
+                }
+              >
+                <Strikethrough size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton
+                label="行内代码"
+                onClick={() =>
+                  runEditorToolbarCommand((view) => {
+                    wrapPrimarySelection(view, "`", "`", "code");
+                  })
+                }
+              >
+                <Code2 size={15} />
+              </EditorToolbarButton>
+            </div>
+            <div className="editor-toolbar__group">
+              <EditorToolbarButton label="无序列表" onClick={() => runEditorToolbarCommand(applyBulletListSyntax)}>
+                <List size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="有序列表" onClick={() => runEditorToolbarCommand(applyOrderedListSyntax)}>
+                <ListOrdered size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="任务列表" onClick={() => runEditorToolbarCommand(applyTaskListSyntax)}>
+                <ListChecks size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="引用" onClick={() => runEditorToolbarCommand(applyQuoteSyntax)}>
+                <Quote size={15} />
+              </EditorToolbarButton>
+            </div>
+            <div className="editor-toolbar__group">
+              <EditorToolbarButton label="插入链接" onClick={() => runEditorToolbarCommand(insertLinkSyntax)}>
+                <Link2 size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="插入图片" onClick={triggerImageFilePicker}>
+                <ImageIcon size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="代码块" onClick={() => runEditorToolbarCommand(insertCodeBlockSyntax)}>
+                <Code2 size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="分隔线" onClick={() => runEditorToolbarCommand(insertHorizontalRuleSyntax)}>
+                <Minus size={15} />
+              </EditorToolbarButton>
+              <EditorToolbarButton label="插入表格" onClick={() => runEditorToolbarCommand(insertTableSyntax)}>
+                <Table2 size={15} />
+              </EditorToolbarButton>
+            </div>
+          </div>
+          <div className="header-actions">
+            {/* 目录菜单：展示标题结构并支持快速跳转。 */}
+            {hasTocMarker ? (
+              <TocMenu
+                items={tocItems}
+                onSelectItem={handleTocNavigate}
+                triggerMode="icon"
+                tooltipText="目录导航"
+              />
+            ) : null}
+            {/* 预览模式切换：在 PC 与移动端窄屏模拟之间切换。 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={`preview-mode-toggle preview-mode-toggle--${previewViewportMode} preview-mode-toggle--icon`}
+                  onClick={togglePreviewViewportMode}
+                  aria-label={previewViewportMode === "desktop" ? "切换到移动端预览" : "切换到 PC 预览"}
+                >
+                  {previewViewportMode === "desktop" ? <Monitor size={14} /> : <Smartphone size={14} />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {previewViewportMode === "desktop" ? "切换到移动端预览" : "切换到 PC 预览"}
+              </TooltipContent>
+            </Tooltip>
+            {/* 主题菜单：展开/收起只更新菜单组件自身。 */}
+            <ThemeMenu
+              themes={previewThemes}
+              activeThemeId={activePreviewTheme.id}
+              onSelectTheme={handleThemeChange}
+              customPreviewStyleText={customPreviewStyleText}
+              triggerMode="icon"
+              tooltipText="主题设置"
+            />
+          </div>
+        </TooltipProvider>
       </header>
+      <input
+        ref={imageFileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="editor-image-file-input"
+        tabIndex={-1}
+        onChange={handleImageFileInputChange}
+      />
       {/* 工作区主区域：左侧边栏 + 中间编辑器 + 右侧预览。 */}
       <main
         className={`workspace ${isWorkspaceSidebarCollapsed ? "workspace--sidebar-collapsed" : ""}`}

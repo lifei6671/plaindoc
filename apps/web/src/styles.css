@@ -52,14 +52,65 @@ input[type="reset"]:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   position: relative;
   z-index: 5;
 }
 
-.header h1 {
-  font-size: 24px;
-  margin: 0;
-  font-family: Optima-Regular, Optima, PingFangSC-light, PingFangTC-light, PingFang SC, Cambria, Cochin, Georgia, Times, Times New Roman, serif;
+.editor-toolbar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding: 4px 0;
+}
+
+.editor-toolbar__group {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f3f4f6;
+}
+
+.editor-toolbar__button {
+  min-width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #4b5563;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+}
+
+.editor-toolbar__button:hover {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.editor-toolbar__button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
+.editor-toolbar__button--text {
+  min-width: 38px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.editor-image-file-input {
+  display: none;
 }
 
 /* 顶栏操作区：用于承载主题菜单等扩展能力。 */
@@ -67,6 +118,7 @@ input[type="reset"]:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 /* 顶栏用户标签：展示当前登录账号。 */
@@ -269,6 +321,11 @@ input[type="reset"]:not(:disabled) {
   color: #0369a1;
 }
 
+.preview-mode-toggle--icon {
+  width: 34px;
+  padding: 0;
+}
+
 .preview-mode-toggle--footnote {
   border-color: #fcd34d;
   background: #fffbeb;
@@ -336,6 +393,13 @@ input[type="reset"]:not(:disabled) {
 .theme-menu__trigger:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 2px;
+}
+
+.theme-menu__trigger--icon {
+  min-width: 34px;
+  width: 34px;
+  padding: 0;
+  justify-content: center;
 }
 
 /* 主题按钮前缀文案。 */
@@ -473,6 +537,13 @@ input[type="reset"]:not(:disabled) {
 .toc-menu__trigger:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 2px;
+}
+
+.toc-menu__trigger--icon {
+  min-width: 34px;
+  width: 34px;
+  padding: 0;
+  justify-content: center;
 }
 
 /* 目录按钮前缀文案。 */
@@ -2569,12 +2640,31 @@ input[type="reset"]:not(:disabled) {
     row-gap: 8px;
   }
 
+  .editor-toolbar {
+    order: 2;
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .header-actions {
+    margin-left: auto;
+  }
+
   .theme-menu__trigger {
     min-width: 148px;
   }
 
+  .theme-menu__trigger--icon {
+    min-width: 34px;
+    width: 34px;
+  }
+
   .preview-mode-toggle {
     padding: 0 9px;
+  }
+
+  .preview-mode-toggle--icon {
+    padding: 0;
   }
 
   .preview-mode-toggle__label {

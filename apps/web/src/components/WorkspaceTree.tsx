@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type ReactNode
@@ -75,7 +76,7 @@ function mergeClassNames(...classNames: Array<string | false | null | undefined>
   return classNames.filter(Boolean).join(" ");
 }
 
-// 收集可展开节点：初次渲染时默认展开全部目录类节点。
+// 收集可展开节点：用于在树结构刷新后过滤无效展开项。
 function collectExpandableNodeIds(nodes: TreeNode[]): string[] {
   const expandableNodeIds: string[] = [];
   const walk = (currentNodes: TreeNode[]) => {
@@ -250,21 +251,21 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const inlineEditInputRef = useRef<HTMLInputElement | null>(null);
   const pendingInlineEditFocusNodeIdRef = useRef<string | null>(null);
   const isCommittingInlineEditRef = useRef(false);
-  const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>(expandableNodeIds);
+  // 默认全折叠：首次进入目录树时不自动展开任何节点。
+  const [expandedNodeIds, setExpandedNodeIds] = useState<string[]>([]);
   const [openActionNodeId, setOpenActionNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
+  const [creatingDraftNodeIds, setCreatingDraftNodeIds] = useState<string[]>([]);
   const [isCreatingFirstDocument, setIsCreatingFirstDocument] = useState(false);
+  const creatingDraftNodeIdSet = useMemo(() => new Set(creatingDraftNodeIds), [creatingDraftNodeIds]);
 
-  // 树结构变化时更新展开状态：保留用户折叠选择，仅默认展开新出现的目录。
+  // 树结构变化时仅保留仍然存在的展开节点，不自动展开新节点。
+  // 这样可以保持“默认全折叠”与“用户手动展开优先”。
   useEffect(() => {
     const currentExpandableNodeIdSet = new Set(expandableNodeIds);
-    const newNodeIds = expandableNodeIds.filter((nodeId) => !knownExpandableNodeIdsRef.current.has(nodeId));
     setExpandedNodeIds((previousExpandedNodeIds) => {
-      const remainingNodeIds = previousExpandedNodeIds.filter((nodeId) =>
-        currentExpandableNodeIdSet.has(nodeId)
-      );
-      return [...remainingNodeIds, ...newNodeIds];
+      return previousExpandedNodeIds.filter((nodeId) => currentExpandableNodeIdSet.has(nodeId));
     });
     knownExpandableNodeIdsRef.current = currentExpandableNodeIdSet;
   }, [expandableNodeIds]);
@@ -331,29 +332,59 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     if (pendingInlineEditFocusNodeIdRef.current !== editingNodeId) {
       return;
     }
-    const frameId = window.requestAnimationFrame(() => {
-      const inputElement = inlineEditInputRef.current;
-      if (!inputElement) {
+    let canceled = false;
+    let timeoutId: number | null = null;
+    const rafIds: number[] = [];
+    let attemptCount = 0;
+
+    const runFocusAttempt = () => {
+      if (canceled) {
         return;
       }
-      inputElement.focus();
-      inputElement.select();
-      pendingInlineEditFocusNodeIdRef.current = null;
-    });
-    return () => {
-      window.cancelAnimationFrame(frameId);
+      const inputElement = inlineEditInputRef.current;
+      if (inputElement) {
+        inputElement.focus();
+        inputElement.select();
+        pendingInlineEditFocusNodeIdRef.current = null;
+        return;
+      }
+
+      attemptCount += 1;
+      if (attemptCount >= 8) {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        rafIds.push(window.requestAnimationFrame(runFocusAttempt));
+      }, 16);
     };
-  }, [editingNodeId]);
+
+    rafIds.push(window.requestAnimationFrame(runFocusAttempt));
+    return () => {
+      canceled = true;
+      for (const rafId of rafIds) {
+        window.cancelAnimationFrame(rafId);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [editingNodeId, items]);
 
   const viewState = useMemo<TreeViewState>(() => {
+    // 行内编辑期间不让树组件接管焦点，避免输入框因焦点切换触发 onBlur 误提交。
+    const focusedItem = editingNodeId
+      ? undefined
+      : activeDocId && items[activeDocId]
+        ? activeDocId
+        : undefined;
     return {
       [WORKSPACE_TREE_ID]: {
         expandedItems: expandedNodeIds,
         selectedItems: activeDocId ? [activeDocId] : [],
-        focusedItem: activeDocId ?? undefined
+        focusedItem
       }
     };
-  }, [activeDocId, expandedNodeIds]);
+  }, [activeDocId, editingNodeId, expandedNodeIds, items]);
 
   // 阻止菜单按钮冒泡到树项主操作，避免误触发文档打开。
   const stopTreeItemEvent = useCallback((event: MouseEvent<HTMLElement>) => {
@@ -392,6 +423,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     setDraftNodes((previousDraftNodes) =>
       previousDraftNodes.filter((draftNode) => draftNode.nodeId !== nodeId)
     );
+    setCreatingDraftNodeIds((previousNodeIds) =>
+      previousNodeIds.filter((draftNodeID) => draftNodeID !== nodeId)
+    );
   }, []);
 
   const commitInlineEdit = useCallback(async () => {
@@ -404,17 +438,31 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const fallbackTitle =
         editingDraftNode.type === "folder" ? DEFAULT_FOLDER_TITLE : DEFAULT_DOCUMENT_TITLE;
       const normalizedTitle = editingNodeTitle.trim() || fallbackTitle;
+      const draftNodeID = editingNodeId;
 
       isCommittingInlineEditRef.current = true;
       try {
+        // 先退出输入态并保留草稿节点占位，避免“节点消失后再出现”的闪烁。
+        setDraftNodes((previousDraftNodes) =>
+          previousDraftNodes.map((draftNode) =>
+            draftNode.nodeId === draftNodeID ? { ...draftNode, title: normalizedTitle } : draftNode
+          )
+        );
+        setCreatingDraftNodeIds((previousNodeIds) =>
+          previousNodeIds.includes(draftNodeID) ? previousNodeIds : [...previousNodeIds, draftNodeID]
+        );
+        cancelInlineEdit();
         await onCreateNode({
           parentId: editingDraftNode.parentId,
           type: editingDraftNode.type,
           title: normalizedTitle
         });
-        removeDraftNode(editingNodeId);
-        cancelInlineEdit();
+        removeDraftNode(draftNodeID);
       } catch (error) {
+        setCreatingDraftNodeIds((previousNodeIds) =>
+          previousNodeIds.filter((candidateNodeID) => candidateNodeID !== draftNodeID)
+        );
+        beginInlineEdit(draftNodeID, normalizedTitle);
         window.alert(`创建失败：${formatError(error)}`);
       } finally {
         isCommittingInlineEditRef.current = false;
@@ -446,6 +494,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       cancelInlineEdit();
     }
   }, [
+    beginInlineEdit,
     cancelInlineEdit,
     draftNodeByID,
     editingNodeId,
@@ -625,6 +674,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const isActionMenuOpen = openActionNodeId === nodeId;
       const isInlineEditing = editingNodeId === nodeId;
       const isDraftNode = draftNodeByID.has(nodeId);
+      const isCreatingDraftNode = creatingDraftNodeIdSet.has(nodeId);
       const rowStyle = {
         ...(context.itemContainerWithoutChildrenProps.style ?? {}),
         paddingLeft: `${8 + depth * 20}px`,
@@ -684,20 +734,31 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                       cancelInlineEdit();
                     }
                   }}
-                  onBlur={() => {
+                  onBlur={(event: ReactFocusEvent<HTMLInputElement>) => {
+                    if (
+                      event.relatedTarget instanceof HTMLElement &&
+                      event.currentTarget.parentElement?.contains(event.relatedTarget)
+                    ) {
+                      return;
+                    }
                     void commitInlineEdit();
                   }}
                 />
               ) : (
-                <span
-                  className={mergeClassNames(
-                    "min-w-0 truncate leading-[1.3]",
-                    isActive && "font-semibold"
-                  )}
-                  title={item.data.title}
-                >
-                  {title}
-                </span>
+                <>
+                  <span
+                    className={mergeClassNames(
+                      "min-w-0 truncate leading-[1.3]",
+                      isActive && "font-semibold"
+                    )}
+                    title={item.data.title}
+                  >
+                    {title}
+                  </span>
+                  {isDraftNode && isCreatingDraftNode ? (
+                    <span className="ml-2 shrink-0 text-[11px] text-[#8a8d90]">创建中...</span>
+                  ) : null}
+                </>
               )}
             </InteractiveComponent>
             {isInlineEditing || isDraftNode ? null : (
@@ -803,6 +864,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     },
     [
       activeDocId,
+      creatingDraftNodeIdSet,
       draftNodeByID,
       handleCreateChildDocument,
       handleCreateChildFolder,
@@ -837,7 +899,14 @@ export const WorkspaceTree = memo(function WorkspaceTree({
               <Plus size={18} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[148px]">
+          <DropdownMenuContent
+            align="end"
+            className="min-w-[148px]"
+            onCloseAutoFocus={(event) => {
+              // 新建后焦点应交给行内输入框，而不是回到触发按钮。
+              event.preventDefault();
+            }}
+          >
             <DropdownMenuItem
               className="cursor-pointer"
               onSelect={() => {
@@ -870,6 +939,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           items={items}
           getItemTitle={(item) => item.data.title}
           viewState={viewState}
+          autoFocus={false}
           defaultInteractionMode={InteractionMode.ClickArrowToExpand}
           canDragAndDrop={false}
           canDropOnFolder={false}

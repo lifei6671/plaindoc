@@ -709,7 +709,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                     <label className="space-y-1.5">
                       <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问前缀</span>
                       <Input
-                        placeholder="/api/uploads/local"
+                        placeholder="/uploads"
                         value={imageHostingDraft.local.publicBaseUrl}
                         onChange={(event) => setLocalField("publicBaseUrl", event.target.value)}
                         disabled={saving}

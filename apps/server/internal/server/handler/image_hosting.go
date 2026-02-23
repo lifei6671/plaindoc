@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 type imageHostingHandler struct {
 	authService         *service.AuthService
 	imageHostingService *service.ImageHostingService
+	spaceRepo           repository.SpaceRepository
 	localImageRootDir   string
 }
 
@@ -35,10 +37,12 @@ type imageHostingHandler struct {
 func NewImageHostingHandler(
 	authService *service.AuthService,
 	imageHostingService *service.ImageHostingService,
+	spaceRepo repository.SpaceRepository,
 ) *imageHostingHandler {
 	return &imageHostingHandler{
 		authService:         authService,
 		imageHostingService: imageHostingService,
+		spaceRepo:           spaceRepo,
 		localImageRootDir:   defaultLocalImageStorageRoot,
 	}
 }
@@ -64,12 +68,31 @@ func (h *imageHostingHandler) GetConfig(c *gin.Context) {
 
 // UploadImage 接收本地图片上传并返回可访问地址。
 func (h *imageHostingHandler) UploadImage(c *gin.Context) {
-	if h == nil || h.authService == nil || h.imageHostingService == nil {
+	if h == nil || h.authService == nil || h.imageHostingService == nil || h.spaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
 
-	if _, ok := h.requireAuthenticatedUser(c); !ok {
+	actorUserID, ok := h.requireAuthenticatedUser(c)
+	if !ok {
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.PostForm("spaceId"))
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(c.Query("spaceId"))
+	}
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "spaceId is required")
+		return
+	}
+	hasWriterAccess, err := h.spaceRepo.HasWriterAccess(c.Request.Context(), spaceID, actorUserID)
+	if err != nil {
+		response.InternalError(c)
+		return
+	}
+	if !hasWriterAccess {
+		response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission for image upload")
 		return
 	}
 
@@ -130,7 +153,7 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 
 	response.JSON(c, http.StatusOK, gin.H{
 		"key": objectKey,
-		"url": resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/api/uploads/local"),
+		"url": resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"),
 	})
 }
 
@@ -151,6 +174,12 @@ func (h *imageHostingHandler) ServeLocalImage(c *gin.Context) {
 	cleanPath := path.Clean(trimmedPath)
 	if cleanPath == "." || cleanPath == "/" || strings.HasPrefix(cleanPath, "../") {
 		response.Error(c, http.StatusBadRequest, "INVALID_FILE_PATH", "invalid file path")
+		return
+	}
+	// 兼容历史公开路径 /uploads/local/*：统一映射到本地存储根 uploads/local。
+	cleanPath = strings.TrimPrefix(cleanPath, "local/")
+	if cleanPath == "local" {
+		response.Error(c, http.StatusNotFound, "FILE_NOT_FOUND", "file not found")
 		return
 	}
 
@@ -311,7 +340,17 @@ func resolvePublicURL(baseURL string, objectPath string, fallbackBaseURL string)
 		base = strings.TrimSpace(fallbackBaseURL)
 	}
 	if base == "" {
-		base = "/api/uploads/local"
+		base = "/uploads"
+	}
+	// 兼容历史配置：将 /api/uploads/local 或 /uploads/local 归一到 /uploads。
+	if strings.EqualFold(strings.TrimRight(base, "/"), "/api/uploads/local") {
+		base = "/uploads"
+	}
+	if strings.EqualFold(strings.TrimRight(base, "/"), "/uploads/local") {
+		base = "/uploads"
+	}
+	if strings.HasPrefix(base, "/api/uploads/") {
+		base = strings.TrimPrefix(base, "/api")
 	}
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(objectPath, "/")
 }

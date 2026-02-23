@@ -84,7 +84,7 @@ func DefaultImageHostingConfig() ImageHostingConfig {
 		},
 		Local: LocalImageHostingConfig{
 			UploadEndpoint: "/api/uploads/images",
-			PublicBaseURL:  "/api/uploads/local",
+			PublicBaseURL:  "/uploads",
 		},
 	}
 }
@@ -126,7 +126,7 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 			config.Local.UploadEndpoint = uploadEndpoint
 		}
 		if publicBaseURL := readString(local, "publicBaseUrl"); publicBaseURL != "" {
-			config.Local.PublicBaseURL = publicBaseURL
+			config.Local.PublicBaseURL = normalizeLocalPublicBaseURL(publicBaseURL)
 		}
 	}
 
@@ -185,6 +185,18 @@ func normalizeImageHostingProvider(rawValue string) ImageHostingProvider {
 	default:
 		return ""
 	}
+}
+
+func normalizeLocalPublicBaseURL(rawValue string) string {
+	trimmed := strings.TrimSpace(rawValue)
+	normalized := strings.TrimRight(trimmed, "/")
+	if normalized == "/api/uploads/local" || normalized == "/uploads/local" {
+		return "/uploads"
+	}
+	if strings.HasPrefix(trimmed, "/api/uploads/") {
+		return strings.TrimPrefix(trimmed, "/api")
+	}
+	return trimmed
 }
 
 func readString(payload map[string]any, key string) string {

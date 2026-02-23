@@ -474,7 +474,13 @@ export interface ImageHostingGateway {
   // 获取当前生效的图床配置（由后端系统配置统一管理）。
   getConfig(): Promise<Record<string, unknown>>;
   // 上传到本地图片存储（由后端接收 multipart/form-data 文件）。
-  uploadLocalImage(file: File, uploadEndpoint?: string): Promise<UploadLocalImageResult>;
+  uploadLocalImage(
+    file: File,
+    uploadEndpoint?: string,
+    options?: {
+      spaceId?: string | null;
+    }
+  ): Promise<UploadLocalImageResult>;
 }
 
 export interface UserConfigGateway {
