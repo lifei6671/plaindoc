@@ -26,7 +26,8 @@ COPY apps/server ./
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plaindoc-server ./cmd/server
+# github.com/chai2010/webp requires CGO; disable CGO will cause backend build failures.
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plaindoc-server ./cmd/server
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 WORKDIR /app
