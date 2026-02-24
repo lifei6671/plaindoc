@@ -110,6 +110,11 @@ func newRouter(
 	// ---- SSR 页面与静态资源路由（不走 /api）----
 	// 模板静态资源（CSS/字体/图片）统一挂在 /assets。
 	router.StaticFS("/assets", http.FS(view.MustStaticFS()))
+	// 站点 favicon 走根路径直出，避免 302 重定向带来的额外 RTT。
+	router.GET("/favicon.ico", func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=2592000, immutable")
+		c.FileFromFS("favicon.png", http.FS(view.MustStaticFS()))
+	})
 	// 首页：服务端渲染（SEO 主入口）。
 	router.GET("/", homeHandler.Home)
 	// 分类探索页：服务端渲染分类导航与分类空间列表。

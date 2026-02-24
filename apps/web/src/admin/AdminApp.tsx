@@ -1,6 +1,5 @@
 import {
   ChevronRight,
-  CircleDot,
   FileText,
   FolderKanban,
   History,
@@ -25,6 +24,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { ADMIN_BRAND_LOGO_SRC } from "./brand";
 import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./routes";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AdminSpacesPage } from "./pages/AdminSpacesPage";
@@ -625,7 +625,9 @@ export function AdminApp({
           }`}
         >
           <div className="flex items-center gap-2 px-2 py-1">
-            <CircleDot size={18} className="text-slate-700" />
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/80 bg-white shadow-sm">
+              <img src={ADMIN_BRAND_LOGO_SRC} alt="PlainDoc logo" className="h-full w-full object-cover" />
+            </span>
             <p className="text-sm font-semibold tracking-tight">PlainDoc 管理后台</p>
           </div>
 

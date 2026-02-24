@@ -1,6 +1,7 @@
-import { LoaderCircle, ShieldCheck } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { ADMIN_BRAND_LOGO_SRC } from "../admin/brand";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -51,10 +52,14 @@ export function AdminAuthPanel({ checking, submitting, errorMessage, onLogin }: 
     <div className="admin-auth-page">
       <Card className="mx-auto w-full max-w-md border-slate-200 shadow-xl">
         <CardHeader className="space-y-4 pb-4">
-          <Badge variant="outline" className="w-fit gap-1 border-cyan-200 bg-cyan-50 text-cyan-700">
-            <ShieldCheck size={13} />
-            <span>Admin Console</span>
-          </Badge>
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/80 bg-white shadow-sm">
+              <img src={ADMIN_BRAND_LOGO_SRC} alt="PlainDoc logo" className="h-full w-full object-cover" />
+            </span>
+            <Badge variant="outline" className="w-fit border-cyan-200 bg-cyan-50 text-cyan-700">
+              <span>Admin Console</span>
+            </Badge>
+          </div>
           <div className="space-y-2">
             <CardTitle className="text-2xl tracking-tight">PlainDoc 管理后台</CardTitle>
             <CardDescription>使用现有账号登录，系统会自动校验管理员角色。</CardDescription>
