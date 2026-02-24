@@ -9,6 +9,8 @@
   --text-secondary: #5c6680;
   --accent-500: #4f7cff;
   --accent-600: #355fe1;
+  --pd-global-font-family: "Google Sans Code", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --pd-code-font-family: "Google Sans Code", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 * {
@@ -22,10 +24,18 @@ body {
 
 body {
   color: var(--text-primary);
-  font-family: "Avenir Next", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: var(--pd-global-font-family);
   background:
     radial-gradient(1200px 700px at 8% 0%, #eef3ff 0%, #f4f7ff 45%, #f6f8ff 70%, #f8f9fd 100%),
     linear-gradient(180deg, #f2f5ff 0%, #f7f9ff 100%);
+}
+
+/* SSR 页面中 code 类元素统一走代码字体。 */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--pd-code-font-family);
 }
 
 .home-body {

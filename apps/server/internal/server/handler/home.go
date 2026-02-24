@@ -355,6 +355,6 @@ func renderHomeFallback(c *gin.Context) {
 	c.Data(
 		http.StatusOK,
 		"text/html; charset=utf-8",
-		[]byte("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>"+seoTitle+"</title></head><body><main><h1>空间探索</h1><p>页面正在初始化，请稍后刷新。</p></main></body></html>"),
+		[]byte("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>"+seoTitle+"</title><link rel=\"preload\" href=\"/assets/google-sans-code-latin-400-normal.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"stylesheet\" href=\"/assets/font-google-sans-code.css?v=20260224\"><style>body{margin:0;padding:24px;font-family:\"Google Sans Code\",\"PingFang SC\",\"Microsoft YaHei\",\"Helvetica Neue\",Arial,sans-serif;background:#f8fafc;color:#1f2937}main{max-width:720px;margin:40px auto;background:#fff;border:1px solid #dbe2ea;border-radius:12px;padding:18px 20px}</style></head><body><main><h1>空间探索</h1><p>页面正在初始化，请稍后刷新。</p></main></body></html>"),
 	)
 }

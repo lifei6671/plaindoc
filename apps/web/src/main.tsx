@@ -1,4 +1,4 @@
-import googleSansCodeLatinStyleText from "@fontsource/google-sans-code/latin.css?inline";
+import googleSansCodeLatinStyleText from "@fontsource/google-sans-code/index.css?inline";
 import katexStyleText from "katex/dist/katex.min.css?inline";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

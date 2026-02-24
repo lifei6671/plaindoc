@@ -1,0 +1,24 @@
+/*
+ * SSR 阅读页字体声明：
+ * - latin + latin-ext：英文字母/数字/拉丁字母
+ * - math + symbols + symbols2：数学公式与常见符号
+ */
+@import "@fontsource/google-sans-code/latin-400.css";
+@import "@fontsource/google-sans-code/latin-600.css";
+@import "@fontsource/google-sans-code/latin-700.css";
+
+@import "@fontsource/google-sans-code/latin-ext-400.css";
+@import "@fontsource/google-sans-code/latin-ext-600.css";
+@import "@fontsource/google-sans-code/latin-ext-700.css";
+
+@import "@fontsource/google-sans-code/math-400.css";
+@import "@fontsource/google-sans-code/math-600.css";
+@import "@fontsource/google-sans-code/math-700.css";
+
+@import "@fontsource/google-sans-code/symbols-400.css";
+@import "@fontsource/google-sans-code/symbols-600.css";
+@import "@fontsource/google-sans-code/symbols-700.css";
+
+@import "@fontsource/google-sans-code/symbols2-400.css";
+@import "@fontsource/google-sans-code/symbols2-600.css";
+@import "@fontsource/google-sans-code/symbols2-700.css";

@@ -3,7 +3,9 @@
 
 :root {
   --pd-latin-mono-font-family: "Google Sans Code", "Google Sans Flex", "Google Sans", "Helvetica Neue", sans-serif;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --pd-code-font-family: "Google Sans Code", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --pd-global-font-family: "Google Sans Code", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--pd-global-font-family);
   line-height: 1.5;
   font-weight: 400;
   color: #1f1f1f;
@@ -26,6 +28,22 @@ body,
 
 body {
   margin: 0;
+  font-family: var(--pd-global-font-family);
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: var(--pd-global-font-family);
+}
+
+/* 统一代码类元素字体，保证后台 ID/code 标签稳定命中 Google Sans Code。 */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--pd-code-font-family);
 }
 
 /* 统一按钮交互：可点击按钮显示手型光标。 */
@@ -2582,6 +2600,7 @@ input[type="reset"]:not(:disabled) {
   font-size: 11px;
   line-height: 1.4;
 }
+
 /* 新版后台侧栏按钮：强制去除默认粗边框，统一轻量商务风。 */
 .admin-nav-item-button {
   -webkit-appearance: none;

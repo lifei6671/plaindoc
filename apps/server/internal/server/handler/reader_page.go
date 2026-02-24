@@ -525,8 +525,10 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>%s</title>
+    <link rel="preload" href="/assets/google-sans-code-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/assets/font-google-sans-code.css?v=20260224" />
     <style>
-      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fb; color: #1f2937; }
+      body { margin: 0; font-family: "Google Sans Code", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; background: #f5f7fb; color: #1f2937; }
       .reader-shell { max-width: 980px; margin: 24px auto; background: #fff; border: 1px solid #dbe2ea; border-radius: 14px; padding: 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); }
       .reader-meta { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
       .reader-title { font-size: 28px; font-weight: 700; margin: 0 0 18px; }
@@ -534,7 +536,7 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
       .reader-fallback-denied { margin: 0; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 12px; padding: 16px; }
       .reader-fallback-denied h2 { margin: 0; color: #0f172a; font-size: 18px; line-height: 1.4; }
       .reader-fallback-denied p { margin: 8px 0 0; color: #475569; font-size: 14px; line-height: 1.7; }
-      pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 14px; line-height: 1.7; }
+      pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 14px; line-height: 1.7; font-family: "Google Sans Code", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     </style>
   </head>
   <body>
@@ -577,8 +579,10 @@ func buildReaderErrorHTML(statusCode int, title string, description string) stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>%s</title>
+    <link rel="preload" href="/assets/google-sans-code-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/assets/font-google-sans-code.css?v=20260224" />
     <style>
-      body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: linear-gradient(180deg, #f8fafc 0%%, #eef2ff 100%%); }
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; font-family: "Google Sans Code", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; color: #1f2937; background: linear-gradient(180deg, #f8fafc 0%%, #eef2ff 100%%); }
       .error-shell { width: 100%%; max-width: 560px; background: #fff; border: 1px solid #dbe2ea; border-radius: 16px; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08); padding: 24px; }
       .error-code { margin: 0; font-size: 12px; color: #64748b; letter-spacing: 0.04em; text-transform: uppercase; }
       .error-title { margin: 10px 0 8px; font-size: 28px; line-height: 1.25; color: #0f172a; }
