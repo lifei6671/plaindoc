@@ -207,6 +207,7 @@ type WorkspaceUpdateNodeParams struct {
 	NodeID        string
 	UpdateValues  map[string]any
 	DocumentTitle *string
+	ActorUserID   string
 	TouchSpace    string
 	TouchedAt     time.Time
 }

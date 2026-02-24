@@ -13,6 +13,8 @@
 - 空间阅读页 SSR（对 SEO 友好）
 - 后台管理（用户、空间、文档、主题、系统配置、审计）
 
+![](./docs/screenshot-1771921927147.png)
+
 ![](./docs/screenshot-1771855761950.png)
 
 ![](./docs/screenshot-1771855798856.png)

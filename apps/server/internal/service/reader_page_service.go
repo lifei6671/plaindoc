@@ -337,14 +337,13 @@ func (s *ReaderPageService) loadDocumentRow(
 			"d.title",
 			"d.content_md",
 			"d.version",
-			// 作者固定取首个版本（version=1）的编辑者，避免后续更新人覆盖创建人语义。
+			// 作者固定取文档创建者，避免后续更新人覆盖创建人语义。
 			"COALESCE(NULLIF(TRIM(u_creator.name), ''), '未知作者') AS author_nickname",
 			"d.updated_at",
 			"n.space_id AS space_id",
 		).
 		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("LEFT JOIN document_revisions AS dr_creator ON dr_creator.document_id = d.document_id AND dr_creator.version = 1").
-		Joins("LEFT JOIN users AS u_creator ON u_creator.user_id = dr_creator.editor_user_id").
+		Joins("LEFT JOIN users AS u_creator ON u_creator.user_id = d.created_by_user_id").
 		Where("d.document_id = ?", documentID).
 		Take(&row).Error
 	return row, err

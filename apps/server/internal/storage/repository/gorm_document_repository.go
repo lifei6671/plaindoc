@@ -27,6 +27,7 @@ type documentAccessRow struct {
 	Title             string              `gorm:"column:title"`
 	ContentMD         string              `gorm:"column:content_md"`
 	Version           int                 `gorm:"column:version"`
+	CreatedByUserID   *string             `gorm:"column:created_by_user_id"`
 	UpdatedByUserID   *string             `gorm:"column:updated_by_user_id"`
 	SpaceID           string              `gorm:"column:space_id"`
 	SpaceName         string              `gorm:"column:space_name"`
@@ -78,6 +79,7 @@ func (r *gormDocumentRepository) GetByDocumentID(ctx context.Context, documentID
 			"title",
 			"content_md",
 			"version",
+			"created_by_user_id",
 			"updated_by_user_id",
 		).
 		Where("document_id = ?", documentID).
@@ -117,6 +119,7 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			"d.title AS title",
 			"d.content_md AS content_md",
 			"d.version AS version",
+			"d.created_by_user_id AS created_by_user_id",
 			"d.updated_by_user_id AS updated_by_user_id",
 			"s.space_id AS space_id",
 			"s.name AS space_name",
@@ -161,6 +164,7 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			Title:           row.Title,
 			ContentMD:       row.ContentMD,
 			Version:         row.Version,
+			CreatedByUserID: row.CreatedByUserID,
 			UpdatedByUserID: row.UpdatedByUserID,
 		},
 		SpaceID:           row.SpaceID,
@@ -255,6 +259,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 		Title           string              `gorm:"column:title"`
 		ContentMD       string              `gorm:"column:content_md"`
 		Version         int                 `gorm:"column:version"`
+		CreatedByUserID *string             `gorm:"column:created_by_user_id"`
 		UpdatedByUserID *string             `gorm:"column:updated_by_user_id"`
 		CreatedAtRaw    string              `gorm:"column:created_at"`
 		UpdatedAtRaw    string              `gorm:"column:updated_at"`
@@ -280,6 +285,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 			"d.title",
 			"d.content_md",
 			"d.version",
+			"d.created_by_user_id",
 			"d.updated_by_user_id",
 			"d.created_at",
 			"d.updated_at",
@@ -311,6 +317,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 			Title:           row.Title,
 			ContentMD:       row.ContentMD,
 			Version:         row.Version,
+			CreatedByUserID: row.CreatedByUserID,
 			UpdatedByUserID: row.UpdatedByUserID,
 			CreatedAt:       parseDocumentRecordTime(row.CreatedAtRaw),
 			UpdatedAt:       parseDocumentRecordTime(row.UpdatedAtRaw),

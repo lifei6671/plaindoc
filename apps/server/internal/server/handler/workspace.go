@@ -385,14 +385,16 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 	now := time.Now().UTC()
 	nodeID := strings.ToLower(ulid.Make().String())
 	node := &models.Node{
-		NodeID:       nodeID,
-		SpaceID:      spaceID,
-		ParentNodeID: parentID,
-		Type:         req.Type,
-		Title:        title,
-		Sort:         maxSort + 1,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		NodeID:          nodeID,
+		SpaceID:         spaceID,
+		ParentNodeID:    parentID,
+		Type:            req.Type,
+		Title:           title,
+		Sort:            maxSort + 1,
+		CreatedByUserID: &actorUserID,
+		UpdatedByUserID: &actorUserID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	responseBody := createWorkspaceNodeResponse{
@@ -416,6 +418,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 			Title:           title,
 			ContentMD:       "",
 			Version:         1,
+			CreatedByUserID: &actorUserID,
 			UpdatedByUserID: &actorUserID,
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -551,6 +554,7 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		NodeID:        nodeID,
 		UpdateValues:  updateValues,
 		DocumentTitle: documentTitle,
+		ActorUserID:   actorUserID,
 		TouchSpace:    strings.TrimSpace(node.SpaceID),
 		TouchedAt:     now,
 	}); err != nil {

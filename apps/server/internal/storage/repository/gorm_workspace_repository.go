@@ -401,6 +401,14 @@ func (r *gormWorkspaceRepository) UpdateNode(
 	if len(params.UpdateValues) == 0 {
 		return nil
 	}
+	actorUserID := strings.TrimSpace(params.ActorUserID)
+	updateValues := make(map[string]any, len(params.UpdateValues)+1)
+	for key, value := range params.UpdateValues {
+		updateValues[key] = value
+	}
+	if actorUserID != "" {
+		updateValues["updated_by_user_id"] = actorUserID
+	}
 
 	touchedAt := params.TouchedAt
 	if touchedAt.IsZero() {
@@ -411,7 +419,7 @@ func (r *gormWorkspaceRepository) UpdateNode(
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Table("nodes").
 			Where("node_id = ?", nodeID).
-			Updates(params.UpdateValues)
+			Updates(updateValues)
 		if updateTx.Error != nil {
 			return updateTx.Error
 		}
@@ -420,12 +428,16 @@ func (r *gormWorkspaceRepository) UpdateNode(
 		}
 
 		if params.DocumentTitle != nil {
+			documentUpdates := map[string]any{
+				"title":      strings.TrimSpace(*params.DocumentTitle),
+				"updated_at": touchedAt,
+			}
+			if actorUserID != "" {
+				documentUpdates["updated_by_user_id"] = actorUserID
+			}
 			if err := tx.Table("documents").
 				Where("node_id = ?", nodeID).
-				Updates(map[string]any{
-					"title":      strings.TrimSpace(*params.DocumentTitle),
-					"updated_at": touchedAt,
-				}).Error; err != nil {
+				Updates(documentUpdates).Error; err != nil {
 				return err
 			}
 		}
@@ -580,9 +592,15 @@ func (r *gormWorkspaceRepository) SaveDocument(
 		}
 
 		if nodeID != "" {
+			nodeUpdates := map[string]any{
+				"updated_at": touchedAt,
+			}
+			if actorUserID != "" {
+				nodeUpdates["updated_by_user_id"] = actorUserID
+			}
 			if err := tx.Table("nodes").
 				Where("node_id = ?", nodeID).
-				Update("updated_at", touchedAt).Error; err != nil {
+				Updates(nodeUpdates).Error; err != nil {
 				return err
 			}
 		}

@@ -16,6 +16,7 @@ type Document struct {
 	Title           string       `gorm:"column:title"`
 	ContentMD       string       `gorm:"column:content_md"`
 	Version         int          `gorm:"column:version"`
+	CreatedByUserID *string      `gorm:"column:created_by_user_id"`
 	UpdatedByUserID *string      `gorm:"column:updated_by_user_id"`
 	CreatedAt       time.Time    `gorm:"column:created_at"`
 	UpdatedAt       time.Time    `gorm:"column:updated_at"`
