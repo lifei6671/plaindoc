@@ -10,15 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
-var (
-	ErrAdminOperationTokenRequired         = errors.New("admin operation token is required")
-	ErrAdminOperationTokenInvalid          = errors.New("admin operation token is invalid")
-	ErrAdminOperationTokenExpired          = errors.New("admin operation token is expired")
-	ErrAdminOperationTokenReplayed         = errors.New("admin operation token is replayed")
-	ErrAdminOperationTokenScopeMismatch    = errors.New("admin operation token scope mismatch")
-	ErrAdminOperationTokenInvalidOperation = errors.New("admin operation token operation is invalid")
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 )
 
 const (
@@ -88,26 +81,30 @@ func NewAdminOperationTokenService(
 func (s *AdminOperationTokenService) Issue(
 	ctx context.Context,
 	input IssueAdminOperationTokenInput,
-) (AdminOperationTokenIssueResult, error) {
+) (result AdminOperationTokenIssueResult, err error) {
+	defer func() {
+		err = errcode.MapAdminOperationTokenError(err)
+	}()
+
 	if s == nil || s.adminAccessService == nil {
 		return AdminOperationTokenIssueResult{}, errors.New("admin operation token service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return AdminOperationTokenIssueResult{}, ErrAdminForbidden
+		return AdminOperationTokenIssueResult{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return AdminOperationTokenIssueResult{}, err
 	}
 	if !isAdmin {
-		return AdminOperationTokenIssueResult{}, ErrAdminForbidden
+		return AdminOperationTokenIssueResult{}, errcode.ErrAdminForbidden
 	}
 
 	operation := normalizeAdminOperationTokenOperation(input.Operation)
 	if operation == "" {
-		return AdminOperationTokenIssueResult{}, ErrAdminOperationTokenInvalidOperation
+		return AdminOperationTokenIssueResult{}, errcode.ErrAdminOperationTokenInvalidOperation
 	}
 
 	targetType := normalizeAdminOperationTokenTargetType(input.TargetType)
@@ -144,30 +141,34 @@ func (s *AdminOperationTokenService) Issue(
 func (s *AdminOperationTokenService) Consume(
 	ctx context.Context,
 	input ConsumeAdminOperationTokenInput,
-) error {
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminOperationTokenError(err)
+	}()
+
 	if s == nil || s.adminAccessService == nil {
 		return errors.New("admin operation token service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return err
 	}
 	if !isAdmin {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 
 	tokenValue := strings.TrimSpace(input.Token)
 	if tokenValue == "" {
-		return ErrAdminOperationTokenRequired
+		return errcode.ErrAdminOperationTokenRequired
 	}
 	operation := normalizeAdminOperationTokenOperation(input.Operation)
 	if operation == "" {
-		return ErrAdminOperationTokenInvalidOperation
+		return errcode.ErrAdminOperationTokenInvalidOperation
 	}
 
 	targetType := normalizeAdminOperationTokenTargetType(input.TargetType)
@@ -183,26 +184,26 @@ func (s *AdminOperationTokenService) Consume(
 
 	record, exists := s.tokens[tokenHash]
 	if !exists {
-		return ErrAdminOperationTokenInvalid
+		return errcode.ErrAdminOperationTokenInvalid
 	}
 
 	if record.ExpiresAt.Before(now) {
 		delete(s.tokens, tokenHash)
-		return ErrAdminOperationTokenExpired
+		return errcode.ErrAdminOperationTokenExpired
 	}
 
 	if record.Consumed {
-		return ErrAdminOperationTokenReplayed
+		return errcode.ErrAdminOperationTokenReplayed
 	}
 
 	if record.ActorUserID != actorUserID {
-		return ErrAdminOperationTokenInvalid
+		return errcode.ErrAdminOperationTokenInvalid
 	}
 	if record.Operation != operation {
-		return ErrAdminOperationTokenScopeMismatch
+		return errcode.ErrAdminOperationTokenScopeMismatch
 	}
 	if !matchAdminOperationTarget(record.TargetType, record.TargetID, targetType, targetID) {
-		return ErrAdminOperationTokenScopeMismatch
+		return errcode.ErrAdminOperationTokenScopeMismatch
 	}
 
 	record.Consumed = true

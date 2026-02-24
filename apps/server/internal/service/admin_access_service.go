@@ -9,10 +9,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var (
-	ErrAdminForbidden = errors.New("admin forbidden")
-)
-
 // AdminAccessService 封装后台访问权限判定。
 type AdminAccessService struct {
 	adminRoleRepo       repository.AdminRoleRepository

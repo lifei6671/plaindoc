@@ -82,6 +82,7 @@ func newRouter(
 	auditLogRepo := repository.NewGormAuditLogRepository(db)
 	adminRoleRepo := repository.NewGormAdminRoleRepository(db)
 	spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
+	workspaceRepo := repository.NewGormWorkspaceRepository(db)
 
 	// ---- 基础服务与页面 Handler 装配 ----
 	// authService 是鉴权基石，后续 API/后台中间件都会复用。
@@ -155,7 +156,7 @@ func newRouter(
 
 		// ---- 工作区与文档协作 API（业务主链）----
 		accessHandler := handler.NewAccessHandler(authService, visibilityService)
-		workspaceHandler := handler.NewWorkspaceHandler(db, authService, visibilityService)
+		workspaceHandler := handler.NewWorkspaceHandler(workspaceRepo, authService, visibilityService)
 
 		// 空间列表（按访问者可见范围过滤）。
 		api.GET("/spaces", workspaceHandler.ListSpaces)

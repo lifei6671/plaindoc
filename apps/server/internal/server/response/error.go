@@ -1,6 +1,7 @@
 package response
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,14 @@ type JsonResult[T any] struct {
 	Message   string `json:"message,omitempty"`
 	RequestID string `json:"requestId,omitempty"`
 	Data      T      `json:"data"`
+}
+
+// MappedError 定义可直接映射为统一 API 错误响应的错误接口。
+type MappedError interface {
+	error
+	HTTPStatus() int
+	ErrorCode() string
+	ErrorMessage() string
 }
 
 // RequestIDFromContext 读取中间件写入的 request_id，缺失时返回空字符串。
@@ -74,4 +83,18 @@ func Error(c *gin.Context, status int, code string, message string) {
 // InternalError 用于服务端兜底错误，避免暴露内部细节。
 func InternalError(c *gin.Context) {
 	Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+}
+
+// FromError 优先按业务错误映射输出；无法识别时回落到 InternalError。
+func FromError(c *gin.Context, err error) {
+	if err == nil {
+		return
+	}
+
+	var mappedErr MappedError
+	if errors.As(err, &mappedErr) {
+		Error(c, mappedErr.HTTPStatus(), mappedErr.ErrorCode(), mappedErr.ErrorMessage())
+		return
+	}
+	InternalError(c)
 }

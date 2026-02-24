@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -53,22 +52,7 @@ func RequireAdminOperationToken(
 			TargetID:    targetID,
 		})
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrAdminForbidden):
-				response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-			case errors.Is(err, service.ErrAdminOperationTokenRequired):
-				response.Error(c, http.StatusBadRequest, "OPERATION_TOKEN_REQUIRED", "operation token is required")
-			case errors.Is(err, service.ErrAdminOperationTokenReplayed):
-				response.Error(c, http.StatusConflict, "OPERATION_TOKEN_REPLAYED", "operation token already used")
-			case errors.Is(err, service.ErrAdminOperationTokenExpired):
-				response.Error(c, http.StatusConflict, "OPERATION_TOKEN_EXPIRED", "operation token is expired")
-			case errors.Is(err, service.ErrAdminOperationTokenScopeMismatch):
-				response.Error(c, http.StatusConflict, "OPERATION_TOKEN_SCOPE_MISMATCH", "operation token scope mismatch")
-			case errors.Is(err, service.ErrAdminOperationTokenInvalid):
-				response.Error(c, http.StatusConflict, "OPERATION_TOKEN_INVALID", "operation token is invalid")
-			default:
-				response.InternalError(c)
-			}
+			response.FromError(c, err)
 			return
 		}
 

@@ -128,6 +128,123 @@ type SpaceRepository interface {
 	HasWriterAccess(ctx context.Context, spaceID string, userID string) (bool, error)
 }
 
+// WorkspaceSpaceListRecord 编辑器工作区空间列表项。
+type WorkspaceSpaceListRecord struct {
+	SpaceID      string
+	Name         string
+	CreatedAtRaw string
+	UpdatedAtRaw string
+}
+
+// WorkspaceSpacePermissionSnapshot 工作区空间权限判断快照。
+type WorkspaceSpacePermissionSnapshot struct {
+	SpaceID            string
+	OwnerUserID        string
+	Visibility         models.Visibility
+	Status             models.EntityStatus
+	DeletedAt          *time.Time
+	IsPlatformAdmin    bool
+	HasSpaceAdminScope bool
+	MemberRole         *models.Role
+}
+
+// WorkspaceTreeNodeRecord 工作区目录树节点记录。
+type WorkspaceTreeNodeRecord struct {
+	NodeID             string
+	DocumentID         *string
+	SpaceID            string
+	ParentNodeID       *string
+	Type               models.NodeType
+	Title              string
+	Sort               int
+	DocumentVisibility *string
+}
+
+// WorkspaceNodeRecord 工作区节点记录。
+type WorkspaceNodeRecord struct {
+	NodeID       string
+	SpaceID      string
+	ParentNodeID *string
+	Type         models.NodeType
+	Title        string
+	Sort         int
+}
+
+// WorkspaceDocumentRecord 工作区文档记录。
+type WorkspaceDocumentRecord struct {
+	DocumentID   string
+	NodeID       string
+	ThemeID      string
+	Title        string
+	ContentMD    string
+	Version      int
+	SpaceID      string
+	UpdatedAtRaw string
+}
+
+// WorkspaceRevisionRecord 工作区文档修订记录。
+type WorkspaceRevisionRecord struct {
+	DocumentRevisionID string
+	DocumentID         string
+	Version            int
+	ContentMD          string
+	BaseVersion        int
+	Source             models.RevisionSource
+	CreatedAtRaw       string
+}
+
+// WorkspaceCreateNodeParams 工作区创建节点参数。
+type WorkspaceCreateNodeParams struct {
+	Node       *models.Node
+	Document   *models.Document
+	Revision   *models.DocumentRevision
+	TouchSpace string
+	TouchedAt  time.Time
+}
+
+// WorkspaceUpdateNodeParams 工作区更新节点参数。
+type WorkspaceUpdateNodeParams struct {
+	NodeID        string
+	UpdateValues  map[string]any
+	DocumentTitle *string
+	TouchSpace    string
+	TouchedAt     time.Time
+}
+
+// WorkspaceSaveDocumentParams 工作区保存文档参数。
+type WorkspaceSaveDocumentParams struct {
+	DocumentID  string
+	BaseVersion int
+	NextVersion int
+	ContentMD   string
+	ActorUserID string
+	NodeID      string
+	SpaceID     string
+	TouchedAt   time.Time
+	Revision    *models.DocumentRevision
+}
+
+// WorkspaceRepository 编辑器工作区仓储接口。
+type WorkspaceRepository interface {
+	ListSpacesByActor(ctx context.Context, actorUserID string) ([]WorkspaceSpaceListRecord, error)
+	GetDefaultCategory(ctx context.Context) (*models.SpaceCategory, error)
+	CreateSpace(ctx context.Context, space *models.Space) error
+	GetSpacePermissionSnapshot(
+		ctx context.Context,
+		spaceID string,
+		actorUserID string,
+	) (*WorkspaceSpacePermissionSnapshot, error)
+	ListTreeNodesBySpaceID(ctx context.Context, spaceID string) ([]WorkspaceTreeNodeRecord, error)
+	GetNodeByNodeID(ctx context.Context, nodeID string) (*WorkspaceNodeRecord, error)
+	GetMaxNodeSort(ctx context.Context, spaceID string, parentNodeID *string) (int, error)
+	CreateNode(ctx context.Context, params WorkspaceCreateNodeParams) error
+	UpdateNode(ctx context.Context, params WorkspaceUpdateNodeParams) error
+	DeleteNode(ctx context.Context, nodeID string, touchSpace string, touchedAt time.Time) (bool, error)
+	GetDocumentByDocumentID(ctx context.Context, documentID string) (*WorkspaceDocumentRecord, error)
+	SaveDocument(ctx context.Context, params WorkspaceSaveDocumentParams) (bool, error)
+	ListRevisionsByDocumentID(ctx context.Context, documentID string) ([]WorkspaceRevisionRecord, error)
+}
+
 // ListVisibleHomepageSpacesParams 首页/分类页可见空间查询参数。
 type ListVisibleHomepageSpacesParams struct {
 	ViewerUserID string

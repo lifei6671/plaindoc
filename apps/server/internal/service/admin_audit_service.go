@@ -7,18 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
-)
-
-var (
-	ErrAdminAuditInvalidModule       = errors.New("admin audit module is invalid")
-	ErrAdminAuditInvalidAction       = errors.New("admin audit action is invalid")
-	ErrAdminAuditInvalidTargetType   = errors.New("admin audit target type is invalid")
-	ErrAdminAuditInvalidTargetID     = errors.New("admin audit target id is invalid")
-	ErrAdminAuditInvalidModuleFilter = errors.New("admin audit module filter is invalid")
-	ErrAdminAuditInvalidActionFilter = errors.New("admin audit action filter is invalid")
-	ErrAdminAuditInvalidTimeRange    = errors.New("admin audit time range is invalid")
 )
 
 const (
@@ -130,7 +121,14 @@ func NewAdminAuditService(
 }
 
 // Record 写入审计日志。
-func (s *AdminAuditService) Record(ctx context.Context, input RecordAdminAuditInput) error {
+func (s *AdminAuditService) Record(
+	ctx context.Context,
+	input RecordAdminAuditInput,
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminAuditError(err)
+	}()
+
 	if s == nil || s.auditLogRepo == nil || s.adminAccessService == nil {
 		return errors.New("admin audit service dependencies are nil")
 	}
@@ -140,14 +138,14 @@ func (s *AdminAuditService) Record(ctx context.Context, input RecordAdminAuditIn
 		actorUserID = adminAuditActorUserIDFromContext(ctx)
 	}
 	if actorUserID == "" {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return err
 	}
 	if !isAdmin {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 
 	module, err := normalizeAdminAuditModule(string(input.Module))
@@ -161,11 +159,11 @@ func (s *AdminAuditService) Record(ctx context.Context, input RecordAdminAuditIn
 
 	targetType := strings.ToLower(strings.TrimSpace(input.TargetType))
 	if targetType == "" {
-		return ErrAdminAuditInvalidTargetType
+		return errcode.ErrAdminAuditInvalidTargetType
 	}
 	targetID := strings.TrimSpace(input.TargetID)
 	if targetID == "" {
-		return ErrAdminAuditInvalidTargetID
+		return errcode.ErrAdminAuditInvalidTargetID
 	}
 
 	summary := strings.TrimSpace(input.Summary)
@@ -204,21 +202,25 @@ func (s *AdminAuditService) Record(ctx context.Context, input RecordAdminAuditIn
 func (s *AdminAuditService) ListAudits(
 	ctx context.Context,
 	input ListAdminAuditsInput,
-) (ListAdminAuditsResult, error) {
+) (result ListAdminAuditsResult, err error) {
+	defer func() {
+		err = errcode.MapAdminAuditError(err)
+	}()
+
 	if s == nil || s.auditLogRepo == nil || s.adminAccessService == nil {
 		return ListAdminAuditsResult{}, errors.New("admin audit service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return ListAdminAuditsResult{}, ErrAdminForbidden
+		return ListAdminAuditsResult{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return ListAdminAuditsResult{}, err
 	}
 	if !isAdmin {
-		return ListAdminAuditsResult{}, ErrAdminForbidden
+		return ListAdminAuditsResult{}, errcode.ErrAdminForbidden
 	}
 
 	moduleFilter, err := normalizeAdminAuditModuleFilter(input.ModuleFilter)
@@ -230,7 +232,7 @@ func (s *AdminAuditService) ListAudits(
 		return ListAdminAuditsResult{}, err
 	}
 	if input.CreatedAtFrom != nil && input.CreatedAtTo != nil && input.CreatedAtFrom.After(*input.CreatedAtTo) {
-		return ListAdminAuditsResult{}, ErrAdminAuditInvalidTimeRange
+		return ListAdminAuditsResult{}, errcode.ErrAdminAuditInvalidTimeRange
 	}
 
 	page := input.Page
@@ -260,7 +262,7 @@ func (s *AdminAuditService) ListAudits(
 		if moduleFilter != "" && moduleFilter != string(AdminAuditModuleSpace) &&
 			moduleFilter != string(AdminAuditModuleDocument) &&
 			moduleFilter != string(AdminAuditModuleTheme) {
-			return ListAdminAuditsResult{}, ErrAdminForbidden
+			return ListAdminAuditsResult{}, errcode.ErrAdminForbidden
 		}
 		if actorUserIDFilter == "" {
 			actorUserIDFilter = actorUserID
@@ -315,7 +317,7 @@ func (s *AdminAuditService) ListAudits(
 func normalizeAdminAuditModule(rawModule string) (string, error) {
 	module := strings.ToLower(strings.TrimSpace(rawModule))
 	if _, ok := validAdminAuditModules[module]; !ok {
-		return "", ErrAdminAuditInvalidModule
+		return "", errcode.ErrAdminAuditInvalidModule
 	}
 	return module, nil
 }
@@ -326,7 +328,7 @@ func normalizeAdminAuditModuleFilter(rawModule string) (string, error) {
 		return "", nil
 	}
 	if _, ok := validAdminAuditModules[module]; !ok {
-		return "", ErrAdminAuditInvalidModuleFilter
+		return "", errcode.ErrAdminAuditInvalidModuleFilter
 	}
 	return module, nil
 }
@@ -334,7 +336,7 @@ func normalizeAdminAuditModuleFilter(rawModule string) (string, error) {
 func normalizeAdminAuditAction(rawAction string) (string, error) {
 	action := strings.ToLower(strings.TrimSpace(rawAction))
 	if _, ok := validAdminAuditActions[action]; !ok {
-		return "", ErrAdminAuditInvalidAction
+		return "", errcode.ErrAdminAuditInvalidAction
 	}
 	return action, nil
 }
@@ -345,7 +347,7 @@ func normalizeAdminAuditActionFilter(rawAction string) (string, error) {
 		return "", nil
 	}
 	if _, ok := validAdminAuditActions[action]; !ok {
-		return "", ErrAdminAuditInvalidActionFilter
+		return "", errcode.ErrAdminAuditInvalidActionFilter
 	}
 	return action, nil
 }

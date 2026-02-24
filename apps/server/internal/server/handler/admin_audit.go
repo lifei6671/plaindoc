@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -97,18 +96,7 @@ func (h *adminAuditHandler) ListAudits(c *gin.Context) {
 		PageSize:          pageSize,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient admin permission")
-		case errors.Is(err, service.ErrAdminAuditInvalidModuleFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_MODULE", "module filter is invalid")
-		case errors.Is(err, service.ErrAdminAuditInvalidActionFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_ACTION", "action filter is invalid")
-		case errors.Is(err, service.ErrAdminAuditInvalidTimeRange):
-			response.Error(c, http.StatusBadRequest, "INVALID_TIME_RANGE", "from must be before to")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 

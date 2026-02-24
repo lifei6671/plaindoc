@@ -24,6 +24,7 @@ import (
 
 	"github.com/chai2010/webp"
 	"github.com/fogleman/gg"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -83,39 +84,39 @@ func processAdminSpaceUserUploadCover(
 ) (processAdminSpaceCoverResult, error) {
 	fileBytes := input.FileBytes
 	if len(fileBytes) == 0 {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverFileRequired
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverFileRequired
 	}
 	if len(fileBytes) > adminSpaceCoverMaxUploadSizeBytes {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageTooLarge
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageTooLarge
 	}
 
 	contentType := detectAdminSpaceCoverContentType(fileBytes, input.FileContentType)
 	if !strings.HasPrefix(contentType, "image/") {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageInvalid
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageInvalid
 	}
 
 	decodedImage, _, err := image.Decode(bytes.NewReader(fileBytes))
 	if err != nil {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageInvalid
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageInvalid
 	}
 
 	sourceBounds := decodedImage.Bounds()
 	sourceWidth := sourceBounds.Dx()
 	sourceHeight := sourceBounds.Dy()
 	if sourceWidth <= 0 || sourceHeight <= 0 {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageInvalid
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageInvalid
 	}
 	if sourceWidth > adminSpaceCoverMaxImageDimension || sourceHeight > adminSpaceCoverMaxImageDimension {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageTooManyPixels
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageTooManyPixels
 	}
 	if int64(sourceWidth)*int64(sourceHeight) > adminSpaceCoverMaxPixelCount {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageTooManyPixels
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageTooManyPixels
 	}
 
 	cropRect := computeAdminSpaceCoverCropRect(sourceBounds)
 	outputWidth, outputHeight := computeAdminSpaceCoverOutputSize(cropRect.Dx(), cropRect.Dy())
 	if outputWidth <= 0 || outputHeight <= 0 {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverImageInvalid
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverImageInvalid
 	}
 
 	resized := image.NewRGBA(image.Rect(0, 0, outputWidth, outputHeight))
@@ -152,7 +153,7 @@ func renderAdminSpaceSystemCover(
 ) (processAdminSpaceCoverResult, error) {
 	title := normalizeAdminSpaceCoverTitle(input.SpaceName)
 	if title == "" {
-		return processAdminSpaceCoverResult{}, ErrAdminSpaceCoverSpaceNameRequired
+		return processAdminSpaceCoverResult{}, errcode.ErrAdminSpaceCoverSpaceNameRequired
 	}
 
 	canvas := image.NewRGBA(image.Rect(0, 0, adminSpaceCoverMaxWidth, adminSpaceCoverMaxHeight))
@@ -201,12 +202,12 @@ func drawAdminSpaceCoverBackground(ctx *gg.Context) {
 
 func drawAdminSpaceCoverTitle(dst *image.RGBA, title string) error {
 	if dst == nil {
-		return ErrAdminSpaceCoverImageInvalid
+		return errcode.ErrAdminSpaceCoverImageInvalid
 	}
 
 	contentWidth := dst.Bounds().Dx() - adminSpaceCoverSafeMargin*2
 	if contentWidth <= 0 {
-		return ErrAdminSpaceCoverImageInvalid
+		return errcode.ErrAdminSpaceCoverImageInvalid
 	}
 
 	face, lines, lineHeight, err := chooseAdminSpaceCoverTitleLayout(title, contentWidth)
@@ -248,7 +249,7 @@ func chooseAdminSpaceCoverTitleLayout(
 	for _, size := range sizes {
 		face, err := loadAdminSpaceCoverFontFace(size)
 		if err != nil {
-			if errors.Is(err, ErrAdminSpaceFontUnavailable) {
+			if errors.Is(err, errcode.ErrAdminSpaceFontUnavailable) {
 				return nil, nil, 0, err
 			}
 			continue
@@ -276,7 +277,7 @@ func chooseAdminSpaceCoverTitleLayout(
 	}
 	lines, _ := wrapAdminSpaceCoverTitle(title, face, maxWidth, adminSpaceCoverMaxTitleLines)
 	if len(lines) == 0 {
-		return nil, nil, 0, ErrAdminSpaceCoverImageInvalid
+		return nil, nil, 0, errcode.ErrAdminSpaceCoverImageInvalid
 	}
 	return face, lines, computeAdminSpaceCoverLineHeight(face, 60), nil
 }
@@ -452,7 +453,7 @@ func loadAdminSpaceCoverFontFace(size float64) (font.Face, error) {
 	}
 	parsed, err := opentype.Parse(fontData)
 	if err != nil {
-		return nil, ErrAdminSpaceFontUnavailable
+		return nil, errcode.ErrAdminSpaceFontUnavailable
 	}
 	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
 		Size:    size,
@@ -460,7 +461,7 @@ func loadAdminSpaceCoverFontFace(size float64) (font.Face, error) {
 		Hinting: font.HintingFull,
 	})
 	if err != nil {
-		return nil, ErrAdminSpaceFontUnavailable
+		return nil, errcode.ErrAdminSpaceFontUnavailable
 	}
 	return face, nil
 }
@@ -490,14 +491,14 @@ func (r *adminSpaceFontRegistry) loadFontData() ([]byte, error) {
 			r.fontPath = candidate
 			return
 		}
-		r.err = ErrAdminSpaceFontUnavailable
+		r.err = errcode.ErrAdminSpaceFontUnavailable
 	})
 
 	if len(r.fontData) == 0 {
 		if r.err != nil {
 			return nil, r.err
 		}
-		return nil, ErrAdminSpaceFontUnavailable
+		return nil, errcode.ErrAdminSpaceFontUnavailable
 	}
 	return r.fontData, nil
 }
@@ -593,7 +594,7 @@ func firstAdminSpaceBytes(input []byte, limit int) []byte {
 
 func encodeAdminSpaceCoverWebP(imageValue image.Image, quality float64) ([]byte, error) {
 	if imageValue == nil {
-		return nil, ErrAdminSpaceCoverImageInvalid
+		return nil, errcode.ErrAdminSpaceCoverImageInvalid
 	}
 	var output bytes.Buffer
 	if err := webp.Encode(&output, imageValue, &webp.Options{

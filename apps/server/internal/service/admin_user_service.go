@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"github.com/oklog/ulid/v2"
@@ -17,22 +18,6 @@ const (
 	defaultAdminUserPage     = 1
 	defaultAdminUserPageSize = 20
 	maxAdminUserPageSize     = 100
-)
-
-var (
-	ErrAdminUserInvalidStatusFilter  = errors.New("invalid admin user status filter")
-	ErrAdminUserInvalidStatus        = errors.New("invalid admin user status")
-	ErrAdminUserBanReasonRequired    = errors.New("admin user ban reason is required")
-	ErrAdminUserNotFound             = errors.New("admin user target not found")
-	ErrAdminUserInvalidUserID        = errors.New("admin user id is invalid")
-	ErrAdminUserSelfOperationBlocked = errors.New("admin user self operation is blocked")
-	ErrAdminUserAlreadyDeleted       = errors.New("admin user target already deleted")
-	ErrAdminUserInvalidEmail         = errors.New("admin user email is invalid")
-	ErrAdminUserInvalidName          = errors.New("admin user name is invalid")
-	ErrAdminUserInvalidPassword      = errors.New("admin user password is invalid")
-	ErrAdminUserEmailAlreadyExists   = errors.New("admin user email already exists")
-	ErrAdminUserInvalidRole          = errors.New("admin user role is invalid")
-	ErrAdminUserRoleForbidden        = errors.New("admin user role operation forbidden")
 )
 
 // AdminUserStatusFilter 管理后台用户查询状态过滤条件。
@@ -140,7 +125,14 @@ func NewAdminUserService(
 }
 
 // ListUsers 查询后台用户列表，默认不返回已删除用户。
-func (s *AdminUserService) ListUsers(ctx context.Context, input ListAdminUsersInput) (ListAdminUsersResult, error) {
+func (s *AdminUserService) ListUsers(
+	ctx context.Context,
+	input ListAdminUsersInput,
+) (result ListAdminUsersResult, err error) {
+	defer func() {
+		err = errcode.MapAdminUserError(err)
+	}()
+
 	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
 		return ListAdminUsersResult{}, err
 	}
@@ -202,7 +194,14 @@ func (s *AdminUserService) ListUsers(ctx context.Context, input ListAdminUsersIn
 }
 
 // CreateUser 新增后台用户，默认创建为 active 状态。
-func (s *AdminUserService) CreateUser(ctx context.Context, input CreateAdminUserInput) (AdminUserRecord, error) {
+func (s *AdminUserService) CreateUser(
+	ctx context.Context,
+	input CreateAdminUserInput,
+) (result AdminUserRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminUserError(err)
+	}()
+
 	_ = input.RequestID
 
 	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
@@ -220,24 +219,24 @@ func (s *AdminUserService) CreateUser(ctx context.Context, input CreateAdminUser
 	role := normalizeAdminUserRole(input.Role)
 
 	if email == "" || !strings.Contains(email, "@") {
-		return AdminUserRecord{}, ErrAdminUserInvalidEmail
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidEmail
 	}
 	if name == "" {
-		return AdminUserRecord{}, ErrAdminUserInvalidName
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidName
 	}
 	if len(password) < 6 {
-		return AdminUserRecord{}, ErrAdminUserInvalidPassword
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidPassword
 	}
 	if !isValidAdminUserRole(role) {
-		return AdminUserRecord{}, ErrAdminUserInvalidRole
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidRole
 	}
 	if adminUserRoleRank(role) > adminUserRoleRank(actorRole) {
-		return AdminUserRecord{}, ErrAdminUserRoleForbidden
+		return AdminUserRecord{}, errcode.ErrAdminUserRoleForbidden
 	}
 
 	_, err = s.userRepo.GetByEmail(ctx, email)
 	if err == nil {
-		return AdminUserRecord{}, ErrAdminUserEmailAlreadyExists
+		return AdminUserRecord{}, errcode.ErrAdminUserEmailAlreadyExists
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return AdminUserRecord{}, err
@@ -260,7 +259,7 @@ func (s *AdminUserService) CreateUser(ctx context.Context, input CreateAdminUser
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		if isUniqueConstraintError(err) {
-			return AdminUserRecord{}, ErrAdminUserEmailAlreadyExists
+			return AdminUserRecord{}, errcode.ErrAdminUserEmailAlreadyExists
 		}
 		return AdminUserRecord{}, err
 	}
@@ -271,7 +270,7 @@ func (s *AdminUserService) CreateUser(ctx context.Context, input CreateAdminUser
 	latestUser, err := s.userRepo.GetByUserID(ctx, user.UserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminUserRecord{}, ErrAdminUserNotFound
+			return AdminUserRecord{}, errcode.ErrAdminUserNotFound
 		}
 		return AdminUserRecord{}, err
 	}
@@ -304,7 +303,11 @@ func (s *AdminUserService) CreateUser(ctx context.Context, input CreateAdminUser
 func (s *AdminUserService) UpdateUserStatus(
 	ctx context.Context,
 	input UpdateAdminUserStatusInput,
-) (AdminUserRecord, error) {
+) (result AdminUserRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminUserError(err)
+	}()
+
 	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
 		return AdminUserRecord{}, err
 	}
@@ -316,29 +319,29 @@ func (s *AdminUserService) UpdateUserStatus(
 
 	targetUserID := strings.TrimSpace(input.UserID)
 	if targetUserID == "" {
-		return AdminUserRecord{}, ErrAdminUserInvalidUserID
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidUserID
 	}
 	if strings.TrimSpace(input.ActorUserID) == targetUserID {
-		return AdminUserRecord{}, ErrAdminUserSelfOperationBlocked
+		return AdminUserRecord{}, errcode.ErrAdminUserSelfOperationBlocked
 	}
 	if input.Status != models.EntityStatusActive && input.Status != models.EntityStatusBanned {
-		return AdminUserRecord{}, ErrAdminUserInvalidStatus
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidStatus
 	}
 
 	reason := strings.TrimSpace(input.Reason)
 	if input.Status == models.EntityStatusBanned && reason == "" {
-		return AdminUserRecord{}, ErrAdminUserBanReasonRequired
+		return AdminUserRecord{}, errcode.ErrAdminUserBanReasonRequired
 	}
 
 	targetUser, err := s.userRepo.GetByUserID(ctx, targetUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminUserRecord{}, ErrAdminUserNotFound
+			return AdminUserRecord{}, errcode.ErrAdminUserNotFound
 		}
 		return AdminUserRecord{}, err
 	}
 	if normalizeEntityStatus(targetUser.Status) == models.EntityStatusDeleted || targetUser.DeletedAt != nil {
-		return AdminUserRecord{}, ErrAdminUserAlreadyDeleted
+		return AdminUserRecord{}, errcode.ErrAdminUserAlreadyDeleted
 	}
 
 	now := time.Now().UTC()
@@ -357,7 +360,7 @@ func (s *AdminUserService) UpdateUserStatus(
 		return AdminUserRecord{}, err
 	}
 	if !updated {
-		return AdminUserRecord{}, ErrAdminUserNotFound
+		return AdminUserRecord{}, errcode.ErrAdminUserNotFound
 	}
 
 	if input.Status == models.EntityStatusBanned {
@@ -369,7 +372,7 @@ func (s *AdminUserService) UpdateUserStatus(
 	latestUser, err := s.userRepo.GetByUserID(ctx, targetUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminUserRecord{}, ErrAdminUserNotFound
+			return AdminUserRecord{}, errcode.ErrAdminUserNotFound
 		}
 		return AdminUserRecord{}, err
 	}
@@ -404,7 +407,11 @@ func (s *AdminUserService) UpdateUserStatus(
 func (s *AdminUserService) UpdateUserRole(
 	ctx context.Context,
 	input UpdateAdminUserRoleInput,
-) (AdminUserRecord, error) {
+) (result AdminUserRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminUserError(err)
+	}()
+
 	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
 		return AdminUserRecord{}, err
 	}
@@ -412,15 +419,15 @@ func (s *AdminUserService) UpdateUserRole(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	targetUserID := strings.TrimSpace(input.UserID)
 	if targetUserID == "" {
-		return AdminUserRecord{}, ErrAdminUserInvalidUserID
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidUserID
 	}
 	if actorUserID == targetUserID {
-		return AdminUserRecord{}, ErrAdminUserSelfOperationBlocked
+		return AdminUserRecord{}, errcode.ErrAdminUserSelfOperationBlocked
 	}
 
 	nextRole := normalizeAdminUserRole(input.Role)
 	if !isValidAdminUserRole(nextRole) {
-		return AdminUserRecord{}, ErrAdminUserInvalidRole
+		return AdminUserRecord{}, errcode.ErrAdminUserInvalidRole
 	}
 
 	actorRole, err := s.resolveUserRole(ctx, actorUserID)
@@ -428,18 +435,18 @@ func (s *AdminUserService) UpdateUserRole(
 		return AdminUserRecord{}, err
 	}
 	if adminUserRoleRank(nextRole) > adminUserRoleRank(actorRole) {
-		return AdminUserRecord{}, ErrAdminUserRoleForbidden
+		return AdminUserRecord{}, errcode.ErrAdminUserRoleForbidden
 	}
 
 	targetUser, err := s.userRepo.GetByUserID(ctx, targetUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminUserRecord{}, ErrAdminUserNotFound
+			return AdminUserRecord{}, errcode.ErrAdminUserNotFound
 		}
 		return AdminUserRecord{}, err
 	}
 	if normalizeEntityStatus(targetUser.Status) == models.EntityStatusDeleted || targetUser.DeletedAt != nil {
-		return AdminUserRecord{}, ErrAdminUserAlreadyDeleted
+		return AdminUserRecord{}, errcode.ErrAdminUserAlreadyDeleted
 	}
 
 	currentRole, err := s.resolveUserRole(ctx, targetUserID)
@@ -447,7 +454,7 @@ func (s *AdminUserService) UpdateUserRole(
 		return AdminUserRecord{}, err
 	}
 	if adminUserRoleRank(currentRole) > adminUserRoleRank(actorRole) {
-		return AdminUserRecord{}, ErrAdminUserRoleForbidden
+		return AdminUserRecord{}, errcode.ErrAdminUserRoleForbidden
 	}
 
 	if err := s.adminRoleRepo.ReplaceByUserID(ctx, targetUserID, adminRolesByUserRole(nextRole)); err != nil {
@@ -457,7 +464,7 @@ func (s *AdminUserService) UpdateUserRole(
 	latestUser, err := s.userRepo.GetByUserID(ctx, targetUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminUserRecord{}, ErrAdminUserNotFound
+			return AdminUserRecord{}, errcode.ErrAdminUserNotFound
 		}
 		return AdminUserRecord{}, err
 	}
@@ -490,7 +497,11 @@ func (s *AdminUserService) DeleteUser(
 	actorUserID string,
 	targetUserID string,
 	requestID string,
-) error {
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminUserError(err)
+	}()
+
 	_ = requestID
 
 	if err := s.ensurePlatformAdmin(ctx, actorUserID); err != nil {
@@ -499,16 +510,16 @@ func (s *AdminUserService) DeleteUser(
 
 	normalizedTargetUserID := strings.TrimSpace(targetUserID)
 	if normalizedTargetUserID == "" {
-		return ErrAdminUserInvalidUserID
+		return errcode.ErrAdminUserInvalidUserID
 	}
 	if strings.TrimSpace(actorUserID) == normalizedTargetUserID {
-		return ErrAdminUserSelfOperationBlocked
+		return errcode.ErrAdminUserSelfOperationBlocked
 	}
 
 	targetUser, err := s.userRepo.GetByUserID(ctx, normalizedTargetUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrAdminUserNotFound
+			return errcode.ErrAdminUserNotFound
 		}
 		return err
 	}
@@ -522,7 +533,7 @@ func (s *AdminUserService) DeleteUser(
 		return err
 	}
 	if !deleted {
-		return ErrAdminUserNotFound
+		return errcode.ErrAdminUserNotFound
 	}
 	if err := s.userSessionRepo.RevokeAllByUserID(ctx, normalizedTargetUserID, now); err != nil {
 		return err
@@ -555,7 +566,7 @@ func (s *AdminUserService) ensurePlatformAdmin(ctx context.Context, actorUserID 
 		return err
 	}
 	if !isPlatformAdmin {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	return nil
 }
@@ -587,7 +598,7 @@ func resolveUserStatuses(filter AdminUserStatusFilter) ([]models.EntityStatus, e
 	case AdminUserStatusFilterDeleted:
 		return []models.EntityStatus{models.EntityStatusDeleted}, nil
 	default:
-		return nil, ErrAdminUserInvalidStatusFilter
+		return nil, errcode.ErrAdminUserInvalidStatusFilter
 	}
 }
 

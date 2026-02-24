@@ -79,14 +79,7 @@ func (h *adminProfileHandler) GetProfile(c *gin.Context) {
 
 	payload, err := h.adminProfileService.GetProfile(c.Request.Context(), actorUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminProfileNotFound):
-			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "admin user not found")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 	response.JSON(c, http.StatusOK, mapAdminProfileResponse(payload))
@@ -117,7 +110,7 @@ func (h *adminProfileHandler) UpdateProfile(c *gin.Context) {
 		AvatarURL:   req.AvatarURL,
 	})
 	if err != nil {
-		h.writeUpdateProfileError(c, err)
+		response.FromError(c, err)
 		return
 	}
 	response.JSON(c, http.StatusOK, mapAdminProfileResponse(payload))
@@ -152,20 +145,7 @@ func (h *adminProfileHandler) UpdatePassword(c *gin.Context) {
 		NewPassword:     req.NewPassword,
 		ConfirmPassword: req.ConfirmPassword,
 	}); err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminProfileNotFound):
-			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "admin user not found")
-		case errors.Is(err, service.ErrAdminProfileCurrentPasswordInvalid):
-			response.Error(c, http.StatusBadRequest, "INVALID_CURRENT_PASSWORD", "current password is invalid")
-		case errors.Is(err, service.ErrAdminProfilePasswordTooShort):
-			response.Error(c, http.StatusBadRequest, "INVALID_NEW_PASSWORD", "new password must be at least 6 characters")
-		case errors.Is(err, service.ErrAdminProfilePasswordUnchanged):
-			response.Error(c, http.StatusBadRequest, "PASSWORD_UNCHANGED", "new password can not be same as current password")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -245,25 +225,10 @@ func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 		AvatarURL:   &avatarURL,
 	})
 	if err != nil {
-		h.writeUpdateProfileError(c, err)
+		response.FromError(c, err)
 		return
 	}
 	response.JSON(c, http.StatusOK, mapAdminProfileResponse(payload))
-}
-
-func (h *adminProfileHandler) writeUpdateProfileError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrAdminForbidden):
-		response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-	case errors.Is(err, service.ErrAdminProfileNotFound):
-		response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "admin user not found")
-	case errors.Is(err, service.ErrAdminProfileInvalidName):
-		response.Error(c, http.StatusBadRequest, "INVALID_NAME", "name is invalid")
-	case errors.Is(err, service.ErrAdminProfileInvalidAvatarURL):
-		response.Error(c, http.StatusBadRequest, "INVALID_AVATAR_URL", "avatar url is invalid")
-	default:
-		response.InternalError(c)
-	}
 }
 
 func mapAdminProfileResponse(payload service.AdminProfileRecord) adminProfileResponse {

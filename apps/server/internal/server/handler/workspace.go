@@ -11,6 +11,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 )
@@ -21,10 +22,8 @@ const (
 	maxWorkspaceSpaceNameLength  = 64
 )
 
-var errWorkspaceDocumentVersionConflict = errors.New("workspace document version conflict")
-
 type workspaceHandler struct {
-	db                *gorm.DB
+	workspaceRepo     repository.WorkspaceRepository
 	authService       *service.AuthService
 	visibilityService *service.VisibilityService
 }
@@ -123,12 +122,12 @@ type workspaceTreeNode struct {
 
 // NewWorkspaceHandler 创建编辑器工作区处理器。
 func NewWorkspaceHandler(
-	db *gorm.DB,
+	workspaceRepo repository.WorkspaceRepository,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
 ) *workspaceHandler {
 	return &workspaceHandler{
-		db:                db,
+		workspaceRepo:     workspaceRepo,
 		authService:       authService,
 		visibilityService: visibilityService,
 	}
@@ -140,41 +139,13 @@ func (h *workspaceHandler) ListSpaces(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
 
-	type spaceRow struct {
-		SpaceID      string `gorm:"column:space_id"`
-		Name         string `gorm:"column:name"`
-		CreatedAtRaw string `gorm:"column:created_at"`
-		UpdatedAtRaw string `gorm:"column:updated_at"`
-	}
-
-	isPlatformAdmin, err := h.isPlatformAdmin(c.Request.Context(), actorUserID)
+	rows, err := h.workspaceRepo.ListSpacesByActor(c.Request.Context(), actorUserID)
 	if err != nil {
-		response.InternalError(c)
-		return
-	}
-
-	query := h.db.WithContext(c.Request.Context()).
-		Table("spaces AS s").
-		Distinct("s.space_id", "s.name", "s.created_at", "s.updated_at").
-		Select("s.space_id", "s.name", "s.created_at", "s.updated_at").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive)
-
-	if !isPlatformAdmin {
-		query = query.
-			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", actorUserID).
-			Joins("LEFT JOIN space_admin_scopes AS sas ON sas.space_id = s.space_id AND sas.user_id = ?", actorUserID).
-			Where("s.owner_user_id = ? OR sm.id IS NOT NULL OR sas.id IS NOT NULL", actorUserID)
-	}
-
-	var rows []spaceRow
-	if err := query.
-		Order("s.updated_at DESC, s.id DESC").
-		Find(&rows).Error; err != nil {
 		response.InternalError(c)
 		return
 	}
@@ -197,7 +168,7 @@ func (h *workspaceHandler) CreateSpace(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -214,22 +185,17 @@ func (h *workspaceHandler) CreateSpace(c *gin.Context) {
 		return
 	}
 
-	type defaultCategoryRow struct {
-		CategoryID string `gorm:"column:category_id"`
-		Name       string `gorm:"column:name"`
-	}
-	defaultCategory := defaultCategoryRow{
+	defaultCategory := models.SpaceCategory{
 		CategoryID: defaultWorkspaceCategoryID,
 		Name:       defaultWorkspaceCategoryName,
 	}
-	if err := h.db.WithContext(c.Request.Context()).
-		Table("space_categories").
-		Select("category_id", "name").
-		Where("is_default = ?", true).
-		Order("id ASC").
-		Take(&defaultCategory).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	defaultCategoryValue, err := h.workspaceRepo.GetDefaultCategory(c.Request.Context())
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		response.InternalError(c)
 		return
+	}
+	if defaultCategoryValue != nil {
+		defaultCategory = *defaultCategoryValue
 	}
 	if strings.TrimSpace(defaultCategory.CategoryID) == "" {
 		defaultCategory.CategoryID = defaultWorkspaceCategoryID
@@ -251,7 +217,7 @@ func (h *workspaceHandler) CreateSpace(c *gin.Context) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := h.db.WithContext(c.Request.Context()).Create(space).Error; err != nil {
+	if err := h.workspaceRepo.CreateSpace(c.Request.Context(), space); err != nil {
 		response.InternalError(c)
 		return
 	}
@@ -270,7 +236,7 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -295,34 +261,8 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 		return
 	}
 
-	type nodeRow struct {
-		NodeID             string          `gorm:"column:node_id"`
-		DocumentID         *string         `gorm:"column:document_id"`
-		SpaceID            string          `gorm:"column:space_id"`
-		ParentNodeID       *string         `gorm:"column:parent_node_id"`
-		Type               models.NodeType `gorm:"column:type"`
-		Title              string          `gorm:"column:title"`
-		Sort               int             `gorm:"column:sort"`
-		DocumentVisibility *string         `gorm:"column:document_visibility"`
-	}
-
-	var rows []nodeRow
-	if err := h.db.WithContext(c.Request.Context()).
-		Table("nodes AS n").
-		Select(
-			"n.node_id",
-			"d.document_id AS document_id",
-			"n.space_id",
-			"n.parent_node_id",
-			"n.type",
-			"n.title",
-			"n.sort",
-			"d.visibility AS document_visibility",
-		).
-		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
-		Where("n.space_id = ?", spaceID).
-		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
-		Find(&rows).Error; err != nil {
+	rows, err := h.workspaceRepo.ListTreeNodesBySpaceID(c.Request.Context(), spaceID)
+	if err != nil {
 		response.InternalError(c)
 		return
 	}
@@ -377,7 +317,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -387,22 +327,13 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
 		return
 	}
-	if err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+	spaceAccess, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID)
+	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
 			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
 		case errors.Is(err, service.ErrSpaceAccessDenied):
 			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
-		default:
-			response.InternalError(c)
-		}
-		return
-	}
-	spaceAccess, err := h.loadSpaceAccess(c.Request.Context(), spaceID)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
 		default:
 			response.InternalError(c)
 		}
@@ -430,15 +361,8 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 
 	parentID := normalizeOptionalString(req.ParentID)
 	if parentID != nil {
-		type parentRow struct {
-			SpaceID string `gorm:"column:space_id"`
-		}
-		var parent parentRow
-		if err := h.db.WithContext(c.Request.Context()).
-			Table("nodes").
-			Select("space_id").
-			Where("node_id = ?", *parentID).
-			Take(&parent).Error; err != nil {
+		parent, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), *parentID)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "parent node not found")
 				return
@@ -452,20 +376,8 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		}
 	}
 
-	type maxSortRow struct {
-		Value int `gorm:"column:value"`
-	}
-	maxSort := maxSortRow{Value: 0}
-	sortQuery := h.db.WithContext(c.Request.Context()).
-		Table("nodes").
-		Select("COALESCE(MAX(sort), 0) AS value").
-		Where("space_id = ?", spaceID)
-	if parentID == nil {
-		sortQuery = sortQuery.Where("parent_node_id IS NULL")
-	} else {
-		sortQuery = sortQuery.Where("parent_node_id = ?", *parentID)
-	}
-	if err := sortQuery.Take(&maxSort).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	maxSort, err := h.workspaceRepo.GetMaxNodeSort(c.Request.Context(), spaceID, parentID)
+	if err != nil {
 		response.InternalError(c)
 		return
 	}
@@ -478,7 +390,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		ParentNodeID: parentID,
 		Type:         req.Type,
 		Title:        title,
-		Sort:         maxSort.Value + 1,
+		Sort:         maxSort + 1,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -491,46 +403,42 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		defaultDocumentVisibility = models.VisibilityMember
 	}
 
-	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(node).Error; err != nil {
-			return err
+	var doc *models.Document
+	var revision *models.DocumentRevision
+	if req.Type == models.NodeTypeDoc {
+		documentID := node.NodeID
+		doc = &models.Document{
+			DocumentID:      documentID,
+			NodeID:          node.NodeID,
+			ThemeID:         "default",
+			Visibility:      defaultDocumentVisibility,
+			Status:          models.EntityStatusActive,
+			Title:           title,
+			ContentMD:       "",
+			Version:         1,
+			UpdatedByUserID: &actorUserID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
-		if req.Type == models.NodeTypeDoc {
-			documentID := node.NodeID
-			doc := &models.Document{
-				DocumentID:      documentID,
-				NodeID:          node.NodeID,
-				ThemeID:         "default",
-				Visibility:      defaultDocumentVisibility,
-				Status:          models.EntityStatusActive,
-				Title:           title,
-				ContentMD:       "",
-				Version:         1,
-				UpdatedByUserID: &actorUserID,
-				CreatedAt:       now,
-				UpdatedAt:       now,
-			}
-			if err := tx.Create(doc).Error; err != nil {
-				return err
-			}
-			revision := &models.DocumentRevision{
-				DocumentRevisionID: strings.ToLower(ulid.Make().String()),
-				DocumentID:         documentID,
-				Version:            1,
-				ContentMD:          "",
-				BaseVersion:        0,
-				EditorUserID:       &actorUserID,
-				Source:             models.RevisionSourceRemote,
-				CreatedAt:          now,
-			}
-			if err := tx.Create(revision).Error; err != nil {
-				return err
-			}
-			responseBody.DocID = documentID
+		revision = &models.DocumentRevision{
+			DocumentRevisionID: strings.ToLower(ulid.Make().String()),
+			DocumentID:         documentID,
+			Version:            1,
+			ContentMD:          "",
+			BaseVersion:        0,
+			EditorUserID:       &actorUserID,
+			Source:             models.RevisionSourceRemote,
+			CreatedAt:          now,
 		}
-		return tx.Table("spaces").
-			Where("space_id = ?", spaceID).
-			Update("updated_at", now).Error
+		responseBody.DocID = documentID
+	}
+
+	if err := h.workspaceRepo.CreateNode(c.Request.Context(), repository.WorkspaceCreateNodeParams{
+		Node:       node,
+		Document:   doc,
+		Revision:   revision,
+		TouchSpace: spaceID,
+		TouchedAt:  now,
 	}); err != nil {
 		response.InternalError(c)
 		return
@@ -545,7 +453,7 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -566,19 +474,8 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		return
 	}
 
-	type nodeRow struct {
-		NodeID  string          `gorm:"column:node_id"`
-		SpaceID string          `gorm:"column:space_id"`
-		Type    models.NodeType `gorm:"column:type"`
-		Title   string          `gorm:"column:title"`
-		Sort    int             `gorm:"column:sort"`
-	}
-	var node nodeRow
-	if err := h.db.WithContext(c.Request.Context()).
-		Table("nodes").
-		Select("node_id", "space_id", "type", "title", "sort").
-		Where("node_id = ?", nodeID).
-		Take(&node).Error; err != nil {
+	node, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), nodeID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
 			return
@@ -587,7 +484,7 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		return
 	}
 
-	if err := h.ensureSpaceWritable(c.Request.Context(), strings.TrimSpace(node.SpaceID), actorUserID); err != nil {
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), strings.TrimSpace(node.SpaceID), actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
 			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
@@ -620,15 +517,8 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 			return
 		}
 		if parentID != nil {
-			type parentRow struct {
-				SpaceID string `gorm:"column:space_id"`
-			}
-			var parent parentRow
-			if err := h.db.WithContext(c.Request.Context()).
-				Table("nodes").
-				Select("space_id").
-				Where("node_id = ?", *parentID).
-				Take(&parent).Error; err != nil {
+			parent, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), *parentID)
+			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "parent node not found")
 					return
@@ -652,26 +542,22 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 	now := time.Now().UTC()
 	updateValues["updated_at"] = now
 
-	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Table("nodes").
-			Where("node_id = ?", nodeID).
-			Updates(updateValues).Error; err != nil {
-			return err
-		}
-		if node.Type == models.NodeTypeDoc && req.Title != nil {
-			if err := tx.Table("documents").
-				Where("node_id = ?", nodeID).
-				Updates(map[string]any{
-					"title":      nextTitle,
-					"updated_at": now,
-				}).Error; err != nil {
-				return err
-			}
-		}
-		return tx.Table("spaces").
-			Where("space_id = ?", strings.TrimSpace(node.SpaceID)).
-			Update("updated_at", now).Error
+	var documentTitle *string
+	if node.Type == models.NodeTypeDoc && req.Title != nil {
+		documentTitle = &nextTitle
+	}
+
+	if err := h.workspaceRepo.UpdateNode(c.Request.Context(), repository.WorkspaceUpdateNodeParams{
+		NodeID:        nodeID,
+		UpdateValues:  updateValues,
+		DocumentTitle: documentTitle,
+		TouchSpace:    strings.TrimSpace(node.SpaceID),
+		TouchedAt:     now,
 	}); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
+			return
+		}
 		response.InternalError(c)
 		return
 	}
@@ -685,7 +571,7 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -696,15 +582,8 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 		return
 	}
 
-	type nodeRow struct {
-		SpaceID string `gorm:"column:space_id"`
-	}
-	var node nodeRow
-	if err := h.db.WithContext(c.Request.Context()).
-		Table("nodes").
-		Select("space_id").
-		Where("node_id = ?", nodeID).
-		Take(&node).Error; err != nil {
+	node, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), nodeID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
 			return
@@ -714,7 +593,7 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 	}
 
 	spaceID := strings.TrimSpace(node.SpaceID)
-	if err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
 			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
@@ -727,23 +606,13 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 	}
 
 	now := time.Now().UTC()
-	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		deleteResult := tx.Where("node_id = ?", nodeID).Delete(&models.Node{})
-		if deleteResult.Error != nil {
-			return deleteResult.Error
-		}
-		if deleteResult.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return tx.Table("spaces").
-			Where("space_id = ?", spaceID).
-			Update("updated_at", now).Error
-	}); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
-			return
-		}
+	deleted, err := h.workspaceRepo.DeleteNode(c.Request.Context(), nodeID, spaceID, now)
+	if err != nil {
 		response.InternalError(c)
+		return
+	}
+	if !deleted {
+		response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
 		return
 	}
 
@@ -756,7 +625,7 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil {
+	if h == nil || h.workspaceRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -777,27 +646,7 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		return
 	}
 
-	fetchDocument := func(tx *gorm.DB) (workspaceDocumentRow, error) {
-		var row workspaceDocumentRow
-		err := tx.
-			Table("documents AS d").
-			Select(
-				"d.document_id",
-				"d.node_id",
-				"d.theme_id",
-				"d.title",
-				"d.content_md",
-				"d.version",
-				"d.updated_at",
-				"n.space_id AS space_id",
-			).
-			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-			Where("d.document_id = ?", documentID).
-			Take(&row).Error
-		return row, err
-	}
-
-	current, err := fetchDocument(h.db.WithContext(c.Request.Context()))
+	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
@@ -806,9 +655,19 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
+	current := workspaceDocumentRow{
+		DocumentID:   currentRecord.DocumentID,
+		NodeID:       currentRecord.NodeID,
+		ThemeID:      currentRecord.ThemeID,
+		Title:        currentRecord.Title,
+		ContentMD:    currentRecord.ContentMD,
+		Version:      currentRecord.Version,
+		SpaceID:      currentRecord.SpaceID,
+		UpdatedAtRaw: currentRecord.UpdatedAtRaw,
+	}
 
 	spaceID := strings.TrimSpace(current.SpaceID)
-	if err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
 			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
@@ -827,71 +686,56 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 
 	now := time.Now().UTC()
 	nextVersion := current.Version + 1
-	var latest workspaceDocumentResponse
-
-	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		updateResult := tx.Table("documents").
-			Where("document_id = ? AND version = ?", documentID, req.BaseVersion).
-			Updates(map[string]any{
-				"content_md":         req.ContentMD,
-				"version":            nextVersion,
-				"updated_by_user_id": actorUserID,
-				"updated_at":         now,
-			})
-		if updateResult.Error != nil {
-			return updateResult.Error
-		}
-		if updateResult.RowsAffected == 0 {
-			return errWorkspaceDocumentVersionConflict
-		}
-
-		revision := &models.DocumentRevision{
-			DocumentRevisionID: strings.ToLower(ulid.Make().String()),
-			DocumentID:         documentID,
-			Version:            nextVersion,
-			ContentMD:          req.ContentMD,
-			BaseVersion:        req.BaseVersion,
-			EditorUserID:       &actorUserID,
-			Source:             models.RevisionSourceRemote,
-			CreatedAt:          now,
-		}
-		if err := tx.Create(revision).Error; err != nil {
-			return err
-		}
-
-		if err := tx.Table("nodes").
-			Where("node_id = ?", strings.TrimSpace(current.NodeID)).
-			Update("updated_at", now).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("spaces").
-			Where("space_id = ?", spaceID).
-			Update("updated_at", now).Error; err != nil {
-			return err
-		}
-
-		latestRow, err := fetchDocument(tx)
-		if err != nil {
-			return err
-		}
-		latest = mapWorkspaceDocumentResponse(latestRow)
-		return nil
-	}); err != nil {
-		if errors.Is(err, errWorkspaceDocumentVersionConflict) {
-			latestRow, latestErr := fetchDocument(h.db.WithContext(c.Request.Context()))
-			if latestErr != nil {
-				response.InternalError(c)
-				return
-			}
-			h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(latestRow))
-			return
-		}
+	revision := &models.DocumentRevision{
+		DocumentRevisionID: strings.ToLower(ulid.Make().String()),
+		DocumentID:         documentID,
+		Version:            nextVersion,
+		ContentMD:          req.ContentMD,
+		BaseVersion:        req.BaseVersion,
+		EditorUserID:       &actorUserID,
+		Source:             models.RevisionSourceRemote,
+		CreatedAt:          now,
+	}
+	saved, err := h.workspaceRepo.SaveDocument(c.Request.Context(), repository.WorkspaceSaveDocumentParams{
+		DocumentID:  documentID,
+		BaseVersion: req.BaseVersion,
+		NextVersion: nextVersion,
+		ContentMD:   req.ContentMD,
+		ActorUserID: actorUserID,
+		NodeID:      current.NodeID,
+		SpaceID:     spaceID,
+		TouchedAt:   now,
+		Revision:    revision,
+	})
+	if err != nil {
 		response.InternalError(c)
 		return
 	}
+	if !saved {
+		latestRecord, latestErr := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+		if latestErr != nil {
+			response.InternalError(c)
+			return
+		}
+		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(workspaceDocumentRow{
+			DocumentID:   latestRecord.DocumentID,
+			NodeID:       latestRecord.NodeID,
+			ThemeID:      latestRecord.ThemeID,
+			Title:        latestRecord.Title,
+			ContentMD:    latestRecord.ContentMD,
+			Version:      latestRecord.Version,
+			SpaceID:      latestRecord.SpaceID,
+			UpdatedAtRaw: latestRecord.UpdatedAtRaw,
+		}))
+		return
+	}
+
+	current.ContentMD = req.ContentMD
+	current.Version = nextVersion
+	current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
 
 	response.JSON(c, http.StatusOK, saveWorkspaceDocumentResponse{
-		Document: latest,
+		Document: mapWorkspaceDocumentResponse(current),
 	})
 }
 
@@ -901,7 +745,7 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if h == nil || h.db == nil || h.visibilityService == nil {
+	if h == nil || h.workspaceRepo == nil || h.visibilityService == nil {
 		response.InternalError(c)
 		return
 	}
@@ -927,23 +771,8 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 		return
 	}
 
-	type revisionRow struct {
-		DocumentRevisionID string                `gorm:"column:document_revision_id"`
-		DocumentID         string                `gorm:"column:document_id"`
-		Version            int                   `gorm:"column:version"`
-		ContentMD          string                `gorm:"column:content_md"`
-		BaseVersion        int                   `gorm:"column:base_version"`
-		Source             models.RevisionSource `gorm:"column:source"`
-		CreatedAtRaw       string                `gorm:"column:created_at"`
-	}
-
-	var rows []revisionRow
-	if err := h.db.WithContext(c.Request.Context()).
-		Table("document_revisions").
-		Select("document_revision_id", "document_id", "version", "content_md", "base_version", "source", "created_at").
-		Where("document_id = ?", documentID).
-		Order("version DESC, created_at DESC, id DESC").
-		Find(&rows).Error; err != nil {
+	rows, err := h.workspaceRepo.ListRevisionsByDocumentID(c.Request.Context(), documentID)
+	if err != nil {
 		response.InternalError(c)
 		return
 	}
@@ -993,36 +822,20 @@ func (h *workspaceHandler) requireActorUserID(c *gin.Context) (string, bool) {
 }
 
 func (h *workspaceHandler) ensureSpaceReadable(ctx context.Context, spaceID string, userID string) error {
-	space, err := h.loadSpaceAccess(ctx, spaceID)
+	space, err := h.loadSpaceAccess(ctx, spaceID, userID)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(space.OwnerUserID) == userID {
 		return nil
 	}
-
-	isPlatformAdmin, err := h.isPlatformAdmin(ctx, userID)
-	if err != nil {
-		return err
-	}
-	if isPlatformAdmin {
+	if space.IsPlatformAdmin {
 		return nil
 	}
-
-	hasScope, err := h.hasSpaceAdminScope(ctx, userID, spaceID)
-	if err != nil {
-		return err
-	}
-	if hasScope {
+	if space.HasSpaceAdminScope {
 		return nil
 	}
-
-	memberRole, memberFound, err := h.findSpaceMemberRole(ctx, spaceID, userID)
-	if err != nil {
-		return err
-	}
-	if memberFound {
-		_ = memberRole
+	if space.MemberRole != nil {
 		return nil
 	}
 
@@ -1034,62 +847,44 @@ func (h *workspaceHandler) ensureSpaceReadable(ctx context.Context, spaceID stri
 	}
 }
 
-func (h *workspaceHandler) ensureSpaceWritable(ctx context.Context, spaceID string, userID string) error {
-	space, err := h.loadSpaceAccess(ctx, spaceID)
+func (h *workspaceHandler) ensureSpaceWritable(
+	ctx context.Context,
+	spaceID string,
+	userID string,
+) (*repository.WorkspaceSpacePermissionSnapshot, error) {
+	space, err := h.loadSpaceAccess(ctx, spaceID, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if strings.TrimSpace(space.OwnerUserID) == userID {
-		return nil
+		return space, nil
 	}
-
-	isPlatformAdmin, err := h.isPlatformAdmin(ctx, userID)
-	if err != nil {
-		return err
+	if space.IsPlatformAdmin {
+		return space, nil
 	}
-	if isPlatformAdmin {
-		return nil
+	if space.HasSpaceAdminScope {
+		return space, nil
 	}
-
-	hasScope, err := h.hasSpaceAdminScope(ctx, userID, spaceID)
-	if err != nil {
-		return err
+	if space.MemberRole == nil {
+		return nil, service.ErrSpaceAccessDenied
 	}
-	if hasScope {
-		return nil
+	if *space.MemberRole == models.RoleReader {
+		return nil, service.ErrSpaceAccessDenied
 	}
-
-	memberRole, memberFound, err := h.findSpaceMemberRole(ctx, spaceID, userID)
-	if err != nil {
-		return err
-	}
-	if !memberFound {
-		return service.ErrSpaceAccessDenied
-	}
-	if memberRole == models.RoleReader {
-		return service.ErrSpaceAccessDenied
-	}
-	return nil
+	return space, nil
 }
 
-type spaceAccessRow struct {
-	SpaceID     string              `gorm:"column:space_id"`
-	OwnerUserID string              `gorm:"column:owner_user_id"`
-	Visibility  models.Visibility   `gorm:"column:visibility"`
-	Status      models.EntityStatus `gorm:"column:status"`
-	DeletedAt   *time.Time          `gorm:"column:deleted_at"`
-}
-
-func (h *workspaceHandler) loadSpaceAccess(ctx context.Context, spaceID string) (*spaceAccessRow, error) {
-	if h == nil || h.db == nil {
+func (h *workspaceHandler) loadSpaceAccess(
+	ctx context.Context,
+	spaceID string,
+	userID string,
+) (*repository.WorkspaceSpacePermissionSnapshot, error) {
+	if h == nil || h.workspaceRepo == nil {
 		return nil, errors.New("workspace handler dependencies are nil")
 	}
-	var row spaceAccessRow
-	if err := h.db.WithContext(ctx).
-		Table("spaces").
-		Select("space_id", "owner_user_id", "visibility", "status", "deleted_at").
-		Where("space_id = ?", spaceID).
-		Take(&row).Error; err != nil {
+
+	row, err := h.workspaceRepo.GetSpacePermissionSnapshot(ctx, spaceID, userID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, service.ErrSpaceNotFound
 		}
@@ -1101,65 +896,7 @@ func (h *workspaceHandler) loadSpaceAccess(ctx context.Context, spaceID string) 
 	if !models.IsValidVisibility(row.Visibility) {
 		row.Visibility = models.VisibilityMember
 	}
-	return &row, nil
-}
-
-func (h *workspaceHandler) isPlatformAdmin(ctx context.Context, userID string) (bool, error) {
-	if h == nil || h.db == nil {
-		return false, errors.New("workspace handler dependencies are nil")
-	}
-	var count int64
-	if err := h.db.WithContext(ctx).
-		Table("user_admin_roles").
-		Where("user_id = ? AND role = ?", userID, models.AdminRolePlatformAdmin).
-		Count(&count).Error; err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (h *workspaceHandler) hasSpaceAdminScope(ctx context.Context, userID string, spaceID string) (bool, error) {
-	if h == nil || h.db == nil {
-		return false, errors.New("workspace handler dependencies are nil")
-	}
-	var count int64
-	if err := h.db.WithContext(ctx).
-		Table("space_admin_scopes").
-		Where("user_id = ? AND space_id = ?", userID, spaceID).
-		Count(&count).Error; err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (h *workspaceHandler) findSpaceMemberRole(
-	ctx context.Context,
-	spaceID string,
-	userID string,
-) (models.Role, bool, error) {
-	if h == nil || h.db == nil {
-		return "", false, errors.New("workspace handler dependencies are nil")
-	}
-	type memberRoleRow struct {
-		Role models.Role `gorm:"column:role"`
-	}
-	var row memberRoleRow
-	if err := h.db.WithContext(ctx).
-		Table("space_members").
-		Select("role").
-		Where("space_id = ? AND user_id = ?", spaceID, userID).
-		Take(&row).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", false, nil
-		}
-		return "", false, err
-	}
-	switch row.Role {
-	case models.RoleOwner, models.RoleCollaborator, models.RoleReader:
-		return row.Role, true, nil
-	default:
-		return models.RoleReader, true, nil
-	}
+	return row, nil
 }
 
 func (h *workspaceHandler) writeDocumentVersionConflict(c *gin.Context, latest workspaceDocumentResponse) {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"github.com/oklog/ulid/v2"
@@ -24,42 +25,6 @@ const (
 )
 
 var adminSpaceIDPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
-
-var (
-	ErrAdminSpaceInvalidStatusFilter      = errors.New("invalid admin space status filter")
-	ErrAdminSpaceInvalidVisibilityFilter  = errors.New("invalid admin space visibility filter")
-	ErrAdminSpaceInvalidSpaceID           = errors.New("admin space id is invalid")
-	ErrAdminSpaceAlreadyExists            = errors.New("admin space id already exists")
-	ErrAdminSpaceInvalidName              = errors.New("admin space name is invalid")
-	ErrAdminSpaceInvalidVisibility        = errors.New("admin space visibility is invalid")
-	ErrAdminSpaceInvalidStatus            = errors.New("admin space status is invalid")
-	ErrAdminSpaceBanReasonRequired        = errors.New("admin space ban reason is required")
-	ErrAdminSpaceNoMetadataChange         = errors.New("admin space metadata change is required")
-	ErrAdminSpaceNotFound                 = errors.New("admin space target not found")
-	ErrAdminSpaceAlreadyDeleted           = errors.New("admin space target already deleted")
-	ErrAdminSpaceInvalidDescription       = errors.New("admin space description is invalid")
-	ErrAdminSpaceInvalidCategory          = errors.New("admin space category is invalid")
-	ErrAdminSpaceCategoryNotFound         = errors.New("admin space category not found")
-	ErrAdminSpaceCategoryNameConflict     = errors.New("admin space category name conflict")
-	ErrAdminSpaceCategoryDefaultImmutable = errors.New("admin space default category is immutable")
-	ErrAdminSpaceInvalidCoverSource       = errors.New("admin space cover source is invalid")
-	ErrAdminSpaceCoverFileRequired        = errors.New("admin space cover file is required")
-	ErrAdminSpaceCoverSpaceNameRequired   = errors.New("admin space cover space name is required")
-	ErrAdminSpaceCoverAssetNotFound       = errors.New("admin space cover asset not found")
-	ErrAdminSpaceCoverImageInvalid        = errors.New("admin space cover image is invalid")
-	ErrAdminSpaceCoverImageTooLarge       = errors.New("admin space cover image is too large")
-	ErrAdminSpaceCoverImageTooManyPixels  = errors.New("admin space cover image has too many pixels")
-	ErrAdminSpaceFontUnavailable          = errors.New("admin space cover font is unavailable")
-	ErrAdminSpaceTransferTargetRequired   = errors.New("admin space transfer target is required")
-	ErrAdminSpaceTransferTargetNotFound   = errors.New("admin space transfer target not found")
-	ErrAdminSpaceTransferTargetNotMember  = errors.New("admin space transfer target not member")
-	ErrAdminSpaceTransferToSelf           = errors.New("admin space transfer to self")
-	ErrAdminSpaceMemberTargetRequired     = errors.New("admin space member target is required")
-	ErrAdminSpaceMemberTargetNotFound     = errors.New("admin space member target not found")
-	ErrAdminSpaceMemberInvalidRole        = errors.New("admin space member role is invalid")
-	ErrAdminSpaceMemberNotFound           = errors.New("admin space member not found")
-	ErrAdminSpaceMemberOwnerImmutable     = errors.New("admin space owner member is immutable")
-)
 
 // AdminSpaceCoverSource 定义空间封面来源。
 type AdminSpaceCoverSource string
@@ -320,14 +285,18 @@ func NewAdminSpaceService(
 func (s *AdminSpaceService) ListSpaces(
 	ctx context.Context,
 	input ListAdminSpacesInput,
-) (ListAdminSpacesResult, error) {
+) (result ListAdminSpacesResult, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return ListAdminSpacesResult{}, errors.New("admin space service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return ListAdminSpacesResult{}, ErrAdminForbidden
+		return ListAdminSpacesResult{}, errcode.ErrAdminForbidden
 	}
 
 	restrictToScopes, err := s.resolveScopeRestriction(ctx, actorUserID)
@@ -375,27 +344,31 @@ func (s *AdminSpaceService) ListSpaces(
 func (s *AdminSpaceService) ListCategories(
 	ctx context.Context,
 	actorUserID string,
-) ([]AdminSpaceCategoryRecord, error) {
+) (result []AdminSpaceCategoryRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
 		return nil, errors.New("admin space service dependencies are nil")
 	}
 	actor := strings.TrimSpace(actorUserID)
 	if actor == "" {
-		return nil, ErrAdminForbidden
+		return nil, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
 	if !isAdmin {
-		return nil, ErrAdminForbidden
+		return nil, errcode.ErrAdminForbidden
 	}
 
 	items, err := s.spaceCategoryRepo.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]AdminSpaceCategoryRecord, 0, len(items))
+	result = make([]AdminSpaceCategoryRecord, 0, len(items))
 	for _, item := range items {
 		result = append(result, AdminSpaceCategoryRecord{
 			CategoryID: strings.TrimSpace(item.CategoryID),
@@ -412,21 +385,25 @@ func (s *AdminSpaceService) ListCategories(
 func (s *AdminSpaceService) CreateCategory(
 	ctx context.Context,
 	input CreateAdminSpaceCategoryInput,
-) (AdminSpaceCategoryRecord, error) {
+) (result AdminSpaceCategoryRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceCategoryRecord{}, errors.New("admin space service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return AdminSpaceCategoryRecord{}, err
 	}
 	if !isAdmin {
-		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminForbidden
 	}
 
 	name, err := normalizeAdminSpaceCategoryName(input.Name)
@@ -436,7 +413,7 @@ func (s *AdminSpaceService) CreateCategory(
 	existing, err := s.spaceCategoryRepo.GetByName(ctx, name)
 	switch {
 	case err == nil && existing != nil:
-		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNameConflict
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceCategoryNameConflict
 	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
 		return AdminSpaceCategoryRecord{}, err
 	}
@@ -482,36 +459,40 @@ func (s *AdminSpaceService) CreateCategory(
 func (s *AdminSpaceService) RenameCategory(
 	ctx context.Context,
 	input RenameAdminSpaceCategoryInput,
-) (AdminSpaceCategoryRecord, error) {
+) (result AdminSpaceCategoryRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceCategoryRecord{}, errors.New("admin space service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return AdminSpaceCategoryRecord{}, err
 	}
 	if !isAdmin {
-		return AdminSpaceCategoryRecord{}, ErrAdminForbidden
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminForbidden
 	}
 
 	categoryID := strings.TrimSpace(input.CategoryID)
 	if categoryID == "" {
-		return AdminSpaceCategoryRecord{}, ErrAdminSpaceInvalidCategory
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceInvalidCategory
 	}
 	target, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNotFound
+			return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceCategoryNotFound
 		}
 		return AdminSpaceCategoryRecord{}, err
 	}
 	if target.IsDefault {
-		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryDefaultImmutable
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceCategoryDefaultImmutable
 	}
 
 	name, err := normalizeAdminSpaceCategoryName(input.Name)
@@ -531,7 +512,7 @@ func (s *AdminSpaceService) RenameCategory(
 	existing, err := s.spaceCategoryRepo.GetByName(ctx, name)
 	switch {
 	case err == nil && existing != nil && strings.TrimSpace(existing.CategoryID) != categoryID:
-		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNameConflict
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceCategoryNameConflict
 	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
 		return AdminSpaceCategoryRecord{}, err
 	}
@@ -541,12 +522,12 @@ func (s *AdminSpaceService) RenameCategory(
 		return AdminSpaceCategoryRecord{}, err
 	}
 	if !updated {
-		return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNotFound
+		return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceCategoryNotFound
 	}
 	latest, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceCategoryRecord{}, ErrAdminSpaceCategoryNotFound
+			return AdminSpaceCategoryRecord{}, errcode.ErrAdminSpaceCategoryNotFound
 		}
 		return AdminSpaceCategoryRecord{}, err
 	}
@@ -580,36 +561,40 @@ func (s *AdminSpaceService) RenameCategory(
 func (s *AdminSpaceService) DeleteCategory(
 	ctx context.Context,
 	input DeleteAdminSpaceCategoryInput,
-) (DeleteAdminSpaceCategoryResult, error) {
+) (result DeleteAdminSpaceCategoryResult, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceCategoryRepo == nil || s.adminAccessService == nil {
 		return DeleteAdminSpaceCategoryResult{}, errors.New("admin space service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return DeleteAdminSpaceCategoryResult{}, ErrAdminForbidden
+		return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return DeleteAdminSpaceCategoryResult{}, err
 	}
 	if !isAdmin {
-		return DeleteAdminSpaceCategoryResult{}, ErrAdminForbidden
+		return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminForbidden
 	}
 
 	categoryID := strings.TrimSpace(input.CategoryID)
 	if categoryID == "" {
-		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceInvalidCategory
+		return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminSpaceInvalidCategory
 	}
 	target, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryNotFound
+			return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminSpaceCategoryNotFound
 		}
 		return DeleteAdminSpaceCategoryResult{}, err
 	}
 	if target.IsDefault {
-		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryDefaultImmutable
+		return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminSpaceCategoryDefaultImmutable
 	}
 
 	defaultCategory, err := s.getDefaultSpaceCategory(ctx)
@@ -617,7 +602,7 @@ func (s *AdminSpaceService) DeleteCategory(
 		return DeleteAdminSpaceCategoryResult{}, err
 	}
 	if strings.TrimSpace(defaultCategory.CategoryID) == categoryID {
-		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryDefaultImmutable
+		return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminSpaceCategoryDefaultImmutable
 	}
 
 	movedCount, deleted, err := s.spaceCategoryRepo.DeleteAndReassignSpaces(
@@ -631,10 +616,10 @@ func (s *AdminSpaceService) DeleteCategory(
 		return DeleteAdminSpaceCategoryResult{}, err
 	}
 	if !deleted {
-		return DeleteAdminSpaceCategoryResult{}, ErrAdminSpaceCategoryNotFound
+		return DeleteAdminSpaceCategoryResult{}, errcode.ErrAdminSpaceCategoryNotFound
 	}
 
-	result := DeleteAdminSpaceCategoryResult{
+	result = DeleteAdminSpaceCategoryResult{
 		CategoryID:             categoryID,
 		ReassignedToCategoryID: defaultCategory.CategoryID,
 		ReassignedToName:       defaultCategory.Name,
@@ -664,7 +649,11 @@ func (s *AdminSpaceService) DeleteCategory(
 func (s *AdminSpaceService) ListMembers(
 	ctx context.Context,
 	input ListAdminSpaceMembersInput,
-) ([]AdminSpaceMemberRecord, error) {
+) (result []AdminSpaceMemberRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return nil, errors.New("admin space service dependencies are nil")
 	}
@@ -672,7 +661,7 @@ func (s *AdminSpaceService) ListMembers(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	spaceID := strings.TrimSpace(input.SpaceID)
 	if spaceID == "" {
-		return nil, ErrAdminSpaceInvalidSpaceID
+		return nil, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
@@ -682,12 +671,12 @@ func (s *AdminSpaceService) ListMembers(
 	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrAdminSpaceNotFound
+			return nil, errcode.ErrAdminSpaceNotFound
 		}
 		return nil, err
 	}
 	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
-		return nil, ErrAdminSpaceAlreadyDeleted
+		return nil, errcode.ErrAdminSpaceAlreadyDeleted
 	}
 
 	members, err := s.spaceRepo.ListMembers(ctx, spaceID)
@@ -702,7 +691,11 @@ func (s *AdminSpaceService) ListMembers(
 func (s *AdminSpaceService) UpsertMember(
 	ctx context.Context,
 	input UpsertAdminSpaceMemberInput,
-) (AdminSpaceMemberRecord, error) {
+) (result AdminSpaceMemberRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.userRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceMemberRecord{}, errors.New("admin space service dependencies are nil")
 	}
@@ -710,7 +703,7 @@ func (s *AdminSpaceService) UpsertMember(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	spaceID := strings.TrimSpace(input.SpaceID)
 	if spaceID == "" {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceInvalidSpaceID
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
 		return AdminSpaceMemberRecord{}, err
@@ -718,18 +711,18 @@ func (s *AdminSpaceService) UpsertMember(
 
 	memberRole := normalizeEditableAdminSpaceMemberRole(input.Role)
 	if memberRole == "" {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberInvalidRole
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberInvalidRole
 	}
 
 	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceMemberRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceMemberRecord{}, err
 	}
 	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceAlreadyDeleted
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceAlreadyDeleted
 	}
 
 	targetUser, err := s.resolveTargetUser(ctx, input.TargetUserID, input.TargetEmail)
@@ -738,7 +731,7 @@ func (s *AdminSpaceService) UpsertMember(
 	}
 	targetUserID := strings.TrimSpace(targetUser.UserID)
 	if targetUserID == strings.TrimSpace(spaceSnapshot.OwnerUserID) {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberOwnerImmutable
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberOwnerImmutable
 	}
 
 	now := time.Now().UTC()
@@ -757,7 +750,7 @@ func (s *AdminSpaceService) UpsertMember(
 	}
 	memberRecord, found := findAdminSpaceMemberRecord(s.hydrateSpaceMembers(ctx, spaceSnapshot, members), targetUserID)
 	if !found {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberNotFound
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberNotFound
 	}
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
@@ -783,7 +776,11 @@ func (s *AdminSpaceService) UpsertMember(
 func (s *AdminSpaceService) UpdateMemberRole(
 	ctx context.Context,
 	input UpdateAdminSpaceMemberRoleInput,
-) (AdminSpaceMemberRecord, error) {
+) (result AdminSpaceMemberRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.userRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceMemberRecord{}, errors.New("admin space service dependencies are nil")
 	}
@@ -792,10 +789,10 @@ func (s *AdminSpaceService) UpdateMemberRole(
 	spaceID := strings.TrimSpace(input.SpaceID)
 	memberUserID := strings.TrimSpace(input.UserID)
 	if spaceID == "" {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceInvalidSpaceID
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	if memberUserID == "" {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberTargetRequired
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberTargetRequired
 	}
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
 		return AdminSpaceMemberRecord{}, err
@@ -803,21 +800,21 @@ func (s *AdminSpaceService) UpdateMemberRole(
 
 	memberRole := normalizeEditableAdminSpaceMemberRole(input.Role)
 	if memberRole == "" {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberInvalidRole
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberInvalidRole
 	}
 
 	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceMemberRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceMemberRecord{}, err
 	}
 	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceAlreadyDeleted
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceAlreadyDeleted
 	}
 	if memberUserID == strings.TrimSpace(spaceSnapshot.OwnerUserID) {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberOwnerImmutable
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberOwnerImmutable
 	}
 
 	updated, err := s.spaceRepo.UpdateMemberRole(ctx, repository.UpdateSpaceMemberRoleParams{
@@ -830,7 +827,7 @@ func (s *AdminSpaceService) UpdateMemberRole(
 		return AdminSpaceMemberRecord{}, err
 	}
 	if !updated {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberNotFound
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberNotFound
 	}
 
 	members, err := s.spaceRepo.ListMembers(ctx, spaceID)
@@ -839,7 +836,7 @@ func (s *AdminSpaceService) UpdateMemberRole(
 	}
 	memberRecord, found := findAdminSpaceMemberRecord(s.hydrateSpaceMembers(ctx, spaceSnapshot, members), memberUserID)
 	if !found {
-		return AdminSpaceMemberRecord{}, ErrAdminSpaceMemberNotFound
+		return AdminSpaceMemberRecord{}, errcode.ErrAdminSpaceMemberNotFound
 	}
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
@@ -864,7 +861,11 @@ func (s *AdminSpaceService) UpdateMemberRole(
 func (s *AdminSpaceService) DeleteMember(
 	ctx context.Context,
 	input DeleteAdminSpaceMemberInput,
-) error {
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return errors.New("admin space service dependencies are nil")
 	}
@@ -873,10 +874,10 @@ func (s *AdminSpaceService) DeleteMember(
 	spaceID := strings.TrimSpace(input.SpaceID)
 	memberUserID := strings.TrimSpace(input.UserID)
 	if spaceID == "" {
-		return ErrAdminSpaceInvalidSpaceID
+		return errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	if memberUserID == "" {
-		return ErrAdminSpaceMemberTargetRequired
+		return errcode.ErrAdminSpaceMemberTargetRequired
 	}
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
 		return err
@@ -885,15 +886,15 @@ func (s *AdminSpaceService) DeleteMember(
 	spaceSnapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrAdminSpaceNotFound
+			return errcode.ErrAdminSpaceNotFound
 		}
 		return err
 	}
 	if normalizeEntityStatus(spaceSnapshot.Status) == models.EntityStatusDeleted || spaceSnapshot.DeletedAt != nil {
-		return ErrAdminSpaceAlreadyDeleted
+		return errcode.ErrAdminSpaceAlreadyDeleted
 	}
 	if memberUserID == strings.TrimSpace(spaceSnapshot.OwnerUserID) {
-		return ErrAdminSpaceMemberOwnerImmutable
+		return errcode.ErrAdminSpaceMemberOwnerImmutable
 	}
 
 	deleted, err := s.spaceRepo.DeleteMember(ctx, spaceID, memberUserID)
@@ -901,7 +902,7 @@ func (s *AdminSpaceService) DeleteMember(
 		return err
 	}
 	if !deleted {
-		return ErrAdminSpaceMemberNotFound
+		return errcode.ErrAdminSpaceMemberNotFound
 	}
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
@@ -924,21 +925,25 @@ func (s *AdminSpaceService) DeleteMember(
 func (s *AdminSpaceService) CreateSpace(
 	ctx context.Context,
 	input CreateAdminSpaceInput,
-) (AdminSpaceRecord, error) {
+) (result AdminSpaceRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceRecord{}, errors.New("admin space service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return AdminSpaceRecord{}, ErrAdminForbidden
+		return AdminSpaceRecord{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return AdminSpaceRecord{}, err
 	}
 	if !isAdmin {
-		return AdminSpaceRecord{}, ErrAdminForbidden
+		return AdminSpaceRecord{}, errcode.ErrAdminForbidden
 	}
 
 	spaceID, hasCustomSpaceID, err := normalizeAdminSpaceID(input.SpaceID)
@@ -948,7 +953,7 @@ func (s *AdminSpaceService) CreateSpace(
 	if hasCustomSpaceID {
 		existingSpace, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 		if err == nil && existingSpace != nil {
-			return AdminSpaceRecord{}, ErrAdminSpaceAlreadyExists
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceAlreadyExists
 		}
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return AdminSpaceRecord{}, err
@@ -959,12 +964,12 @@ func (s *AdminSpaceService) CreateSpace(
 
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len([]rune(name)) > maxAdminSpaceNameLength {
-		return AdminSpaceRecord{}, ErrAdminSpaceInvalidName
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidName
 	}
 
 	description := strings.TrimSpace(input.Description)
 	if len([]rune(description)) > maxAdminSpaceDescLength {
-		return AdminSpaceRecord{}, ErrAdminSpaceInvalidDescription
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidDescription
 	}
 	resolvedCategory, err := s.resolveSpaceCategoryByID(ctx, input.CategoryID)
 	if err != nil {
@@ -974,7 +979,7 @@ func (s *AdminSpaceService) CreateSpace(
 	visibility := input.Visibility
 	if !models.IsValidVisibility(visibility) {
 		if strings.TrimSpace(string(visibility)) != "" {
-			return AdminSpaceRecord{}, ErrAdminSpaceInvalidVisibility
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidVisibility
 		}
 		visibility = models.VisibilityMember
 	}
@@ -991,7 +996,7 @@ func (s *AdminSpaceService) CreateSpace(
 		coverAsset, err := s.spaceRepo.GetCoverAssetByAssetID(ctx, trimmedCoverAssetID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return AdminSpaceRecord{}, ErrAdminSpaceCoverAssetNotFound
+				return AdminSpaceRecord{}, errcode.ErrAdminSpaceCoverAssetNotFound
 			}
 			return AdminSpaceRecord{}, err
 		}
@@ -1096,10 +1101,10 @@ func normalizeAdminSpaceID(rawSpaceID string) (spaceID string, hasCustom bool, e
 		return "", false, nil
 	}
 	if len(normalized) > maxAdminSpaceIDLength {
-		return "", true, ErrAdminSpaceInvalidSpaceID
+		return "", true, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	if !adminSpaceIDPattern.MatchString(normalized) {
-		return "", true, ErrAdminSpaceInvalidSpaceID
+		return "", true, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	return normalized, true, nil
 }
@@ -1108,26 +1113,30 @@ func normalizeAdminSpaceID(rawSpaceID string) (spaceID string, hasCustom bool, e
 func (s *AdminSpaceService) CreateCoverAsset(
 	ctx context.Context,
 	input CreateAdminSpaceCoverAssetInput,
-) (AdminSpaceCoverAsset, error) {
+) (result AdminSpaceCoverAsset, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceCoverAsset{}, errors.New("admin space service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return AdminSpaceCoverAsset{}, ErrAdminForbidden
+		return AdminSpaceCoverAsset{}, errcode.ErrAdminForbidden
 	}
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return AdminSpaceCoverAsset{}, err
 	}
 	if !isAdmin {
-		return AdminSpaceCoverAsset{}, ErrAdminForbidden
+		return AdminSpaceCoverAsset{}, errcode.ErrAdminForbidden
 	}
 
 	source := normalizeAdminSpaceCoverSource(input.Source)
 	if source == "" {
-		return AdminSpaceCoverAsset{}, ErrAdminSpaceInvalidCoverSource
+		return AdminSpaceCoverAsset{}, errcode.ErrAdminSpaceInvalidCoverSource
 	}
 
 	var (
@@ -1140,7 +1149,7 @@ func (s *AdminSpaceService) CreateCoverAsset(
 	switch source {
 	case AdminSpaceCoverSourceUserUpload:
 		if len(input.FileBytes) == 0 {
-			return AdminSpaceCoverAsset{}, ErrAdminSpaceCoverFileRequired
+			return AdminSpaceCoverAsset{}, errcode.ErrAdminSpaceCoverFileRequired
 		}
 		processed, err := processAdminSpaceUserUploadCover(processAdminSpaceUserUploadCoverInput{
 			FileName:        input.FileName,
@@ -1158,7 +1167,7 @@ func (s *AdminSpaceService) CreateCoverAsset(
 	case AdminSpaceCoverSourceSystemGenerate:
 		spaceName := strings.TrimSpace(input.SpaceName)
 		if spaceName == "" {
-			return AdminSpaceCoverAsset{}, ErrAdminSpaceCoverSpaceNameRequired
+			return AdminSpaceCoverAsset{}, errcode.ErrAdminSpaceCoverSpaceNameRequired
 		}
 		processed, err := renderAdminSpaceSystemCover(renderAdminSpaceSystemCoverInput{
 			SpaceName: spaceName,
@@ -1172,7 +1181,7 @@ func (s *AdminSpaceService) CreateCoverAsset(
 		height = processed.Height
 		normalized = true
 	default:
-		return AdminSpaceCoverAsset{}, ErrAdminSpaceInvalidCoverSource
+		return AdminSpaceCoverAsset{}, errcode.ErrAdminSpaceInvalidCoverSource
 	}
 
 	objectKey, err := buildAdminSpaceCoverObjectKey(time.Now().UTC())
@@ -1232,7 +1241,11 @@ func (s *AdminSpaceService) CreateCoverAsset(
 func (s *AdminSpaceService) UpdateMetadata(
 	ctx context.Context,
 	input UpdateAdminSpaceMetadataInput,
-) (AdminSpaceRecord, error) {
+) (result AdminSpaceRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceRecord{}, errors.New("admin space service dependencies are nil")
 	}
@@ -1240,7 +1253,7 @@ func (s *AdminSpaceService) UpdateMetadata(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	spaceID := strings.TrimSpace(input.SpaceID)
 	if spaceID == "" {
-		return AdminSpaceRecord{}, ErrAdminSpaceInvalidSpaceID
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
@@ -1248,14 +1261,14 @@ func (s *AdminSpaceService) UpdateMetadata(
 	}
 
 	if input.Name == nil && input.Visibility == nil && input.Description == nil && input.CategoryID == nil && input.CoverAssetID == nil {
-		return AdminSpaceRecord{}, ErrAdminSpaceNoMetadataChange
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceNoMetadataChange
 	}
 
 	var normalizedName *string
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
-			return AdminSpaceRecord{}, ErrAdminSpaceInvalidName
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidName
 		}
 		normalizedName = &name
 	}
@@ -1264,7 +1277,7 @@ func (s *AdminSpaceService) UpdateMetadata(
 	if input.Description != nil {
 		description := strings.TrimSpace(*input.Description)
 		if len([]rune(description)) > maxAdminSpaceDescLength {
-			return AdminSpaceRecord{}, ErrAdminSpaceInvalidDescription
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidDescription
 		}
 		normalizedDescription = &description
 	}
@@ -1287,7 +1300,7 @@ func (s *AdminSpaceService) UpdateMetadata(
 	var normalizedVisibility *models.Visibility
 	if input.Visibility != nil {
 		if !models.IsValidVisibility(*input.Visibility) {
-			return AdminSpaceRecord{}, ErrAdminSpaceInvalidVisibility
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidVisibility
 		}
 		visibility := *input.Visibility
 		normalizedVisibility = &visibility
@@ -1317,7 +1330,7 @@ func (s *AdminSpaceService) UpdateMetadata(
 			coverAsset, err := s.spaceRepo.GetCoverAssetByAssetID(ctx, trimmedCoverAssetID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return AdminSpaceRecord{}, ErrAdminSpaceCoverAssetNotFound
+					return AdminSpaceRecord{}, errcode.ErrAdminSpaceCoverAssetNotFound
 				}
 				return AdminSpaceRecord{}, err
 			}
@@ -1340,12 +1353,12 @@ func (s *AdminSpaceService) UpdateMetadata(
 	snapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
 	if normalizeEntityStatus(snapshot.Status) == models.EntityStatusDeleted || snapshot.DeletedAt != nil {
-		return AdminSpaceRecord{}, ErrAdminSpaceAlreadyDeleted
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceAlreadyDeleted
 	}
 
 	updated, err := s.spaceRepo.UpdateMetadata(ctx, repository.UpdateSpaceMetadataParams{
@@ -1367,13 +1380,13 @@ func (s *AdminSpaceService) UpdateMetadata(
 		return AdminSpaceRecord{}, err
 	}
 	if !updated {
-		return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 	}
 
 	latest, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
@@ -1440,7 +1453,11 @@ func (s *AdminSpaceService) UpdateMetadata(
 func (s *AdminSpaceService) TransferOwnership(
 	ctx context.Context,
 	input TransferAdminSpaceOwnershipInput,
-) (AdminSpaceRecord, error) {
+) (result AdminSpaceRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.userRepo == nil || s.adminAccessService == nil || s.adminRoleRepo == nil || s.spaceScopeRepo == nil {
 		return AdminSpaceRecord{}, errors.New("admin space service dependencies are nil")
 	}
@@ -1448,7 +1465,7 @@ func (s *AdminSpaceService) TransferOwnership(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	spaceID := strings.TrimSpace(input.SpaceID)
 	if spaceID == "" {
-		return AdminSpaceRecord{}, ErrAdminSpaceInvalidSpaceID
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
 		return AdminSpaceRecord{}, err
@@ -1457,11 +1474,10 @@ func (s *AdminSpaceService) TransferOwnership(
 	targetUserID := strings.TrimSpace(input.TargetUserID)
 	targetEmail := strings.TrimSpace(input.TargetEmail)
 	if targetUserID == "" && targetEmail == "" {
-		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetRequired
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceTransferTargetRequired
 	}
 
 	var targetUser *models.User
-	var err error
 	if targetUserID != "" {
 		targetUser, err = s.userRepo.GetByUserID(ctx, targetUserID)
 	} else {
@@ -1469,31 +1485,31 @@ func (s *AdminSpaceService) TransferOwnership(
 	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceTransferTargetNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
 	if targetUser == nil {
-		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotFound
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceTransferTargetNotFound
 	}
 	targetUserID = strings.TrimSpace(targetUser.UserID)
 	if targetUserID == "" {
-		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotFound
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceTransferTargetNotFound
 	}
 
 	snapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
 	if normalizeEntityStatus(snapshot.Status) == models.EntityStatusDeleted || snapshot.DeletedAt != nil {
-		return AdminSpaceRecord{}, ErrAdminSpaceAlreadyDeleted
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceAlreadyDeleted
 	}
 
 	if strings.TrimSpace(snapshot.OwnerUserID) == targetUserID {
-		return AdminSpaceRecord{}, ErrAdminSpaceTransferToSelf
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceTransferToSelf
 	}
 
 	isMember, err := s.spaceRepo.IsMember(ctx, spaceID, targetUserID)
@@ -1501,7 +1517,7 @@ func (s *AdminSpaceService) TransferOwnership(
 		return AdminSpaceRecord{}, err
 	}
 	if !isMember {
-		return AdminSpaceRecord{}, ErrAdminSpaceTransferTargetNotMember
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceTransferTargetNotMember
 	}
 
 	updated, err := s.spaceRepo.TransferOwnership(ctx, spaceID, snapshot.OwnerUserID, targetUserID, time.Now().UTC())
@@ -1509,7 +1525,7 @@ func (s *AdminSpaceService) TransferOwnership(
 		return AdminSpaceRecord{}, err
 	}
 	if !updated {
-		return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 	}
 
 	// 目标用户升级为空间管理员，并绑定空间管理范围。
@@ -1531,7 +1547,7 @@ func (s *AdminSpaceService) TransferOwnership(
 	latest, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
@@ -1575,7 +1591,11 @@ func (s *AdminSpaceService) TransferOwnership(
 func (s *AdminSpaceService) UpdateStatus(
 	ctx context.Context,
 	input UpdateAdminSpaceStatusInput,
-) (AdminSpaceRecord, error) {
+) (result AdminSpaceRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
 		return AdminSpaceRecord{}, errors.New("admin space service dependencies are nil")
 	}
@@ -1583,13 +1603,13 @@ func (s *AdminSpaceService) UpdateStatus(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	spaceID := strings.TrimSpace(input.SpaceID)
 	if spaceID == "" {
-		return AdminSpaceRecord{}, ErrAdminSpaceInvalidSpaceID
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 	if input.Status != models.EntityStatusActive && input.Status != models.EntityStatusBanned {
-		return AdminSpaceRecord{}, ErrAdminSpaceInvalidStatus
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidStatus
 	}
 	if input.Status == models.EntityStatusBanned && strings.TrimSpace(input.Reason) == "" {
-		return AdminSpaceRecord{}, ErrAdminSpaceBanReasonRequired
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceBanReasonRequired
 	}
 
 	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
@@ -1599,12 +1619,12 @@ func (s *AdminSpaceService) UpdateStatus(
 	snapshot, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
 	if normalizeEntityStatus(snapshot.Status) == models.EntityStatusDeleted || snapshot.DeletedAt != nil {
-		return AdminSpaceRecord{}, ErrAdminSpaceAlreadyDeleted
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceAlreadyDeleted
 	}
 
 	now := time.Now().UTC()
@@ -1623,13 +1643,13 @@ func (s *AdminSpaceService) UpdateStatus(
 		return AdminSpaceRecord{}, err
 	}
 	if !updated {
-		return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+		return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 	}
 
 	latest, err := s.spaceRepo.GetBySpaceID(ctx, spaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminSpaceRecord{}, ErrAdminSpaceNotFound
+			return AdminSpaceRecord{}, errcode.ErrAdminSpaceNotFound
 		}
 		return AdminSpaceRecord{}, err
 	}
@@ -1674,7 +1694,11 @@ func (s *AdminSpaceService) DeleteSpace(
 	actorUserID string,
 	spaceID string,
 	requestID string,
-) error {
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminSpaceError(err)
+	}()
+
 	_ = requestID
 
 	if s == nil || s.spaceRepo == nil || s.adminAccessService == nil {
@@ -1684,7 +1708,7 @@ func (s *AdminSpaceService) DeleteSpace(
 	actor := strings.TrimSpace(actorUserID)
 	targetSpaceID := strings.TrimSpace(spaceID)
 	if targetSpaceID == "" {
-		return ErrAdminSpaceInvalidSpaceID
+		return errcode.ErrAdminSpaceInvalidSpaceID
 	}
 
 	if err := s.ensureCanManageSpace(ctx, actor, targetSpaceID); err != nil {
@@ -1694,7 +1718,7 @@ func (s *AdminSpaceService) DeleteSpace(
 	snapshot, err := s.spaceRepo.GetBySpaceID(ctx, targetSpaceID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrAdminSpaceNotFound
+			return errcode.ErrAdminSpaceNotFound
 		}
 		return err
 	}
@@ -1707,7 +1731,7 @@ func (s *AdminSpaceService) DeleteSpace(
 		return err
 	}
 	if !deleted {
-		return ErrAdminSpaceNotFound
+		return errcode.ErrAdminSpaceNotFound
 	}
 
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
@@ -1729,14 +1753,14 @@ func (s *AdminSpaceService) DeleteSpace(
 
 func (s *AdminSpaceService) ensureCanManageSpace(ctx context.Context, actorUserID string, spaceID string) error {
 	if strings.TrimSpace(actorUserID) == "" {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	canManage, err := s.adminAccessService.CanManageSpace(ctx, actorUserID, spaceID)
 	if err != nil {
 		return err
 	}
 	if !canManage {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	return nil
 }
@@ -1822,7 +1846,7 @@ func (s *AdminSpaceService) resolveScopeRestriction(ctx context.Context, actorUs
 		return false, err
 	}
 	if !isSpaceAdmin {
-		return false, ErrAdminForbidden
+		return false, errcode.ErrAdminForbidden
 	}
 	return true, nil
 }
@@ -1842,7 +1866,7 @@ func (s *AdminSpaceService) resolveTargetUser(ctx context.Context, targetUserID 
 	normalizedUserID := strings.TrimSpace(targetUserID)
 	normalizedEmail := strings.TrimSpace(targetEmail)
 	if normalizedUserID == "" && normalizedEmail == "" {
-		return nil, ErrAdminSpaceMemberTargetRequired
+		return nil, errcode.ErrAdminSpaceMemberTargetRequired
 	}
 
 	var (
@@ -1856,12 +1880,12 @@ func (s *AdminSpaceService) resolveTargetUser(ctx context.Context, targetUserID 
 	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrAdminSpaceMemberTargetNotFound
+			return nil, errcode.ErrAdminSpaceMemberTargetNotFound
 		}
 		return nil, err
 	}
 	if targetUser == nil || strings.TrimSpace(targetUser.UserID) == "" {
-		return nil, ErrAdminSpaceMemberTargetNotFound
+		return nil, errcode.ErrAdminSpaceMemberTargetNotFound
 	}
 	return targetUser, nil
 }
@@ -1981,10 +2005,10 @@ func normalizeEditableAdminSpaceMemberRole(value models.Role) models.Role {
 func normalizeAdminSpaceCategoryName(rawName string) (string, error) {
 	name := strings.TrimSpace(rawName)
 	if name == "" {
-		return "", ErrAdminSpaceInvalidCategory
+		return "", errcode.ErrAdminSpaceInvalidCategory
 	}
 	if len([]rune(name)) > maxAdminSpaceCategoryLen {
-		return "", ErrAdminSpaceInvalidCategory
+		return "", errcode.ErrAdminSpaceInvalidCategory
 	}
 	return name, nil
 }
@@ -2024,12 +2048,12 @@ func (s *AdminSpaceService) getDefaultSpaceCategory(ctx context.Context) (models
 		return models.SpaceCategory{}, err
 	}
 	if defaultCategory == nil {
-		return models.SpaceCategory{}, ErrAdminSpaceCategoryNotFound
+		return models.SpaceCategory{}, errcode.ErrAdminSpaceCategoryNotFound
 	}
 	defaultCategory.CategoryID = strings.TrimSpace(defaultCategory.CategoryID)
 	defaultCategory.Name = strings.TrimSpace(defaultCategory.Name)
 	if defaultCategory.CategoryID == "" || defaultCategory.Name == "" {
-		return models.SpaceCategory{}, ErrAdminSpaceCategoryNotFound
+		return models.SpaceCategory{}, errcode.ErrAdminSpaceCategoryNotFound
 	}
 	return *defaultCategory, nil
 }
@@ -2049,18 +2073,18 @@ func (s *AdminSpaceService) resolveSpaceCategoryByID(
 	category, err := s.spaceCategoryRepo.GetByCategoryID(ctx, categoryID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return models.SpaceCategory{}, ErrAdminSpaceInvalidCategory
+			return models.SpaceCategory{}, errcode.ErrAdminSpaceInvalidCategory
 		}
 		return models.SpaceCategory{}, err
 	}
 	if category == nil {
-		return models.SpaceCategory{}, ErrAdminSpaceInvalidCategory
+		return models.SpaceCategory{}, errcode.ErrAdminSpaceInvalidCategory
 	}
 
 	category.CategoryID = strings.TrimSpace(category.CategoryID)
 	category.Name = strings.TrimSpace(category.Name)
 	if category.CategoryID == "" || category.Name == "" {
-		return models.SpaceCategory{}, ErrAdminSpaceInvalidCategory
+		return models.SpaceCategory{}, errcode.ErrAdminSpaceInvalidCategory
 	}
 	return *category, nil
 }
@@ -2082,7 +2106,7 @@ func resolveAdminSpaceStatuses(filter AdminSpaceStatusFilter) ([]models.EntitySt
 	case AdminSpaceStatusFilterDeleted:
 		return []models.EntityStatus{models.EntityStatusDeleted}, nil
 	default:
-		return nil, ErrAdminSpaceInvalidStatusFilter
+		return nil, errcode.ErrAdminSpaceInvalidStatusFilter
 	}
 }
 
@@ -2101,7 +2125,7 @@ func resolveAdminSpaceVisibilities(filter AdminSpaceVisibilityFilter) ([]models.
 	case AdminSpaceVisibilityFilterMember:
 		return []models.Visibility{models.VisibilityMember}, nil
 	default:
-		return nil, ErrAdminSpaceInvalidVisibilityFilter
+		return nil, errcode.ErrAdminSpaceInvalidVisibilityFilter
 	}
 }
 

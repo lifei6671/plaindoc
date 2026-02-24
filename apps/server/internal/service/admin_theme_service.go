@@ -8,20 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
-)
-
-var (
-	ErrAdminThemeInvalidThemeID   = errors.New("admin theme id is invalid")
-	ErrAdminThemeInvalidName      = errors.New("admin theme name is invalid")
-	ErrAdminThemeInvalidSyntax    = errors.New("admin theme syntax is invalid")
-	ErrAdminThemeAlreadyExists    = errors.New("admin theme already exists")
-	ErrAdminThemeNotFound         = errors.New("admin theme not found")
-	ErrAdminThemeNoChanges        = errors.New("admin theme no changes")
-	ErrAdminThemeBuiltinImmutable = errors.New("admin theme builtin immutable")
-	ErrAdminThemeInUse            = errors.New("admin theme in use")
 )
 
 var adminThemeIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
@@ -99,7 +89,11 @@ func NewAdminThemeService(
 func (s *AdminThemeService) ListThemes(
 	ctx context.Context,
 	actorUserID string,
-) ([]AdminThemeRecord, error) {
+) (result []AdminThemeRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminThemeError(err)
+	}()
+
 	if s == nil || s.themeRepo == nil || s.adminAccessService == nil {
 		return nil, errors.New("admin theme service dependencies are nil")
 	}
@@ -127,7 +121,11 @@ func (s *AdminThemeService) ListThemes(
 func (s *AdminThemeService) CreateTheme(
 	ctx context.Context,
 	input CreateAdminThemeInput,
-) (AdminThemeRecord, error) {
+) (result AdminThemeRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminThemeError(err)
+	}()
+
 	if s == nil || s.themeRepo == nil || s.adminAccessService == nil {
 		return AdminThemeRecord{}, errors.New("admin theme service dependencies are nil")
 	}
@@ -141,7 +139,7 @@ func (s *AdminThemeService) CreateTheme(
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
-		return AdminThemeRecord{}, ErrAdminThemeInvalidName
+		return AdminThemeRecord{}, errcode.ErrAdminThemeInvalidName
 	}
 
 	syntaxTheme := strings.TrimSpace(input.SyntaxTheme)
@@ -149,12 +147,12 @@ func (s *AdminThemeService) CreateTheme(
 		syntaxTheme = "one-light"
 	}
 	if syntaxTheme != "one-light" && syntaxTheme != "one-dark" {
-		return AdminThemeRecord{}, ErrAdminThemeInvalidSyntax
+		return AdminThemeRecord{}, errcode.ErrAdminThemeInvalidSyntax
 	}
 
 	existingTheme, err := s.themeRepo.GetByThemeID(ctx, themeID)
 	if err == nil && existingTheme != nil {
-		return AdminThemeRecord{}, ErrAdminThemeAlreadyExists
+		return AdminThemeRecord{}, errcode.ErrAdminThemeAlreadyExists
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return AdminThemeRecord{}, err
@@ -229,7 +227,11 @@ func (s *AdminThemeService) CreateTheme(
 func (s *AdminThemeService) UpdateTheme(
 	ctx context.Context,
 	input UpdateAdminThemeInput,
-) (AdminThemeRecord, error) {
+) (result AdminThemeRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminThemeError(err)
+	}()
+
 	if s == nil || s.themeRepo == nil || s.adminAccessService == nil {
 		return AdminThemeRecord{}, errors.New("admin theme service dependencies are nil")
 	}
@@ -245,12 +247,12 @@ func (s *AdminThemeService) UpdateTheme(
 	targetTheme, err := s.themeRepo.GetByThemeID(ctx, themeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminThemeRecord{}, ErrAdminThemeNotFound
+			return AdminThemeRecord{}, errcode.ErrAdminThemeNotFound
 		}
 		return AdminThemeRecord{}, err
 	}
 	if targetTheme.IsBuiltin {
-		return AdminThemeRecord{}, ErrAdminThemeBuiltinImmutable
+		return AdminThemeRecord{}, errcode.ErrAdminThemeBuiltinImmutable
 	}
 
 	params := repository.UpdateThemeParams{
@@ -263,7 +265,7 @@ func (s *AdminThemeService) UpdateTheme(
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
-			return AdminThemeRecord{}, ErrAdminThemeInvalidName
+			return AdminThemeRecord{}, errcode.ErrAdminThemeInvalidName
 		}
 		params.Name = &name
 		changed = true
@@ -287,7 +289,7 @@ func (s *AdminThemeService) UpdateTheme(
 	if input.SyntaxTheme != nil {
 		syntaxTheme := strings.TrimSpace(*input.SyntaxTheme)
 		if syntaxTheme != "one-light" && syntaxTheme != "one-dark" {
-			return AdminThemeRecord{}, ErrAdminThemeInvalidSyntax
+			return AdminThemeRecord{}, errcode.ErrAdminThemeInvalidSyntax
 		}
 		params.SyntaxTheme = &syntaxTheme
 		changed = true
@@ -333,7 +335,7 @@ func (s *AdminThemeService) UpdateTheme(
 	}
 
 	if !changed {
-		return AdminThemeRecord{}, ErrAdminThemeNoChanges
+		return AdminThemeRecord{}, errcode.ErrAdminThemeNoChanges
 	}
 
 	updated, err := s.themeRepo.Update(ctx, params)
@@ -341,7 +343,7 @@ func (s *AdminThemeService) UpdateTheme(
 		return AdminThemeRecord{}, err
 	}
 	if !updated {
-		return AdminThemeRecord{}, ErrAdminThemeNotFound
+		return AdminThemeRecord{}, errcode.ErrAdminThemeNotFound
 	}
 
 	latestTheme, err := s.themeRepo.GetByThemeID(ctx, themeID)
@@ -375,7 +377,11 @@ func (s *AdminThemeService) DeleteTheme(
 	actorUserID string,
 	themeID string,
 	requestID string,
-) error {
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminThemeError(err)
+	}()
+
 	_ = requestID
 
 	if s == nil || s.themeRepo == nil || s.adminAccessService == nil {
@@ -393,12 +399,12 @@ func (s *AdminThemeService) DeleteTheme(
 	targetTheme, err := s.themeRepo.GetByThemeID(ctx, normalizedThemeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrAdminThemeNotFound
+			return errcode.ErrAdminThemeNotFound
 		}
 		return err
 	}
 	if targetTheme.IsBuiltin {
-		return ErrAdminThemeBuiltinImmutable
+		return errcode.ErrAdminThemeBuiltinImmutable
 	}
 
 	references, err := s.themeRepo.CountDocumentReferences(ctx, normalizedThemeID)
@@ -406,7 +412,7 @@ func (s *AdminThemeService) DeleteTheme(
 		return err
 	}
 	if references > 0 {
-		return ErrAdminThemeInUse
+		return errcode.ErrAdminThemeInUse
 	}
 
 	deleted, err := s.themeRepo.Delete(ctx, normalizedThemeID)
@@ -414,7 +420,7 @@ func (s *AdminThemeService) DeleteTheme(
 		return err
 	}
 	if !deleted {
-		return ErrAdminThemeNotFound
+		return errcode.ErrAdminThemeNotFound
 	}
 
 	if err := s.recordThemeAudit(ctx, RecordAdminAuditInput{
@@ -443,7 +449,7 @@ func (s *AdminThemeService) recordThemeAudit(ctx context.Context, input RecordAd
 func (s *AdminThemeService) ensureAdminActor(ctx context.Context, actorUserID string) error {
 	userID := strings.TrimSpace(actorUserID)
 	if userID == "" {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, userID)
@@ -451,7 +457,7 @@ func (s *AdminThemeService) ensureAdminActor(ctx context.Context, actorUserID st
 		return err
 	}
 	if !isAdmin {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	return nil
 }
@@ -459,7 +465,7 @@ func (s *AdminThemeService) ensureAdminActor(ctx context.Context, actorUserID st
 func normalizeAdminThemeID(rawThemeID string) (string, error) {
 	themeID := strings.ToLower(strings.TrimSpace(rawThemeID))
 	if !adminThemeIDPattern.MatchString(themeID) {
-		return "", ErrAdminThemeInvalidThemeID
+		return "", errcode.ErrAdminThemeInvalidThemeID
 	}
 	return themeID, nil
 }

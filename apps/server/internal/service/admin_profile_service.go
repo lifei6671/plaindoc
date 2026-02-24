@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"golang.org/x/crypto/bcrypt"
@@ -17,15 +18,6 @@ const (
 	maxAdminProfileNameLength      = 120
 	maxAdminProfileAvatarURLLength = 1024
 	minAdminProfilePasswordLength  = 6
-)
-
-var (
-	ErrAdminProfileNotFound               = errors.New("admin profile user not found")
-	ErrAdminProfileInvalidName            = errors.New("admin profile name is invalid")
-	ErrAdminProfileInvalidAvatarURL       = errors.New("admin profile avatar url is invalid")
-	ErrAdminProfileCurrentPasswordInvalid = errors.New("admin profile current password is invalid")
-	ErrAdminProfilePasswordTooShort       = errors.New("admin profile new password is too short")
-	ErrAdminProfilePasswordUnchanged      = errors.New("admin profile new password equals current password")
 )
 
 // AdminProfileRecord 管理后台个人信息视图。
@@ -77,7 +69,14 @@ func NewAdminProfileService(
 }
 
 // GetProfile 返回当前管理员个人资料。
-func (s *AdminProfileService) GetProfile(ctx context.Context, actorUserID string) (AdminProfileRecord, error) {
+func (s *AdminProfileService) GetProfile(
+	ctx context.Context,
+	actorUserID string,
+) (result AdminProfileRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminProfileError(err)
+	}()
+
 	actorUserID = strings.TrimSpace(actorUserID)
 	user, roles, err := s.loadActorUser(ctx, actorUserID)
 	if err != nil {
@@ -87,7 +86,14 @@ func (s *AdminProfileService) GetProfile(ctx context.Context, actorUserID string
 }
 
 // UpdateProfile 更新当前管理员昵称和头像地址。
-func (s *AdminProfileService) UpdateProfile(ctx context.Context, input UpdateAdminProfileInput) (AdminProfileRecord, error) {
+func (s *AdminProfileService) UpdateProfile(
+	ctx context.Context,
+	input UpdateAdminProfileInput,
+) (result AdminProfileRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminProfileError(err)
+	}()
+
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	user, roles, err := s.loadActorUser(ctx, actorUserID)
 	if err != nil {
@@ -101,7 +107,7 @@ func (s *AdminProfileService) UpdateProfile(ctx context.Context, input UpdateAdm
 	if input.Name != nil {
 		normalizedName := strings.TrimSpace(*input.Name)
 		if normalizedName == "" || len(normalizedName) > maxAdminProfileNameLength {
-			return AdminProfileRecord{}, ErrAdminProfileInvalidName
+			return AdminProfileRecord{}, errcode.ErrAdminProfileInvalidName
 		}
 		if normalizedName != strings.TrimSpace(user.Name) {
 			updateName = &normalizedName
@@ -135,13 +141,13 @@ func (s *AdminProfileService) UpdateProfile(ctx context.Context, input UpdateAdm
 		return AdminProfileRecord{}, err
 	}
 	if !updated {
-		return AdminProfileRecord{}, ErrAdminProfileNotFound
+		return AdminProfileRecord{}, errcode.ErrAdminProfileNotFound
 	}
 
 	latestUser, err := s.userRepo.GetByUserID(ctx, actorUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminProfileRecord{}, ErrAdminProfileNotFound
+			return AdminProfileRecord{}, errcode.ErrAdminProfileNotFound
 		}
 		return AdminProfileRecord{}, err
 	}
@@ -163,7 +169,14 @@ func (s *AdminProfileService) UpdateProfile(ctx context.Context, input UpdateAdm
 }
 
 // UpdatePassword 更新当前管理员密码。
-func (s *AdminProfileService) UpdatePassword(ctx context.Context, input UpdateAdminPasswordInput) error {
+func (s *AdminProfileService) UpdatePassword(
+	ctx context.Context,
+	input UpdateAdminPasswordInput,
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminProfileError(err)
+	}()
+
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	user, _, err := s.loadActorUser(ctx, actorUserID)
 	if err != nil {
@@ -173,16 +186,16 @@ func (s *AdminProfileService) UpdatePassword(ctx context.Context, input UpdateAd
 	currentPassword := input.CurrentPassword
 	newPassword := input.NewPassword
 	if strings.TrimSpace(currentPassword) == "" {
-		return ErrAdminProfileCurrentPasswordInvalid
+		return errcode.ErrAdminProfileCurrentPasswordInvalid
 	}
 	if len(newPassword) < minAdminProfilePasswordLength {
-		return ErrAdminProfilePasswordTooShort
+		return errcode.ErrAdminProfilePasswordTooShort
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(newPassword)) == nil {
-		return ErrAdminProfilePasswordUnchanged
+		return errcode.ErrAdminProfilePasswordUnchanged
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)) != nil {
-		return ErrAdminProfileCurrentPasswordInvalid
+		return errcode.ErrAdminProfileCurrentPasswordInvalid
 	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -194,7 +207,7 @@ func (s *AdminProfileService) UpdatePassword(ctx context.Context, input UpdateAd
 		return err
 	}
 	if !updated {
-		return ErrAdminProfileNotFound
+		return errcode.ErrAdminProfileNotFound
 	}
 
 	return s.recordProfileAudit(ctx, RecordAdminAuditInput{
@@ -219,7 +232,7 @@ func (s *AdminProfileService) loadActorUser(
 		return nil, nil, errors.New("admin profile service dependencies are nil")
 	}
 	if actorUserID == "" {
-		return nil, nil, ErrAdminForbidden
+		return nil, nil, errcode.ErrAdminForbidden
 	}
 
 	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
@@ -227,13 +240,13 @@ func (s *AdminProfileService) loadActorUser(
 		return nil, nil, err
 	}
 	if !isAdmin {
-		return nil, nil, ErrAdminForbidden
+		return nil, nil, errcode.ErrAdminForbidden
 	}
 
 	user, err := s.userRepo.GetByUserID(ctx, actorUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, ErrAdminProfileNotFound
+			return nil, nil, errcode.ErrAdminProfileNotFound
 		}
 		return nil, nil, err
 	}
@@ -258,7 +271,7 @@ func normalizeAdminProfileAvatarURL(rawValue string) (string, error) {
 		return "", nil
 	}
 	if len(normalizedValue) > maxAdminProfileAvatarURLLength {
-		return "", ErrAdminProfileInvalidAvatarURL
+		return "", errcode.ErrAdminProfileInvalidAvatarURL
 	}
 	if strings.HasPrefix(normalizedValue, "/") {
 		if strings.HasPrefix(normalizedValue, "/api/uploads/") {
@@ -267,18 +280,18 @@ func normalizeAdminProfileAvatarURL(rawValue string) (string, error) {
 		if strings.HasPrefix(normalizedValue, "/uploads/") {
 			return normalizedValue, nil
 		}
-		return "", ErrAdminProfileInvalidAvatarURL
+		return "", errcode.ErrAdminProfileInvalidAvatarURL
 	}
 
 	parsedURL, err := url.Parse(normalizedValue)
 	if err != nil {
-		return "", ErrAdminProfileInvalidAvatarURL
+		return "", errcode.ErrAdminProfileInvalidAvatarURL
 	}
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return "", ErrAdminProfileInvalidAvatarURL
+		return "", errcode.ErrAdminProfileInvalidAvatarURL
 	}
 	if strings.TrimSpace(parsedURL.Host) == "" {
-		return "", ErrAdminProfileInvalidAvatarURL
+		return "", errcode.ErrAdminProfileInvalidAvatarURL
 	}
 	return normalizedValue, nil
 }

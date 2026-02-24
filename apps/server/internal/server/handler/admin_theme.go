@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -77,12 +76,7 @@ func (h *adminThemeHandler) ListThemes(c *gin.Context) {
 
 	items, err := h.adminThemeService.ListThemes(c.Request.Context(), actorUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -132,20 +126,7 @@ func (h *adminThemeHandler) CreateTheme(c *gin.Context) {
 		Enabled:            enabled,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminThemeInvalidThemeID):
-			response.Error(c, http.StatusBadRequest, "INVALID_THEME_ID", "theme id is invalid")
-		case errors.Is(err, service.ErrAdminThemeInvalidName):
-			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "theme name is invalid")
-		case errors.Is(err, service.ErrAdminThemeInvalidSyntax):
-			response.Error(c, http.StatusBadRequest, "INVALID_SYNTAX_THEME", "syntax theme must be one-light or one-dark")
-		case errors.Is(err, service.ErrAdminThemeAlreadyExists):
-			response.Error(c, http.StatusConflict, "THEME_ALREADY_EXISTS", "theme id already exists")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -192,24 +173,7 @@ func (h *adminThemeHandler) UpdateTheme(c *gin.Context) {
 		Enabled:            req.Enabled,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminThemeInvalidThemeID):
-			response.Error(c, http.StatusBadRequest, "INVALID_THEME_ID", "theme id is invalid")
-		case errors.Is(err, service.ErrAdminThemeInvalidName):
-			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "theme name is invalid")
-		case errors.Is(err, service.ErrAdminThemeInvalidSyntax):
-			response.Error(c, http.StatusBadRequest, "INVALID_SYNTAX_THEME", "syntax theme must be one-light or one-dark")
-		case errors.Is(err, service.ErrAdminThemeNoChanges):
-			response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "theme update changes are required")
-		case errors.Is(err, service.ErrAdminThemeNotFound):
-			response.Error(c, http.StatusNotFound, "THEME_NOT_FOUND", "theme not found")
-		case errors.Is(err, service.ErrAdminThemeBuiltinImmutable):
-			response.Error(c, http.StatusBadRequest, "THEME_BUILTIN_IMMUTABLE", "builtin theme can not be modified")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -241,20 +205,7 @@ func (h *adminThemeHandler) DeleteTheme(c *gin.Context) {
 		themeID,
 		response.RequestIDFromContext(c),
 	); err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminThemeInvalidThemeID):
-			response.Error(c, http.StatusBadRequest, "INVALID_THEME_ID", "theme id is invalid")
-		case errors.Is(err, service.ErrAdminThemeNotFound):
-			response.Error(c, http.StatusNotFound, "THEME_NOT_FOUND", "theme not found")
-		case errors.Is(err, service.ErrAdminThemeBuiltinImmutable):
-			response.Error(c, http.StatusBadRequest, "THEME_BUILTIN_IMMUTABLE", "builtin theme can not be deleted")
-		case errors.Is(err, service.ErrAdminThemeInUse):
-			response.Error(c, http.StatusConflict, "THEME_IN_USE", "theme is referenced by documents")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 

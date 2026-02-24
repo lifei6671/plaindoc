@@ -9,16 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
-)
-
-var (
-	ErrAdminSystemConfigInvalidKey      = errors.New("admin system config key is invalid")
-	ErrAdminSystemConfigInvalidValue    = errors.New("admin system config value is invalid")
-	ErrAdminSystemConfigExpectedVersion = errors.New("admin system config expected version is invalid")
-	ErrAdminSystemConfigVersionConflict = errors.New("admin system config version conflict")
 )
 
 var systemConfigValidators = map[string]func(map[string]any) error{
@@ -72,7 +66,11 @@ func NewAdminSystemConfigService(
 func (s *AdminSystemConfigService) ListConfigs(
 	ctx context.Context,
 	actorUserID string,
-) ([]AdminSystemConfigRecord, error) {
+) (result []AdminSystemConfigRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
 	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil {
 		return nil, errors.New("admin system config service dependencies are nil")
 	}
@@ -100,7 +98,11 @@ func (s *AdminSystemConfigService) ListConfigs(
 func (s *AdminSystemConfigService) UpsertConfig(
 	ctx context.Context,
 	input UpsertAdminSystemConfigInput,
-) (AdminSystemConfigRecord, error) {
+) (result AdminSystemConfigRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
 	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil {
 		return AdminSystemConfigRecord{}, errors.New("admin system config service dependencies are nil")
 	}
@@ -115,10 +117,10 @@ func (s *AdminSystemConfigService) UpsertConfig(
 
 	valueMap, ok := input.Value.(map[string]any)
 	if !ok || valueMap == nil {
-		return AdminSystemConfigRecord{}, ErrAdminSystemConfigInvalidValue
+		return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigInvalidValue
 	}
 	if err := validator(valueMap); err != nil {
-		return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", ErrAdminSystemConfigInvalidValue, err)
+		return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 	}
 	valueJSONBytes, err := json.Marshal(valueMap)
 	if err != nil {
@@ -140,7 +142,7 @@ func (s *AdminSystemConfigService) UpsertConfig(
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		if input.ExpectedVersion != nil && *input.ExpectedVersion != 0 {
-			return AdminSystemConfigRecord{}, ErrAdminSystemConfigVersionConflict
+			return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigVersionConflict
 		}
 
 		createConfig := &models.SystemConfig{
@@ -178,13 +180,13 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	}
 
 	if existing == nil {
-		return AdminSystemConfigRecord{}, ErrAdminSystemConfigVersionConflict
+		return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigVersionConflict
 	}
 	if input.ExpectedVersion != nil && *input.ExpectedVersion <= 0 {
-		return AdminSystemConfigRecord{}, ErrAdminSystemConfigExpectedVersion
+		return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigExpectedVersion
 	}
 	if input.ExpectedVersion != nil && existing.Version != *input.ExpectedVersion {
-		return AdminSystemConfigRecord{}, ErrAdminSystemConfigVersionConflict
+		return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigVersionConflict
 	}
 
 	expectedVersion := existing.Version
@@ -200,7 +202,7 @@ func (s *AdminSystemConfigService) UpsertConfig(
 		return AdminSystemConfigRecord{}, err
 	}
 	if !updated {
-		return AdminSystemConfigRecord{}, ErrAdminSystemConfigVersionConflict
+		return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigVersionConflict
 	}
 
 	latestConfig, err := s.systemConfigRepo.GetByConfigKey(ctx, configKey)
@@ -228,7 +230,7 @@ func (s *AdminSystemConfigService) UpsertConfig(
 func (s *AdminSystemConfigService) ensurePlatformAdmin(ctx context.Context, actorUserID string) error {
 	userID := strings.TrimSpace(actorUserID)
 	if userID == "" {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 
 	isPlatformAdmin, err := s.adminAccessService.IsPlatformAdmin(ctx, userID)
@@ -236,7 +238,7 @@ func (s *AdminSystemConfigService) ensurePlatformAdmin(ctx context.Context, acto
 		return err
 	}
 	if !isPlatformAdmin {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	return nil
 }
@@ -247,7 +249,7 @@ func resolveSystemConfigValidator(
 	configKey := strings.ToLower(strings.TrimSpace(rawConfigKey))
 	validator, exists := systemConfigValidators[configKey]
 	if !exists {
-		return "", nil, ErrAdminSystemConfigInvalidKey
+		return "", nil, errcode.ErrAdminSystemConfigInvalidKey
 	}
 	return configKey, validator, nil
 }

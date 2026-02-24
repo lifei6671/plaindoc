@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -15,16 +16,6 @@ const (
 	defaultAdminDocumentPage     = 1
 	defaultAdminDocumentPageSize = 20
 	maxAdminDocumentPageSize     = 100
-)
-
-var (
-	ErrAdminDocumentInvalidStatusFilter     = errors.New("invalid admin document status filter")
-	ErrAdminDocumentInvalidVisibilityFilter = errors.New("invalid admin document visibility filter")
-	ErrAdminDocumentInvalidDocumentID       = errors.New("admin document id is invalid")
-	ErrAdminDocumentInvalidStatus           = errors.New("admin document status is invalid")
-	ErrAdminDocumentBanReasonRequired       = errors.New("admin document ban reason is required")
-	ErrAdminDocumentNotFound                = errors.New("admin document target not found")
-	ErrAdminDocumentAlreadyDeleted          = errors.New("admin document target already deleted")
 )
 
 // AdminDocumentStatusFilter 管理后台文档状态过滤条件。
@@ -121,14 +112,18 @@ func NewAdminDocumentService(
 func (s *AdminDocumentService) ListDocuments(
 	ctx context.Context,
 	input ListAdminDocumentsInput,
-) (ListAdminDocumentsResult, error) {
+) (result ListAdminDocumentsResult, err error) {
+	defer func() {
+		err = errcode.MapAdminDocumentError(err)
+	}()
+
 	if s == nil || s.documentRepo == nil || s.adminAccessService == nil {
 		return ListAdminDocumentsResult{}, errors.New("admin document service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return ListAdminDocumentsResult{}, ErrAdminForbidden
+		return ListAdminDocumentsResult{}, errcode.ErrAdminForbidden
 	}
 
 	restrictToScopes, err := s.resolveScopeRestriction(ctx, actorUserID)
@@ -177,7 +172,11 @@ func (s *AdminDocumentService) ListDocuments(
 func (s *AdminDocumentService) UpdateStatus(
 	ctx context.Context,
 	input UpdateAdminDocumentStatusInput,
-) (AdminDocumentRecord, error) {
+) (result AdminDocumentRecord, err error) {
+	defer func() {
+		err = errcode.MapAdminDocumentError(err)
+	}()
+
 	if s == nil || s.documentRepo == nil || s.adminAccessService == nil {
 		return AdminDocumentRecord{}, errors.New("admin document service dependencies are nil")
 	}
@@ -185,19 +184,19 @@ func (s *AdminDocumentService) UpdateStatus(
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	documentID := strings.TrimSpace(input.DocumentID)
 	if documentID == "" {
-		return AdminDocumentRecord{}, ErrAdminDocumentInvalidDocumentID
+		return AdminDocumentRecord{}, errcode.ErrAdminDocumentInvalidDocumentID
 	}
 	if input.Status != models.EntityStatusActive && input.Status != models.EntityStatusBanned {
-		return AdminDocumentRecord{}, ErrAdminDocumentInvalidStatus
+		return AdminDocumentRecord{}, errcode.ErrAdminDocumentInvalidStatus
 	}
 	if input.Status == models.EntityStatusBanned && strings.TrimSpace(input.Reason) == "" {
-		return AdminDocumentRecord{}, ErrAdminDocumentBanReasonRequired
+		return AdminDocumentRecord{}, errcode.ErrAdminDocumentBanReasonRequired
 	}
 
 	accessInfo, err := s.documentRepo.GetAccessByDocumentID(ctx, documentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminDocumentRecord{}, ErrAdminDocumentNotFound
+			return AdminDocumentRecord{}, errcode.ErrAdminDocumentNotFound
 		}
 		return AdminDocumentRecord{}, err
 	}
@@ -205,7 +204,7 @@ func (s *AdminDocumentService) UpdateStatus(
 		return AdminDocumentRecord{}, err
 	}
 	if normalizeEntityStatus(accessInfo.Document.Status) == models.EntityStatusDeleted || accessInfo.Document.DeletedAt != nil {
-		return AdminDocumentRecord{}, ErrAdminDocumentAlreadyDeleted
+		return AdminDocumentRecord{}, errcode.ErrAdminDocumentAlreadyDeleted
 	}
 
 	now := time.Now().UTC()
@@ -224,13 +223,13 @@ func (s *AdminDocumentService) UpdateStatus(
 		return AdminDocumentRecord{}, err
 	}
 	if !updated {
-		return AdminDocumentRecord{}, ErrAdminDocumentNotFound
+		return AdminDocumentRecord{}, errcode.ErrAdminDocumentNotFound
 	}
 
 	latestAccessInfo, err := s.documentRepo.GetAccessByDocumentID(ctx, documentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return AdminDocumentRecord{}, ErrAdminDocumentNotFound
+			return AdminDocumentRecord{}, errcode.ErrAdminDocumentNotFound
 		}
 		return AdminDocumentRecord{}, err
 	}
@@ -260,7 +259,11 @@ func (s *AdminDocumentService) DeleteDocument(
 	actorUserID string,
 	documentID string,
 	requestID string,
-) error {
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminDocumentError(err)
+	}()
+
 	_ = requestID
 
 	if s == nil || s.documentRepo == nil || s.adminAccessService == nil {
@@ -269,13 +272,13 @@ func (s *AdminDocumentService) DeleteDocument(
 
 	targetDocumentID := strings.TrimSpace(documentID)
 	if targetDocumentID == "" {
-		return ErrAdminDocumentInvalidDocumentID
+		return errcode.ErrAdminDocumentInvalidDocumentID
 	}
 
 	accessInfo, err := s.documentRepo.GetAccessByDocumentID(ctx, targetDocumentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrAdminDocumentNotFound
+			return errcode.ErrAdminDocumentNotFound
 		}
 		return err
 	}
@@ -292,7 +295,7 @@ func (s *AdminDocumentService) DeleteDocument(
 		return err
 	}
 	if !deleted {
-		return ErrAdminDocumentNotFound
+		return errcode.ErrAdminDocumentNotFound
 	}
 
 	if err := s.recordDocumentAudit(ctx, RecordAdminAuditInput{
@@ -315,14 +318,14 @@ func (s *AdminDocumentService) DeleteDocument(
 
 func (s *AdminDocumentService) ensureCanManageSpace(ctx context.Context, actorUserID string, spaceID string) error {
 	if strings.TrimSpace(actorUserID) == "" {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	canManage, err := s.adminAccessService.CanManageSpace(ctx, actorUserID, spaceID)
 	if err != nil {
 		return err
 	}
 	if !canManage {
-		return ErrAdminForbidden
+		return errcode.ErrAdminForbidden
 	}
 	return nil
 }
@@ -341,7 +344,7 @@ func (s *AdminDocumentService) resolveScopeRestriction(ctx context.Context, acto
 		return false, err
 	}
 	if !isSpaceAdmin {
-		return false, ErrAdminForbidden
+		return false, errcode.ErrAdminForbidden
 	}
 	return true, nil
 }
@@ -416,7 +419,7 @@ func resolveAdminDocumentStatuses(filter AdminDocumentStatusFilter) ([]models.En
 	case AdminDocumentStatusFilterDeleted:
 		return []models.EntityStatus{models.EntityStatusDeleted}, nil
 	default:
-		return nil, ErrAdminDocumentInvalidStatusFilter
+		return nil, errcode.ErrAdminDocumentInvalidStatusFilter
 	}
 }
 
@@ -435,7 +438,7 @@ func resolveAdminDocumentVisibilities(filter AdminDocumentVisibilityFilter) ([]m
 	case AdminDocumentVisibilityFilterMember:
 		return []models.Visibility{models.VisibilityMember}, nil
 	default:
-		return nil, ErrAdminDocumentInvalidVisibilityFilter
+		return nil, errcode.ErrAdminDocumentInvalidVisibilityFilter
 	}
 }
 

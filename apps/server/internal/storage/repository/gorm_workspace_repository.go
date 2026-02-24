@@ -1,0 +1,665 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"gorm.io/gorm"
+)
+
+type gormWorkspaceRepository struct {
+	db *gorm.DB
+}
+
+// NewGormWorkspaceRepository 创建基于 GORM 的编辑器工作区仓储实现。
+func NewGormWorkspaceRepository(db *gorm.DB) WorkspaceRepository {
+	return &gormWorkspaceRepository{db: db}
+}
+
+func (r *gormWorkspaceRepository) ListSpacesByActor(
+	ctx context.Context,
+	actorUserID string,
+) ([]WorkspaceSpaceListRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	userID := strings.TrimSpace(actorUserID)
+	if userID == "" {
+		return []WorkspaceSpaceListRecord{}, nil
+	}
+
+	type spaceRow struct {
+		SpaceID      string `gorm:"column:space_id"`
+		Name         string `gorm:"column:name"`
+		CreatedAtRaw string `gorm:"column:created_at"`
+		UpdatedAtRaw string `gorm:"column:updated_at"`
+	}
+
+	var rows []spaceRow
+	if err := r.db.WithContext(ctx).
+		Table("spaces AS s").
+		Select("s.space_id", "s.name", "s.created_at", "s.updated_at").
+		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
+		Where(
+			"("+
+				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
+				"s.owner_user_id = ? OR "+
+				"EXISTS (SELECT 1 FROM space_members AS sm WHERE sm.space_id = s.space_id AND sm.user_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?)"+
+				")",
+			userID,
+			models.AdminRolePlatformAdmin,
+			userID,
+			userID,
+			userID,
+		).
+		Order("s.updated_at DESC, s.id DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]WorkspaceSpaceListRecord, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, WorkspaceSpaceListRecord{
+			SpaceID:      strings.TrimSpace(row.SpaceID),
+			Name:         strings.TrimSpace(row.Name),
+			CreatedAtRaw: row.CreatedAtRaw,
+			UpdatedAtRaw: row.UpdatedAtRaw,
+		})
+	}
+	return items, nil
+}
+
+func (r *gormWorkspaceRepository) GetDefaultCategory(ctx context.Context) (*models.SpaceCategory, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	type categoryRow struct {
+		CategoryID string `gorm:"column:category_id"`
+		Name       string `gorm:"column:name"`
+	}
+
+	var row categoryRow
+	if err := r.db.WithContext(ctx).
+		Table("space_categories").
+		Select("category_id", "name").
+		Where("is_default = ?", true).
+		Order("id ASC").
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	return &models.SpaceCategory{
+		CategoryID: strings.TrimSpace(row.CategoryID),
+		Name:       strings.TrimSpace(row.Name),
+		IsDefault:  true,
+	}, nil
+}
+
+func (r *gormWorkspaceRepository) CreateSpace(ctx context.Context, space *models.Space) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("workspace repository db is nil")
+	}
+	if space == nil {
+		return fmt.Errorf("space must not be nil")
+	}
+
+	space.SpaceID = strings.TrimSpace(space.SpaceID)
+	space.Name = strings.TrimSpace(space.Name)
+	space.Description = strings.TrimSpace(space.Description)
+	space.CategoryID = strings.TrimSpace(space.CategoryID)
+	space.Category = strings.TrimSpace(space.Category)
+	space.OwnerUserID = strings.TrimSpace(space.OwnerUserID)
+	if !models.IsValidVisibility(space.Visibility) {
+		space.Visibility = models.VisibilityMember
+	}
+	if !models.IsValidEntityStatus(space.Status) {
+		space.Status = models.EntityStatusActive
+	}
+
+	return r.db.WithContext(ctx).Create(space).Error
+}
+
+func (r *gormWorkspaceRepository) GetSpacePermissionSnapshot(
+	ctx context.Context,
+	spaceID string,
+	actorUserID string,
+) (*WorkspaceSpacePermissionSnapshot, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedActorUserID := strings.TrimSpace(actorUserID)
+	if normalizedSpaceID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	type spacePermissionRow struct {
+		SpaceID            string              `gorm:"column:space_id"`
+		OwnerUserID        string              `gorm:"column:owner_user_id"`
+		Visibility         models.Visibility   `gorm:"column:visibility"`
+		Status             models.EntityStatus `gorm:"column:status"`
+		DeletedAt          *time.Time          `gorm:"column:deleted_at"`
+		IsPlatformAdmin    int                 `gorm:"column:is_platform_admin"`
+		HasSpaceAdminScope int                 `gorm:"column:has_space_admin_scope"`
+		MemberRole         *string             `gorm:"column:member_role"`
+	}
+
+	var row spacePermissionRow
+	if err := r.db.WithContext(ctx).
+		Table("spaces AS s").
+		Select(
+			"s.space_id",
+			"s.owner_user_id",
+			"s.visibility",
+			"s.status",
+			"s.deleted_at",
+			"CASE WHEN uar.user_id IS NULL THEN 0 ELSE 1 END AS is_platform_admin",
+			"CASE WHEN sas.id IS NULL THEN 0 ELSE 1 END AS has_space_admin_scope",
+			"sm.role AS member_role",
+		).
+		Joins(
+			"LEFT JOIN user_admin_roles AS uar ON uar.user_id = ? AND uar.role = ?",
+			normalizedActorUserID,
+			models.AdminRolePlatformAdmin,
+		).
+		Joins(
+			"LEFT JOIN space_admin_scopes AS sas ON sas.user_id = ? AND sas.space_id = s.space_id",
+			normalizedActorUserID,
+		).
+		Joins(
+			"LEFT JOIN space_members AS sm ON sm.user_id = ? AND sm.space_id = s.space_id",
+			normalizedActorUserID,
+		).
+		Where("s.space_id = ?", normalizedSpaceID).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	if !models.IsValidVisibility(row.Visibility) {
+		row.Visibility = models.VisibilityMember
+	}
+	if !models.IsValidEntityStatus(row.Status) {
+		row.Status = models.EntityStatusActive
+	}
+
+	var memberRole *models.Role
+	if row.MemberRole != nil {
+		normalized := strings.ToLower(strings.TrimSpace(*row.MemberRole))
+		if normalized != "" {
+			role := models.Role(normalized)
+			switch role {
+			case models.RoleOwner, models.RoleCollaborator, models.RoleReader:
+			default:
+				role = models.RoleReader
+			}
+			memberRole = &role
+		}
+	}
+
+	return &WorkspaceSpacePermissionSnapshot{
+		SpaceID:            strings.TrimSpace(row.SpaceID),
+		OwnerUserID:        strings.TrimSpace(row.OwnerUserID),
+		Visibility:         row.Visibility,
+		Status:             row.Status,
+		DeletedAt:          row.DeletedAt,
+		IsPlatformAdmin:    row.IsPlatformAdmin > 0,
+		HasSpaceAdminScope: row.HasSpaceAdminScope > 0,
+		MemberRole:         memberRole,
+	}, nil
+}
+
+func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
+	ctx context.Context,
+	spaceID string,
+) ([]WorkspaceTreeNodeRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	type nodeRow struct {
+		NodeID             string          `gorm:"column:node_id"`
+		DocumentID         *string         `gorm:"column:document_id"`
+		SpaceID            string          `gorm:"column:space_id"`
+		ParentNodeID       *string         `gorm:"column:parent_node_id"`
+		Type               models.NodeType `gorm:"column:type"`
+		Title              string          `gorm:"column:title"`
+		Sort               int             `gorm:"column:sort"`
+		DocumentVisibility *string         `gorm:"column:document_visibility"`
+	}
+
+	var rows []nodeRow
+	if err := r.db.WithContext(ctx).
+		Table("nodes AS n").
+		Select(
+			"n.node_id",
+			"d.document_id AS document_id",
+			"n.space_id",
+			"n.parent_node_id",
+			"n.type",
+			"n.title",
+			"n.sort",
+			"d.visibility AS document_visibility",
+		).
+		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
+		Where("n.space_id = ?", strings.TrimSpace(spaceID)).
+		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]WorkspaceTreeNodeRecord, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, WorkspaceTreeNodeRecord{
+			NodeID:             strings.TrimSpace(row.NodeID),
+			DocumentID:         trimOptionalString(row.DocumentID),
+			SpaceID:            strings.TrimSpace(row.SpaceID),
+			ParentNodeID:       trimOptionalString(row.ParentNodeID),
+			Type:               row.Type,
+			Title:              strings.TrimSpace(row.Title),
+			Sort:               row.Sort,
+			DocumentVisibility: trimOptionalString(row.DocumentVisibility),
+		})
+	}
+
+	return items, nil
+}
+
+func (r *gormWorkspaceRepository) GetNodeByNodeID(
+	ctx context.Context,
+	nodeID string,
+) (*WorkspaceNodeRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	type nodeRow struct {
+		NodeID       string          `gorm:"column:node_id"`
+		SpaceID      string          `gorm:"column:space_id"`
+		ParentNodeID *string         `gorm:"column:parent_node_id"`
+		Type         models.NodeType `gorm:"column:type"`
+		Title        string          `gorm:"column:title"`
+		Sort         int             `gorm:"column:sort"`
+	}
+
+	var row nodeRow
+	if err := r.db.WithContext(ctx).
+		Table("nodes").
+		Select("node_id", "space_id", "parent_node_id", "type", "title", "sort").
+		Where("node_id = ?", strings.TrimSpace(nodeID)).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	nodeType := row.Type
+	if nodeType != models.NodeTypeFolder && nodeType != models.NodeTypeDoc {
+		nodeType = models.NodeTypeDoc
+	}
+
+	return &WorkspaceNodeRecord{
+		NodeID:       strings.TrimSpace(row.NodeID),
+		SpaceID:      strings.TrimSpace(row.SpaceID),
+		ParentNodeID: trimOptionalString(row.ParentNodeID),
+		Type:         nodeType,
+		Title:        strings.TrimSpace(row.Title),
+		Sort:         row.Sort,
+	}, nil
+}
+
+func (r *gormWorkspaceRepository) GetMaxNodeSort(
+	ctx context.Context,
+	spaceID string,
+	parentNodeID *string,
+) (int, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("workspace repository db is nil")
+	}
+
+	type maxSortRow struct {
+		Value int `gorm:"column:value"`
+	}
+
+	query := r.db.WithContext(ctx).
+		Table("nodes").
+		Select("COALESCE(MAX(sort), 0) AS value").
+		Where("space_id = ?", strings.TrimSpace(spaceID))
+	if parentNodeID == nil {
+		query = query.Where("parent_node_id IS NULL")
+	} else {
+		query = query.Where("parent_node_id = ?", strings.TrimSpace(*parentNodeID))
+	}
+
+	var row maxSortRow
+	if err := query.Take(&row).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	return row.Value, nil
+}
+
+func (r *gormWorkspaceRepository) CreateNode(
+	ctx context.Context,
+	params WorkspaceCreateNodeParams,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("workspace repository db is nil")
+	}
+	if params.Node == nil {
+		return fmt.Errorf("workspace create node params must include node")
+	}
+
+	spaceID := strings.TrimSpace(params.TouchSpace)
+	if spaceID == "" {
+		spaceID = strings.TrimSpace(params.Node.SpaceID)
+	}
+	touchedAt := params.TouchedAt
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(params.Node).Error; err != nil {
+			return err
+		}
+		if params.Document != nil {
+			if err := tx.Create(params.Document).Error; err != nil {
+				return err
+			}
+		}
+		if params.Revision != nil {
+			if err := tx.Create(params.Revision).Error; err != nil {
+				return err
+			}
+		}
+		if spaceID == "" {
+			return nil
+		}
+		return tx.Table("spaces").
+			Where("space_id = ?", spaceID).
+			Update("updated_at", touchedAt).Error
+	})
+}
+
+func (r *gormWorkspaceRepository) UpdateNode(
+	ctx context.Context,
+	params WorkspaceUpdateNodeParams,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("workspace repository db is nil")
+	}
+
+	nodeID := strings.TrimSpace(params.NodeID)
+	if nodeID == "" {
+		return gorm.ErrRecordNotFound
+	}
+	if len(params.UpdateValues) == 0 {
+		return nil
+	}
+
+	touchedAt := params.TouchedAt
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	spaceID := strings.TrimSpace(params.TouchSpace)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Table("nodes").
+			Where("node_id = ?", nodeID).
+			Updates(params.UpdateValues)
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		if params.DocumentTitle != nil {
+			if err := tx.Table("documents").
+				Where("node_id = ?", nodeID).
+				Updates(map[string]any{
+					"title":      strings.TrimSpace(*params.DocumentTitle),
+					"updated_at": touchedAt,
+				}).Error; err != nil {
+				return err
+			}
+		}
+
+		if spaceID == "" {
+			return nil
+		}
+		return tx.Table("spaces").
+			Where("space_id = ?", spaceID).
+			Update("updated_at", touchedAt).Error
+	})
+}
+
+func (r *gormWorkspaceRepository) DeleteNode(
+	ctx context.Context,
+	nodeID string,
+	touchSpace string,
+	touchedAt time.Time,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("workspace repository db is nil")
+	}
+
+	normalizedNodeID := strings.TrimSpace(nodeID)
+	if normalizedNodeID == "" {
+		return false, nil
+	}
+	normalizedSpaceID := strings.TrimSpace(touchSpace)
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		deleteResult := tx.Where("node_id = ?", normalizedNodeID).Delete(&models.Node{})
+		if deleteResult.Error != nil {
+			return deleteResult.Error
+		}
+		if deleteResult.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		if normalizedSpaceID == "" {
+			return nil
+		}
+		return tx.Table("spaces").
+			Where("space_id = ?", normalizedSpaceID).
+			Update("updated_at", touchedAt).Error
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
+	ctx context.Context,
+	documentID string,
+) (*WorkspaceDocumentRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	type documentRow struct {
+		DocumentID   string `gorm:"column:document_id"`
+		NodeID       string `gorm:"column:node_id"`
+		ThemeID      string `gorm:"column:theme_id"`
+		Title        string `gorm:"column:title"`
+		ContentMD    string `gorm:"column:content_md"`
+		Version      int    `gorm:"column:version"`
+		SpaceID      string `gorm:"column:space_id"`
+		UpdatedAtRaw string `gorm:"column:updated_at"`
+	}
+
+	var row documentRow
+	if err := r.db.WithContext(ctx).
+		Table("documents AS d").
+		Select(
+			"d.document_id",
+			"d.node_id",
+			"d.theme_id",
+			"d.title",
+			"d.content_md",
+			"d.version",
+			"d.updated_at",
+			"n.space_id AS space_id",
+		).
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Where("d.document_id = ?", strings.TrimSpace(documentID)).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	return &WorkspaceDocumentRecord{
+		DocumentID:   strings.TrimSpace(row.DocumentID),
+		NodeID:       strings.TrimSpace(row.NodeID),
+		ThemeID:      strings.TrimSpace(row.ThemeID),
+		Title:        strings.TrimSpace(row.Title),
+		ContentMD:    row.ContentMD,
+		Version:      row.Version,
+		SpaceID:      strings.TrimSpace(row.SpaceID),
+		UpdatedAtRaw: row.UpdatedAtRaw,
+	}, nil
+}
+
+func (r *gormWorkspaceRepository) SaveDocument(
+	ctx context.Context,
+	params WorkspaceSaveDocumentParams,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("workspace repository db is nil")
+	}
+
+	documentID := strings.TrimSpace(params.DocumentID)
+	if documentID == "" || params.BaseVersion <= 0 {
+		return false, nil
+	}
+
+	touchedAt := params.TouchedAt
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	actorUserID := strings.TrimSpace(params.ActorUserID)
+	nodeID := strings.TrimSpace(params.NodeID)
+	spaceID := strings.TrimSpace(params.SpaceID)
+	saved := false
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateResult := tx.Table("documents").
+			Where("document_id = ? AND version = ?", documentID, params.BaseVersion).
+			Updates(map[string]any{
+				"content_md":         params.ContentMD,
+				"version":            params.NextVersion,
+				"updated_by_user_id": actorUserID,
+				"updated_at":         touchedAt,
+			})
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+		if updateResult.RowsAffected == 0 {
+			return nil
+		}
+
+		saved = true
+		if params.Revision != nil {
+			if err := tx.Create(params.Revision).Error; err != nil {
+				return err
+			}
+		}
+
+		if nodeID != "" {
+			if err := tx.Table("nodes").
+				Where("node_id = ?", nodeID).
+				Update("updated_at", touchedAt).Error; err != nil {
+				return err
+			}
+		}
+		if spaceID != "" {
+			if err := tx.Table("spaces").
+				Where("space_id = ?", spaceID).
+				Update("updated_at", touchedAt).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return saved, nil
+}
+
+func (r *gormWorkspaceRepository) ListRevisionsByDocumentID(
+	ctx context.Context,
+	documentID string,
+) ([]WorkspaceRevisionRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	type revisionRow struct {
+		DocumentRevisionID string                `gorm:"column:document_revision_id"`
+		DocumentID         string                `gorm:"column:document_id"`
+		Version            int                   `gorm:"column:version"`
+		ContentMD          string                `gorm:"column:content_md"`
+		BaseVersion        int                   `gorm:"column:base_version"`
+		Source             models.RevisionSource `gorm:"column:source"`
+		CreatedAtRaw       string                `gorm:"column:created_at"`
+	}
+
+	var rows []revisionRow
+	if err := r.db.WithContext(ctx).
+		Table("document_revisions").
+		Select(
+			"document_revision_id",
+			"document_id",
+			"version",
+			"content_md",
+			"base_version",
+			"source",
+			"created_at",
+		).
+		Where("document_id = ?", strings.TrimSpace(documentID)).
+		Order("version DESC, created_at DESC, id DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	revisions := make([]WorkspaceRevisionRecord, 0, len(rows))
+	for _, row := range rows {
+		revisions = append(revisions, WorkspaceRevisionRecord{
+			DocumentRevisionID: strings.TrimSpace(row.DocumentRevisionID),
+			DocumentID:         strings.TrimSpace(row.DocumentID),
+			Version:            row.Version,
+			ContentMD:          row.ContentMD,
+			BaseVersion:        row.BaseVersion,
+			Source:             row.Source,
+			CreatedAtRaw:       row.CreatedAtRaw,
+		})
+	}
+
+	return revisions, nil
+}
+
+func trimOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}

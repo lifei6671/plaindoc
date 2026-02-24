@@ -173,26 +173,7 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 		CoverAssetID: strings.TrimSpace(req.CoverAssetID),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidName):
-			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
-			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
-			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyExists):
-			response.Error(c, http.StatusConflict, "SPACE_ALREADY_EXISTS", "space id already exists")
-		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
-			response.Error(c, http.StatusNotFound, "COVER_ASSET_NOT_FOUND", "cover asset not found")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -254,26 +235,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 		PreferredQuality: 0,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidCoverSource):
-			response.Error(c, http.StatusBadRequest, "INVALID_SOURCE", "source must be user_upload or system_generated")
-		case errors.Is(err, service.ErrAdminSpaceCoverFileRequired):
-			response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is required")
-		case errors.Is(err, service.ErrAdminSpaceCoverSpaceNameRequired):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_NAME", "space name is required for system generated cover")
-		case errors.Is(err, service.ErrAdminSpaceCoverImageInvalid):
-			response.Error(c, http.StatusBadRequest, "INVALID_COVER_IMAGE", "cover image is invalid")
-		case errors.Is(err, service.ErrAdminSpaceCoverImageTooLarge):
-			response.Error(c, http.StatusRequestEntityTooLarge, "COVER_IMAGE_TOO_LARGE", "cover image exceeds 10MB limit")
-		case errors.Is(err, service.ErrAdminSpaceCoverImageTooManyPixels):
-			response.Error(c, http.StatusBadRequest, "COVER_IMAGE_TOO_LARGE", "cover image dimensions are too large")
-		case errors.Is(err, service.ErrAdminSpaceFontUnavailable):
-			response.Error(c, http.StatusServiceUnavailable, "COVER_FONT_UNAVAILABLE", "system cover font is unavailable")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -313,16 +275,7 @@ func (h *adminSpaceHandler) ListSpaces(c *gin.Context) {
 		PageSize:         pageSize,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidStatusFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_STATUS", "status filter is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidVisibilityFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "visibility filter is invalid")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -356,12 +309,7 @@ func (h *adminSpaceHandler) ListCategories(c *gin.Context) {
 
 	payload, err := h.adminSpaceService.ListCategories(c.Request.Context(), actorUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -400,16 +348,7 @@ func (h *adminSpaceHandler) CreateCategory(c *gin.Context) {
 		Name:        req.Name,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
-		case errors.Is(err, service.ErrAdminSpaceCategoryNameConflict):
-			response.Error(c, http.StatusConflict, "SPACE_CATEGORY_NAME_EXISTS", "space category name already exists")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -448,20 +387,7 @@ func (h *adminSpaceHandler) RenameCategory(c *gin.Context) {
 		Name:        req.Name,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
-		case errors.Is(err, service.ErrAdminSpaceCategoryNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_CATEGORY_NOT_FOUND", "space category not found")
-		case errors.Is(err, service.ErrAdminSpaceCategoryDefaultImmutable):
-			response.Error(c, http.StatusBadRequest, "SPACE_CATEGORY_DEFAULT_IMMUTABLE", "default category cannot be renamed")
-		case errors.Is(err, service.ErrAdminSpaceCategoryNameConflict):
-			response.Error(c, http.StatusConflict, "SPACE_CATEGORY_NAME_EXISTS", "space category name already exists")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -493,18 +419,7 @@ func (h *adminSpaceHandler) DeleteCategory(c *gin.Context) {
 		CategoryID:  categoryID,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
-		case errors.Is(err, service.ErrAdminSpaceCategoryNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_CATEGORY_NOT_FOUND", "space category not found")
-		case errors.Is(err, service.ErrAdminSpaceCategoryDefaultImmutable):
-			response.Error(c, http.StatusBadRequest, "SPACE_CATEGORY_DEFAULT_IMMUTABLE", "default category cannot be deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -540,18 +455,7 @@ func (h *adminSpaceHandler) ListMembers(c *gin.Context) {
 		SpaceID:     spaceID,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -599,26 +503,7 @@ func (h *adminSpaceHandler) UpsertMember(c *gin.Context) {
 		Role:         models.Role(strings.ToLower(strings.TrimSpace(req.Role))),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		case errors.Is(err, service.ErrAdminSpaceMemberTargetRequired):
-			response.Error(c, http.StatusBadRequest, "MEMBER_TARGET_REQUIRED", "member target is required")
-		case errors.Is(err, service.ErrAdminSpaceMemberTargetNotFound):
-			response.Error(c, http.StatusNotFound, "MEMBER_TARGET_NOT_FOUND", "member target not found")
-		case errors.Is(err, service.ErrAdminSpaceMemberInvalidRole):
-			response.Error(c, http.StatusBadRequest, "INVALID_MEMBER_ROLE", "member role must be collaborator or reader")
-		case errors.Is(err, service.ErrAdminSpaceMemberOwnerImmutable):
-			response.Error(c, http.StatusBadRequest, "OWNER_MEMBER_IMMUTABLE", "owner member role cannot be changed")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -663,26 +548,7 @@ func (h *adminSpaceHandler) UpdateMemberRole(c *gin.Context) {
 		Role:        models.Role(strings.ToLower(strings.TrimSpace(req.Role))),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		case errors.Is(err, service.ErrAdminSpaceMemberTargetRequired):
-			response.Error(c, http.StatusBadRequest, "MEMBER_TARGET_REQUIRED", "member target is required")
-		case errors.Is(err, service.ErrAdminSpaceMemberInvalidRole):
-			response.Error(c, http.StatusBadRequest, "INVALID_MEMBER_ROLE", "member role must be collaborator or reader")
-		case errors.Is(err, service.ErrAdminSpaceMemberNotFound):
-			response.Error(c, http.StatusNotFound, "MEMBER_NOT_FOUND", "space member not found")
-		case errors.Is(err, service.ErrAdminSpaceMemberOwnerImmutable):
-			response.Error(c, http.StatusBadRequest, "OWNER_MEMBER_IMMUTABLE", "owner member role cannot be changed")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -719,24 +585,7 @@ func (h *adminSpaceHandler) DeleteMember(c *gin.Context) {
 		SpaceID:     spaceID,
 		UserID:      memberUserID,
 	}); err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		case errors.Is(err, service.ErrAdminSpaceMemberTargetRequired):
-			response.Error(c, http.StatusBadRequest, "MEMBER_TARGET_REQUIRED", "member target is required")
-		case errors.Is(err, service.ErrAdminSpaceMemberNotFound):
-			response.Error(c, http.StatusNotFound, "MEMBER_NOT_FOUND", "space member not found")
-		case errors.Is(err, service.ErrAdminSpaceMemberOwnerImmutable):
-			response.Error(c, http.StatusBadRequest, "OWNER_MEMBER_IMMUTABLE", "owner member cannot be removed")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -785,28 +634,7 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 		CoverAssetID: req.CoverAssetID,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceNoMetadataChange):
-			response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "metadata change is required")
-		case errors.Is(err, service.ErrAdminSpaceInvalidName):
-			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "space name is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidDescription):
-			response.Error(c, http.StatusBadRequest, "INVALID_DESCRIPTION", "space description is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidCategory):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category is invalid")
-		case errors.Is(err, service.ErrAdminSpaceInvalidVisibility):
-			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "space visibility is invalid")
-		case errors.Is(err, service.ErrAdminSpaceCoverAssetNotFound):
-			response.Error(c, http.StatusNotFound, "COVER_ASSET_NOT_FOUND", "cover asset not found")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -846,24 +674,7 @@ func (h *adminSpaceHandler) TransferOwnership(c *gin.Context) {
 		TargetEmail:  strings.TrimSpace(req.TargetEmail),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		case errors.Is(err, service.ErrAdminSpaceTransferTargetRequired):
-			response.Error(c, http.StatusBadRequest, "TRANSFER_TARGET_REQUIRED", "transfer target is required")
-		case errors.Is(err, service.ErrAdminSpaceTransferTargetNotFound):
-			response.Error(c, http.StatusNotFound, "TRANSFER_TARGET_NOT_FOUND", "transfer target not found")
-		case errors.Is(err, service.ErrAdminSpaceTransferTargetNotMember):
-			response.Error(c, http.StatusBadRequest, "TRANSFER_TARGET_NOT_MEMBER", "transfer target is not a space member")
-		case errors.Is(err, service.ErrAdminSpaceTransferToSelf):
-			response.Error(c, http.StatusBadRequest, "TRANSFER_TARGET_SELF", "transfer target is current owner")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -903,20 +714,7 @@ func (h *adminSpaceHandler) UpdateStatus(c *gin.Context) {
 		Reason:      strings.TrimSpace(req.Reason),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceInvalidStatus):
-			response.Error(c, http.StatusBadRequest, "INVALID_STATUS", "status must be active or banned")
-		case errors.Is(err, service.ErrAdminSpaceBanReasonRequired):
-			response.Error(c, http.StatusBadRequest, "INVALID_REASON", "ban reason is required")
-		case errors.Is(err, service.ErrAdminSpaceAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "SPACE_DELETED", "space has been deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -948,16 +746,7 @@ func (h *adminSpaceHandler) DeleteSpace(c *gin.Context) {
 		spaceID,
 		response.RequestIDFromContext(c),
 	); err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
-		case errors.Is(err, service.ErrAdminSpaceInvalidSpaceID):
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is invalid")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 

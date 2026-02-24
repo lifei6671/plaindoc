@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -62,14 +61,7 @@ func (h *adminOperationTokenHandler) Issue(c *gin.Context) {
 		TargetID:    strings.TrimSpace(req.TargetID),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminOperationTokenInvalidOperation):
-			response.Error(c, http.StatusBadRequest, "INVALID_OPERATION", "operation is required")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 

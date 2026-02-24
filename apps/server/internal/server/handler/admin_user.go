@@ -92,24 +92,7 @@ func (h *adminUserHandler) CreateUser(c *gin.Context) {
 		Role:        service.AdminUserRole(strings.ToLower(strings.TrimSpace(req.Role))),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		case errors.Is(err, service.ErrAdminUserInvalidEmail):
-			response.Error(c, http.StatusBadRequest, "INVALID_EMAIL", "email is invalid")
-		case errors.Is(err, service.ErrAdminUserInvalidName):
-			response.Error(c, http.StatusBadRequest, "INVALID_NAME", "name is required")
-		case errors.Is(err, service.ErrAdminUserInvalidPassword):
-			response.Error(c, http.StatusBadRequest, "INVALID_PASSWORD", "password must be at least 6 characters")
-		case errors.Is(err, service.ErrAdminUserEmailAlreadyExists):
-			response.Error(c, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email already exists")
-		case errors.Is(err, service.ErrAdminUserInvalidRole):
-			response.Error(c, http.StatusBadRequest, "INVALID_ROLE", "role must be user or space_admin or platform_admin")
-		case errors.Is(err, service.ErrAdminUserRoleForbidden):
-			response.Error(c, http.StatusForbidden, "ROLE_FORBIDDEN", "can not set role higher than actor role")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -148,14 +131,7 @@ func (h *adminUserHandler) ListUsers(c *gin.Context) {
 		PageSize:     pageSize,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		case errors.Is(err, service.ErrAdminUserInvalidStatusFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_STATUS", "status filter is invalid")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -207,22 +183,7 @@ func (h *adminUserHandler) UpdateStatus(c *gin.Context) {
 		Reason:      strings.TrimSpace(req.Reason),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		case errors.Is(err, service.ErrAdminUserNotFound):
-			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
-		case errors.Is(err, service.ErrAdminUserInvalidStatus):
-			response.Error(c, http.StatusBadRequest, "INVALID_STATUS", "status must be active or banned")
-		case errors.Is(err, service.ErrAdminUserBanReasonRequired):
-			response.Error(c, http.StatusBadRequest, "INVALID_REASON", "ban reason is required")
-		case errors.Is(err, service.ErrAdminUserSelfOperationBlocked):
-			response.Error(c, http.StatusBadRequest, "SELF_OPERATION_FORBIDDEN", "self operation is not allowed")
-		case errors.Is(err, service.ErrAdminUserAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "USER_DELETED", "user has been deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -261,24 +222,7 @@ func (h *adminUserHandler) UpdateRole(c *gin.Context) {
 		Role:        service.AdminUserRole(strings.ToLower(strings.TrimSpace(req.Role))),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		case errors.Is(err, service.ErrAdminUserNotFound):
-			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
-		case errors.Is(err, service.ErrAdminUserInvalidUserID):
-			response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is invalid")
-		case errors.Is(err, service.ErrAdminUserInvalidRole):
-			response.Error(c, http.StatusBadRequest, "INVALID_ROLE", "role must be user or space_admin or platform_admin")
-		case errors.Is(err, service.ErrAdminUserRoleForbidden):
-			response.Error(c, http.StatusForbidden, "ROLE_FORBIDDEN", "can not edit higher role user")
-		case errors.Is(err, service.ErrAdminUserSelfOperationBlocked):
-			response.Error(c, http.StatusBadRequest, "SELF_OPERATION_FORBIDDEN", "self operation is not allowed")
-		case errors.Is(err, service.ErrAdminUserAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "USER_DELETED", "user has been deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -310,18 +254,7 @@ func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 		targetUserID,
 		response.RequestIDFromContext(c),
 	); err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		case errors.Is(err, service.ErrAdminUserNotFound):
-			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
-		case errors.Is(err, service.ErrAdminUserSelfOperationBlocked):
-			response.Error(c, http.StatusBadRequest, "SELF_OPERATION_FORBIDDEN", "self operation is not allowed")
-		case errors.Is(err, service.ErrAdminUserInvalidUserID):
-			response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is invalid")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 

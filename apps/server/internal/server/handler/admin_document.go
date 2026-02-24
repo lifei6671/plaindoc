@@ -91,16 +91,7 @@ func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 		PageSize:         pageSize,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
-		case errors.Is(err, service.ErrAdminDocumentInvalidStatusFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_STATUS", "status filter is invalid")
-		case errors.Is(err, service.ErrAdminDocumentInvalidVisibilityFilter):
-			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "visibility filter is invalid")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -152,20 +143,7 @@ func (h *adminDocumentHandler) UpdateStatus(c *gin.Context) {
 		Reason:      strings.TrimSpace(req.Reason),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminDocumentNotFound):
-			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
-		case errors.Is(err, service.ErrAdminDocumentInvalidStatus):
-			response.Error(c, http.StatusBadRequest, "INVALID_STATUS", "status must be active or banned")
-		case errors.Is(err, service.ErrAdminDocumentBanReasonRequired):
-			response.Error(c, http.StatusBadRequest, "INVALID_REASON", "ban reason is required")
-		case errors.Is(err, service.ErrAdminDocumentAlreadyDeleted):
-			response.Error(c, http.StatusBadRequest, "DOCUMENT_DELETED", "document has been deleted")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -197,16 +175,7 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 		documentID,
 		response.RequestIDFromContext(c),
 	); err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
-		case errors.Is(err, service.ErrAdminDocumentNotFound):
-			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
-		case errors.Is(err, service.ErrAdminDocumentInvalidDocumentID):
-			response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is invalid")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 

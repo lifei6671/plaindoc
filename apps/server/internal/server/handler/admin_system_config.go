@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -52,12 +51,7 @@ func (h *adminSystemConfigHandler) ListConfigs(c *gin.Context) {
 
 	items, err := h.adminSystemConfigService.ListConfigs(c.Request.Context(), actorUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
@@ -101,20 +95,7 @@ func (h *adminSystemConfigHandler) UpsertConfig(c *gin.Context) {
 		ExpectedVersion: req.ExpectedVersion,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAdminForbidden):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
-		case errors.Is(err, service.ErrAdminSystemConfigInvalidKey):
-			response.Error(c, http.StatusBadRequest, "INVALID_CONFIG_KEY", "config key is invalid")
-		case errors.Is(err, service.ErrAdminSystemConfigInvalidValue):
-			response.Error(c, http.StatusBadRequest, "INVALID_CONFIG_VALUE", "config value is invalid")
-		case errors.Is(err, service.ErrAdminSystemConfigExpectedVersion):
-			response.Error(c, http.StatusBadRequest, "INVALID_EXPECTED_VERSION", "expectedVersion must be positive integer")
-		case errors.Is(err, service.ErrAdminSystemConfigVersionConflict):
-			response.Error(c, http.StatusConflict, "CONFIG_VERSION_CONFLICT", "config version conflict")
-		default:
-			response.InternalError(c)
-		}
+		response.FromError(c, err)
 		return
 	}
 
