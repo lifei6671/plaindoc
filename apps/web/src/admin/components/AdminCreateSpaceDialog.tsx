@@ -439,10 +439,12 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
 
   const [uploadingCover, setUploadingCover] = useState(false);
   const [creatingSpace, setCreatingSpace] = useState(false);
+  const [createProgressMessage, setCreateProgressMessage] = useState("");
   const [pendingCover, setPendingCover] = useState<PendingCoverPreview | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragStartRef = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
+  const createSpaceInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
@@ -451,6 +453,9 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        if (uploadingCover || creatingSpace) {
+          return;
+        }
         onOpenChange(false);
       }
     };
@@ -461,7 +466,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
       window.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [onOpenChange, open]);
+  }, [creatingSpace, onOpenChange, open, uploadingCover]);
 
   useEffect(() => {
     return () => {
@@ -523,6 +528,8 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
     clearPendingCover();
     setUploadingCover(false);
     setCreatingSpace(false);
+    setCreateProgressMessage("");
+    createSpaceInFlightRef.current = false;
     setLoadedImage((previous) => {
       if (previous?.objectURL) {
         URL.revokeObjectURL(previous.objectURL);
@@ -696,6 +703,11 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
   }, [name]);
 
   const handleCreateSpace = useCallback(async () => {
+    // 同步锁：防止 React 状态刷新前的快速连点触发重复提交。
+    if (createSpaceInFlightRef.current) {
+      return;
+    }
+
     const normalizedSpaceID = normalizeSpaceID(spaceID);
     const spaceIDValidationMessage = resolveSpaceIDValidationMessage(normalizedSpaceID);
     if (spaceIDValidationMessage) {
@@ -717,21 +729,40 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
       return;
     }
 
+    createSpaceInFlightRef.current = true;
     setCreatingSpace(true);
+    setCreateProgressMessage("正在准备创建...");
     try {
-      // 若有封面预览，先上传封面再创建空间，保证预览与最终一致。
-      let coverAssetId: string | undefined;
-      if (pendingCover) {
-        const payload = await dataGateway.admin.createSpaceCoverAsset({
-          source: "user_upload",
-          file: pendingCover.file,
-          clientWidth: pendingCover.width,
-          clientHeight: pendingCover.height,
-          clientMimeType: pendingCover.mimeType,
-          clientProcessed: true
-        });
-        coverAssetId = payload.assetId;
+      // 封面创建策略：
+      // 1) 用户已生成/上传封面预览：沿用该预览文件上传；
+      // 2) 未提供封面：前端自动生成系统封面，再继续创建空间。
+      let preparedCover = pendingCover;
+      if (!preparedCover) {
+        setCreateProgressMessage("正在自动生成封面...");
+        const generated = await exportSystemGeneratedWebP(trimmedName);
+        preparedCover = {
+          sourceLabel: "system_generated",
+          file: generated.file,
+          width: generated.width,
+          height: generated.height,
+          mimeType: generated.file.type || "image/webp",
+          previewUrl: ""
+        };
       }
+
+      let coverAssetId: string | undefined;
+      setCreateProgressMessage("正在上传封面...");
+      const payload = await dataGateway.admin.createSpaceCoverAsset({
+        source: "user_upload",
+        file: preparedCover.file,
+        clientWidth: preparedCover.width,
+        clientHeight: preparedCover.height,
+        clientMimeType: preparedCover.mimeType,
+        clientProcessed: true
+      });
+      coverAssetId = payload.assetId;
+
+      setCreateProgressMessage("正在创建空间...");
       await dataGateway.admin.createSpace({
         spaceId: normalizedSpaceID || undefined,
         name: trimmedName,
@@ -747,7 +778,9 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
     } catch (error) {
       showToast(`创建空间失败：${formatError(error)}`);
     } finally {
+      createSpaceInFlightRef.current = false;
       setCreatingSpace(false);
+      setCreateProgressMessage("");
     }
   }, [categoryID, dataGateway.admin, description, name, onCreated, onOpenChange, pendingCover, resetDialog, spaceID, visibility]);
 
@@ -983,12 +1016,24 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
+          {creatingSpace ? (
+            <div className="mr-auto inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
+              <LoaderCircle size={14} className="animate-spin" />
+              <span>{createProgressMessage || "处理中..."}</span>
+            </div>
+          ) : null}
           <Button type="button" variant="outline" disabled={uploadingCover || creatingSpace} onClick={closeDialog}>
             取消
           </Button>
-          <Button type="button" disabled={creatingSpace || uploadingCover} onClick={() => void handleCreateSpace()}>
+          <Button
+            type="button"
+            disabled={creatingSpace || uploadingCover}
+            aria-busy={creatingSpace}
+            className="min-w-[112px] transition-all duration-200"
+            onClick={() => void handleCreateSpace()}
+          >
             {creatingSpace ? <LoaderCircle size={15} className="animate-spin" /> : null}
-            创建空间
+            {creatingSpace ? "处理中..." : "创建空间"}
           </Button>
         </footer>
       </section>
