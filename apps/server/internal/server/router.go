@@ -3,10 +3,13 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
@@ -16,7 +19,6 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	ssrpool "github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
-	"gorm.io/gorm"
 )
 
 const (
@@ -64,6 +66,21 @@ func newRouter(
 	// 使用 gin.New() 而不是 gin.Default()，确保中间件链完全由项目显式控制，
 	// 防止默认 Logger/Recovery 与自定义中间件发生重复或顺序冲突。
 	router := gin.New()
+
+	// 1) 只信任来自 Caddy 的代理（Docker 网段或 Caddy 容器 IP）
+	// 示例：你的 docker network subnet 是 172.18.0.0/16，就写它
+	proxies := strings.Split(os.Getenv("GIN_TRUSTED_PROXIES"), ",")
+	for i := range proxies {
+		proxies[i] = strings.TrimSpace(proxies[i])
+	}
+	if len(proxies) == 1 && proxies[0] == "" {
+		proxies = nil
+	}
+	_ = router.SetTrustedProxies(proxies)
+
+	// 2) Cloudflare 场景：让 Gin 直接信任 CF-Connecting-IP（推荐）
+	router.TrustedPlatform = gin.PlatformCloudflare
+
 	// 开启 405（Method Not Allowed）处理，让同一路径错误方法命中 NoMethod。
 	router.HandleMethodNotAllowed = true
 	// 1) 预置请求属性容器：用于后续中间件/业务层向 context 写入结构化日志字段。
