@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
@@ -14,6 +15,7 @@ import (
 type accessHandler struct {
 	authService       *service.AuthService
 	visibilityService *service.VisibilityService
+	renderCache       *rendercache.Cache
 }
 
 type updateVisibilityRequest struct {
@@ -43,10 +45,12 @@ type documentAccessResponse struct {
 func NewAccessHandler(
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
+	renderCache *rendercache.Cache,
 ) *accessHandler {
 	return &accessHandler{
 		authService:       authService,
 		visibilityService: visibilityService,
+		renderCache:       renderCache,
 	}
 }
 
@@ -228,6 +232,11 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 			response.InternalError(c)
 		}
 		return
+	}
+
+	if h != nil && h.renderCache != nil {
+		// 文档可见性变化会直接影响阅读页输出，需主动失效渲染缓存。
+		h.renderCache.PurgeDoc(document.DocumentID)
 	}
 
 	response.JSON(c, http.StatusOK, documentAccessResponse{

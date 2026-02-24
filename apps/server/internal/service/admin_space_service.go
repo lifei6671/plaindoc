@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
@@ -545,7 +546,7 @@ func (s *AdminSpaceService) RenameCategory(
 		TargetType: "space_category",
 		TargetID:   record.CategoryID,
 		Summary:    "space category renamed: " + record.CategoryID,
-		Detail: map[string]any{
+		Detail: gin.H{
 			"categoryId": record.CategoryID,
 			"nameBefore": target.Name,
 			"nameAfter":  record.Name,
@@ -631,7 +632,7 @@ func (s *AdminSpaceService) DeleteCategory(
 		TargetType: "space_category",
 		TargetID:   categoryID,
 		Summary:    "space category deleted: " + categoryID,
-		Detail: map[string]any{
+		Detail: gin.H{
 			"categoryId":             categoryID,
 			"name":                   target.Name,
 			"movedSpaceCount":        movedCount,
@@ -759,7 +760,7 @@ func (s *AdminSpaceService) UpsertMember(
 		TargetType: "space_member",
 		TargetID:   spaceID + ":" + targetUserID,
 		Summary:    "space member upserted: " + spaceID + ":" + targetUserID,
-		Detail: map[string]any{
+		Detail: gin.H{
 			"spaceId":   spaceID,
 			"userId":    targetUserID,
 			"userEmail": strings.TrimSpace(targetUser.Email),

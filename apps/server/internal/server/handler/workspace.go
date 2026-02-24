@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
@@ -26,6 +27,7 @@ type workspaceHandler struct {
 	workspaceRepo     repository.WorkspaceRepository
 	authService       *service.AuthService
 	visibilityService *service.VisibilityService
+	renderCache       *rendercache.Cache
 }
 
 type workspaceSpaceResponse struct {
@@ -125,11 +127,13 @@ func NewWorkspaceHandler(
 	workspaceRepo repository.WorkspaceRepository,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
+	renderCache *rendercache.Cache,
 ) *workspaceHandler {
 	return &workspaceHandler{
 		workspaceRepo:     workspaceRepo,
 		authService:       authService,
 		visibilityService: visibilityService,
+		renderCache:       renderCache,
 	}
 }
 
@@ -566,6 +570,11 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		return
 	}
 
+	if h != nil && h.renderCache != nil && node.Type == models.NodeTypeDoc {
+		// 文档节点标题变更会影响阅读页展示，按文档维度主动失效缓存。
+		h.renderCache.PurgeDoc(strings.TrimSpace(node.NodeID))
+	}
+
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 
@@ -732,6 +741,11 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 			UpdatedAtRaw: latestRecord.UpdatedAtRaw,
 		}))
 		return
+	}
+
+	if h != nil && h.renderCache != nil {
+		// 文档更新后主动失效该文档所有渲染缓存，避免旧版本内容被命中。
+		h.renderCache.PurgeDoc(documentID)
 	}
 
 	current.ContentMD = req.ContentMD

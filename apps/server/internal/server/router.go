@@ -3,9 +3,12 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
@@ -14,6 +17,12 @@ import (
 	ssrpool "github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
+)
+
+const (
+	defaultReaderRenderCacheMaxBytes      = 64 << 20 // 64MB
+	defaultReaderRenderCacheMaxEntryBytes = 2 << 20  // 2MB
+	defaultReaderRenderCacheTTL           = 15 * time.Minute
 )
 
 // NewRouter 构建并返回服务唯一的 HTTP 路由入口。
@@ -93,6 +102,8 @@ func newRouter(
 	visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 	// 阅读页服务：聚合空间树与文档正文，供 SSR worker 渲染。
 	readerPageService := service.NewReaderPageService(db, visibilityService)
+	// 阅读页 SSR 渲染缓存：仅缓存 Node 渲染结果，不缓存鉴权流程。
+	readerRenderCache := buildReaderRenderCache(cfg, logger, readerSSRDispatcher != nil)
 	// 首页 Handler：承接 SSR 渲染与登录态相关行为。
 	homeHandler := handler.NewHomeHandler(authService, homeService, cfg.WebOrigin)
 	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
@@ -100,6 +111,7 @@ func newRouter(
 		authService,
 		readerPageService,
 		readerSSRDispatcher,
+		readerRenderCache,
 		logger,
 		cfg.WebOrigin,
 	)
@@ -160,8 +172,13 @@ func newRouter(
 		api.GET("/uploads/*path", imageHostingHandler.ServeLocalImage)
 
 		// ---- 工作区与文档协作 API（业务主链）----
-		accessHandler := handler.NewAccessHandler(authService, visibilityService)
-		workspaceHandler := handler.NewWorkspaceHandler(workspaceRepo, authService, visibilityService)
+		accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache)
+		workspaceHandler := handler.NewWorkspaceHandler(
+			workspaceRepo,
+			authService,
+			visibilityService,
+			readerRenderCache,
+		)
 
 		// 空间列表（按访问者可见范围过滤）。
 		api.GET("/spaces", workspaceHandler.ListSpaces)
@@ -477,7 +494,7 @@ func newRouter(
 		// ---- 业务端主题接口（非后台治理）----
 		// 这里是普通业务用户使用的主题读取/应用入口，不要求 admin 身份。
 		themeHandler := handler.NewThemeHandler(db)
-		documentThemeHandler := handler.NewDocumentThemeHandler(db)
+		documentThemeHandler := handler.NewDocumentThemeHandler(db, readerRenderCache)
 		// 获取前台可用主题列表（通常仅返回已启用主题）。
 		api.GET("/themes", themeHandler.List)
 		// 为指定文档设置主题。
@@ -495,4 +512,30 @@ func newRouter(
 
 	// 所有依赖与路由装配完成后返回 engine，供 main 包启动 HTTP 服务。
 	return router
+}
+
+func buildReaderRenderCache(
+	cfg config.Config,
+	logger *slog.Logger,
+	enabled bool,
+) *rendercache.Cache {
+	if !enabled {
+		return nil
+	}
+	rendererVersion := strings.TrimSpace(cfg.SSRWorker.ProtocolVersion)
+	if rendererVersion == "" {
+		rendererVersion = "v1"
+	}
+	cache, err := rendercache.New(rendererVersion, rendercache.Options{
+		MaxBytes:      defaultReaderRenderCacheMaxBytes,
+		MaxEntryBytes: defaultReaderRenderCacheMaxEntryBytes,
+		TTL:           defaultReaderRenderCacheTTL,
+	})
+	if err != nil {
+		if logger != nil {
+			logger.Error("init reader render cache failed", "error", err.Error())
+		}
+		return nil
+	}
+	return cache
 }

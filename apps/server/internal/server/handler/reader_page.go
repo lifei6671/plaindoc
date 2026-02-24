@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/protocol"
@@ -23,6 +27,7 @@ type readerPageHandler struct {
 	authService       *service.AuthService
 	readerPageService *service.ReaderPageService
 	dispatcher        *pool.Dispatcher
+	renderCache       *rendercache.Cache
 	logger            *slog.Logger
 	webOrigin         string
 }
@@ -49,11 +54,17 @@ type readerPageAccessState struct {
 	RequiresLogin bool   `json:"requiresLogin"`
 }
 
+const (
+	readerPublicBrowserMaxAgeSeconds = 60
+	readerPublicBrowserSWRSeconds    = 120
+)
+
 // NewReaderPageHandler 创建阅读页 SSR 处理器。
 func NewReaderPageHandler(
 	authService *service.AuthService,
 	readerPageService *service.ReaderPageService,
 	dispatcher *pool.Dispatcher,
+	renderCache *rendercache.Cache,
 	logger *slog.Logger,
 	webOrigin string,
 ) *readerPageHandler {
@@ -61,6 +72,7 @@ func NewReaderPageHandler(
 		authService:       authService,
 		readerPageService: readerPageService,
 		dispatcher:        dispatcher,
+		renderCache:       renderCache,
 		logger:            logger,
 		webOrigin:         normalizeWebOrigin(webOrigin),
 	}
@@ -218,7 +230,7 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 		ActiveDocID: viewModel.ActiveDocID,
 		Viewer:      viewer,
 	}
-	h.renderReaderPayload(c, http.StatusOK, spaceID, documentID, payload)
+	h.renderReaderPayload(c, http.StatusOK, spaceID, documentID, payload, true)
 }
 
 func (h *readerPageHandler) renderReaderPayload(
@@ -227,24 +239,55 @@ func (h *readerPageHandler) renderReaderPayload(
 	spaceID string,
 	documentID string,
 	payload readerPagePayload,
+	cacheable bool,
 ) {
-	appendVaryHeader(c, "Authorization")
-	appendVaryHeader(c, "Cookie")
-	c.Header("Cache-Control", "private, no-store, max-age=0")
+	applyReaderBrowserCacheHeaders(c, statusCode, payload, cacheable)
 
 	if h.dispatcher != nil {
-		payloadBytes, marshalErr := json.Marshal(payload)
+		renderPayload := payload
+		if cacheable {
+			// 鉴权在上游已完成，渲染缓存不携带用户态，避免缓存碎片与用户信息污染。
+			renderPayload.Viewer = readerPageViewerIdentity{}
+		}
+		payloadBytes, marshalErr := json.Marshal(renderPayload)
 		if marshalErr != nil {
 			h.logError("marshal reader page payload failed", marshalErr, "space_id", spaceID, "document_id", documentID)
 		} else {
-			renderResponse, renderErr := h.dispatcher.Render(c.Request.Context(), protocol.RenderRequest{
-				ID:      strings.ToLower(ulid.Make().String()),
-				Type:    protocol.MessageTypeRender,
-				Route:   "space-reader",
-				Payload: payloadBytes,
-			})
-			if renderErr == nil && renderResponse.OK && strings.TrimSpace(renderResponse.HTML) != "" {
-				c.Data(statusCode, "text/html; charset=utf-8", []byte(renderResponse.HTML))
+			if cacheable && h.renderCache != nil {
+				cacheKey := buildReaderRenderCacheKey(h.renderCache, documentID, payloadBytes)
+				if cacheKey != "" {
+					cachedHTML, cacheErr := h.renderCache.GetOrRender(
+						c.Request.Context(),
+						strings.TrimSpace(documentID),
+						cacheKey,
+						func(ctx context.Context) ([]byte, error) {
+							return h.renderReaderPayloadByDispatcher(ctx, payloadBytes)
+						},
+					)
+					if cacheErr == nil && len(cachedHTML) > 0 {
+						c.Data(statusCode, "text/html; charset=utf-8", cachedHTML)
+						return
+					}
+					if cacheErr != nil {
+						h.logWarn(
+							"reader page render cache bypassed",
+							"space_id",
+							spaceID,
+							"document_id",
+							documentID,
+							"error",
+							cacheErr.Error(),
+						)
+					}
+				}
+			}
+
+			renderedHTML, renderResponse, renderErr := h.renderReaderPayloadByDispatcherWithState(
+				c.Request.Context(),
+				payloadBytes,
+			)
+			if renderErr == nil && len(renderedHTML) > 0 {
+				c.Data(statusCode, "text/html; charset=utf-8", renderedHTML)
 				return
 			}
 			if renderErr != nil {
@@ -256,7 +299,7 @@ func (h *readerPageHandler) renderReaderPayload(
 					"document_id",
 					documentID,
 				)
-			} else {
+			} else if renderResponse != nil {
 				h.logWarn(
 					"reader page ssr render rejected",
 					"space_id",
@@ -273,6 +316,102 @@ func (h *readerPageHandler) renderReaderPayload(
 	}
 
 	c.Data(statusCode, "text/html; charset=utf-8", []byte(buildReaderFallbackHTML(payload)))
+}
+
+func applyReaderBrowserCacheHeaders(
+	c *gin.Context,
+	statusCode int,
+	payload readerPagePayload,
+	cacheable bool,
+) {
+	appendVaryHeader(c, "Authorization")
+	appendVaryHeader(c, "Cookie")
+	if isReaderBrowserCacheEligible(statusCode, payload, cacheable) {
+		c.Header(
+			"Cache-Control",
+			fmt.Sprintf(
+				"public, max-age=%d, stale-while-revalidate=%d",
+				readerPublicBrowserMaxAgeSeconds,
+				readerPublicBrowserSWRSeconds,
+			),
+		)
+		return
+	}
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+}
+
+func isReaderBrowserCacheEligible(
+	statusCode int,
+	payload readerPagePayload,
+	cacheable bool,
+) bool {
+	if !cacheable || statusCode != http.StatusOK {
+		return false
+	}
+	if payload.Viewer.Authenticated {
+		return false
+	}
+	if payload.Access != nil && strings.TrimSpace(payload.Access.Code) != "" {
+		return false
+	}
+	if strings.TrimSpace(payload.Document.ID) == "" {
+		return false
+	}
+	// 仅公开文档允许浏览器短缓存，降低权限变更后的可见性残留风险。
+	if payload.Document.Visibility != models.VisibilityPublic {
+		return false
+	}
+	return true
+}
+
+func (h *readerPageHandler) renderReaderPayloadByDispatcher(
+	ctx context.Context,
+	payloadBytes []byte,
+) ([]byte, error) {
+	renderedHTML, _, renderErr := h.renderReaderPayloadByDispatcherWithState(ctx, payloadBytes)
+	return renderedHTML, renderErr
+}
+
+func (h *readerPageHandler) renderReaderPayloadByDispatcherWithState(
+	ctx context.Context,
+	payloadBytes []byte,
+) ([]byte, *protocol.RenderResponse, error) {
+	if h == nil || h.dispatcher == nil {
+		return nil, nil, errors.New("reader page dispatcher not initialized")
+	}
+	renderResponse, renderErr := h.dispatcher.Render(ctx, protocol.RenderRequest{
+		ID:      strings.ToLower(ulid.Make().String()),
+		Type:    protocol.MessageTypeRender,
+		Route:   "space-reader",
+		Payload: payloadBytes,
+	})
+	if renderErr != nil {
+		return nil, nil, renderErr
+	}
+	if !renderResponse.OK || strings.TrimSpace(renderResponse.HTML) == "" {
+		return nil, &renderResponse, nil
+	}
+	return []byte(renderResponse.HTML), &renderResponse, nil
+}
+
+func buildReaderRenderCacheKey(
+	cache *rendercache.Cache,
+	documentID string,
+	payloadBytes []byte,
+) string {
+	if cache == nil {
+		return ""
+	}
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" || len(payloadBytes) == 0 {
+		return ""
+	}
+	payloadHash := sha256.Sum256(payloadBytes)
+	return cache.BuildKey(
+		normalizedDocumentID,
+		time.Time{},
+		hex.EncodeToString(payloadHash[:]),
+	)
 }
 
 func (h *readerPageHandler) renderReaderAccessDeniedPage(
@@ -353,6 +492,7 @@ func (h *readerPageHandler) renderReaderAccessDeniedPage(
 		normalizedSpaceID,
 		normalizedDocumentID,
 		payload,
+		false,
 	)
 }
 

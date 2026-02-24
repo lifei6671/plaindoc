@@ -287,8 +287,6 @@ func (s *ReaderPageService) resolveDocumentID(
 	}{
 		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
 		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "LOWER(d.document_id) = LOWER(?)", args: []any{normalizedDocumentID}},
-		{condition: "LOWER(d.node_id) = LOWER(?)", args: []any{normalizedDocumentID}},
 	}
 	for _, matcher := range spaceScopedMatchers {
 		resolvedDocumentID, err := tryResolve(true, matcher.condition, matcher.args...)
@@ -307,8 +305,6 @@ func (s *ReaderPageService) resolveDocumentID(
 	}{
 		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
 		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "LOWER(d.document_id) = LOWER(?)", args: []any{normalizedDocumentID}},
-		{condition: "LOWER(d.node_id) = LOWER(?)", args: []any{normalizedDocumentID}},
 	}
 	for _, matcher := range globalMatchers {
 		resolvedDocumentID, err := tryResolve(false, matcher.condition, matcher.args...)

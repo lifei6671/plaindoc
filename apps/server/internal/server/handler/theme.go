@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"gorm.io/gorm"
 )
@@ -16,7 +17,8 @@ type themeHandler struct {
 }
 
 type documentThemeHandler struct {
-	db *gorm.DB
+	db          *gorm.DB
+	renderCache *rendercache.Cache
 }
 
 // NewThemeHandler 创建主题查询处理器。
@@ -25,8 +27,8 @@ func NewThemeHandler(db *gorm.DB) *themeHandler {
 }
 
 // NewDocumentThemeHandler 创建文档主题更新处理器。
-func NewDocumentThemeHandler(db *gorm.DB) *documentThemeHandler {
-	return &documentThemeHandler{db: db}
+func NewDocumentThemeHandler(db *gorm.DB, renderCache *rendercache.Cache) *documentThemeHandler {
+	return &documentThemeHandler{db: db, renderCache: renderCache}
 }
 
 type themeResponse struct {
@@ -173,6 +175,11 @@ func (h *documentThemeHandler) UpdateTheme(c *gin.Context) {
 		First(&document).Error; err != nil {
 		response.InternalError(c)
 		return
+	}
+
+	if h != nil && h.renderCache != nil {
+		// 主题切换会影响阅读页样式，需主动失效渲染缓存。
+		h.renderCache.PurgeDoc(document.DocumentID)
 	}
 
 	response.JSON(c, http.StatusOK, toDocumentResponse(document, time.Now().UTC().Format(time.RFC3339Nano)))
