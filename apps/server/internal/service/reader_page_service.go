@@ -17,15 +17,16 @@ type ReaderPageService struct {
 }
 
 type readerDocumentRow struct {
-	DocumentID   string `gorm:"column:document_id"`
-	NodeID       string `gorm:"column:node_id"`
-	ThemeID      string `gorm:"column:theme_id"`
-	Visibility   string `gorm:"column:visibility"`
-	Title        string `gorm:"column:title"`
-	ContentMD    string `gorm:"column:content_md"`
-	Version      int    `gorm:"column:version"`
-	UpdatedAtRaw string `gorm:"column:updated_at"`
-	SpaceID      string `gorm:"column:space_id"`
+	DocumentID     string `gorm:"column:document_id"`
+	NodeID         string `gorm:"column:node_id"`
+	ThemeID        string `gorm:"column:theme_id"`
+	Visibility     string `gorm:"column:visibility"`
+	Title          string `gorm:"column:title"`
+	ContentMD      string `gorm:"column:content_md"`
+	Version        int    `gorm:"column:version"`
+	AuthorNickname string `gorm:"column:author_nickname"`
+	UpdatedAt      string `gorm:"column:updated_at"`
+	SpaceID        string `gorm:"column:space_id"`
 }
 
 type readerTreeNodeRow struct {
@@ -187,7 +188,7 @@ func (s *ReaderPageService) BuildPage(
 		pageTitle = pageTitle + " - " + spaceName
 	}
 
-	updatedAt := formatReaderTime(documentRow.UpdatedAtRaw)
+	updatedAt := formatReaderTime(documentRow.UpdatedAt)
 
 	return ReaderPageViewModel{
 		Space: ReaderSpaceViewModel{
@@ -196,14 +197,15 @@ func (s *ReaderPageService) BuildPage(
 			Title: pageTitle,
 		},
 		Document: ReaderDocumentViewModel{
-			ID:         strings.TrimSpace(documentRow.DocumentID),
-			NodeID:     strings.TrimSpace(documentRow.NodeID),
-			ThemeID:    strings.TrimSpace(documentRow.ThemeID),
-			Visibility: normalizeReaderVisibility(documentRow.Visibility),
-			Title:      documentTitle,
-			ContentMD:  documentRow.ContentMD,
-			Version:    documentRow.Version,
-			UpdatedAt:  updatedAt,
+			ID:             strings.TrimSpace(documentRow.DocumentID),
+			NodeID:         strings.TrimSpace(documentRow.NodeID),
+			ThemeID:        strings.TrimSpace(documentRow.ThemeID),
+			Visibility:     normalizeReaderVisibility(documentRow.Visibility),
+			Title:          documentTitle,
+			ContentMD:      documentRow.ContentMD,
+			Version:        documentRow.Version,
+			AuthorNickname: normalizeReaderAuthorNickname(documentRow.AuthorNickname),
+			UpdatedAt:      updatedAt,
 		},
 		Tree:        tree,
 		ActiveDocID: strings.TrimSpace(documentRow.DocumentID),
@@ -335,10 +337,14 @@ func (s *ReaderPageService) loadDocumentRow(
 			"d.title",
 			"d.content_md",
 			"d.version",
+			// 作者固定取首个版本（version=1）的编辑者，避免后续更新人覆盖创建人语义。
+			"COALESCE(NULLIF(TRIM(u_creator.name), ''), '未知作者') AS author_nickname",
 			"d.updated_at",
 			"n.space_id AS space_id",
 		).
 		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("LEFT JOIN document_revisions AS dr_creator ON dr_creator.document_id = d.document_id AND dr_creator.version = 1").
+		Joins("LEFT JOIN users AS u_creator ON u_creator.user_id = dr_creator.editor_user_id").
 		Where("d.document_id = ?", documentID).
 		Take(&row).Error
 	return row, err
@@ -493,10 +499,18 @@ func normalizeReaderDocumentVisibility(
 	return &visibility
 }
 
+func normalizeReaderAuthorNickname(raw string) string {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "未知作者"
+	}
+	return name
+}
+
 func formatReaderTime(raw string) string {
 	parsed := parseReaderTime(raw)
 	if parsed.IsZero() {
-		return time.Now().UTC().Format(time.RFC3339Nano)
+		return ""
 	}
 	return parsed.UTC().Format(time.RFC3339Nano)
 }
@@ -509,16 +523,26 @@ func parseReaderTime(raw string) time.Time {
 	layouts := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02 15:04:05-07:00",
 		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02T15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02T15:04:05-07:00",
+		"2006-01-02 15:04:05.999999999-0700",
+		"2006-01-02T15:04:05.999999999-0700",
+		"2006-01-02 15:04:05-0700",
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02 15:04:05.999999999-07",
+		"2006-01-02T15:04:05.999999999-07",
+		"2006-01-02 15:04:05-07",
+		"2006-01-02T15:04:05-07",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
 	}
 	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
 		}
 	}
 	return time.Time{}

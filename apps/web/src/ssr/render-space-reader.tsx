@@ -314,7 +314,8 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const seoTitle = composeSEOTitle(payload.space.title || articleTitle);
   const hasDeniedAccess = Boolean(payload.access?.code?.trim());
   const updatedMeta = hasDeniedAccess ? "" : formatUpdatedMeta(payload.document.updatedAt, renderedAt);
-  const documentMeta = `空间：${spaceTitle} · 版本：v${payload.document.version} · ${updatedMeta}`;
+  const authorNickname = payload.document.authorNickname.trim() || "未知作者";
+  const documentMeta = `空间：${spaceTitle} · 作者：${authorNickname} · ${updatedMeta}`;
   const documentVisibilityMarker = hasDeniedAccess ? null : renderVisibilityMarker(payload.document.visibility);
   const spaceLandingPath = `/r/${encodeURIComponent(payload.space.id)}`;
   const loginPath = `/login?redirect=${encodeURIComponent(canonicalPath)}`;

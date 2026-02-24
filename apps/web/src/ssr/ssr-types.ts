@@ -23,6 +23,7 @@ export interface ReaderDocumentPayload {
   title: string;
   contentMd: string;
   version: number;
+  authorNickname: string;
   updatedAt: string;
 }
 

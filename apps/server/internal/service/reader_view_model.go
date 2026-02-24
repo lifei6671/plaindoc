@@ -16,14 +16,15 @@ type ReaderTreeNodeViewModel struct {
 
 // ReaderDocumentViewModel 表示阅读页正文数据。
 type ReaderDocumentViewModel struct {
-	ID         string            `json:"id"`
-	NodeID     string            `json:"nodeId"`
-	ThemeID    string            `json:"themeId"`
-	Visibility models.Visibility `json:"visibility"`
-	Title      string            `json:"title"`
-	ContentMD  string            `json:"contentMd"`
-	Version    int               `json:"version"`
-	UpdatedAt  string            `json:"updatedAt"`
+	ID             string            `json:"id"`
+	NodeID         string            `json:"nodeId"`
+	ThemeID        string            `json:"themeId"`
+	Visibility     models.Visibility `json:"visibility"`
+	Title          string            `json:"title"`
+	ContentMD      string            `json:"contentMd"`
+	Version        int               `json:"version"`
+	AuthorNickname string            `json:"authorNickname"`
+	UpdatedAt      string            `json:"updatedAt"`
 }
 
 // ReaderSpaceViewModel 表示阅读页空间元信息。
