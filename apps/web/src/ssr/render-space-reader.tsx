@@ -2,7 +2,6 @@ import katexStyleText from "katex/dist/katex.min.css?inline";
 import { ChevronDown, Lock, LockOpen } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
-import appStyleText from "../styles.css?inline";
 import { PREVIEW_BODY_CLASS, PREVIEW_BODY_ID } from "../editor/constants";
 import { buildPreviewThemeStyleText, getPreviewThemeClassName } from "../editor/preview-style";
 import {
@@ -10,6 +9,7 @@ import {
   DEFAULT_PREVIEW_THEME_TEMPLATE,
   resolvePreviewTheme
 } from "../preview-themes";
+import appStyleText from "../styles.css?inline";
 import { buildReaderMarkdownRenderer } from "./markdown-shared";
 import type { ReaderPagePayload, ReaderTreeNode } from "./ssr-types";
 
@@ -304,7 +304,7 @@ a {
   opacity: 0.95;
 }
 .reader-article-shell {
-  max-width: 900px;
+  max-width: 1024px;
   margin: 0 auto;
   border: 1px solid #dbe2ea;
   border-radius: 16px;
