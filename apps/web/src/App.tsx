@@ -827,8 +827,13 @@ export default function App() {
       return;
     }
 
-    if ((route.kind === "login" || route.kind === "register") && authRedirectTarget) {
-      window.location.replace(authRedirectTarget);
+    // 登录/注册页在已登录态下不应渲染编辑器，直接跳转到目标页或首页。
+    if (route.kind === "login" || route.kind === "register") {
+      if (authRedirectTarget) {
+        window.location.replace(authRedirectTarget);
+        return;
+      }
+      window.location.replace("/");
       return;
     }
 
@@ -1871,6 +1876,21 @@ export default function App() {
           onLogin={handleAuthLogin}
           onRegister={handleAuthRegister}
         />
+      </>
+    );
+  }
+
+  // 已登录但仍停留在登录/注册路由时，展示过渡占位，避免编辑器闪屏。
+  if (route.kind === "login" || route.kind === "register") {
+    return (
+      <>
+        <Toaster />
+        <div className="admin-auth-page">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <LoaderCircle size={16} className="animate-spin" />
+            <span>登录成功，正在跳转...</span>
+          </div>
+        </div>
       </>
     );
   }
