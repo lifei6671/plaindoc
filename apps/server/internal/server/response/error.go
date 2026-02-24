@@ -61,8 +61,16 @@ func JSON[T any](c *gin.Context, _ int, data T) {
 
 // Error 统一输出 JSON 错误响应，并自动附带 request_id。
 func Error(c *gin.Context, status int, code string, message string) {
+	writeError(c, NormalizeErrorHTTPStatus(status), code, message)
+}
+
+// ErrorWithStatus 直接使用传入的 HTTP 状态码输出错误响应。
+func ErrorWithStatus(c *gin.Context, status int, code string, message string) {
+	writeError(c, preserveErrorHTTPStatus(status), code, message)
+}
+
+func writeError(c *gin.Context, httpStatus int, code string, message string) {
 	errorCode := ResolveErrorCode(code)
-	httpStatus := NormalizeErrorHTTPStatus(status)
 
 	// 中文注释：错误信息进入请求容器，便于请求结束时统一输出结构化日志。
 	logit.SetRequestAttrs(c.Request.Context(),
@@ -78,6 +86,13 @@ func Error(c *gin.Context, status int, code string, message string) {
 		RequestID: RequestIDFromContext(c),
 		Data:      nil,
 	})
+}
+
+func preserveErrorHTTPStatus(status int) int {
+	if status >= http.StatusBadRequest && status <= 599 {
+		return status
+	}
+	return http.StatusInternalServerError
 }
 
 // InternalError 用于服务端兜底错误，避免暴露内部细节。

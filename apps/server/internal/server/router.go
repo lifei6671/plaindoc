@@ -503,11 +503,11 @@ func newRouter(
 
 	// 统一未知路由错误协议，避免返回 HTML 默认页导致前端网关解析不一致。
 	router.NoRoute(func(c *gin.Context) {
-		response.RouterErrRouteNotFound.Write(c)
+		response.RouterErrRouteNotFound.WriteWithStatus(c)
 	})
 	// 同一路径下方法不匹配时返回统一错误码，便于客户端按协议处理。
 	router.NoMethod(func(c *gin.Context) {
-		response.RouterErrMethodNotAllowed.Write(c)
+		response.RouterErrMethodNotAllowed.WriteWithStatus(c)
 	})
 
 	// 所有依赖与路由装配完成后返回 engine，供 main 包启动 HTTP 服务。

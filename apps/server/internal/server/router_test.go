@@ -66,8 +66,8 @@ func TestRouter_NoRouteUsesUnifiedErrorShape(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rec.Code)
 	}
 	if rec.Header().Get("X-Request-Id") == "" {
 		t.Fatal("expected X-Request-Id header to be set")
@@ -83,6 +83,38 @@ func TestRouter_NoRouteUsesUnifiedErrorShape(t *testing.T) {
 	}
 	if payload.Code != response.ResolveErrorCode("ROUTE_NOT_FOUND") {
 		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode("ROUTE_NOT_FOUND"), payload.Code)
+	}
+	if payload.RequestID == "" {
+		t.Fatal("expected requestId in response body")
+	}
+}
+
+func TestRouter_NoMethodUsesUnifiedErrorShape(t *testing.T) {
+	logger := logit.NewLogger(slog.LevelError)
+	router := NewRouter(testConfig(), logger, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", rec.Code)
+	}
+	if rec.Header().Get("X-Request-Id") == "" {
+		t.Fatal("expected X-Request-Id header to be set")
+	}
+
+	var payload struct {
+		Code      int    `json:"code"`
+		Message   string `json:"message"`
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if payload.Code != response.ResolveErrorCode("METHOD_NOT_ALLOWED") {
+		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode("METHOD_NOT_ALLOWED"), payload.Code)
 	}
 	if payload.RequestID == "" {
 		t.Fatal("expected requestId in response body")
