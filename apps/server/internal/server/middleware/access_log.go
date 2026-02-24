@@ -34,6 +34,7 @@ func AccessLog(logger *slog.Logger) gin.HandlerFunc {
 			logit.String("request_id", response.RequestIDFromContext(c)),
 			logit.String("method", c.Request.Method),
 			logit.String("route", route),
+			logit.String("url", c.Request.RequestURI),
 			logit.Int("status", status),
 			// latency 保留原始 duration 类型，便于机器统计与告警聚合。
 			logit.Duration("latency", latency),
