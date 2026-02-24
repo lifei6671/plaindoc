@@ -73,7 +73,7 @@ func (h *adminProfileHandler) GetProfile(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
@@ -93,13 +93,13 @@ func (h *adminProfileHandler) UpdateProfile(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req updateAdminProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminProfileErrRequestBody.Write(c)
 		return
 	}
 
@@ -124,17 +124,17 @@ func (h *adminProfileHandler) UpdatePassword(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req updateAdminProfilePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminProfileErrRequestBody.Write(c)
 		return
 	}
 	if req.NewPassword != req.ConfirmPassword {
-		response.Error(c, http.StatusBadRequest, "PASSWORD_CONFIRM_MISMATCH", "new password and confirm password mismatch")
+		response.AdminProfileErrNewPasswordConfirmPasswordMismatch.Write(c)
 		return
 	}
 
@@ -160,31 +160,31 @@ func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil || fileHeader == nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is required")
+		response.AdminProfileErrFileRequired.Write(c)
 		return
 	}
 	if fileHeader.Size <= 0 {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is empty")
+		response.AdminProfileErrFileEmpty.Write(c)
 		return
 	}
 	if fileHeader.Size > maxAdminProfileAvatarSizeBytes {
-		response.Error(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "avatar file exceeds 10MB limit")
+		response.AdminProfileErrAvatarFileExceeds10mbLimit.Write(c)
 		return
 	}
 
 	contentType, err := detectAdminProfileUploadedFileContentType(fileHeader)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "cannot read uploaded file")
+		response.AdminProfileErrCannotReadUploadedFile.Write(c)
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "only image file is allowed")
+		response.AdminProfileErrOnlyImageFileAllowed.Write(c)
 		return
 	}
 

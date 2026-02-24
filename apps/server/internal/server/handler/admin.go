@@ -51,7 +51,7 @@ func (h *adminHandler) Me(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminErrAdminActorMissing.Write(c)
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *adminHandler) Me(c *gin.Context) {
 	user, err := h.userRepo.GetByUserID(c.Request.Context(), actorUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "USER_NOT_FOUND", "admin user not found")
+			response.AdminErrAdminUserNotFound.Write(c)
 			return
 		}
 		response.InternalError(c)
@@ -93,7 +93,7 @@ func (h *adminHandler) CheckSpace(c *gin.Context) {
 
 	spaceID := c.Param("spaceId")
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminErrSpaceIDRequired.Write(c)
 		return
 	}
 

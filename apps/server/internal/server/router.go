@@ -152,7 +152,7 @@ func newRouter(
 		// 统一图片上传入口（按配置决定走本地或外部托管）。
 		api.POST("/uploads/images", imageHostingHandler.UploadImage)
 		// 本地图片回源访问（当配置使用本地存储时生效）。
-		api.GET("/uploads/local/*path", imageHostingHandler.ServeLocalImage)
+		api.GET("/uploads/*path", imageHostingHandler.ServeLocalImage)
 
 		// ---- 工作区与文档协作 API（业务主链）----
 		accessHandler := handler.NewAccessHandler(authService, visibilityService)
@@ -481,11 +481,11 @@ func newRouter(
 
 	// 统一未知路由错误协议，避免返回 HTML 默认页导致前端网关解析不一致。
 	router.NoRoute(func(c *gin.Context) {
-		response.Error(c, http.StatusNotFound, "ROUTE_NOT_FOUND", "route not found")
+		response.RouterErrRouteNotFound.Write(c)
 	})
 	// 同一路径下方法不匹配时返回统一错误码，便于客户端按协议处理。
 	router.NoMethod(func(c *gin.Context) {
-		response.Error(c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		response.RouterErrMethodNotAllowed.Write(c)
 	})
 
 	// 所有依赖与路由装配完成后返回 engine，供 main 包启动 HTTP 服务。

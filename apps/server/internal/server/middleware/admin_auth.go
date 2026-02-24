@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"errors"
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -27,13 +26,13 @@ func RequireAdmin(
 
 		rawToken, ok := bearerTokenFromRequest(c)
 		if !ok {
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "authorization token is required")
+			response.MiddlewareAdminAuthErrAuthorizationTokenRequired.Write(c)
 			return
 		}
 
 		session, err := authService.Me(c.Request.Context(), rawToken)
 		if err != nil {
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+			response.MiddlewareAdminAuthErrInvalidAccessToken.Write(c)
 			return
 		}
 
@@ -43,7 +42,7 @@ func RequireAdmin(
 			return
 		}
 		if !isAdmin {
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "admin role is required")
+			response.MiddlewareAdminAuthErrAdminRoleRequired.Write(c)
 			return
 		}
 
@@ -65,18 +64,18 @@ func RequireSpaceManagement(
 
 		rawActorUserID, exists := c.Get(adminActorUserIDContextKey)
 		if !exists {
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+			response.MiddlewareAdminAuthErrAdminActorMissing.Write(c)
 			return
 		}
 		actorUserID, ok := rawActorUserID.(string)
 		if !ok || strings.TrimSpace(actorUserID) == "" {
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is invalid")
+			response.MiddlewareAdminAuthErrAdminActorInvalid.Write(c)
 			return
 		}
 
 		spaceID := strings.TrimSpace(c.Param(spaceIDParam))
 		if spaceID == "" {
-			response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+			response.MiddlewareAdminAuthErrSpaceIDRequired.Write(c)
 			return
 		}
 
@@ -86,7 +85,7 @@ func RequireSpaceManagement(
 			return
 		}
 		if !allowed {
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space admin permission")
+			response.MiddlewareAdminAuthErrInsufficientSpaceAdminPermission.Write(c)
 			return
 		}
 
@@ -104,7 +103,7 @@ func RequirePlatformAdmin(adminAccessService *service.AdminAccessService) gin.Ha
 
 		actorUserID, err := AdminActorUserID(c)
 		if err != nil {
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+			response.MiddlewareAdminAuthErrAdminActorMissing.Write(c)
 			return
 		}
 
@@ -114,7 +113,7 @@ func RequirePlatformAdmin(adminAccessService *service.AdminAccessService) gin.Ha
 			return
 		}
 		if !allowed {
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "platform admin role is required")
+			response.MiddlewareAdminAuthErrPlatformAdminRoleRequired.Write(c)
 			return
 		}
 

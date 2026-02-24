@@ -44,13 +44,13 @@ func (h *adminOperationTokenHandler) Issue(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminOperationTokenErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req issueAdminOperationTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminOperationTokenErrRequestBody.Write(c)
 		return
 	}
 

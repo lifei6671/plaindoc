@@ -70,7 +70,7 @@ func (h *adminThemeHandler) ListThemes(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
@@ -96,13 +96,13 @@ func (h *adminThemeHandler) CreateTheme(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminThemeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminThemeErrRequestBody.Write(c)
 		return
 	}
 
@@ -142,19 +142,19 @@ func (h *adminThemeHandler) UpdateTheme(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	themeID := strings.TrimSpace(c.Param("themeId"))
 	if themeID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_THEME_ID", "theme id is required")
+		response.AdminThemeErrThemeIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminThemeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminThemeErrRequestBody.Write(c)
 		return
 	}
 
@@ -189,13 +189,13 @@ func (h *adminThemeHandler) DeleteTheme(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	themeID := strings.TrimSpace(c.Param("themeId"))
 	if themeID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_THEME_ID", "theme id is required")
+		response.AdminThemeErrThemeIDRequired.Write(c)
 		return
 	}
 

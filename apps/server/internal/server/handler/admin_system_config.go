@@ -45,7 +45,7 @@ func (h *adminSystemConfigHandler) ListConfigs(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
 		return
 	}
 
@@ -71,19 +71,19 @@ func (h *adminSystemConfigHandler) UpsertConfig(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
 		return
 	}
 
 	configKey := strings.TrimSpace(c.Param("key"))
 	if configKey == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_CONFIG_KEY", "config key is required")
+		response.AdminSystemConfigErrConfigKeyRequired.Write(c)
 		return
 	}
 
 	var req upsertAdminSystemConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSystemConfigErrRequestBody.Write(c)
 		return
 	}
 

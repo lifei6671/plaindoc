@@ -152,13 +152,13 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminSpaceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
@@ -202,7 +202,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 	if source == service.AdminSpaceCoverSourceUserUpload {
 		fileHeader, err := c.FormFile("file")
 		if err != nil || fileHeader == nil {
-			response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is required")
+			response.AdminSpaceErrFileRequired.Write(c)
 			return
 		}
 
@@ -210,7 +210,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 		fileContentType = strings.TrimSpace(fileHeader.Header.Get("Content-Type"))
 		content, err := readAdminUploadedFileBytes(fileHeader)
 		if err != nil {
-			response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "cannot read uploaded file")
+			response.AdminSpaceErrCannotReadUploadedFile.Write(c)
 			return
 		}
 		fileBytes = content
@@ -251,18 +251,18 @@ func (h *adminSpaceHandler) ListSpaces(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	page, err := parseAdminSpaceQueryInt(c.Query("page"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE", "page must be a positive integer")
+		response.AdminSpaceErrPagePositiveInteger.Write(c)
 		return
 	}
 	pageSize, err := parseAdminSpaceQueryInt(c.Query("pageSize"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE_SIZE", "pageSize must be a positive integer")
+		response.AdminSpaceErrPageSizePositiveInteger.Write(c)
 		return
 	}
 
@@ -303,7 +303,7 @@ func (h *adminSpaceHandler) ListCategories(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
@@ -332,13 +332,13 @@ func (h *adminSpaceHandler) CreateCategory(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminSpaceCategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -364,19 +364,19 @@ func (h *adminSpaceHandler) RenameCategory(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	categoryID := strings.TrimSpace(c.Param("categoryId"))
 	if categoryID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category id is invalid")
+		response.AdminSpaceErrSpaceCategoryID.Write(c)
 		return
 	}
 
 	var req renameAdminSpaceCategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -403,13 +403,13 @@ func (h *adminSpaceHandler) DeleteCategory(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	categoryID := strings.TrimSpace(c.Param("categoryId"))
 	if categoryID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_CATEGORY", "space category id is invalid")
+		response.AdminSpaceErrSpaceCategoryID.Write(c)
 		return
 	}
 
@@ -440,13 +440,13 @@ func (h *adminSpaceHandler) ListMembers(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 
@@ -478,19 +478,19 @@ func (h *adminSpaceHandler) UpsertMember(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 
 	var req upsertAdminSpaceMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -519,24 +519,24 @@ func (h *adminSpaceHandler) UpdateMemberRole(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 	memberUserID := strings.TrimSpace(c.Param("userId"))
 	if memberUserID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "member user id is required")
+		response.AdminSpaceErrMemberUserIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminSpaceMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -564,18 +564,18 @@ func (h *adminSpaceHandler) DeleteMember(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 	memberUserID := strings.TrimSpace(c.Param("userId"))
 	if memberUserID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "member user id is required")
+		response.AdminSpaceErrMemberUserIDRequired.Write(c)
 		return
 	}
 
@@ -601,19 +601,19 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminSpaceMetadataRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -650,19 +650,19 @@ func (h *adminSpaceHandler) TransferOwnership(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 
 	var req transferAdminSpaceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -690,19 +690,19 @@ func (h *adminSpaceHandler) UpdateStatus(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminSpaceStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
 
@@ -730,13 +730,13 @@ func (h *adminSpaceHandler) DeleteSpace(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AdminSpaceErrSpaceIDRequired.Write(c)
 		return
 	}
 

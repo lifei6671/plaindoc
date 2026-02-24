@@ -66,18 +66,18 @@ func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminDocumentErrAdminActorMissing.Write(c)
 		return
 	}
 
 	page, err := parseAdminDocumentQueryInt(c.Query("page"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE", "page must be a positive integer")
+		response.AdminDocumentErrPagePositiveInteger.Write(c)
 		return
 	}
 	pageSize, err := parseAdminDocumentQueryInt(c.Query("pageSize"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE_SIZE", "pageSize must be a positive integer")
+		response.AdminDocumentErrPageSizePositiveInteger.Write(c)
 		return
 	}
 
@@ -119,19 +119,19 @@ func (h *adminDocumentHandler) UpdateStatus(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminDocumentErrAdminActorMissing.Write(c)
 		return
 	}
 
 	documentID := strings.TrimSpace(c.Param("documentId"))
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.AdminDocumentErrDocumentIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminDocumentStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminDocumentErrRequestBody.Write(c)
 		return
 	}
 
@@ -159,13 +159,13 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminDocumentErrAdminActorMissing.Write(c)
 		return
 	}
 
 	documentID := strings.TrimSpace(c.Param("documentId"))
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.AdminDocumentErrDocumentIDRequired.Write(c)
 		return
 	}
 

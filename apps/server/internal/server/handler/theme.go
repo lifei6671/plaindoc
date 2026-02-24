@@ -121,18 +121,18 @@ func (h *documentThemeHandler) UpdateTheme(c *gin.Context) {
 
 	documentID := c.Param("docId")
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.ThemeErrDocumentIDRequired.Write(c)
 		return
 	}
 
 	var req updateDocumentThemeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "themeId is required")
+		response.ThemeErrThemeIDRequired.Write(c)
 		return
 	}
 
 	if req.ThemeID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_THEME_ID", "theme id is required")
+		response.ThemeErrInvalidThemeIdThemeIDRequired.Write(c)
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *documentThemeHandler) UpdateTheme(c *gin.Context) {
 		return
 	}
 	if themeCount == 0 {
-		response.Error(c, http.StatusNotFound, "THEME_NOT_FOUND", "theme not found")
+		response.ThemeErrThemeNotFound.Write(c)
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *documentThemeHandler) UpdateTheme(c *gin.Context) {
 		return
 	}
 	if updateResult.RowsAffected == 0 {
-		response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
+		response.ThemeErrDocumentNotFound.Write(c)
 		return
 	}
 

@@ -55,29 +55,29 @@ func (h *adminAuditHandler) ListAudits(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminAuditErrAdminActorMissing.Write(c)
 		return
 	}
 
 	page, err := parseQueryInt(c.Query("page"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE", "page must be a positive integer")
+		response.AdminAuditErrPagePositiveInteger.Write(c)
 		return
 	}
 	pageSize, err := parseQueryInt(c.Query("pageSize"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE_SIZE", "pageSize must be a positive integer")
+		response.AdminAuditErrPageSizePositiveInteger.Write(c)
 		return
 	}
 
 	createdAtFrom, err := parseAdminAuditQueryTime(c.Query("from"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_FROM", "from must be RFC3339 datetime")
+		response.AdminAuditErrRFC3339Datetime.Write(c)
 		return
 	}
 	createdAtTo, err := parseAdminAuditQueryTime(c.Query("to"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_TO", "to must be RFC3339 datetime")
+		response.AdminAuditErrInvalidToRFC3339Datetime.Write(c)
 		return
 	}
 

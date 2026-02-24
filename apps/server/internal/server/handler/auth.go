@@ -79,14 +79,14 @@ func (h *authHandler) Register(c *gin.Context) {
 			return
 		}
 		if !allowRegistration {
-			response.Error(c, http.StatusForbidden, "REGISTRATION_DISABLED", "registration is disabled")
+			response.AuthErrRegistrationDisabled.Write(c)
 			return
 		}
 	}
 
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AuthErrRequestBody.Write(c)
 		return
 	}
 
@@ -94,15 +94,15 @@ func (h *authHandler) Register(c *gin.Context) {
 	name := strings.TrimSpace(req.Name)
 	password := req.Password
 	if email == "" || !strings.Contains(email, "@") {
-		response.Error(c, http.StatusBadRequest, "INVALID_EMAIL", "email is invalid")
+		response.AuthErrEmail.Write(c)
 		return
 	}
 	if len(password) < 6 {
-		response.Error(c, http.StatusBadRequest, "INVALID_PASSWORD", "password must be at least 6 characters")
+		response.AuthErrPasswordLeast6Characters.Write(c)
 		return
 	}
 	if name == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_NAME", "name is required")
+		response.AuthErrNameRequired.Write(c)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *authHandler) Register(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmailAlreadyExists):
-			response.Error(c, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email already exists")
+			response.AuthErrEmailAlreadyExists.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -139,13 +139,13 @@ func (h *authHandler) Login(c *gin.Context) {
 
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AuthErrRequestBody.Write(c)
 		return
 	}
 
 	email := normalizeEmail(req.Email)
 	if email == "" || req.Password == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "email and password are required")
+		response.AuthErrEmailPasswordRequired.Write(c)
 		return
 	}
 
@@ -153,11 +153,11 @@ func (h *authHandler) Login(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidCredentials):
-			response.Error(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
+			response.AuthErrEmailPassword.Write(c)
 		case errors.Is(err, service.ErrUserBanned):
-			response.Error(c, http.StatusForbidden, "USER_BANNED", "user has been banned")
+			response.AuthErrUserHasBeenBanned.Write(c)
 		case errors.Is(err, service.ErrUserDeleted):
-			response.Error(c, http.StatusForbidden, "USER_DELETED", "user has been deleted")
+			response.AuthErrUserHasBeenDeleted.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -204,7 +204,7 @@ func (h *authHandler) Refresh(c *gin.Context) {
 		}
 	}
 	if refreshToken == "" {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "refresh token is required")
+		response.AuthErrRefreshTokenRequired.Write(c)
 		return
 	}
 
@@ -212,9 +212,9 @@ func (h *authHandler) Refresh(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidRefreshToken):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid refresh token")
+			response.AuthErrRefreshToken.Write(c)
 		case errors.Is(err, service.ErrUnauthorized):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
+			response.AuthErrUserNotFound.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -243,7 +243,7 @@ func (h *authHandler) Me(c *gin.Context) {
 
 	accessToken, ok := bearerTokenFromRequest(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "authorization token is required")
+		response.AuthErrAuthorizationTokenRequired.Write(c)
 		return
 	}
 
@@ -251,7 +251,7 @@ func (h *authHandler) Me(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUnauthorized):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+			response.AuthErrAccessToken.Write(c)
 		default:
 			response.InternalError(c)
 		}

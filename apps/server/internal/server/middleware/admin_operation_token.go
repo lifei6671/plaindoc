@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -34,7 +33,7 @@ func RequireAdminOperationToken(
 
 		actorUserID, err := AdminActorUserID(c)
 		if err != nil {
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+			response.MiddlewareAdminOperationTokenErrAdminActorMissing.Write(c)
 			return
 		}
 

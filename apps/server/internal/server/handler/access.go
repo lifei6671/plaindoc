@@ -59,13 +59,13 @@ func (h *accessHandler) GetSpace(c *gin.Context) {
 
 	spaceID := c.Param("spaceId")
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AccessErrSpaceIDRequired.Write(c)
 		return
 	}
 
 	viewerUserID, err := h.resolveOptionalViewerUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+		response.AccessErrAccessToken.Write(c)
 		return
 	}
 
@@ -73,11 +73,11 @@ func (h *accessHandler) GetSpace(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.AccessErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+			response.AccessErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+			response.AccessErrInsufficientSpacePermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -102,7 +102,7 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 
 	spaceID := c.Param("spaceId")
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.AccessErrSpaceIDRequired.Write(c)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 
 	var req updateVisibilityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "visibility is required")
+		response.AccessErrVisibilityRequired.Write(c)
 		return
 	}
 
@@ -121,13 +121,13 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidVisibilityValue):
-			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "visibility must be one of public/authenticated/member")
+			response.AccessErrVisibilityPublicAuthenticatedMember.Write(c)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+			response.AccessErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.AccessErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "only owner can update space visibility")
+			response.AccessErrOnlyOwnerCanUpdateSpaceVisibility.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -152,13 +152,13 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 
 	documentID := c.Param("docId")
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.AccessErrDocumentIDRequired.Write(c)
 		return
 	}
 
 	viewerUserID, err := h.resolveOptionalViewerUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+		response.AccessErrAccessToken.Write(c)
 		return
 	}
 
@@ -166,11 +166,11 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrDocumentNotFound):
-			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
+			response.AccessErrDocumentNotFound.Write(c)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+			response.AccessErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrDocumentAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient document permission")
+			response.AccessErrInsufficientDocumentPermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -198,7 +198,7 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 
 	documentID := c.Param("docId")
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.AccessErrDocumentIDRequired.Write(c)
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 
 	var req updateVisibilityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "visibility is required")
+		response.AccessErrVisibilityRequired.Write(c)
 		return
 	}
 
@@ -217,13 +217,13 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidVisibilityValue):
-			response.Error(c, http.StatusBadRequest, "INVALID_VISIBILITY", "visibility must be one of public/authenticated/member")
+			response.AccessErrVisibilityPublicAuthenticatedMember.Write(c)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+			response.AccessErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrDocumentNotFound):
-			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
+			response.AccessErrDocumentNotFound.Write(c)
 		case errors.Is(err, service.ErrDocumentAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient document permission")
+			response.AccessErrInsufficientDocumentPermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -245,7 +245,7 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 func (h *accessHandler) requireViewerUserID(c *gin.Context) (string, bool) {
 	viewerUserID, err := h.resolveRequiredViewerUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "authorization token is required")
+		response.AccessErrAuthorizationTokenRequired.Write(c)
 		return "", false
 	}
 	return viewerUserID, true

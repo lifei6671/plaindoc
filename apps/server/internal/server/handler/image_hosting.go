@@ -73,26 +73,29 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
+	// 先确认用户已登录，后续权限与上传行为都依赖用户身份。
 	actorUserID, ok := h.requireAuthenticatedUser(c)
 	if !ok {
 		return
 	}
 
+	// 兼容 form 与 query 两种 spaceId 传参方式。
 	spaceID := strings.TrimSpace(c.PostForm("spaceId"))
 	if spaceID == "" {
 		spaceID = strings.TrimSpace(c.Query("spaceId"))
 	}
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "spaceId is required")
+		response.ImageHostingInvalidSpaceID(c)
 		return
 	}
+	// 上传入口按“空间写权限”做鉴权，避免越权写入。
 	hasWriterAccess, err := h.spaceRepo.HasWriterAccess(c.Request.Context(), spaceID, actorUserID)
 	if err != nil {
 		response.InternalError(c)
 		return
 	}
 	if !hasWriterAccess {
-		response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission for image upload")
+		response.ImageHostingUploadForbidden(c)
 		return
 	}
 
@@ -101,35 +104,39 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
+	// 当前上传链路仅支持本地存储，其他 provider 直接拒绝。
 	if config.DefaultProvider != service.ImageHostingProviderLocal {
-		response.Error(c, http.StatusBadRequest, "IMAGE_HOSTING_PROVIDER_DISABLED", "default provider is not local")
+		response.ImageHostingProviderDisabled(c)
 		return
 	}
 
+	// 先做基础文件校验（存在、非空、大小限制）。
 	fileHeader, err := c.FormFile("file")
 	if err != nil || fileHeader == nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is required")
+		response.ImageHostingUploadFileRequired(c)
 		return
 	}
 	if fileHeader.Size <= 0 {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "file is empty")
+		response.ImageHostingUploadFileEmpty(c)
 		return
 	}
 	if fileHeader.Size > maxUploadImageSizeBytes {
-		response.Error(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "file exceeds 20MB limit")
+		response.ImageHostingUploadFileTooLarge(c)
 		return
 	}
 
+	// 读取文件头探测 MIME，防止仅凭扩展名绕过校验。
 	contentType, err := detectUploadedFileContentType(fileHeader)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "cannot read upload file")
+		response.ImageHostingUploadFileUnreadable(c)
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
-		response.Error(c, http.StatusBadRequest, "INVALID_UPLOAD_FILE", "only image file is allowed")
+		response.ImageHostingUploadFileNotImage(c)
 		return
 	}
 
+	// 生成按日期分层的对象 key，降低单目录文件数并便于管理。
 	objectKey, err := buildImageObjectKey(fileHeader.Filename, contentType, time.Now().UTC())
 	if err != nil {
 		response.InternalError(c)
@@ -142,6 +149,7 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 	}
 	targetPath := filepath.Join(localRootDir, filepath.FromSlash(objectKey))
 	targetDir := filepath.Dir(targetPath)
+	// 先确保目录存在，再落盘上传文件。
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		response.InternalError(c)
 		return
@@ -167,19 +175,20 @@ func (h *imageHostingHandler) ServeLocalImage(c *gin.Context) {
 	rawPath := strings.TrimSpace(c.Param("path"))
 	trimmedPath := strings.TrimPrefix(rawPath, "/")
 	if trimmedPath == "" {
-		response.Error(c, http.StatusNotFound, "FILE_NOT_FOUND", "file not found")
+		response.ImageHostingFileNotFound(c)
 		return
 	}
 
+	// 清理请求路径并拦截明显的目录穿越输入。
 	cleanPath := path.Clean(trimmedPath)
 	if cleanPath == "." || cleanPath == "/" || strings.HasPrefix(cleanPath, "../") {
-		response.Error(c, http.StatusBadRequest, "INVALID_FILE_PATH", "invalid file path")
+		response.ImageHostingInvalidFilePath(c)
 		return
 	}
 	// 兼容历史公开路径 /uploads/local/*：统一映射到本地存储根 uploads/local。
 	cleanPath = strings.TrimPrefix(cleanPath, "local/")
 	if cleanPath == "local" {
-		response.Error(c, http.StatusNotFound, "FILE_NOT_FOUND", "file not found")
+		response.ImageHostingFileNotFound(c)
 		return
 	}
 
@@ -199,25 +208,27 @@ func (h *imageHostingHandler) ServeLocalImage(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
+	// 二次校验目标路径必须位于根目录下，阻断路径逃逸。
 	if !isPathWithinRoot(rootAbsPath, targetAbsPath) {
-		response.Error(c, http.StatusBadRequest, "INVALID_FILE_PATH", "invalid file path")
+		response.ImageHostingInvalidFilePath(c)
 		return
 	}
 
 	fileInfo, err := os.Stat(targetAbsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			response.Error(c, http.StatusNotFound, "FILE_NOT_FOUND", "file not found")
+			response.ImageHostingFileNotFound(c)
 			return
 		}
 		response.InternalError(c)
 		return
 	}
 	if fileInfo.IsDir() {
-		response.Error(c, http.StatusNotFound, "FILE_NOT_FOUND", "file not found")
+		response.ImageHostingFileNotFound(c)
 		return
 	}
 
+	// 静态图片长期缓存，减少重复回源。
 	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	c.File(targetAbsPath)
 }
@@ -225,13 +236,13 @@ func (h *imageHostingHandler) ServeLocalImage(c *gin.Context) {
 func (h *imageHostingHandler) requireAuthenticatedUser(c *gin.Context) (string, bool) {
 	accessToken, ok := bearerTokenFromRequest(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "authorization token is required")
+		response.ImageHostingTokenRequired(c)
 		return "", false
 	}
 
 	session, err := h.authService.Me(c.Request.Context(), accessToken)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+		response.ImageHostingTokenInvalid(c)
 		return "", false
 	}
 
@@ -245,6 +256,7 @@ func detectUploadedFileContentType(fileHeader *multipart.FileHeader) (string, er
 	}
 	defer file.Close()
 
+	// 仅需读取前 512 字节即可做内容类型探测。
 	buffer := make([]byte, 512)
 	readCount, readErr := file.Read(buffer)
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
@@ -260,6 +272,7 @@ func buildImageObjectKey(fileName string, contentType string, now time.Time) (st
 		return "", err
 	}
 
+	// key 结构：业务前缀 + 日期分区 + 时间戳 + 随机后缀 + 扩展名。
 	return fmt.Sprintf(
 		"plaindoc/%04d/%02d/%02d/%d-%s.%s",
 		now.Year(),
@@ -272,6 +285,7 @@ func buildImageObjectKey(fileName string, contentType string, now time.Time) (st
 }
 
 func resolveFileExtension(fileName string, contentType string) string {
+	// 优先使用上传文件名中的扩展名，但必须通过安全字符校验。
 	extension := strings.TrimSpace(strings.ToLower(path.Ext(fileName)))
 	if extension != "" {
 		extension = strings.TrimPrefix(extension, ".")
@@ -280,6 +294,7 @@ func resolveFileExtension(fileName string, contentType string) string {
 		}
 	}
 
+	// 再尝试通过 MIME 类型推导扩展名。
 	extensions, err := mime.ExtensionsByType(contentType)
 	if err == nil {
 		for _, item := range extensions {

@@ -175,13 +175,13 @@ func (h *workspaceHandler) CreateSpace(c *gin.Context) {
 
 	var req createWorkspaceSpaceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "space name is required")
+		response.WorkspaceErrSpaceNameRequired.Write(c)
 		return
 	}
 
 	spaceName := strings.TrimSpace(req.Name)
 	if spaceName == "" || len([]rune(spaceName)) > maxWorkspaceSpaceNameLength {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_NAME", "invalid space name")
+		response.WorkspaceErrSpaceName.Write(c)
 		return
 	}
 
@@ -243,18 +243,18 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.WorkspaceErrSpaceIDRequired.Write(c)
 		return
 	}
 
 	if err := h.ensureSpaceReadable(c.Request.Context(), spaceID, actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.WorkspaceErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+			response.WorkspaceErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -324,16 +324,16 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 
 	spaceID := strings.TrimSpace(c.Param("spaceId"))
 	if spaceID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_SPACE_ID", "space id is required")
+		response.WorkspaceErrSpaceIDRequired.Write(c)
 		return
 	}
 	spaceAccess, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.WorkspaceErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -342,12 +342,12 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 
 	var req createWorkspaceNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid create node request")
+		response.WorkspaceErrCreateNodeRequest.Write(c)
 		return
 	}
 
 	if req.Type != models.NodeTypeFolder && req.Type != models.NodeTypeDoc {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid node type")
+		response.WorkspaceErrNodeType.Write(c)
 		return
 	}
 	title := strings.TrimSpace(req.Title)
@@ -364,14 +364,14 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		parent, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), *parentID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "parent node not found")
+				response.WorkspaceErrParentNodeNotFound.Write(c)
 				return
 			}
 			response.InternalError(c)
 			return
 		}
 		if strings.TrimSpace(parent.SpaceID) != spaceID {
-			response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "parent node not in target space")
+			response.WorkspaceErrParentNodeNotTargetSpace.Write(c)
 			return
 		}
 	}
@@ -460,13 +460,13 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 
 	nodeID := strings.TrimSpace(c.Param("nodeId"))
 	if nodeID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_NODE_ID", "node id is required")
+		response.WorkspaceErrNodeIDRequired.Write(c)
 		return
 	}
 
 	var req updateWorkspaceNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid update node request")
+		response.WorkspaceErrUpdateNodeRequest.Write(c)
 		return
 	}
 	if req.Title == nil && req.ParentID == nil && req.Sort == nil {
@@ -477,7 +477,7 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 	node, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), nodeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
+			response.WorkspaceErrNodeNotFound.Write(c)
 			return
 		}
 		response.InternalError(c)
@@ -487,9 +487,9 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 	if _, err := h.ensureSpaceWritable(c.Request.Context(), strings.TrimSpace(node.SpaceID), actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.WorkspaceErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -513,21 +513,21 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 	if req.ParentID != nil {
 		parentID := normalizeOptionalString(req.ParentID)
 		if parentID != nil && *parentID == nodeID {
-			response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "node cannot be its own parent")
+			response.WorkspaceErrNodeCannotItsOwnParent.Write(c)
 			return
 		}
 		if parentID != nil {
 			parent, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), *parentID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "parent node not found")
+					response.WorkspaceErrParentNodeNotFound.Write(c)
 					return
 				}
 				response.InternalError(c)
 				return
 			}
 			if strings.TrimSpace(parent.SpaceID) != strings.TrimSpace(node.SpaceID) {
-				response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "parent node not in target space")
+				response.WorkspaceErrParentNodeNotTargetSpace.Write(c)
 				return
 			}
 			updateValues["parent_node_id"] = *parentID
@@ -555,7 +555,7 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		TouchedAt:     now,
 	}); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
+			response.WorkspaceErrNodeNotFound.Write(c)
 			return
 		}
 		response.InternalError(c)
@@ -578,14 +578,14 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 
 	nodeID := strings.TrimSpace(c.Param("nodeId"))
 	if nodeID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_NODE_ID", "node id is required")
+		response.WorkspaceErrNodeIDRequired.Write(c)
 		return
 	}
 
 	node, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), nodeID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
+			response.WorkspaceErrNodeNotFound.Write(c)
 			return
 		}
 		response.InternalError(c)
@@ -596,9 +596,9 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.WorkspaceErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -612,7 +612,7 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 		return
 	}
 	if !deleted {
-		response.Error(c, http.StatusNotFound, "NODE_NOT_FOUND", "node not found")
+		response.WorkspaceErrNodeNotFound.Write(c)
 		return
 	}
 
@@ -632,24 +632,24 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 
 	documentID := strings.TrimSpace(c.Param("docId"))
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.WorkspaceErrDocumentIDRequired.Write(c)
 		return
 	}
 
 	var req saveWorkspaceDocumentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid save document request")
+		response.WorkspaceErrSaveDocumentRequest.Write(c)
 		return
 	}
 	if req.BaseVersion <= 0 {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "baseVersion is required")
+		response.WorkspaceErrBaseversionRequired.Write(c)
 		return
 	}
 
 	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
+			response.WorkspaceErrDocumentNotFound.Write(c)
 			return
 		}
 		response.InternalError(c)
@@ -670,9 +670,9 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
-			response.Error(c, http.StatusNotFound, "SPACE_NOT_FOUND", "space not found")
+			response.WorkspaceErrSpaceNotFound.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient space permission")
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -752,7 +752,7 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 
 	documentID := strings.TrimSpace(c.Param("docId"))
 	if documentID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_DOCUMENT_ID", "document id is required")
+		response.WorkspaceErrDocumentIDRequired.Write(c)
 		return
 	}
 
@@ -760,11 +760,11 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrDocumentNotFound):
-			response.Error(c, http.StatusNotFound, "DOCUMENT_NOT_FOUND", "document not found")
+			response.WorkspaceErrDocumentNotFound.Write(c)
 		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "login required")
+			response.WorkspaceErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrDocumentAccessDenied):
-			response.Error(c, http.StatusForbidden, "FORBIDDEN", "insufficient document permission")
+			response.WorkspaceErrInsufficientDocumentPermission.Write(c)
 		default:
 			response.InternalError(c)
 		}
@@ -804,18 +804,18 @@ func (h *workspaceHandler) requireActorUserID(c *gin.Context) (string, bool) {
 	}
 	accessToken, ok := bearerTokenFromRequest(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "authorization token is required")
+		response.WorkspaceErrAuthorizationTokenRequired.Write(c)
 		return "", false
 	}
 
 	session, err := h.authService.Me(c.Request.Context(), accessToken)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+		response.WorkspaceErrAccessToken.Write(c)
 		return "", false
 	}
 	actorUserID := strings.TrimSpace(session.User.ID)
 	if actorUserID == "" {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid access token")
+		response.WorkspaceErrAccessToken.Write(c)
 		return "", false
 	}
 	return actorUserID, true

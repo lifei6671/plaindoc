@@ -82,7 +82,7 @@ func Error(c *gin.Context, status int, code string, message string) {
 
 // InternalError 用于服务端兜底错误，避免暴露内部细节。
 func InternalError(c *gin.Context) {
-	Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	Error(c, http.StatusInternalServerError, CodeInternalError, "internal server error")
 }
 
 // FromError 优先按业务错误映射输出；无法识别时回落到 InternalError。

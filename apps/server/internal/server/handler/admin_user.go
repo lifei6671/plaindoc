@@ -73,13 +73,13 @@ func (h *adminUserHandler) CreateUser(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminUserErrRequestBody.Write(c)
 		return
 	}
 
@@ -108,18 +108,18 @@ func (h *adminUserHandler) ListUsers(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	page, err := parseQueryInt(c.Query("page"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE", "page must be a positive integer")
+		response.AdminUserErrPagePositiveInteger.Write(c)
 		return
 	}
 	pageSize, err := parseQueryInt(c.Query("pageSize"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_PAGE_SIZE", "pageSize must be a positive integer")
+		response.AdminUserErrPageSizePositiveInteger.Write(c)
 		return
 	}
 
@@ -159,19 +159,19 @@ func (h *adminUserHandler) UpdateStatus(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	targetUserID := strings.TrimSpace(c.Param("userId"))
 	if targetUserID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is required")
+		response.AdminUserErrUserIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminUserStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminUserErrRequestBody.Write(c)
 		return
 	}
 
@@ -199,19 +199,19 @@ func (h *adminUserHandler) UpdateRole(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	targetUserID := strings.TrimSpace(c.Param("userId"))
 	if targetUserID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is required")
+		response.AdminUserErrUserIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminUserRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		response.AdminUserErrRequestBody.Write(c)
 		return
 	}
 
@@ -238,13 +238,13 @@ func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "admin actor is missing")
+		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	targetUserID := strings.TrimSpace(c.Param("userId"))
 	if targetUserID == "" {
-		response.Error(c, http.StatusBadRequest, "INVALID_USER_ID", "user id is required")
+		response.AdminUserErrUserIDRequired.Write(c)
 		return
 	}
 
