@@ -233,14 +233,15 @@ docker run --rm -p 8080:8080 plaindoc:latest
 当你推送 tag 后，`Release` 工作流会上传以下文件：
 
 - `plaindoc-server-linux-amd64`：Linux amd64 的后端可执行文件（Go 编译产物）。
-- `plaindoc-server-linux-amd64-<tag>.tar.gz`：后端二进制压缩包（包含上面的可执行文件）。
+- `plaindoc-server-linux-amd64-<tag>.tar.gz`：一体化部署压缩包，包含后端可执行文件、`apps/web/dist` 和 `apps/web/dist-ssr`。
 - `plaindoc-web-<tag>.tar.gz`：前端发布产物压缩包，包含 `dist`（前端静态资源）和 `dist-ssr`（阅读页 SSR Worker 产物）。
 - `checksums-<tag>.txt`：上述产物的 SHA256 校验清单。
 
 ### 5.3 使用 Release 产物部署（Linux 裸机/云主机）
 
-1. 下载对应 tag 的 3 个核心文件：
-`plaindoc-server-linux-amd64-<tag>.tar.gz`、`plaindoc-web-<tag>.tar.gz`、`checksums-<tag>.txt`。  
+1. 下载对应 tag 的核心文件：
+`plaindoc-server-linux-amd64-<tag>.tar.gz`、`checksums-<tag>.txt`。  
+`plaindoc-web-<tag>.tar.gz` 为可选文件（仅前端产物包，适合只替换前端时使用）。  
 2. 校验文件完整性：
 
 ```bash
@@ -252,7 +253,6 @@ sha256sum -c checksums-<tag>.txt
 ```bash
 mkdir -p /opt/plaindoc/apps/web
 tar -xzf plaindoc-server-linux-amd64-<tag>.tar.gz -C /opt/plaindoc
-tar -xzf plaindoc-web-<tag>.tar.gz -C /opt/plaindoc/apps/web
 chmod +x /opt/plaindoc/plaindoc-server-linux-amd64
 ```
 

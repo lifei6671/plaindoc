@@ -56,7 +56,15 @@ jobs:
         run: |
           set -euo pipefail
           tar -C apps/web -czf "release/plaindoc-web-${GITHUB_REF_NAME}.tar.gz" dist dist-ssr
-          tar -C release -czf "release/plaindoc-server-linux-amd64-${GITHUB_REF_NAME}.tar.gz" plaindoc-server-linux-amd64
+          mkdir -p "release/plaindoc-bundle/apps/web"
+          cp "release/plaindoc-server-linux-amd64" "release/plaindoc-bundle/plaindoc-server-linux-amd64"
+          cp -R "apps/web/dist" "release/plaindoc-bundle/apps/web/"
+          cp -R "apps/web/dist-ssr" "release/plaindoc-bundle/apps/web/"
+          tar -czf "release/plaindoc-server-linux-amd64-${GITHUB_REF_NAME}.tar.gz" \
+            -C release/plaindoc-bundle \
+            plaindoc-server-linux-amd64 \
+            apps/web/dist \
+            apps/web/dist-ssr
           sha256sum \
             "release/plaindoc-server-linux-amd64" \
             "release/plaindoc-server-linux-amd64-${GITHUB_REF_NAME}.tar.gz" \

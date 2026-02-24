@@ -1,7 +1,10 @@
 package server
 
 import (
+	"errors"
+	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,11 +36,15 @@ func registerWebSPARoutes(router *gin.Engine, cfg config.Config, logger *slog.Lo
 		return
 	}
 
-	webAssetsDir, hasWebAssets := resolveExistingDir(filepath.Join(distDir, "web-assets"))
-	if hasWebAssets {
-		router.Static(webSPAAssetsRoutePrefix, webAssetsDir)
+	webAssetsDirs := resolveWebAssetsDirs(distDir, cfg)
+	if len(webAssetsDirs) > 0 {
+		router.StaticFS(webSPAAssetsRoutePrefix, newLayeredHTTPFileSystem(webAssetsDirs))
 	} else {
-		logWebSPAWarn(logger, "web-assets directory not found, spa shell may fail to load scripts", "dist_dir", distDir)
+		logWebSPAWarn(
+			logger,
+			"web-assets directory not found in dist/dist-ssr, spa shell may fail to load scripts",
+			"dist_dir", distDir,
+		)
 	}
 
 	serveIndex := func(c *gin.Context) {
@@ -54,6 +61,72 @@ func registerWebSPARoutes(router *gin.Engine, cfg config.Config, logger *slog.Lo
 	router.GET("/admin/*path", serveIndex)
 
 	logWebSPAInfo(logger, "web spa routes enabled", "dist_dir", distDir)
+}
+
+func resolveWebAssetsDirs(distDir string, cfg config.Config) []string {
+	dirs := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 4)
+	appendIfExists := func(candidate string) {
+		absolutePath, ok := resolveExistingDir(candidate)
+		if !ok {
+			return
+		}
+		if _, exists := seen[absolutePath]; exists {
+			return
+		}
+		seen[absolutePath] = struct{}{}
+		dirs = append(dirs, absolutePath)
+	}
+
+	// 客户端构建产物目录（优先级最高）。
+	appendIfExists(filepath.Join(distDir, "web-assets"))
+	// SSR worker 构建产物目录（补足 SSR 内联字体/脚本依赖）。
+	appendIfExists(filepath.Join(filepath.Dir(distDir), "dist-ssr", "web-assets"))
+
+	if entry := strings.TrimSpace(cfg.SSRWorker.Entry); entry != "" {
+		absoluteEntry, err := filepath.Abs(filepath.Clean(entry))
+		if err == nil {
+			appendIfExists(filepath.Join(filepath.Dir(absoluteEntry), "web-assets"))
+		}
+	}
+
+	return dirs
+}
+
+type layeredHTTPFileSystem struct {
+	sources []http.FileSystem
+}
+
+func newLayeredHTTPFileSystem(dirs []string) http.FileSystem {
+	sources := make([]http.FileSystem, 0, len(dirs))
+	for _, dir := range dirs {
+		normalized := strings.TrimSpace(dir)
+		if normalized == "" {
+			continue
+		}
+		sources = append(sources, http.Dir(normalized))
+	}
+	return layeredHTTPFileSystem{sources: sources}
+}
+
+func (l layeredHTTPFileSystem) Open(name string) (http.File, error) {
+	var firstErr error
+	for _, source := range l.sources {
+		file, err := source.Open(name)
+		if err == nil {
+			return file, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return nil, fs.ErrNotExist
 }
 
 func resolveWebDistDir(pathValue string) (string, bool) {
