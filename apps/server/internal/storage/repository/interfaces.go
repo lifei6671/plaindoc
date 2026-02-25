@@ -256,7 +256,9 @@ type ListVisibleHomepageSpacesParams struct {
 
 // HomepageVisibleSpaceRecord 首页/分类页可见空间列表项。
 type HomepageVisibleSpaceRecord struct {
-	Space models.Space
+	Space          models.Space
+	OwnerName      string
+	OwnerAvatarURL string
 }
 
 // ListAdminSpacesParams 管理后台空间分页查询参数。

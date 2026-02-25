@@ -198,6 +198,103 @@ func TestRouter_UpdateVisibility_AccessControl(t *testing.T) {
 	}
 }
 
+func TestRouter_PlatformAdminCanManageDocumentWithoutMembership(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, _ := registerAccessUser(t, serve, "owner-platform-admin-doc@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "platform-admin-doc@example.com")
+	grantPlatformAdminRoleForAccess(t, database, platformAdminUserID)
+
+	spaceID := "01h1spaceplatformadmin0000001"
+	nodeID := "01h1nodeplatformadmin00000002"
+	docID := "01h1docplatformadmin000000003"
+	seedSpaceAndDocumentForAccess(t, database, ownerUserID, spaceID, nodeID, docID, "member", "member")
+
+	getDocumentReq := httptest.NewRequest(http.MethodGet, "/api/docs/"+docID, nil)
+	getDocumentReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	getDocumentRec := serve(getDocumentReq)
+	if getDocumentRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected platform admin read document status 200, got %d body=%s",
+			getDocumentRec.Code,
+			getDocumentRec.Body.String(),
+		)
+	}
+
+	updateVisibilityReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/docs/"+docID+"/visibility",
+		bytes.NewReader([]byte(`{"visibility":"public"}`)),
+	)
+	updateVisibilityReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	updateVisibilityReq.Header.Set("Content-Type", "application/json")
+	updateVisibilityRec := serve(updateVisibilityReq)
+	if updateVisibilityRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected platform admin update document visibility status 200, got %d body=%s",
+			updateVisibilityRec.Code,
+			updateVisibilityRec.Body.String(),
+		)
+	}
+
+	saveDocumentReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/docs/"+docID,
+		bytes.NewReader([]byte(`{"contentMd":"# updated by platform admin","baseVersion":1}`)),
+	)
+	saveDocumentReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	saveDocumentReq.Header.Set("Content-Type", "application/json")
+	saveDocumentRec := serve(saveDocumentReq)
+	if saveDocumentRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected platform admin save document status 200, got %d body=%s",
+			saveDocumentRec.Code,
+			saveDocumentRec.Body.String(),
+		)
+	}
+
+	savePayload := decodeJSONResultData[struct {
+		Document struct {
+			ID      string `json:"id"`
+			Version int    `json:"version"`
+		} `json:"document"`
+	}](t, saveDocumentRec.Body.Bytes())
+	if savePayload.Document.ID != docID {
+		t.Fatalf("expected saved document id %s, got %s", docID, savePayload.Document.ID)
+	}
+	if savePayload.Document.Version != 2 {
+		t.Fatalf("expected saved document version 2, got %d", savePayload.Document.Version)
+	}
+
+	var persistedDoc struct {
+		Visibility      string `gorm:"column:visibility"`
+		ContentMD       string `gorm:"column:content_md"`
+		Version         int    `gorm:"column:version"`
+		UpdatedByUserID string `gorm:"column:updated_by_user_id"`
+	}
+	if err := database.ORM.Table("documents").
+		Select("visibility", "content_md", "version", "updated_by_user_id").
+		Where("document_id = ?", docID).
+		Take(&persistedDoc).Error; err != nil {
+		t.Fatalf("query persisted document failed: %v", err)
+	}
+	if persistedDoc.Visibility != "public" {
+		t.Fatalf("expected persisted document visibility public, got %s", persistedDoc.Visibility)
+	}
+	if persistedDoc.ContentMD != "# updated by platform admin" {
+		t.Fatalf("expected persisted document content updated by platform admin, got %q", persistedDoc.ContentMD)
+	}
+	if persistedDoc.Version != 2 {
+		t.Fatalf("expected persisted document version 2, got %d", persistedDoc.Version)
+	}
+	if persistedDoc.UpdatedByUserID != platformAdminUserID {
+		t.Fatalf("expected updated_by_user_id %s, got %s", platformAdminUserID, persistedDoc.UpdatedByUserID)
+	}
+}
+
 func TestRouter_CreateNode_DocumentVisibilityInheritsSpace(t *testing.T) {
 	testCases := []struct {
 		name            string
@@ -413,5 +510,23 @@ func seedSpaceMemberForAccess(
 		"updated_at": now,
 	}).Error; err != nil {
 		t.Fatalf("insert space member failed: %v", err)
+	}
+}
+
+func grantPlatformAdminRoleForAccess(
+	t *testing.T,
+	database *storage.Database,
+	userID string,
+) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("user_admin_roles").Create(map[string]any{
+		"user_id":    userID,
+		"role":       "platform_admin",
+		"created_at": now,
+		"updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("grant platform admin role failed: %v", err)
 	}
 }

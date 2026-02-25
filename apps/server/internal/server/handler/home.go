@@ -13,9 +13,10 @@ import (
 )
 
 type homeHandler struct {
-	authService *service.AuthService
-	homeService *service.HomeService
-	webOrigin   string
+	authService        *service.AuthService
+	homeService        *service.HomeService
+	adminAccessService *service.AdminAccessService
+	webOrigin          string
 }
 
 const exploreAllCategoryRouteToken = "all"
@@ -33,12 +34,14 @@ type homeViewerIdentity struct {
 func NewHomeHandler(
 	authService *service.AuthService,
 	homeService *service.HomeService,
+	adminAccessService *service.AdminAccessService,
 	webOrigin string,
 ) *homeHandler {
 	return &homeHandler{
-		authService: authService,
-		homeService: homeService,
-		webOrigin:   normalizeWebOrigin(webOrigin),
+		authService:        authService,
+		homeService:        homeService,
+		adminAccessService: adminAccessService,
+		webOrigin:          normalizeWebOrigin(webOrigin),
 	}
 }
 
@@ -81,6 +84,19 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 	}
 
 	viewerIdentity := h.resolveOptionalViewerIdentity(c)
+	canManageSpace := false
+	if h != nil &&
+		h.adminAccessService != nil &&
+		viewerIdentity.Authenticated &&
+		strings.TrimSpace(viewerIdentity.UserID) != "" {
+		hasAdminRole, roleErr := h.adminAccessService.IsAdmin(
+			c.Request.Context(),
+			strings.TrimSpace(viewerIdentity.UserID),
+		)
+		if roleErr == nil {
+			canManageSpace = hasAdminRole
+		}
+	}
 	record, err := h.homeService.GetPage(c.Request.Context(), service.HomepageQueryInput{
 		ViewerUserID: viewerIdentity.UserID,
 		CategoryID:   categoryID,
@@ -141,6 +157,9 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 			Name:        strings.TrimSpace(item.Name),
 			Description: strings.TrimSpace(item.Description),
 			CoverURL:    strings.TrimSpace(item.CoverURL),
+			OwnerName:   strings.TrimSpace(item.OwnerName),
+			OwnerAvatar: strings.TrimSpace(item.OwnerAvatar),
+			UpdatedAt:   item.UpdatedAt,
 		})
 	}
 	loginURL := h.buildWebAuthEntryURL(c, "/login")
@@ -157,6 +176,7 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 		SiteName:             "PlainDoc",
 		IsExplore:            explore,
 		IsAuthenticated:      viewerIdentity.Authenticated,
+		CanManageSpace:       canManageSpace,
 		CurrentUserName:      viewerIdentity.Name,
 		CurrentUserAvatar:    buildUserAvatarText(viewerIdentity.Name, viewerIdentity.Email),
 		CurrentUserAvatarURL: strings.TrimSpace(viewerIdentity.AvatarURL),

@@ -1,0 +1,12 @@
+{{ define "youtube_sidebar" }}
+<aside class="yt-sidebar" aria-label="侧边导航">
+  <nav class="yt-sidebar-nav">
+    {{ range .Categories }}
+      <a class="yt-sidebar-item{{ if .IsActive }} is-active{{ end }}" href="{{ .URL }}">
+        <span class="yt-sidebar-icon" aria-hidden="true">&gt;</span>
+        <span class="yt-sidebar-text">{{ .Name }}</span>
+      </a>
+    {{ end }}
+  </nav>
+</aside>
+{{ end }}

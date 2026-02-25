@@ -48,6 +48,8 @@ type HomepageSpaceRecord struct {
 	PublishedAt time.Time
 	UpdatedAt   time.Time
 	OwnerUserID string
+	OwnerName   string
+	OwnerAvatar string
 }
 
 // HomepagePagination 首页/分类页分页信息。
@@ -151,6 +153,13 @@ func (s *HomeService) GetPage(ctx context.Context, input HomepageQueryInput) (Ho
 
 	for _, item := range records {
 		space := item.Space
+		ownerName := strings.TrimSpace(item.OwnerName)
+		if ownerName == "" {
+			ownerName = strings.TrimSpace(space.OwnerUserID)
+		}
+		if ownerName == "" {
+			ownerName = "未知用户"
+		}
 		result.Spaces = append(result.Spaces, HomepageSpaceRecord{
 			SpaceID:     strings.TrimSpace(space.SpaceID),
 			Name:        strings.TrimSpace(space.Name),
@@ -161,6 +170,8 @@ func (s *HomeService) GetPage(ctx context.Context, input HomepageQueryInput) (Ho
 			PublishedAt: space.CreatedAt,
 			UpdatedAt:   space.UpdatedAt,
 			OwnerUserID: strings.TrimSpace(space.OwnerUserID),
+			OwnerName:   ownerName,
+			OwnerAvatar: strings.TrimSpace(item.OwnerAvatarURL),
 		})
 	}
 

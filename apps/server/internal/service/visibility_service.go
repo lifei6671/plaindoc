@@ -174,7 +174,7 @@ func (s *VisibilityService) GetDocument(
 	return &documentAccess.Document, nil
 }
 
-// UpdateDocumentVisibility 允许空间 owner / collaborator 修改文档可见性。
+// UpdateDocumentVisibility 允许空间 owner / collaborator / 管理员修改文档可见性。
 func (s *VisibilityService) UpdateDocumentVisibility(
 	ctx context.Context,
 	documentID string,

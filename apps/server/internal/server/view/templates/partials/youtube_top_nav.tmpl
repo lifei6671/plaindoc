@@ -1,0 +1,52 @@
+{{ define "youtube_top_nav" }}
+<header class="yt-header">
+  <div class="yt-header-inner">
+    <div class="yt-header-left">
+      <a href="/" class="yt-brand" aria-label="{{ .SiteName }} 首页">
+        <img src="/assets/favicon.png" alt="{{ .SiteName }} Logo" class="yt-brand-logo" loading="eager" decoding="async">
+        <span class="yt-brand-badge">Docs</span>
+      </a>
+    </div>
+
+    <div class="yt-header-right">
+      {{ if and .IsAuthenticated .CanManageSpace }}
+        <a
+          href="{{ .AdminURL }}/spaces"
+          class="yt-create-button"
+          title="创建内容"
+          aria-label="创建内容，跳转到后台空间管理"
+        >
+          <span class="yt-create-button-icon" aria-hidden="true">+</span>
+          <span>创建</span>
+        </a>
+      {{ end }}
+
+      {{ if .IsAuthenticated }}
+        <details class="yt-user-dropdown" data-nav-user-dropdown="1">
+          <summary class="yt-user-trigger">
+            <span class="yt-user-avatar">
+              {{ if .CurrentUserAvatarURL }}
+                <img src="{{ .CurrentUserAvatarURL }}" alt="{{ .CurrentUserName }} 头像" class="yt-user-avatar-image">
+              {{ else }}
+                {{ .CurrentUserAvatar }}
+              {{ end }}
+            </span>
+          </summary>
+          <div class="yt-user-menu">
+            <p class="yt-user-menu-name">{{ .CurrentUserName }}</p>
+            <a href="{{ .AdminURL }}" class="yt-user-menu-item">后台管理</a>
+            <form method="post" action="{{ .LogoutURL }}">
+              <button type="submit" class="yt-user-menu-item yt-user-menu-button">退出登录</button>
+            </form>
+          </div>
+        </details>
+      {{ else }}
+        <div class="yt-guest-actions">
+          <a href="{{ .LoginURL }}" class="yt-signin-button">登录</a>
+          <a href="{{ .RegisterURL }}" class="yt-register-button">注册</a>
+        </div>
+      {{ end }}
+    </div>
+  </div>
+</header>
+{{ end }}

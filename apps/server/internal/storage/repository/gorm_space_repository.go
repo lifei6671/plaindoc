@@ -295,6 +295,7 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 
 	baseQuery := r.db.WithContext(ctx).
 		Table("spaces AS s").
+		Joins("LEFT JOIN users AS u ON u.user_id = s.owner_user_id").
 		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive)
 
 	if categoryID != "" {
@@ -398,6 +399,8 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 		DeletedAt    *time.Time          `gorm:"column:deleted_at"`
 		CreatedAtRaw string              `gorm:"column:created_at"`
 		UpdatedAtRaw string              `gorm:"column:updated_at"`
+		OwnerName    string              `gorm:"column:owner_name"`
+		OwnerAvatar  string              `gorm:"column:owner_avatar_url"`
 	}
 
 	var rows []homepageSpaceRow
@@ -423,6 +426,8 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 			"s.deleted_at",
 			"s.created_at",
 			"s.updated_at",
+			"u.name AS owner_name",
+			"u.avatar_url AS owner_avatar_url",
 		).
 		Order("s.created_at DESC, s.id DESC").
 		Offset(offset).
@@ -483,7 +488,9 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 			}
 		}
 		result = append(result, HomepageVisibleSpaceRecord{
-			Space: space,
+			Space:          space,
+			OwnerName:      strings.TrimSpace(row.OwnerName),
+			OwnerAvatarURL: strings.TrimSpace(row.OwnerAvatar),
 		})
 	}
 
@@ -1130,10 +1137,12 @@ func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID strin
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("space repository db is nil")
 	}
-	if userID == "" {
+	normalizedUserID := strings.TrimSpace(userID)
+	if normalizedUserID == "" {
 		return false, nil
 	}
 
+	// 读取权限：owner/member 以及管理员（平台管理员、具备空间管理范围）均可访问。
 	// 使用 LIMIT 1 探测存在性，避免 COUNT(*) 在大表场景的额外扫描成本。
 	var probe struct {
 		Hit int `gorm:"column:hit"`
@@ -1141,12 +1150,20 @@ func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID strin
 	if err := r.db.WithContext(ctx).
 		Table("spaces AS s").
 		Select("1 AS hit").
-		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", userID).
+		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedUserID).
 		Where(
-			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND (s.owner_user_id = ? OR (sm.id IS NOT NULL AND sm.role IN ?))",
+			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND ("+
+				"s.owner_user_id = ? OR "+
+				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
+				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?) OR "+
+				"(sm.id IS NOT NULL AND sm.role IN ?)"+
+				")",
 			spaceID,
 			models.EntityStatusActive,
-			userID,
+			normalizedUserID,
+			normalizedUserID,
+			models.AdminRolePlatformAdmin,
+			normalizedUserID,
 			[]models.Role{models.RoleOwner, models.RoleCollaborator, models.RoleReader},
 		).
 		Limit(1).
@@ -1164,23 +1181,33 @@ func (r *gormSpaceRepository) HasWriterAccess(ctx context.Context, spaceID strin
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("space repository db is nil")
 	}
-	if userID == "" {
+	normalizedUserID := strings.TrimSpace(userID)
+	if normalizedUserID == "" {
 		return false, nil
 	}
 
-	// writer 仅允许 owner / collaborator；reader 不具备写能力。
+	// 写入权限：owner/collaborator 以及管理员（平台管理员、具备空间管理范围）可写；
+	// reader 仍不具备写能力。
 	var probe struct {
 		Hit int `gorm:"column:hit"`
 	}
 	if err := r.db.WithContext(ctx).
 		Table("spaces AS s").
 		Select("1 AS hit").
-		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", userID).
+		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedUserID).
 		Where(
-			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND (s.owner_user_id = ? OR (sm.id IS NOT NULL AND sm.role IN ?))",
+			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND ("+
+				"s.owner_user_id = ? OR "+
+				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
+				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?) OR "+
+				"(sm.id IS NOT NULL AND sm.role IN ?)"+
+				")",
 			spaceID,
 			models.EntityStatusActive,
-			userID,
+			normalizedUserID,
+			normalizedUserID,
+			models.AdminRolePlatformAdmin,
+			normalizedUserID,
 			[]models.Role{models.RoleOwner, models.RoleCollaborator},
 		).
 		Limit(1).

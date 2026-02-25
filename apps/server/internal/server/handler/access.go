@@ -193,7 +193,7 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 	})
 }
 
-// UpdateDocumentVisibility 更新文档公开级别（空间 owner / collaborator 可操作）。
+// UpdateDocumentVisibility 更新文档公开级别（空间 owner / collaborator / 管理员可操作）。
 func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 	if h == nil || h.visibilityService == nil {
 		response.InternalError(c)

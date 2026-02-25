@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ if .Title }}{{ .Title }} - {{ end }}PlainDoc - 一个适合中小团队文档在线管理系统</title>
+  <meta name="description" content="{{ .Description }}">
+  <link rel="canonical" href="{{ .CanonicalURL }}">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/favicon.png">
+  <link rel="preload" href="/assets/google-sans-code-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/font-google-sans-code.css?v=20260224">
+  <link rel="stylesheet" href="/assets/home.css?v=20260224">
+</head>
+<body class="home-body">
+  {{ template "top_nav" . }}
+  <div class="home-shell">
+    <main class="home-layout">
+      <aside class="home-sidebar">
+        <div class="home-sidebar-head">
+          <span class="home-sidebar-kicker">分类目录</span>
+          <h2 class="home-sidebar-title">空间分类</h2>
+        </div>
+        {{ template "category_sidebar" . }}
+      </aside>
+
+      <section class="home-content">
+        <header class="home-header">
+          <p class="home-kicker">Space Library</p>
+          <h1 class="home-title">空间探索</h1>
+          <p class="home-subtitle">按发布时间倒序展示你可见的空间</p>
+        </header>
+
+        <section class="spaces-grid" aria-label="分类空间列表">
+          {{ if .Spaces }}
+            {{ range .Spaces }}
+              {{ template "space_cover_card" . }}
+            {{ end }}
+          {{ else }}
+            <div class="spaces-empty">该分类下暂无可见空间</div>
+          {{ end }}
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/home.js?v=20260224" defer></script>
+</body>
+</html>

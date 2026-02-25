@@ -109,6 +109,8 @@ func newRouter(
 	adminRoleRepo := repository.NewGormAdminRoleRepository(db)
 	spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
 	workspaceRepo := repository.NewGormWorkspaceRepository(db)
+	// adminAccessService 统一封装 platform_admin / space_admin(scope) 权限判定。
+	adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo, spaceRepo)
 
 	// ---- 基础服务与页面 Handler 装配 ----
 	// authService 是鉴权基石，后续 API/后台中间件都会复用。
@@ -124,7 +126,7 @@ func newRouter(
 	// 阅读页 SSR 渲染缓存：仅缓存 Node 渲染结果，不缓存鉴权流程。
 	readerRenderCache := buildReaderRenderCache(cfg, logger, readerSSRDispatcher != nil)
 	// 首页 Handler：承接 SSR 渲染与登录态相关行为。
-	homeHandler := handler.NewHomeHandler(authService, homeService, cfg.WebOrigin)
+	homeHandler := handler.NewHomeHandler(authService, homeService, adminAccessService, cfg.WebOrigin)
 	// sitemap Handler：承接 /sitemap.xml 输出。
 	sitemapHandler := handler.NewSitemapHandler(sitemapService, cfg.WebOrigin)
 	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
@@ -234,8 +236,6 @@ func newRouter(
 		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
 
 		// ---- 后台治理 API 依赖装配 ----
-		// adminAccessService 统一封装 platform_admin / space_admin(scope) 权限判定。
-		adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo, spaceRepo)
 		adminHandler := handler.NewAdminHandler(adminAccessService, userRepo)
 		// 高风险操作一次性 token 服务；TTL=0 表示使用服务默认值。
 		adminOperationTokenService := service.NewAdminOperationTokenService(adminAccessService, 0)

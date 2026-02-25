@@ -114,10 +114,10 @@ func TestRouter_Home_AnonymousUsesPublicCacheAndVisibility(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `class="top-nav-login-button"`) || !strings.Contains(body, ">登录<") {
+	if !strings.Contains(body, `class="yt-signin-button"`) || !strings.Contains(body, ">登录<") {
 		t.Fatalf("expected anonymous nav has login button, body=%s", body)
 	}
-	if !strings.Contains(body, `class="top-nav-register-button"`) || !strings.Contains(body, ">注册<") {
+	if !strings.Contains(body, `class="yt-register-button"`) || !strings.Contains(body, ">注册<") {
 		t.Fatalf("expected anonymous nav has register button, body=%s", body)
 	}
 	if !strings.Contains(body, `href="http://localhost:5173/login?redirect=http%3A%2F%2Fexample.com%2F"`) {
@@ -135,7 +135,7 @@ func TestRouter_Home_AnonymousUsesPublicCacheAndVisibility(t *testing.T) {
 	if !strings.Contains(body, "/explore/"+categoryID) {
 		t.Fatalf("expected category link in body, body=%s", body)
 	}
-	if !strings.Contains(body, `class="category-link is-active" href="/"`) {
+	if !strings.Contains(body, `class="yt-sidebar-item is-active" href="/"`) {
 		t.Fatalf("expected homepage sidebar has active all-category link, body=%s", body)
 	}
 	allIndex := strings.Index(body, `href="/">`)
@@ -261,7 +261,7 @@ func TestRouter_Explore_LoggedInUsesNoStoreAndCategoryFilter(t *testing.T) {
 		t.Fatalf("expected status 200 for explore all, got %d body=%s", allRec.Code, allRec.Body.String())
 	}
 	allBody := allRec.Body.String()
-	if !strings.Contains(allBody, `class="category-link is-active" href="/explore/all"`) {
+	if !strings.Contains(allBody, `class="yt-sidebar-item is-active" href="/explore/all"`) {
 		t.Fatalf("expected explore all sidebar category active, body=%s", allBody)
 	}
 	exploreAllIndex := strings.Index(allBody, `href="/explore/all"`)

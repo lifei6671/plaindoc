@@ -1,0 +1,48 @@
+{{ define "youtube_space_card" }}
+<article class="yt-card">
+  <a
+    class="yt-card-thumb"
+    data-space-id="{{ .SpaceID }}"
+    href="/r/{{ .SpaceID }}"
+    target="_blank"
+    rel="noopener noreferrer"
+    aria-label="进入空间 {{ .Name }}"
+  >
+    {{ if .CoverURL }}
+      <img class="yt-card-image" src="{{ .CoverURL }}" alt="{{ .Name }} 封面" loading="lazy">
+    {{ else }}
+      <div class="yt-card-placeholder" aria-label="{{ .Name }} 无封面">
+        <span>暂无封面</span>
+      </div>
+    {{ end }}
+    <span class="yt-card-duration" aria-hidden="true">文档空间</span>
+  </a>
+
+  <div class="yt-card-content">
+    <span class="yt-card-avatar" aria-hidden="true">
+      {{ if .OwnerAvatar }}
+        <img src="{{ .OwnerAvatar }}" alt="" class="yt-card-avatar-image" loading="lazy" decoding="async">
+      {{ else }}
+        <span class="yt-card-avatar-fallback">{{ avatarInitial .OwnerName }}</span>
+      {{ end }}
+    </span>
+    <div class="yt-card-meta">
+      <a
+        class="yt-card-title-link"
+        href="/r/{{ .SpaceID }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开空间 {{ .Name }}"
+      >
+        <h2 class="yt-card-title">{{ .Name }}</h2>
+      </a>
+      <p class="yt-card-channel">{{ .OwnerName }} · 最后更新：{{ formatFriendlyRelativeTime .UpdatedAt }}</p>
+      {{ if .Description }}
+        <p class="yt-card-desc">{{ .Description }}</p>
+      {{ else }}
+        <p class="yt-card-desc">点击进入查看该空间的在线文档内容。</p>
+      {{ end }}
+    </div>
+  </div>
+</article>
+{{ end }}

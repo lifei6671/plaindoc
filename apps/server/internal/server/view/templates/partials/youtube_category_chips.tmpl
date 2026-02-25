@@ -1,0 +1,7 @@
+{{ define "youtube_category_chips" }}
+<nav class="yt-chip-row" aria-label="分类筛选">
+  {{ range .Categories }}
+    <a class="yt-chip{{ if .IsActive }} is-active{{ end }}" href="{{ .URL }}">{{ .Name }}</a>
+  {{ end }}
+</nav>
+{{ end }}
