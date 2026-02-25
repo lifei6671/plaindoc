@@ -39,12 +39,13 @@ type readerPageViewerIdentity struct {
 }
 
 type readerPagePayload struct {
-	Space       service.ReaderSpaceViewModel      `json:"space"`
-	Document    service.ReaderDocumentViewModel   `json:"document"`
-	Tree        []service.ReaderTreeNodeViewModel `json:"tree"`
-	ActiveDocID string                            `json:"activeDocId"`
-	Viewer      readerPageViewerIdentity          `json:"viewer"`
-	Access      *readerPageAccessState            `json:"access,omitempty"`
+	Space         service.ReaderSpaceViewModel      `json:"space"`
+	Document      service.ReaderDocumentViewModel   `json:"document"`
+	Tree          []service.ReaderTreeNodeViewModel `json:"tree"`
+	ActiveDocID   string                            `json:"activeDocId"`
+	RequestOrigin string                            `json:"requestOrigin,omitempty"`
+	Viewer        readerPageViewerIdentity          `json:"viewer"`
+	Access        *readerPageAccessState            `json:"access,omitempty"`
 }
 
 type readerPageAccessState struct {
@@ -224,11 +225,12 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 	}
 
 	payload := readerPagePayload{
-		Space:       viewModel.Space,
-		Document:    viewModel.Document,
-		Tree:        viewModel.Tree,
-		ActiveDocID: viewModel.ActiveDocID,
-		Viewer:      viewer,
+		Space:         viewModel.Space,
+		Document:      viewModel.Document,
+		Tree:          viewModel.Tree,
+		ActiveDocID:   viewModel.ActiveDocID,
+		RequestOrigin: resolveRequestOrigin(c),
+		Viewer:        viewer,
 	}
 	h.renderReaderPayload(c, http.StatusOK, spaceID, documentID, payload, true)
 }
@@ -476,9 +478,10 @@ func (h *readerPageHandler) renderReaderAccessDeniedPage(
 			AuthorNickname: "未知作者",
 			UpdatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 		},
-		Tree:        tree,
-		ActiveDocID: activeDocID,
-		Viewer:      viewer,
+		Tree:          tree,
+		ActiveDocID:   activeDocID,
+		RequestOrigin: resolveRequestOrigin(c),
+		Viewer:        viewer,
 		Access: &readerPageAccessState{
 			Code:          "FORBIDDEN",
 			Title:         "无权限访问",
@@ -566,6 +569,23 @@ func (h *readerPageHandler) buildWebAuthEntryURL(c *gin.Context, targetPath stri
 		return baseOrigin + path
 	}
 	return baseOrigin + path + "?redirect=" + url.QueryEscape(redirectURL)
+}
+
+func resolveRequestOrigin(c *gin.Context) string {
+	absoluteURL := strings.TrimSpace(buildRequestAbsoluteURL(c))
+	if absoluteURL == "" {
+		return ""
+	}
+	parsedURL, err := url.Parse(absoluteURL)
+	if err != nil {
+		return ""
+	}
+	scheme := strings.TrimSpace(parsedURL.Scheme)
+	host := strings.TrimSpace(parsedURL.Host)
+	if scheme == "" || host == "" {
+		return ""
+	}
+	return scheme + "://" + host
 }
 
 func (h *readerPageHandler) renderFriendlyErrorPage(

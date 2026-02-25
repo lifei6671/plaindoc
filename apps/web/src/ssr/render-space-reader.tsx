@@ -307,7 +307,9 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const previewThemeClassName = getPreviewThemeClassName(resolvedTheme.id);
   const previewThemeStyleText = buildPreviewThemeStyleText(resolvedTheme);
   const previewThemeCustomStyleText = (resolvedTheme.customCss ?? "").trim();
-  const markdownRenderer = buildReaderMarkdownRenderer(payload.document.contentMd, resolvedTheme);
+  const markdownRenderer = buildReaderMarkdownRenderer(payload.document.contentMd, resolvedTheme, {
+    requestOrigin: payload.requestOrigin
+  });
 
   const articleTitle = payload.document.title.trim() || "未命名文档";
   const spaceTitle = payload.space.name.trim() || "未命名空间";

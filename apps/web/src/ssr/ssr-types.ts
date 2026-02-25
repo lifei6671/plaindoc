@@ -45,6 +45,7 @@ export interface ReaderPagePayload {
   document: ReaderDocumentPayload;
   tree: ReaderTreeNode[];
   activeDocId: string;
+  requestOrigin?: string;
   viewer: ReaderViewerPayload;
   access?: ReaderAccessPayload;
 }
