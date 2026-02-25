@@ -2009,6 +2009,73 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSystemConfig_SitemapConfigValidation(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-sitemap-platform-admin@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	validReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/admin/system-configs/sitemap",
+		bytes.NewReader([]byte(`{"value":{"generationMode":"updated_within_days","maxUpdatedWithinDays":30}}`)),
+	)
+	validReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	validReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		validReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"sitemap",
+	)
+	validRec := serve(validReq)
+	if validRec.Code != http.StatusOK {
+		t.Fatalf("expected upsert sitemap config status 200, got %d body=%s", validRec.Code, validRec.Body.String())
+	}
+	validPayload := decodeJSONResultData[struct {
+		ConfigKey string `json:"configKey"`
+		Version   int    `json:"version"`
+	}](t, validRec.Body.Bytes())
+	if validPayload.ConfigKey != "sitemap" || validPayload.Version != 1 {
+		t.Fatalf("unexpected sitemap config payload: %+v", validPayload)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/admin/system-configs/sitemap",
+		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"generationMode":"bad_mode","maxUpdatedWithinDays":30}}`)),
+	)
+	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		invalidReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"sitemap",
+	)
+	invalidRec := serve(invalidReq)
+	if invalidRec.Code != http.StatusOK {
+		t.Fatalf("expected invalid sitemap config status 400, got %d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode("INVALID_CONFIG_VALUE") {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode("INVALID_CONFIG_VALUE"),
+			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
+			invalidRec.Body.String(),
+		)
+	}
+}
+
 func TestRouter_AdminOperationTokenRequiredAndReplayGuard(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

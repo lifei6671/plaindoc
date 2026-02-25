@@ -4,6 +4,7 @@ import {
   Keyboard,
   LoaderCircle,
   Lock,
+  Map,
   RefreshCw,
   Save,
   type LucideIcon
@@ -29,8 +30,9 @@ import {
   type LocalImageHostingConfig
 } from "../../settings/image-hosting";
 
-type SystemConfigKey = "site" | "editor" | "security" | "image-hosting";
+type SystemConfigKey = "site" | "editor" | "security" | "image-hosting" | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
+type SitemapGenerationMode = "all_public" | "updated_within_days";
 
 interface SiteSystemConfigValue {
   allowRegistration: boolean;
@@ -45,6 +47,11 @@ interface EditorSystemConfigValue {
 interface SecuritySystemConfigValue {
   accessTokenTTLMinutes: number;
   refreshTokenTTLMinutes: number;
+}
+
+interface SitemapSystemConfigValue {
+  generationMode: SitemapGenerationMode;
+  maxUpdatedWithinDays: number;
 }
 
 interface SystemConfigTabItem {
@@ -78,6 +85,12 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     label: "图床设置",
     description: "本地 / R2 / OSS",
     icon: ImageIcon
+  },
+  {
+    key: "sitemap",
+    label: "Sitemap 设置",
+    description: "生成规则与更新时间窗口",
+    icon: Map
   }
 ];
 
@@ -93,6 +106,23 @@ const IMAGE_HOSTING_PROVIDER_OPTIONS: Array<{ value: ImageHostingProvider; label
   { value: "aliyun-oss", label: "阿里云 OSS" }
 ];
 
+const SITEMAP_GENERATION_MODE_OPTIONS: Array<{
+  value: SitemapGenerationMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "all_public",
+    label: "全部公开文档",
+    description: "纳入所有公开且有内容的文档"
+  },
+  {
+    value: "updated_within_days",
+    label: "最近更新文档",
+    description: "仅纳入最近 N 天更新的公开文档"
+  }
+];
+
 const SITE_TEMPLATE: SiteSystemConfigValue = {
   allowRegistration: true,
   defaultSpaceVisibility: "member"
@@ -106,6 +136,11 @@ const EDITOR_TEMPLATE: EditorSystemConfigValue = {
 const SECURITY_TEMPLATE: SecuritySystemConfigValue = {
   accessTokenTTLMinutes: 120,
   refreshTokenTTLMinutes: 10080
+};
+
+const SITEMAP_TEMPLATE: SitemapSystemConfigValue = {
+  generationMode: "all_public",
+  maxUpdatedWithinDays: 180
 };
 
 const IMAGE_HOSTING_TEMPLATE = cloneImageHostingConfig(DEFAULT_IMAGE_HOSTING_CONFIG);
@@ -193,6 +228,24 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
   };
 }
 
+function parseSitemapConfig(value: unknown): SitemapSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return { ...SITEMAP_TEMPLATE };
+  }
+
+  const rawMode = parseString(payload.generationMode, SITEMAP_TEMPLATE.generationMode);
+  const generationMode: SitemapGenerationMode =
+    rawMode === "all_public" || rawMode === "updated_within_days" ? rawMode : SITEMAP_TEMPLATE.generationMode;
+  const parsedMaxUpdatedWithinDays = parseInteger(payload.maxUpdatedWithinDays, SITEMAP_TEMPLATE.maxUpdatedWithinDays);
+  const maxUpdatedWithinDays = Math.min(3650, Math.max(1, parsedMaxUpdatedWithinDays));
+
+  return {
+    generationMode,
+    maxUpdatedWithinDays
+  };
+}
+
 function parseImageHostingConfig(value: unknown): ImageHostingConfig {
   return normalizeImageHostingConfig(value);
 }
@@ -213,6 +266,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [siteDraft, setSiteDraft] = useState<SiteSystemConfigValue>({ ...SITE_TEMPLATE });
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
+  const [sitemapDraft, setSitemapDraft] = useState<SitemapSystemConfigValue>({ ...SITEMAP_TEMPLATE });
   const [imageHostingDraft, setImageHostingDraft] = useState<ImageHostingConfig>(
     cloneImageHostingConfig(IMAGE_HOSTING_TEMPLATE)
   );
@@ -221,6 +275,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     site: false,
     editor: false,
     security: false,
+    sitemap: false,
     "image-hosting": false
   });
   const [loading, setLoading] = useState(false);
@@ -280,6 +335,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     if (!dirtyKeys.security) {
       setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
     }
+    if (!dirtyKeys.sitemap) {
+      setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
+    }
     if (!dirtyKeys["image-hosting"]) {
       const parsedConfig = parseImageHostingConfig(findConfigValue("image-hosting"));
       setImageHostingDraft(parsedConfig);
@@ -317,6 +375,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setSecurityDraft({ ...SECURITY_TEMPLATE });
         markDirty("security");
         return;
+      case "sitemap":
+        setSitemapDraft({ ...SITEMAP_TEMPLATE });
+        markDirty("sitemap");
+        return;
       case "image-hosting":
         setImageHostingDraft(cloneImageHostingConfig(IMAGE_HOSTING_TEMPLATE));
         setImageHostingProviderTab(IMAGE_HOSTING_TEMPLATE.defaultProvider);
@@ -340,6 +402,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       case "security":
         setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
         clearDirty("security");
+        return;
+      case "sitemap":
+        setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
+        clearDirty("sitemap");
         return;
       case "image-hosting": {
         const parsedConfig = parseImageHostingConfig(findConfigValue("image-hosting"));
@@ -370,12 +436,17 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
           accessTokenTTLMinutes: securityDraft.accessTokenTTLMinutes,
           refreshTokenTTLMinutes: securityDraft.refreshTokenTTLMinutes
         };
+      case "sitemap":
+        return {
+          generationMode: sitemapDraft.generationMode,
+          maxUpdatedWithinDays: sitemapDraft.maxUpdatedWithinDays
+        };
       case "image-hosting":
         return cloneImageHostingConfig(imageHostingDraft) as unknown as Record<string, unknown>;
       default:
         return {};
     }
-  }, [editorDraft, imageHostingDraft, securityDraft, selectedKey, siteDraft]);
+  }, [editorDraft, imageHostingDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -636,6 +707,62 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                       }}
                       disabled={saving}
                     />
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
+            {selectedKey === "sitemap" ? (
+              <div className="rounded-md border border-slate-200 bg-white p-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-1.5 sm:col-span-2">
+                    <span className="text-xs font-semibold tracking-wide text-slate-600">生成规则</span>
+                    <Select
+                      value={sitemapDraft.generationMode}
+                      onValueChange={(value) => {
+                        setSitemapDraft((previous) => ({
+                          ...previous,
+                          generationMode: value as SitemapGenerationMode
+                        }));
+                        markDirty("sitemap");
+                      }}
+                      disabled={saving}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SITEMAP_GENERATION_MODE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-slate-500">
+                      {
+                        SITEMAP_GENERATION_MODE_OPTIONS.find((option) => option.value === sitemapDraft.generationMode)
+                          ?.description
+                      }
+                    </p>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-semibold tracking-wide text-slate-600">最多纳入最近更新天数</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      value={String(sitemapDraft.maxUpdatedWithinDays)}
+                      onChange={(event) => {
+                        setSitemapDraft((previous) => ({
+                          ...previous,
+                          maxUpdatedWithinDays: normalizeIntegerInput(event.target.value, previous.maxUpdatedWithinDays)
+                        }));
+                        markDirty("sitemap");
+                      }}
+                      disabled={saving}
+                    />
+                    <p className="text-xs text-slate-500">仅在“最近更新文档”规则下生效，范围 1-3650。</p>
                   </label>
                 </div>
               </div>

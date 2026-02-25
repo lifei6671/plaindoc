@@ -115,6 +115,8 @@ func newRouter(
 	authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
 	// 首页 SSR 服务：负责首页/分类页可见性过滤、分类导航和缓存策略配置读取。
 	homeService := service.NewHomeService(spaceRepo, spaceCategoryRepo, systemConfigRepo)
+	// sitemap 服务：负责公开空间/文档 URL 的收敛输出。
+	sitemapService := service.NewSitemapService(db, systemConfigRepo)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
 	visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 	// 阅读页服务：聚合空间树与文档正文，供 SSR worker 渲染。
@@ -123,6 +125,8 @@ func newRouter(
 	readerRenderCache := buildReaderRenderCache(cfg, logger, readerSSRDispatcher != nil)
 	// 首页 Handler：承接 SSR 渲染与登录态相关行为。
 	homeHandler := handler.NewHomeHandler(authService, homeService, cfg.WebOrigin)
+	// sitemap Handler：承接 /sitemap.xml 输出。
+	sitemapHandler := handler.NewSitemapHandler(sitemapService, cfg.WebOrigin)
 	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
 	readerPageHandler := handler.NewReaderPageHandler(
 		authService,
@@ -144,6 +148,13 @@ func newRouter(
 		c.Header("Cache-Control", "public, max-age=2592000, immutable")
 		c.FileFromFS("favicon.png", http.FS(view.MustStaticFS()))
 	})
+	// robots.txt
+	router.GET("/robots.txt", func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=3600, immutable")
+		c.FileFromFS("robots.txt", http.FS(view.MustStaticFS()))
+	})
+	// sitemap.xml
+	router.GET("/sitemap.xml", sitemapHandler.Sitemap)
 	// 首页：服务端渲染（SEO 主入口）。
 	router.GET("/", homeHandler.Home)
 	// 分类探索页：服务端渲染分类导航与分类空间列表。

@@ -20,6 +20,7 @@ var systemConfigValidators = map[string]func(map[string]any) error{
 	"editor":                        validateEditorConfig,
 	"security":                      validateSecurityConfig,
 	"image-hosting":                 validateImageHostingConfig,
+	SitemapConfigKey:                validateSitemapConfig,
 	HomepageAnonymousCacheConfigKey: validateHomepageAnonymousCacheConfig,
 }
 
@@ -387,6 +388,40 @@ func validateSecurityConfig(payload map[string]any) error {
 	}
 	if refreshTokenTTL < 60 || refreshTokenTTL > 43200 {
 		return fmt.Errorf("refreshTokenTTLMinutes must be between 60 and 43200")
+	}
+
+	return nil
+}
+
+func validateSitemapConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"generationMode":       {},
+		"maxUpdatedWithinDays": {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+
+	generationMode, err := getRequiredString(payload, "generationMode")
+	if err != nil {
+		return err
+	}
+	switch normalizeSitemapGenerationMode(generationMode) {
+	case SitemapGenerationModeAllPublic, SitemapGenerationModeUpdatedWithinDays:
+	default:
+		return fmt.Errorf("generationMode must be all_public/updated_within_days")
+	}
+
+	maxUpdatedWithinDays, err := getRequiredInt(payload, "maxUpdatedWithinDays")
+	if err != nil {
+		return err
+	}
+	if maxUpdatedWithinDays < sitemapMinMaxUpdatedWithinDays || maxUpdatedWithinDays > sitemapMaxMaxUpdatedWithinDays {
+		return fmt.Errorf(
+			"maxUpdatedWithinDays must be between %d and %d",
+			sitemapMinMaxUpdatedWithinDays,
+			sitemapMaxMaxUpdatedWithinDays,
+		)
 	}
 
 	return nil

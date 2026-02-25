@@ -1,0 +1,57 @@
+# =========================
+# 默认策略：拒绝一切
+# =========================
+User-agent: *
+Disallow: /
+
+Sitemap: /sitemap.xml
+
+# =========================
+# Google
+# =========================
+User-agent: Googlebot
+Allow: /$
+Allow: /r/*$
+Allow: /r/*/*$
+Disallow: /r/*/*/*
+Disallow: /
+
+# =========================
+# Bing
+# =========================
+User-agent: Bingbot
+Allow: /$
+Allow: /r/*$
+Allow: /r/*/*$
+Disallow: /r/*/*/*
+Disallow: /
+
+# =========================
+# OpenAI Search
+# =========================
+User-agent: OAI-SearchBot
+Allow: /$
+Allow: /r/*$
+Allow: /r/*/*$
+Disallow: /r/*/*/*
+Disallow: /
+
+# =========================
+# OpenAI Training
+# =========================
+User-agent: GPTBot
+Allow: /$
+Allow: /r/*$
+Allow: /r/*/*$
+Disallow: /r/*/*/*
+Disallow: /
+
+# =========================
+# ChatGPT User Fetch
+# =========================
+User-agent: ChatGPT-User
+Allow: /$
+Allow: /r/*$
+Allow: /r/*/*$
+Disallow: /r/*/*/*
+Disallow: /

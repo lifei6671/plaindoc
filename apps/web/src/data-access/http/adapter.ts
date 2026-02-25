@@ -1228,7 +1228,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig[]>("/admin/system-configs");
     },
     async upsertSystemConfig(input: {
-      configKey: "site" | "editor" | "security" | "image-hosting";
+      configKey: "site" | "editor" | "security" | "image-hosting" | "sitemap";
       value: Record<string, unknown>;
       expectedVersion?: number;
     }) {
