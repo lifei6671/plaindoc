@@ -148,7 +148,7 @@ func newRouter(
 	// 站点 favicon 走根路径直出，避免 302 重定向带来的额外 RTT。
 	router.GET("/favicon.ico", func(c *gin.Context) {
 		c.Header("Cache-Control", "public, max-age=2592000, immutable")
-		c.FileFromFS("favicon.png", http.FS(view.MustStaticFS()))
+		c.FileFromFS("favicon.ico", http.FS(view.MustStaticFS()))
 	})
 	// robots.txt
 	router.GET("/robots.txt", func(c *gin.Context) {
