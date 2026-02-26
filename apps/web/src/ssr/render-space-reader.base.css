@@ -24,19 +24,43 @@ a {
   border-right: 1px solid #dbe2ea;
   background: #fff;
   padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   position: sticky;
   top: 0;
   z-index: 60;
   align-self: stretch;
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
+}
+.reader-sidebar__header {
+  flex-shrink: 0;
+  background: #fff;
 }
 .reader-sidebar__title {
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 15px;
   font-weight: 700;
   color: #111827;
+}
+.reader-sidebar__tree-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+.reader-sidebar__footer {
+  flex-shrink: 0;
+  margin: 2px -14px -18px;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
 }
 .reader-tree,
 .reader-tree__children {
