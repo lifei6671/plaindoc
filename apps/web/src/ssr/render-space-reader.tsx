@@ -1,8 +1,10 @@
 import katexStyleText from "katex/dist/katex.min.css?inline";
 import { ChevronDown, Lock, LockOpen } from "lucide-react";
+import MarkdownIt from "markdown-it";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import { PREVIEW_BODY_CLASS, PREVIEW_BODY_ID } from "../editor/constants";
+import { parseTocFromMarkdown } from "../editor/markdown-utils";
 import { buildPreviewThemeStyleText, getPreviewThemeClassName } from "../editor/preview-style";
 import {
   BUILTIN_PREVIEW_THEME_TEMPLATES,
@@ -17,6 +19,17 @@ import { buildReaderMarkdownRenderer } from "./markdown-shared";
 import type { ReaderPagePayload, ReaderTreeNode } from "./ssr-types";
 
 const SEO_TITLE_SUFFIX = "PlainDoc - 一个适合中小团队文档在线管理系统";
+const readerTocParser = new MarkdownIt({
+  html: false,
+  linkify: true,
+  typographer: false
+});
+
+interface ReaderOutlineItem {
+  index: number;
+  level: number;
+  text: string;
+}
 
 interface SpaceReaderRenderHead {
   title: string;
@@ -294,6 +307,24 @@ function composeSEOTitle(title: string): string {
   return `${normalizedTitle} - ${SEO_TITLE_SUFFIX}`;
 }
 
+function buildReaderOutlineItems(markdownContent: string): ReaderOutlineItem[] {
+  const parsedItems = parseTocFromMarkdown(markdownContent, readerTocParser).items;
+  const outlineItems: ReaderOutlineItem[] = [];
+  for (let index = 0; index < parsedItems.length; index += 1) {
+    const item = parsedItems[index];
+    const headingText = item.text.trim();
+    if (!headingText) {
+      continue;
+    }
+    outlineItems.push({
+      index: outlineItems.length,
+      level: Math.min(6, Math.max(1, item.level)),
+      text: headingText
+    });
+  }
+  return outlineItems;
+}
+
 // renderSpaceReader 将阅读页 payload 渲染为完整 HTML 文档字符串。
 export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRenderResult {
   const startedAt = Date.now();
@@ -320,6 +351,8 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const authorNickname = payload.document.authorNickname.trim() || "未知作者";
   const documentMeta = `空间：${spaceTitle} · 作者：${authorNickname} · ${updatedMeta}`;
   const documentVisibilityMarker = hasDeniedAccess ? null : renderVisibilityMarker(payload.document.visibility);
+  const readerOutlineItems = hasDeniedAccess ? [] : buildReaderOutlineItems(payload.document.contentMd);
+  const hasReaderOutline = readerOutlineItems.length > 0;
   const spaceLandingPath = `/r/${encodeURIComponent(payload.space.id)}`;
   const loginPath = `/login?redirect=${encodeURIComponent(canonicalPath)}`;
 
@@ -365,7 +398,31 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
               本文档使用 <a href="https://github.com/lifei6671/plaindoc" title="PlainDoc" target="_blank">PlainDoc</a> 发布
             </div>
           </aside>
-          <main className="reader-main" data-reader-hook="main">
+          <main
+            className="reader-main"
+            data-reader-hook="main"
+            data-reader-outline={hasReaderOutline ? "1" : undefined}
+          >
+            {hasReaderOutline ? (
+              <aside className="reader-outline" data-reader-hook="outline" aria-label="文档大纲">
+                <div className="reader-outline__title">文档大纲</div>
+                <ol className="reader-outline__list">
+                  {readerOutlineItems.map((item) => (
+                    <li key={`${item.index}-${item.level}`} className="reader-outline__item">
+                      <button
+                        type="button"
+                        className="reader-outline__link"
+                        data-reader-hook="outline-link"
+                        data-outline-index={item.index}
+                        style={{ paddingLeft: `${12 + (item.level - 1) * 12}px` }}
+                      >
+                        {item.text}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </aside>
+            ) : null}
             <div
               id="plaindoc-reader-article-shell"
               className="reader-article-shell"

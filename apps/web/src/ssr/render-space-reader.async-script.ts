@@ -22,6 +22,13 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const KATEX_STYLE_ID = "plaindoc-reader-katex-style";
   const THEME_STYLE_ID = "plaindoc-reader-theme-style";
   const THEME_CUSTOM_STYLE_ID = "plaindoc-reader-theme-custom-style";
+  const OUTLINE_SELECTOR = "[data-reader-hook='outline']";
+  const OUTLINE_LINK_SELECTOR = "[data-reader-hook='outline-link'][data-outline-index]";
+  const OUTLINE_LINK_ACTIVE_CLASS = "reader-outline__link--active";
+  const PREVIEW_HEADING_SELECTOR =
+    "#plaindoc-preview-body h1, #plaindoc-preview-body h2, #plaindoc-preview-body h3, #plaindoc-preview-body h4, #plaindoc-preview-body h5, #plaindoc-preview-body h6";
+  const OUTLINE_SCROLL_OFFSET = 16;
+  const OUTLINE_ACTIVE_OFFSET = 108;
   const queryActiveRow = () => document.querySelector(TREE_ROW_ACTIVE_SELECTOR);
 
   const normalizePathname = (pathname) => pathname.replace(/\\/+$/, "") || "/";
@@ -253,6 +260,143 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     }
   };
 
+  let outlineLinks = [];
+  let outlineHeadings = [];
+  let outlineRAF = 0;
+
+  const collectOutlineLinks = () =>
+    Array.from(document.querySelectorAll(OUTLINE_LINK_SELECTOR)).filter((node) => node instanceof HTMLElement);
+
+  const collectOutlineHeadings = () =>
+    Array.from(document.querySelectorAll(PREVIEW_HEADING_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement && String(node.textContent || "").trim().length > 0
+    );
+
+  const clearOutlineActiveState = () => {
+    for (const linkNode of outlineLinks) {
+      if (!(linkNode instanceof HTMLElement)) {
+        continue;
+      }
+      linkNode.classList.remove(OUTLINE_LINK_ACTIVE_CLASS);
+    }
+  };
+
+  const setOutlineActiveIndex = (activeIndex) => {
+    for (const linkNode of outlineLinks) {
+      if (!(linkNode instanceof HTMLElement)) {
+        continue;
+      }
+      const linkIndex = Number(linkNode.getAttribute("data-outline-index"));
+      const isActive = Number.isFinite(linkIndex) && linkIndex === activeIndex;
+      linkNode.classList.toggle(OUTLINE_LINK_ACTIVE_CLASS, isActive);
+    }
+  };
+
+  const resolveOutlineActiveIndex = () => {
+    const readerMain = document.querySelector(MAIN_SELECTOR);
+    if (!(readerMain instanceof HTMLElement) || !outlineHeadings.length) {
+      return null;
+    }
+    const readerMainRect = readerMain.getBoundingClientRect();
+    let activeIndex = 0;
+    for (let headingIndex = 0; headingIndex < outlineHeadings.length; headingIndex += 1) {
+      const headingNode = outlineHeadings[headingIndex];
+      if (!(headingNode instanceof HTMLElement)) {
+        continue;
+      }
+      const relativeTop = headingNode.getBoundingClientRect().top - readerMainRect.top;
+      if (relativeTop <= OUTLINE_ACTIVE_OFFSET) {
+        activeIndex = headingIndex;
+        continue;
+      }
+      break;
+    }
+    return activeIndex;
+  };
+
+  const syncOutlineActiveState = () => {
+    if (!outlineLinks.length || !outlineHeadings.length) {
+      clearOutlineActiveState();
+      return;
+    }
+    const activeIndex = resolveOutlineActiveIndex();
+    if (!Number.isFinite(activeIndex)) {
+      clearOutlineActiveState();
+      return;
+    }
+    setOutlineActiveIndex(activeIndex);
+  };
+
+  const scheduleOutlineActiveSync = () => {
+    if (outlineRAF) {
+      window.cancelAnimationFrame(outlineRAF);
+    }
+    outlineRAF = window.requestAnimationFrame(() => {
+      outlineRAF = 0;
+      syncOutlineActiveState();
+    });
+  };
+
+  const refreshOutlineRegistry = () => {
+    outlineLinks = collectOutlineLinks();
+    outlineHeadings = collectOutlineHeadings();
+    scheduleOutlineActiveSync();
+  };
+
+  const scrollToOutlineIndex = (outlineIndex) => {
+    const readerMain = document.querySelector(MAIN_SELECTOR);
+    if (!(readerMain instanceof HTMLElement)) {
+      return;
+    }
+    if (!Number.isFinite(outlineIndex) || outlineIndex < 0 || outlineIndex >= outlineHeadings.length) {
+      return;
+    }
+    const targetHeading = outlineHeadings[outlineIndex];
+    if (!(targetHeading instanceof HTMLElement)) {
+      return;
+    }
+    const readerMainRect = readerMain.getBoundingClientRect();
+    const targetTop =
+      targetHeading.getBoundingClientRect().top - readerMainRect.top + readerMain.scrollTop - OUTLINE_SCROLL_OFFSET;
+    readerMain.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: "smooth"
+    });
+    setOutlineActiveIndex(outlineIndex);
+  };
+
+  const replaceReaderOutline = (nextDocument) => {
+    const readerMain = document.querySelector(MAIN_SELECTOR);
+    if (!(readerMain instanceof HTMLElement)) {
+      return false;
+    }
+    const currentOutlineNode = document.querySelector(OUTLINE_SELECTOR);
+    const nextOutlineNode = nextDocument.querySelector(OUTLINE_SELECTOR);
+    if (!(nextOutlineNode instanceof HTMLElement)) {
+      if (currentOutlineNode instanceof HTMLElement) {
+        currentOutlineNode.remove();
+      }
+      readerMain.removeAttribute("data-reader-outline");
+      return true;
+    }
+
+    const importedOutlineNode = document.importNode(nextOutlineNode, true);
+    if (currentOutlineNode instanceof HTMLElement) {
+      currentOutlineNode.replaceWith(importedOutlineNode);
+    } else {
+      const articleShellNode = document.querySelector(ARTICLE_SHELL_SELECTOR);
+      if (articleShellNode instanceof HTMLElement && articleShellNode.parentElement === readerMain) {
+        readerMain.insertBefore(importedOutlineNode, articleShellNode);
+      } else if (readerMain.firstChild) {
+        readerMain.insertBefore(importedOutlineNode, readerMain.firstChild);
+      } else {
+        readerMain.appendChild(importedOutlineNode);
+      }
+    }
+    readerMain.setAttribute("data-reader-outline", "1");
+    return true;
+  };
+
   let inflightController = null;
   let inflightSeq = 0;
   const loadReaderPage = async (targetURL, pushHistory) => {
@@ -298,6 +442,10 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         window.location.assign(targetURL.toString());
         return;
       }
+      if (!replaceReaderOutline(parsedDocument)) {
+        window.location.assign(targetURL.toString());
+        return;
+      }
 
       syncDocumentHead(parsedDocument, targetURL);
       syncHeadStyleByID(GOOGLE_SANS_CODE_STYLE_ID, parsedDocument);
@@ -313,6 +461,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       if (readerMain instanceof HTMLElement) {
         readerMain.scrollTop = 0;
       }
+      refreshOutlineRegistry();
       if (pushHistory) {
         window.history.pushState({ reader: true }, "", targetURL.toString());
       }
@@ -336,6 +485,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   try {
     expandAncestorsForActiveRow();
     markActiveTreeItemByPathname(window.location.pathname);
+    refreshOutlineRegistry();
   } catch {
     // no-op: initialization enhancement should never block rendering.
   }
@@ -345,6 +495,21 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       "click",
       (event) => {
         if (!(event.target instanceof Element)) {
+          return;
+        }
+
+        const outlineLink = event.target.closest(OUTLINE_LINK_SELECTOR);
+        if (outlineLink instanceof HTMLElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          const outlineIndex = Number(outlineLink.getAttribute("data-outline-index"));
+          if (!Number.isFinite(outlineIndex)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          scrollToOutlineIndex(Math.max(0, Math.floor(outlineIndex)));
           return;
         }
 
@@ -410,6 +575,16 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     });
   } catch {
     // no-op: history enhancement should never block rendering.
+  }
+
+  try {
+    const readerMain = document.querySelector(MAIN_SELECTOR);
+    if (readerMain instanceof HTMLElement) {
+      readerMain.addEventListener("scroll", scheduleOutlineActiveSync, { passive: true });
+    }
+    window.addEventListener("resize", refreshOutlineRegistry, { passive: true });
+  } catch {
+    // no-op: outline enhancement should never block rendering.
   }
 
   try {
