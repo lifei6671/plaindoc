@@ -33,6 +33,15 @@ type imageHostingHandler struct {
 	localImageRootDir   string
 }
 
+type imageHostingClientConfigResponse struct {
+	Local imageHostingClientLocalConfig `json:"local"`
+}
+
+type imageHostingClientLocalConfig struct {
+	UploadEndpoint string `json:"uploadEndpoint"`
+	PublicBaseURL  string `json:"publicBaseUrl"`
+}
+
 // NewImageHostingHandler 创建图床配置与上传处理器。
 func NewImageHostingHandler(
 	authService *service.AuthService,
@@ -63,7 +72,16 @@ func (h *imageHostingHandler) GetConfig(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
-	response.JSON(c, http.StatusOK, config)
+	response.JSON(c, http.StatusOK, mapImageHostingClientConfig(config))
+}
+
+func mapImageHostingClientConfig(config service.ImageHostingConfig) imageHostingClientConfigResponse {
+	return imageHostingClientConfigResponse{
+		Local: imageHostingClientLocalConfig{
+			UploadEndpoint: config.Local.UploadEndpoint,
+			PublicBaseURL:  config.Local.PublicBaseURL,
+		},
+	}
 }
 
 // UploadImage 接收本地图片上传并返回可访问地址。

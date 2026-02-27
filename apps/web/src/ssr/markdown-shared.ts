@@ -91,7 +91,8 @@ export function buildReaderMarkdownRenderer(
     if (baseAnchorRenderer) {
       return createElement(baseAnchorRenderer as never, anchorProps as never);
     }
-    return createElement("a", anchorProps);
+    const { node: _node, ...nativeAnchorProps } = anchorProps;
+    return createElement("a", nativeAnchorProps);
   };
   const components: Components = {
     ...baseComponents,

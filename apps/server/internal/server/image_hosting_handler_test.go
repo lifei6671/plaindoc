@@ -36,21 +36,24 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 		t.Fatalf("expected get image-hosting config status 200, got %d body=%s", getConfigRec.Code, getConfigRec.Body.String())
 	}
 
-	configPayload := decodeJSONResultData[struct {
-		DefaultProvider string `json:"defaultProvider"`
-		Local           struct {
-			UploadEndpoint string `json:"uploadEndpoint"`
-			PublicBaseURL  string `json:"publicBaseUrl"`
-		} `json:"local"`
-	}](t, getConfigRec.Body.Bytes())
-	if configPayload.DefaultProvider != "local" {
-		t.Fatalf("expected default provider local, got %s", configPayload.DefaultProvider)
+	configPayload := decodeJSONResultData[map[string]any](t, getConfigRec.Body.Bytes())
+	localConfig, ok := configPayload["local"].(map[string]any)
+	if !ok || localConfig == nil {
+		t.Fatalf("expected local config object in response, got %+v", configPayload)
 	}
-	if configPayload.Local.UploadEndpoint != "/api/uploads/images" {
-		t.Fatalf("expected local upload endpoint /api/uploads/images, got %s", configPayload.Local.UploadEndpoint)
+	uploadEndpoint, _ := localConfig["uploadEndpoint"].(string)
+	publicBaseURL, _ := localConfig["publicBaseUrl"].(string)
+	if uploadEndpoint != "/api/uploads/images" {
+		t.Fatalf("expected local upload endpoint /api/uploads/images, got %s", uploadEndpoint)
 	}
-	if configPayload.Local.PublicBaseURL != "/uploads" {
-		t.Fatalf("expected local public base url /uploads, got %s", configPayload.Local.PublicBaseURL)
+	if publicBaseURL != "/uploads" {
+		t.Fatalf("expected local public base url /uploads, got %s", publicBaseURL)
+	}
+	if _, exists := configPayload["cloudflareR2"]; exists {
+		t.Fatalf("unexpected cloudflareR2 config in client response: %+v", configPayload["cloudflareR2"])
+	}
+	if _, exists := configPayload["aliyunOss"]; exists {
+		t.Fatalf("unexpected aliyunOss config in client response: %+v", configPayload["aliyunOss"])
 	}
 
 	imageBytes := decodeTinyPNG(t)
@@ -107,13 +110,20 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	if getConfigAfterInsertRec.Code != http.StatusOK {
 		t.Fatalf("expected get image-hosting config status 200 after insert, got %d body=%s", getConfigAfterInsertRec.Code, getConfigAfterInsertRec.Body.String())
 	}
-	configAfterInsertPayload := decodeJSONResultData[struct {
-		Local struct {
-			PublicBaseURL string `json:"publicBaseUrl"`
-		} `json:"local"`
-	}](t, getConfigAfterInsertRec.Body.Bytes())
-	if configAfterInsertPayload.Local.PublicBaseURL != "/uploads" {
-		t.Fatalf("expected normalized local public base url /uploads, got %s", configAfterInsertPayload.Local.PublicBaseURL)
+	configAfterInsertPayload := decodeJSONResultData[map[string]any](t, getConfigAfterInsertRec.Body.Bytes())
+	insertedLocalConfig, ok := configAfterInsertPayload["local"].(map[string]any)
+	if !ok || insertedLocalConfig == nil {
+		t.Fatalf("expected local config object after insert, got %+v", configAfterInsertPayload)
+	}
+	insertedPublicBaseURL, _ := insertedLocalConfig["publicBaseUrl"].(string)
+	if insertedPublicBaseURL != "/uploads" {
+		t.Fatalf("expected normalized local public base url /uploads, got %s", insertedPublicBaseURL)
+	}
+	if _, exists := configAfterInsertPayload["cloudflareR2"]; exists {
+		t.Fatalf("unexpected cloudflareR2 config leak after insert: %+v", configAfterInsertPayload["cloudflareR2"])
+	}
+	if _, exists := configAfterInsertPayload["aliyunOss"]; exists {
+		t.Fatalf("unexpected aliyunOss config leak after insert: %+v", configAfterInsertPayload["aliyunOss"])
 	}
 
 	disabledUploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes, map[string]string{
