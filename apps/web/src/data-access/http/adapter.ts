@@ -30,6 +30,8 @@ import {
   type DocumentGateway,
   type DocumentRevision,
   type ImageHostingGateway,
+  type LocalizeRemoteImagesInput,
+  type LocalizeRemoteImagesResult,
   type MoveNodeInput,
   type SaveDocumentInput,
   type SaveDocumentResult,
@@ -510,6 +512,43 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         method: "PUT",
         body: JSON.stringify(input)
       });
+    },
+    async localizeRemoteImages(input: LocalizeRemoteImagesInput) {
+      const documentID = input.docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      const imageURLs = Array.isArray(input.imageUrls)
+        ? input.imageUrls
+            .map((item) => (typeof item === "string" ? item.trim() : ""))
+            .filter((item) => item.length > 0)
+        : [];
+      if (!imageURLs.length) {
+        return { localizedUrls: {} };
+      }
+      const payload = await request<LocalizeRemoteImagesResult>(
+        `/docs/${documentID}/remote-images/localize`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            imageUrls: imageURLs
+          })
+        }
+      );
+      const localizedURLsRecord =
+        payload.localizedUrls && typeof payload.localizedUrls === "object"
+          ? payload.localizedUrls
+          : {};
+      const normalizedLocalizedURLs: Record<string, string> = {};
+      for (const [rawSourceURL, rawLocalizedURL] of Object.entries(localizedURLsRecord)) {
+        const sourceURL = rawSourceURL.trim();
+        const localizedURL = typeof rawLocalizedURL === "string" ? rawLocalizedURL.trim() : "";
+        if (!sourceURL || !localizedURL) {
+          continue;
+        }
+        normalizedLocalizedURLs[sourceURL] = resolveBackendPublicUrl(localizedURL, options.baseUrl);
+      }
+      return { localizedUrls: normalizedLocalizedURLs };
     },
     async listRevisions(docId: string) {
       return request<DocumentRevision[]>(`/docs/${docId}/revisions`);

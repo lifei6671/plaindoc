@@ -113,6 +113,12 @@ var (
 		Code:    CodeInvalidRequest,
 		Message: "invalid save document request",
 	}
+	// WorkspaceErrLocalizeRemoteImagesRequest 对应场景：invalid localize remote images request
+	WorkspaceErrLocalizeRemoteImagesRequest = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidRequest,
+		Message: "invalid localize remote images request",
+	}
 	// WorkspaceErrBaseversionRequired 对应场景：baseVersion is required
 	WorkspaceErrBaseversionRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,

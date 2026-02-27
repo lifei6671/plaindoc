@@ -233,6 +233,8 @@ func newRouter(
 		api.GET("/docs/:docId", accessHandler.GetDocument)
 		// 保存文档（包含版本冲突检测链路）。
 		api.PUT("/docs/:docId", workspaceHandler.SaveDocument)
+		// 外链图片转存（编辑器粘贴链路前端失败时的服务端兜底）。
+		api.POST("/docs/:docId/remote-images/localize", workspaceHandler.LocalizeDocumentRemoteImages)
 		// 获取文档历史修订列表。
 		api.GET("/docs/:docId/revisions", workspaceHandler.ListRevisions)
 		// 更新文档可见性。

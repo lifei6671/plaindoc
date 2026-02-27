@@ -122,6 +122,14 @@ type saveWorkspaceDocumentResponse struct {
 	Document workspaceDocumentResponse `json:"document"`
 }
 
+type localizeDocumentRemoteImagesRequest struct {
+	ImageURLs []string `json:"imageUrls"`
+}
+
+type localizeDocumentRemoteImagesResponse struct {
+	LocalizedURLs map[string]string `json:"localizedUrls"`
+}
+
 type workspaceTreeNode struct {
 	ID         string
 	DocumentID *string
@@ -799,15 +807,13 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		return
 	}
 
-	localizedContentMD := h.localizeRemoteImageURLsInMarkdown(c.Request.Context(), documentID, req.ContentMD)
-
 	now := time.Now().UTC()
 	nextVersion := current.Version + 1
 	revision := &models.DocumentRevision{
 		DocumentRevisionID: strings.ToLower(ulid.Make().String()),
 		DocumentID:         documentID,
 		Version:            nextVersion,
-		ContentMD:          localizedContentMD,
+		ContentMD:          req.ContentMD,
 		BaseVersion:        req.BaseVersion,
 		EditorUserID:       &actorUserID,
 		Source:             models.RevisionSourceRemote,
@@ -817,7 +823,7 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		DocumentID:  documentID,
 		BaseVersion: req.BaseVersion,
 		NextVersion: nextVersion,
-		ContentMD:   localizedContentMD,
+		ContentMD:   req.ContentMD,
 		ActorUserID: actorUserID,
 		NodeID:      current.NodeID,
 		SpaceID:     spaceID,
@@ -852,12 +858,71 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		h.renderCache.PurgeDoc(documentID)
 	}
 
-	current.ContentMD = localizedContentMD
+	current.ContentMD = req.ContentMD
 	current.Version = nextVersion
 	current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
 
 	response.JSON(c, http.StatusOK, saveWorkspaceDocumentResponse{
 		Document: mapWorkspaceDocumentResponse(current),
+	})
+}
+
+// LocalizeDocumentRemoteImages 将指定文档中的外链图片 URL 转存到本地并返回映射关系。
+func (h *workspaceHandler) LocalizeDocumentRemoteImages(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil {
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+
+	var req localizeDocumentRemoteImagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.WorkspaceErrLocalizeRemoteImagesRequest.Write(c)
+		return
+	}
+
+	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrDocumentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(currentRecord.SpaceID)
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.WorkspaceErrSpaceNotFound.Write(c)
+		case errors.Is(err, service.ErrSpaceAccessDenied):
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	localizedURLs := h.localizeRemoteImageURLs(c.Request.Context(), documentID, req.ImageURLs)
+	if len(localizedURLs) == 0 {
+		response.JSON(c, http.StatusOK, localizeDocumentRemoteImagesResponse{
+			LocalizedURLs: map[string]string{},
+		})
+		return
+	}
+
+	response.JSON(c, http.StatusOK, localizeDocumentRemoteImagesResponse{
+		LocalizedURLs: localizedURLs,
 	})
 }
 

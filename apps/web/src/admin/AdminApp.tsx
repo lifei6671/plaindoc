@@ -295,6 +295,13 @@ const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "系统治理", keys: ["themes", "system", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
+const ADMIN_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
+const ADMIN_DEFAULT_PAGE_TITLE = "管理后台";
+
+function composeAdminBrowserTitle(pageTitle: string): string {
+  const normalizedTitle = pageTitle.trim() || ADMIN_DEFAULT_PAGE_TITLE;
+  return `${normalizedTitle} - ${ADMIN_TITLE_EXTRA_METADATA}`;
+}
 
 function buildMenuGroups(menuItems: AdminMenuItem[]): Array<{ label: string; items: AdminMenuItem[] }> {
   return ADMIN_MENU_GROUPS
@@ -517,6 +524,34 @@ export function AdminApp({
     () => resolveActiveMenu(adminMenuItems, location.pathname),
     [adminMenuItems, location.pathname]
   );
+  const currentAdminPageTitle = useMemo(() => {
+    if (!activeUser) {
+      return "管理后台登录";
+    }
+    if (checking || isAdminIdentityLoading) {
+      return ADMIN_DEFAULT_PAGE_TITLE;
+    }
+    if (adminIdentityError || !adminIdentity || adminMenuItems.length === 0) {
+      return "无管理后台权限";
+    }
+    const activeMenuKey = activeMenuItem?.key ?? adminMenuItems[0]?.key ?? "dashboard";
+    return renderPlaceholderContent(activeMenuKey).title;
+  }, [
+    activeMenuItem,
+    activeUser,
+    adminIdentity,
+    adminIdentityError,
+    adminMenuItems,
+    checking,
+    isAdminIdentityLoading
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.document.title = composeAdminBrowserTitle(currentAdminPageTitle);
+  }, [currentAdminPageTitle]);
 
   useEffect(() => {
     if (!adminIdentity || !adminMenuItems.length) {

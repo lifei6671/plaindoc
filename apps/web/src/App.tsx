@@ -139,6 +139,7 @@ const REGISTER_ROUTE_PATH = "/register";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
 const ADMIN_SPACES_ROUTE_PATH = `${ADMIN_ROUTE_BASE_PATH}/spaces`;
 const AUTO_SAVE_DEBOUNCE_MS = 800;
+const EDITOR_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
 
 export type AppRoute =
   | { kind: "login" }
@@ -155,6 +156,25 @@ interface EditorAccessErrorState {
   spaceId: string | null;
   description: string;
   technicalMessage?: string | null;
+}
+
+function normalizeBrowserTitleSegment(value: string, fallback: string): string {
+  const normalized = value.trim();
+  return normalized || fallback;
+}
+
+function composeEditorBrowserTitle(input: {
+  documentTitle: string;
+  spaceName: string;
+  extraMetadata: string;
+}): string {
+  const documentTitle = normalizeBrowserTitleSegment(input.documentTitle, "未命名文档");
+  const spaceName = normalizeBrowserTitleSegment(input.spaceName, "未命名空间");
+  const metadata = input.extraMetadata.trim();
+  if (!metadata) {
+    return `正在编辑 ${documentTitle} - ${spaceName}`;
+  }
+  return `正在编辑 ${documentTitle} - ${spaceName} - ${metadata}`;
 }
 
 function normalizeRoutePath(pathname: string): string {
@@ -760,6 +780,8 @@ export default function App() {
   const isImageUploadingRef = useRef(isImageUploading);
   // 当前空间引用：用于上传请求附带空间上下文，服务端可做写权限校验。
   const activeSpaceIDRef = useRef(activeSpaceId);
+  // 当前文档引用：用于外链图片后端兜底转储时携带文档上下文。
+  const activeDocIDRef = useRef(activeDocId);
   // 图片选择器引用：供“插入图片”按钮主动触发系统文件选择框。
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   // 工作区宽度与折叠状态：支持侧栏拖拽调宽与隐藏。
@@ -1103,6 +1125,11 @@ export default function App() {
     activeSpaceIDRef.current = activeSpaceId;
   }, [activeSpaceId]);
 
+  // 同步当前文档引用，保证后端兜底转储使用最新文档上下文。
+  useEffect(() => {
+    activeDocIDRef.current = activeDocId;
+  }, [activeDocId]);
+
   useEffect(() => {
     latestContentRef.current = content;
   }, [content]);
@@ -1227,7 +1254,9 @@ export default function App() {
       setStatusMessage(`正在转存 ${remoteImageURLs.length} 张外链图片...`);
 
       const imageURLMapping = new Map<string, string>();
-      const failedMessages: string[] = [];
+      const frontendFailedImageURLs: string[] = [];
+      let backendFallbackError: unknown = null;
+      let backendFallbackSuccessCount = 0;
       try {
         for (const [index, remoteImageURL] of remoteImageURLs.entries()) {
           try {
@@ -1244,20 +1273,59 @@ export default function App() {
               spaceId: spaceID,
               error
             });
-            failedMessages.push(`${remoteImageURL}：${formatError(error)}`);
+            frontendFailedImageURLs.push(remoteImageURL);
           } finally {
             setImageUploadCompletedCount((previousCount) => previousCount + 1);
           }
         }
 
-        if (imageURLMapping.size) {
-          setStatusMessage(`已转存 ${imageURLMapping.size} 张外链图片`);
-          toast.success(`外链图片转存成功（${imageURLMapping.size}/${remoteImageURLs.length}）`);
+        if (frontendFailedImageURLs.length) {
+          const documentID = activeDocIDRef.current?.trim() ?? "";
+          if (!documentID) {
+            backendFallbackError = new Error("当前未打开文档，无法调用后端转存接口");
+          } else {
+            try {
+              const fallbackResult = await dataGateway.document.localizeRemoteImages({
+                docId: documentID,
+                imageUrls: frontendFailedImageURLs
+              });
+              const pendingFallbackURLSet = new Set(frontendFailedImageURLs);
+              for (const [sourceImageURL, localizedImageURL] of Object.entries(
+                fallbackResult.localizedUrls ?? {}
+              )) {
+                const sourceURL = sourceImageURL.trim();
+                const mappedURL = localizedImageURL.trim();
+                if (!sourceURL || !mappedURL || !pendingFallbackURLSet.has(sourceURL)) {
+                  continue;
+                }
+                if (!imageURLMapping.has(sourceURL)) {
+                  backendFallbackSuccessCount += 1;
+                }
+                imageURLMapping.set(sourceURL, mappedURL);
+              }
+            } catch (error) {
+              backendFallbackError = error;
+              console.error("[editor][image-localize] 后端兜底转存失败", {
+                failedImageURLs: frontendFailedImageURLs,
+                docId: documentID,
+                error
+              });
+            }
+          }
         }
-        if (failedMessages.length) {
-          const firstError = failedMessages[0];
-          setStatusMessage(`外链图片转存失败：${firstError}`);
-          toast.error(`部分外链图片转存失败：${firstError}`);
+
+        const unresolvedImageURLs = remoteImageURLs.filter((imageURL) => !imageURLMapping.has(imageURL));
+        if (imageURLMapping.size) {
+          const fallbackSuffix =
+            backendFallbackSuccessCount > 0 ? `（后端兜底 ${backendFallbackSuccessCount} 张）` : "";
+          setStatusMessage(`已转存 ${imageURLMapping.size} 张外链图片${fallbackSuffix}`);
+          toast.success(`外链图片转存成功（${imageURLMapping.size}/${remoteImageURLs.length}）${fallbackSuffix}`);
+        }
+        if (unresolvedImageURLs.length) {
+          const firstFailedImageURL = unresolvedImageURLs[0];
+          const fallbackErrorMessage = backendFallbackError ? `；后端兜底失败：${formatError(backendFallbackError)}` : "";
+          setStatusMessage(`外链图片转存失败：${firstFailedImageURL}${fallbackErrorMessage}`);
+          toast.error(`部分外链图片转存失败：${firstFailedImageURL}${fallbackErrorMessage}`);
         }
         return replaceMarkdownImageURLs(markdownContent, imageURLMapping);
       } catch (error) {
@@ -1726,6 +1794,20 @@ export default function App() {
     routeSpaceId,
     saveStatus
   ]);
+
+  // 编辑器页面标题规则：正在编辑[文档标题] - [空间名称] - [额外元数据]。
+  useEffect(() => {
+    const metadata = EDITOR_TITLE_EXTRA_METADATA;
+    if (isEditorRoute && activeUser && activeDocId) {
+      window.document.title = composeEditorBrowserTitle({
+        documentTitle: activeDocumentTitle,
+        spaceName: activeSpaceName,
+        extraMetadata: metadata
+      });
+      return;
+    }
+    window.document.title = metadata;
+  }, [activeDocId, activeDocumentTitle, activeSpaceName, activeUser, isEditorRoute]);
 
   // 重新校验空间访问权限：触发一次路由同步 effect 即可。
   const retryEditorAccessCheck = useCallback(() => {

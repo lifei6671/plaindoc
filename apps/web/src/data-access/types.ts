@@ -96,6 +96,15 @@ export interface SaveDocumentResult {
   document: Document;
 }
 
+export interface LocalizeRemoteImagesInput {
+  docId: string;
+  imageUrls: string[];
+}
+
+export interface LocalizeRemoteImagesResult {
+  localizedUrls: Record<string, string>;
+}
+
 // 用户配置键值读写参数：用于 user_config 表抽象。
 export type UserConfigUserId = string | number;
 
@@ -144,6 +153,7 @@ export interface WorkspaceGateway {
 export interface DocumentGateway {
   getDocument(docId: string): Promise<Document>;
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
+  localizeRemoteImages(input: LocalizeRemoteImagesInput): Promise<LocalizeRemoteImagesResult>;
   listRevisions(docId: string): Promise<DocumentRevision[]>;
   setDocumentTheme(docId: string, themeId: string): Promise<Document>;
   updateDocumentVisibility(docId: string, visibility: Visibility): Promise<Document>;

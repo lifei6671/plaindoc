@@ -124,9 +124,6 @@ export function AuthPanel({
           <div className="space-y-2">
             <CardTitle className="text-2xl tracking-tight">{headingText}</CardTitle>
             <CardDescription>{introText}</CardDescription>
-            {redirectTarget ? (
-              <p className="text-xs leading-5 text-slate-500">登录后将返回来源页面</p>
-            ) : null}
           </div>
         </CardHeader>
         <CardContent>

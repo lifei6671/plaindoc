@@ -347,11 +347,9 @@ a {
   cursor: pointer;
   margin-left: -1px;
   padding: 7px 8px 7px 11px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 .reader-outline__link:hover {

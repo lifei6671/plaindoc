@@ -39,6 +39,27 @@ func (h *workspaceHandler) localizeRemoteImageURLsInMarkdown(
 		return markdownContent
 	}
 
+	remoteImageURLs := extractRemoteImageURLsFromMarkdown(markdownContent)
+	imageURLMapping := h.localizeRemoteImageURLs(ctx, documentID, remoteImageURLs)
+	if len(imageURLMapping) == 0 {
+		return markdownContent
+	}
+	return replaceMarkdownImageURLs(markdownContent, imageURLMapping)
+}
+
+func (h *workspaceHandler) localizeRemoteImageURLs(
+	ctx context.Context,
+	documentID string,
+	remoteImageURLs []string,
+) map[string]string {
+	if h == nil {
+		return map[string]string{}
+	}
+	normalizedRemoteImageURLs := normalizeRemoteImageURLs(remoteImageURLs)
+	if len(normalizedRemoteImageURLs) == 0 {
+		return map[string]string{}
+	}
+
 	config := service.DefaultImageHostingConfig()
 	if h.imageHostingService != nil {
 		loadedConfig, err := h.imageHostingService.GetConfig(ctx)
@@ -46,13 +67,9 @@ func (h *workspaceHandler) localizeRemoteImageURLsInMarkdown(
 			config = loadedConfig
 		}
 	}
-	remoteImageURLs := extractRemoteImageURLsFromMarkdown(markdownContent)
-	if len(remoteImageURLs) == 0 {
-		return markdownContent
-	}
 
-	imageURLMapping := make(map[string]string, len(remoteImageURLs))
-	for _, remoteImageURL := range remoteImageURLs {
+	imageURLMapping := make(map[string]string, len(normalizedRemoteImageURLs))
+	for _, remoteImageURL := range normalizedRemoteImageURLs {
 		if h.shouldSkipRemoteImageLocalize(documentID, remoteImageURL) {
 			continue
 		}
@@ -64,11 +81,7 @@ func (h *workspaceHandler) localizeRemoteImageURLsInMarkdown(
 		h.clearRemoteImageLocalizeFailure(documentID, remoteImageURL)
 		imageURLMapping[remoteImageURL] = localURL
 	}
-
-	if len(imageURLMapping) == 0 {
-		return markdownContent
-	}
-	return replaceMarkdownImageURLs(markdownContent, imageURLMapping)
+	return imageURLMapping
 }
 
 func (h *workspaceHandler) downloadAndPersistRemoteImage(
@@ -259,6 +272,23 @@ func extractRemoteImageURLsFromMarkdown(markdownContent string) []string {
 		remoteImageURLs = append(remoteImageURLs, imageURL)
 	}
 	return remoteImageURLs
+}
+
+func normalizeRemoteImageURLs(remoteImageURLs []string) []string {
+	normalizedRemoteImageURLs := make([]string, 0, len(remoteImageURLs))
+	seenImageURLSet := make(map[string]struct{}, len(remoteImageURLs))
+	for _, rawImageURL := range remoteImageURLs {
+		imageURL := strings.TrimSpace(rawImageURL)
+		if !isRemoteImageURL(imageURL) {
+			continue
+		}
+		if _, exists := seenImageURLSet[imageURL]; exists {
+			continue
+		}
+		seenImageURLSet[imageURL] = struct{}{}
+		normalizedRemoteImageURLs = append(normalizedRemoteImageURLs, imageURL)
+	}
+	return normalizedRemoteImageURLs
 }
 
 func replaceMarkdownImageURLs(markdownContent string, imageURLMapping map[string]string) string {
