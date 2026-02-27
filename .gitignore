@@ -157,3 +157,5 @@ uploads/
 
 dist/
 dist-ssr/
+
+.omx/

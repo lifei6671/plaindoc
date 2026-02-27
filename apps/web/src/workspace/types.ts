@@ -52,7 +52,7 @@ export interface WorkspaceBootstrapInput {
 export interface WorkspaceMoveNodeInput {
   nodeId: string;
   targetParentId: string | null;
-  targetSort?: number;
+  targetIndex: number;
 }
 
 // 目录树新增参数：用于创建文档或目录节点。

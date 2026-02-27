@@ -82,8 +82,8 @@ export interface UpdateNodeInput {
 // 目录节点移动参数：用于后续拖拽排序扩展点。
 export interface MoveNodeInput {
   nodeId: string;
-  parentId: string | null;
-  sort?: number;
+  targetParentId: string | null;
+  targetIndex: number;
 }
 
 export interface SaveDocumentInput {
@@ -135,8 +135,8 @@ export interface WorkspaceGateway {
   createNode(input: CreateNodeInput): Promise<CreateNodeResult>;
   updateNode(input: UpdateNodeInput): Promise<void>;
   deleteNode(nodeId: string): Promise<void>;
-  // 目录移动（扩展点）：本期可不实现，后续用于拖拽排序。
-  moveNode?(input: MoveNodeInput): Promise<void>;
+  // 目录移动：用于目录树拖拽排序（同级重排 + 跨父级移动）。
+  moveNode(input: MoveNodeInput): Promise<void>;
   // 空间删除（扩展点）：本期可不实现，后续用于空间管理。
   deleteSpace?(spaceId: string): Promise<void>;
 }

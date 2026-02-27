@@ -11,6 +11,12 @@ import (
 var (
 	// ErrInvalidSession 表示会话不存在、已吊销或刷新 token 与会话不匹配。
 	ErrInvalidSession = errors.New("invalid session")
+	// ErrWorkspaceMoveTargetParentNotFound 表示移动目标父节点不存在。
+	ErrWorkspaceMoveTargetParentNotFound = errors.New("workspace move target parent not found")
+	// ErrWorkspaceMoveTargetParentNotInSameSpace 表示目标父节点不在同一空间。
+	ErrWorkspaceMoveTargetParentNotInSameSpace = errors.New("workspace move target parent not in same space")
+	// ErrWorkspaceMoveCycleDetected 表示目标父节点在当前节点子树内，形成循环父子。
+	ErrWorkspaceMoveCycleDetected = errors.New("workspace move cycle detected")
 )
 
 // UserRepository 用户仓储最小接口，服务层可按需扩展。
@@ -225,6 +231,16 @@ type WorkspaceSaveDocumentParams struct {
 	Revision    *models.DocumentRevision
 }
 
+// WorkspaceMoveNodeParams 工作区节点移动参数（支持同级重排与跨父级移动）。
+type WorkspaceMoveNodeParams struct {
+	NodeID             string
+	TargetParentNodeID *string
+	TargetIndex        int
+	ActorUserID        string
+	TouchSpace         string
+	TouchedAt          time.Time
+}
+
 // WorkspaceRepository 编辑器工作区仓储接口。
 type WorkspaceRepository interface {
 	ListSpacesByActor(ctx context.Context, actorUserID string) ([]WorkspaceSpaceListRecord, error)
@@ -240,6 +256,7 @@ type WorkspaceRepository interface {
 	GetMaxNodeSort(ctx context.Context, spaceID string, parentNodeID *string) (int, error)
 	CreateNode(ctx context.Context, params WorkspaceCreateNodeParams) error
 	UpdateNode(ctx context.Context, params WorkspaceUpdateNodeParams) error
+	MoveNode(ctx context.Context, params WorkspaceMoveNodeParams) error
 	DeleteNode(ctx context.Context, nodeID string, touchSpace string, touchedAt time.Time) (bool, error)
 	GetDocumentByDocumentID(ctx context.Context, documentID string) (*WorkspaceDocumentRecord, error)
 	SaveDocument(ctx context.Context, params WorkspaceSaveDocumentParams) (bool, error)

@@ -15,6 +15,7 @@ interface WorkspaceSidebarProps {
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
+  onMoveNode: (input: { nodeId: string; targetParentId: string | null; targetIndex: number }) => Promise<void>;
   activeDocId: string | null;
 }
 
@@ -27,6 +28,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   onUpdateDocumentVisibility,
   onRenameNode,
   onDeleteNode,
+  onMoveNode,
   activeDocId
 }: WorkspaceSidebarProps) {
   return (
@@ -42,6 +44,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
         onUpdateDocumentVisibility={onUpdateDocumentVisibility}
         onRenameNode={onRenameNode}
         onDeleteNode={onDeleteNode}
+        onMoveNode={onMoveNode}
       />
     </aside>
   );

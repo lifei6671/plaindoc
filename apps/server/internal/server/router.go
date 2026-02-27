@@ -222,6 +222,8 @@ func newRouter(
 		api.POST("/spaces/:spaceId/nodes", workspaceHandler.CreateNode)
 		// 更新节点（重命名、移动、排序等）。
 		api.PATCH("/nodes/:nodeId", workspaceHandler.UpdateNode)
+		// 移动节点（拖拽排序专用：同级重排 + 跨父级移动）。
+		api.POST("/nodes/:nodeId/move", workspaceHandler.MoveNode)
 		// 删除节点（目录递归删除与文档联动清理）。
 		api.DELETE("/nodes/:nodeId", workspaceHandler.DeleteNode)
 		// 更新空间可见性（public/authenticated/member）。

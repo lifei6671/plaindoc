@@ -34,6 +34,7 @@ const (
 	CodeInvalidSpaceName        = "INVALID_SPACE_NAME"
 	CodeInvalidSpaceCategory    = "INVALID_SPACE_CATEGORY"
 	CodeInvalidNodeID           = "INVALID_NODE_ID"
+	CodeInvalidNodeMove         = "INVALID_NODE_MOVE"
 	CodePasswordConfirmMismatch = "PASSWORD_CONFIRM_MISMATCH"
 
 	// 3000 段：资源不存在。
@@ -106,6 +107,7 @@ var errorCodeRegistry = map[string]int{
 	CodePasswordConfirmMismatch: 2035,
 	"INVALID_CURRENT_PASSWORD":  2036,
 	"INVALID_NEW_PASSWORD":      2037,
+	CodeInvalidNodeMove:         2038,
 
 	// 3000 段：资源不存在。
 	CodeRouteNotFound:           3001,

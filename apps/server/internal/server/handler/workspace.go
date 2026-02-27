@@ -101,6 +101,11 @@ type updateWorkspaceNodeRequest struct {
 	Sort     *int    `json:"sort"`
 }
 
+type moveWorkspaceNodeRequest struct {
+	TargetParentID *string `json:"targetParentId"`
+	TargetIndex    *int    `json:"targetIndex"`
+}
+
 type saveWorkspaceDocumentRequest struct {
 	ContentMD   string `json:"contentMd"`
 	BaseVersion int    `json:"baseVersion" binding:"required"`
@@ -572,6 +577,88 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 
 	if h != nil && h.renderCache != nil && node.Type == models.NodeTypeDoc {
 		// 文档节点标题变更会影响阅读页展示，按文档维度主动失效缓存。
+		h.renderCache.PurgeDoc(strings.TrimSpace(node.NodeID))
+	}
+
+	response.JSON(c, http.StatusOK, struct{}{})
+}
+
+// MoveNode 移动目录节点（支持同级重排与跨父级移动）。
+func (h *workspaceHandler) MoveNode(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil {
+		response.InternalError(c)
+		return
+	}
+
+	nodeID := strings.TrimSpace(c.Param("nodeId"))
+	if nodeID == "" {
+		response.WorkspaceErrNodeIDRequired.Write(c)
+		return
+	}
+
+	var req moveWorkspaceNodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.WorkspaceErrMoveNodeRequest.Write(c)
+		return
+	}
+	if req.TargetIndex == nil || *req.TargetIndex < 0 {
+		response.WorkspaceErrMoveNodeRequest.Write(c)
+		return
+	}
+
+	node, err := h.workspaceRepo.GetNodeByNodeID(c.Request.Context(), nodeID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrNodeNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(node.SpaceID)
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.WorkspaceErrSpaceNotFound.Write(c)
+		case errors.Is(err, service.ErrSpaceAccessDenied):
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	now := time.Now().UTC()
+	if err := h.workspaceRepo.MoveNode(c.Request.Context(), repository.WorkspaceMoveNodeParams{
+		NodeID:             nodeID,
+		TargetParentNodeID: normalizeOptionalString(req.TargetParentID),
+		TargetIndex:        *req.TargetIndex,
+		ActorUserID:        actorUserID,
+		TouchSpace:         spaceID,
+		TouchedAt:          now,
+	}); err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			response.WorkspaceErrNodeNotFound.Write(c)
+		case errors.Is(err, repository.ErrWorkspaceMoveTargetParentNotFound):
+			response.WorkspaceErrParentNodeNotFound.Write(c)
+		case errors.Is(err, repository.ErrWorkspaceMoveTargetParentNotInSameSpace):
+			response.WorkspaceErrParentNodeNotTargetSpace.Write(c)
+		case errors.Is(err, repository.ErrWorkspaceMoveCycleDetected):
+			response.WorkspaceErrNodeMoveCycleDetected.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	if h != nil && h.renderCache != nil && node.Type == models.NodeTypeDoc {
+		// 文档节点位置变化会影响阅读页树结构，按文档维度主动清理缓存。
 		h.renderCache.PurgeDoc(strings.TrimSpace(node.NodeID))
 	}
 

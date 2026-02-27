@@ -403,19 +403,15 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
     [dataGateway.workspace, defaultSpaceName, ensureSpaceReady]
   );
 
-  // 目录拖拽排序扩展点：本期默认未实现，仅保留调用入口。
+  // 目录拖拽排序：支持同级重排与跨父级移动。
   const moveNode = useCallback(
     async (input: WorkspaceMoveNodeInput): Promise<void> => {
-      const moveHandler = dataGateway.workspace.moveNode;
-      if (!moveHandler) {
-        throw new Error("moveNode 尚未实现：该能力保留给后续拖拽排序阶段。");
-      }
       const moveInput: MoveNodeInput = {
         nodeId: input.nodeId,
-        parentId: input.targetParentId,
-        sort: input.targetSort
+        targetParentId: input.targetParentId,
+        targetIndex: input.targetIndex
       };
-      await moveHandler(moveInput);
+      await dataGateway.workspace.moveNode(moveInput);
       await reloadTree();
     },
     [dataGateway.workspace, reloadTree]

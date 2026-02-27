@@ -30,6 +30,7 @@ import {
   type DocumentGateway,
   type DocumentRevision,
   type ImageHostingGateway,
+  type MoveNodeInput,
   type SaveDocumentInput,
   type SaveDocumentResult,
   type Space,
@@ -487,6 +488,15 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     async deleteNode(nodeId: string) {
       await request<void>(`/nodes/${nodeId}`, {
         method: "DELETE"
+      });
+    },
+    async moveNode(input: MoveNodeInput) {
+      await request<void>(`/nodes/${input.nodeId}/move`, {
+        method: "POST",
+        body: JSON.stringify({
+          targetParentId: input.targetParentId,
+          targetIndex: input.targetIndex
+        })
       });
     }
   };

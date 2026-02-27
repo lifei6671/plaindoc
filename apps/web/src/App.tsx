@@ -594,6 +594,7 @@ export default function App() {
     updateDocumentVisibility,
     renameNode,
     deleteNode,
+    moveNode,
     openDocument,
     setContent,
     setBaseVersion,
@@ -1545,6 +1546,24 @@ export default function App() {
     [deleteNode]
   );
 
+  // 目录拖拽排序动作：支持同级重排与跨父级移动。
+  const handleMoveWorkspaceNode = useCallback(
+    async (input: { nodeId: string; targetParentId: string | null; targetIndex: number }): Promise<void> => {
+      try {
+        await moveNode({
+          nodeId: input.nodeId,
+          targetParentId: input.targetParentId,
+          targetIndex: input.targetIndex
+        });
+        setStatusMessage("目录顺序已更新");
+      } catch (error) {
+        setStatusMessage(`拖拽排序失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [moveNode]
+  );
+
   // 文档可见性动作：供目录树右侧菜单直接切换 public/authenticated/member。
   const handleUpdateWorkspaceDocumentVisibility = useCallback(
     async (docId: string, visibility: "public" | "authenticated" | "member"): Promise<void> => {
@@ -2115,6 +2134,7 @@ export default function App() {
             onUpdateDocumentVisibility={handleUpdateWorkspaceDocumentVisibility}
             onRenameNode={handleRenameWorkspaceNode}
             onDeleteNode={handleDeleteWorkspaceNode}
+            onMoveNode={handleMoveWorkspaceNode}
           />
         </div>
         <div className="workspace-sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="工作区宽度调节">

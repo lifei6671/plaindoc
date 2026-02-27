@@ -77,6 +77,12 @@ var (
 		Code:    CodeInvalidRequest,
 		Message: "invalid update node request",
 	}
+	// WorkspaceErrMoveNodeRequest 对应场景：invalid move node request
+	WorkspaceErrMoveNodeRequest = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidRequest,
+		Message: "invalid move node request",
+	}
 	// WorkspaceErrNodeNotFound 对应场景：node not found
 	WorkspaceErrNodeNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
@@ -88,6 +94,12 @@ var (
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
 		Message: "node cannot be its own parent",
+	}
+	// WorkspaceErrNodeMoveCycleDetected 对应场景：node cannot move to its own descendant
+	WorkspaceErrNodeMoveCycleDetected = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidNodeMove,
+		Message: "node cannot move to its own descendant",
 	}
 	// WorkspaceErrDocumentIDRequired 对应场景：document id is required
 	WorkspaceErrDocumentIDRequired = ErrorTemplate{

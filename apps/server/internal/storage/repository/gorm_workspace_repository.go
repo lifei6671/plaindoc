@@ -451,6 +451,113 @@ func (r *gormWorkspaceRepository) UpdateNode(
 	})
 }
 
+func (r *gormWorkspaceRepository) MoveNode(
+	ctx context.Context,
+	params WorkspaceMoveNodeParams,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("workspace repository db is nil")
+	}
+
+	nodeID := strings.TrimSpace(params.NodeID)
+	if nodeID == "" {
+		return gorm.ErrRecordNotFound
+	}
+	if params.TargetIndex < 0 {
+		return fmt.Errorf("workspace move target index must be >= 0")
+	}
+
+	actorUserID := strings.TrimSpace(params.ActorUserID)
+	touchedAt := params.TouchedAt
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		type nodeRow struct {
+			NodeID       string  `gorm:"column:node_id"`
+			SpaceID      string  `gorm:"column:space_id"`
+			ParentNodeID *string `gorm:"column:parent_node_id"`
+		}
+
+		var moving nodeRow
+		if err := tx.Table("nodes").
+			Select("node_id", "space_id", "parent_node_id").
+			Where("node_id = ?", nodeID).
+			Take(&moving).Error; err != nil {
+			return err
+		}
+
+		spaceID := strings.TrimSpace(moving.SpaceID)
+		oldParentNodeID := trimOptionalString(moving.ParentNodeID)
+		targetParentNodeID := trimOptionalString(params.TargetParentNodeID)
+
+		if targetParentNodeID != nil {
+			if *targetParentNodeID == nodeID {
+				return ErrWorkspaceMoveCycleDetected
+			}
+			if err := ensureWorkspaceMoveParentPathValid(tx, spaceID, nodeID, *targetParentNodeID); err != nil {
+				return err
+			}
+		}
+
+		// 同父级内重排：只需重建一个同级序列。
+		if optionalStringEqual(oldParentNodeID, targetParentNodeID) {
+			siblingNodeIDs, err := listWorkspaceSiblingNodeIDs(tx, spaceID, oldParentNodeID, nodeID)
+			if err != nil {
+				return err
+			}
+			reorderedNodeIDs := insertWorkspaceNodeIDAt(siblingNodeIDs, nodeID, params.TargetIndex)
+			if err := resequenceWorkspaceSiblingNodes(
+				tx,
+				reorderedNodeIDs,
+				oldParentNodeID,
+				actorUserID,
+				touchedAt,
+			); err != nil {
+				return err
+			}
+		} else {
+			// 跨父级移动：旧父级移除后重排，新父级插入后重排。
+			oldSiblingNodeIDs, err := listWorkspaceSiblingNodeIDs(tx, spaceID, oldParentNodeID, nodeID)
+			if err != nil {
+				return err
+			}
+			newSiblingNodeIDs, err := listWorkspaceSiblingNodeIDs(tx, spaceID, targetParentNodeID, nodeID)
+			if err != nil {
+				return err
+			}
+			reorderedTargetNodeIDs := insertWorkspaceNodeIDAt(newSiblingNodeIDs, nodeID, params.TargetIndex)
+
+			if err := resequenceWorkspaceSiblingNodes(
+				tx,
+				oldSiblingNodeIDs,
+				oldParentNodeID,
+				actorUserID,
+				touchedAt,
+			); err != nil {
+				return err
+			}
+			if err := resequenceWorkspaceSiblingNodes(
+				tx,
+				reorderedTargetNodeIDs,
+				targetParentNodeID,
+				actorUserID,
+				touchedAt,
+			); err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Table("spaces").
+			Where("space_id = ?", spaceID).
+			Update("updated_at", touchedAt).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 func (r *gormWorkspaceRepository) DeleteNode(
 	ctx context.Context,
 	nodeID string,
@@ -680,4 +787,145 @@ func trimOptionalString(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func optionalStringEqual(left *string, right *string) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.TrimSpace(*left) == strings.TrimSpace(*right)
+}
+
+func insertWorkspaceNodeIDAt(nodeIDs []string, nodeID string, index int) []string {
+	if index < 0 {
+		index = 0
+	}
+	if index > len(nodeIDs) {
+		index = len(nodeIDs)
+	}
+
+	items := make([]string, 0, len(nodeIDs)+1)
+	items = append(items, nodeIDs[:index]...)
+	items = append(items, nodeID)
+	items = append(items, nodeIDs[index:]...)
+	return items
+}
+
+func listWorkspaceSiblingNodeIDs(
+	tx *gorm.DB,
+	spaceID string,
+	parentNodeID *string,
+	excludeNodeID string,
+) ([]string, error) {
+	type siblingRow struct {
+		NodeID string `gorm:"column:node_id"`
+	}
+
+	query := tx.Table("nodes").
+		Select("node_id").
+		Where("space_id = ?", strings.TrimSpace(spaceID))
+	if parentNodeID == nil {
+		query = query.Where("parent_node_id IS NULL")
+	} else {
+		query = query.Where("parent_node_id = ?", strings.TrimSpace(*parentNodeID))
+	}
+	if normalizedExcludeNodeID := strings.TrimSpace(excludeNodeID); normalizedExcludeNodeID != "" {
+		query = query.Where("node_id <> ?", normalizedExcludeNodeID)
+	}
+
+	var rows []siblingRow
+	if err := query.Order("sort ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	nodeIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		normalizedNodeID := strings.TrimSpace(row.NodeID)
+		if normalizedNodeID == "" {
+			continue
+		}
+		nodeIDs = append(nodeIDs, normalizedNodeID)
+	}
+	return nodeIDs, nil
+}
+
+func resequenceWorkspaceSiblingNodes(
+	tx *gorm.DB,
+	nodeIDs []string,
+	parentNodeID *string,
+	actorUserID string,
+	touchedAt time.Time,
+) error {
+	for index, nodeID := range nodeIDs {
+		updateValues := map[string]any{
+			"parent_node_id": parentNodeID,
+			"sort":           index + 1,
+			"updated_at":     touchedAt,
+		}
+		if actorUserID != "" {
+			updateValues["updated_by_user_id"] = actorUserID
+		}
+
+		updateResult := tx.Table("nodes").
+			Where("node_id = ?", nodeID).
+			Updates(updateValues)
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+		if updateResult.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+	}
+	return nil
+}
+
+func ensureWorkspaceMoveParentPathValid(
+	tx *gorm.DB,
+	spaceID string,
+	nodeID string,
+	targetParentNodeID string,
+) error {
+	type parentRow struct {
+		NodeID       string  `gorm:"column:node_id"`
+		SpaceID      string  `gorm:"column:space_id"`
+		ParentNodeID *string `gorm:"column:parent_node_id"`
+	}
+
+	visitedNodeIDs := make(map[string]struct{})
+	currentNodeID := strings.TrimSpace(targetParentNodeID)
+	for currentNodeID != "" {
+		if currentNodeID == strings.TrimSpace(nodeID) {
+			return ErrWorkspaceMoveCycleDetected
+		}
+		if _, duplicated := visitedNodeIDs[currentNodeID]; duplicated {
+			// 数据异常时直接阻止移动，避免陷入循环链。
+			return ErrWorkspaceMoveCycleDetected
+		}
+		visitedNodeIDs[currentNodeID] = struct{}{}
+
+		var parent parentRow
+		if err := tx.Table("nodes").
+			Select("node_id", "space_id", "parent_node_id").
+			Where("node_id = ?", currentNodeID).
+			Take(&parent).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrWorkspaceMoveTargetParentNotFound
+			}
+			return err
+		}
+
+		if strings.TrimSpace(parent.SpaceID) != strings.TrimSpace(spaceID) {
+			return ErrWorkspaceMoveTargetParentNotInSameSpace
+		}
+
+		nextParentNodeID := trimOptionalString(parent.ParentNodeID)
+		if nextParentNodeID == nil {
+			break
+		}
+		currentNodeID = strings.TrimSpace(*nextParentNodeID)
+	}
+	return nil
 }

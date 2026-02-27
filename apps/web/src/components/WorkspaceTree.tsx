@@ -26,6 +26,7 @@ import {
 } from "react";
 import {
   ControlledTreeEnvironment,
+  type DraggingPosition,
   InteractionMode,
   Tree,
   type TreeInformation,
@@ -79,6 +80,7 @@ interface WorkspaceTreeProps {
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
+  onMoveNode: (input: { nodeId: string; targetParentId: string | null; targetIndex: number }) => Promise<void>;
 }
 
 interface PendingCreateDraftNode {
@@ -230,6 +232,83 @@ function collectDescendantNodeIds(nodeId: string, nodeById: Map<string, TreeNode
   return descendantNodeIds;
 }
 
+interface WorkspaceNodeMoveTarget {
+  targetParentId: string | null;
+  targetIndex: number;
+}
+
+function clampWorkspaceMoveIndex(targetIndex: number, maxIndex: number): number {
+  if (targetIndex < 0) {
+    return 0;
+  }
+  if (targetIndex > maxIndex) {
+    return maxIndex;
+  }
+  return targetIndex;
+}
+
+function resolveWorkspaceNodeMoveTarget(
+  target: DraggingPosition,
+  nodeById: Map<string, TreeNode>,
+  rootChildrenCount: number
+): WorkspaceNodeMoveTarget | null {
+  if (target.targetType === "root") {
+    return {
+      targetParentId: null,
+      targetIndex: rootChildrenCount
+    };
+  }
+
+  if (target.targetType === "item") {
+    const targetNodeID = String(target.targetItem);
+    if (targetNodeID === WORKSPACE_TREE_ROOT_ID) {
+      return {
+        targetParentId: null,
+        targetIndex: rootChildrenCount
+      };
+    }
+    const targetNode = nodeById.get(targetNodeID);
+    if (!targetNode) {
+      return null;
+    }
+    return {
+      targetParentId: targetNodeID,
+      targetIndex: targetNode.children.length
+    };
+  }
+
+  const parentNodeID = String(target.parentItem);
+  const targetParentId = parentNodeID === WORKSPACE_TREE_ROOT_ID ? null : parentNodeID;
+  const targetParentNode = targetParentId ? nodeById.get(targetParentId) : null;
+  if (targetParentId && !targetParentNode) {
+    return null;
+  }
+  const maxIndex = targetParentNode ? targetParentNode.children.length : rootChildrenCount;
+  return {
+    targetParentId,
+    targetIndex: clampWorkspaceMoveIndex(target.childIndex, maxIndex)
+  };
+}
+
+function findWorkspaceSiblingIndex(
+  nodeID: string,
+  nodeById: Map<string, TreeNode>,
+  rootNodes: TreeNode[]
+): number {
+  const node = nodeById.get(nodeID);
+  if (!node) {
+    return -1;
+  }
+  if (!node.parentId) {
+    return rootNodes.findIndex((candidateNode) => candidateNode.id === nodeID);
+  }
+  const parentNode = nodeById.get(node.parentId);
+  if (!parentNode) {
+    return -1;
+  }
+  return parentNode.children.findIndex((candidateNode) => candidateNode.id === nodeID);
+}
+
 function resolveVisibilityMarkerConfig(
   visibilityInput: Visibility | undefined
 ): { label: string; variant: "public" | "authenticated" | "member"; className: string } {
@@ -309,7 +388,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   onCreateNode,
   onUpdateDocumentVisibility,
   onRenameNode,
-  onDeleteNode
+  onDeleteNode,
+  onMoveNode
 }: WorkspaceTreeProps) {
   const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
   const [draftNodes, setDraftNodes] = useState<PendingCreateDraftNode[]>([]);
@@ -366,7 +446,34 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
   const [creatingDraftNodeIds, setCreatingDraftNodeIds] = useState<string[]>([]);
   const [isCreatingFirstDocument, setIsCreatingFirstDocument] = useState(false);
+  const [isDesktopDragEnabled, setIsDesktopDragEnabled] = useState(false);
   const creatingDraftNodeIdSet = useMemo(() => new Set(creatingDraftNodeIds), [creatingDraftNodeIds]);
+
+  // 拖拽排序仅在桌面端启用：依赖 hover + fine pointer 能力判断。
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mediaQuery = window.matchMedia(
+      "((hover: hover) and (pointer: fine)) or ((any-hover: hover) and (any-pointer: fine))"
+    );
+    const applyCapability = () => {
+      setIsDesktopDragEnabled(mediaQuery.matches);
+    };
+    applyCapability();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", applyCapability);
+      return () => {
+        mediaQuery.removeEventListener("change", applyCapability);
+      };
+    }
+
+    mediaQuery.addListener(applyCapability);
+    return () => {
+      mediaQuery.removeListener(applyCapability);
+    };
+  }, []);
 
   // 树结构变化时仅保留仍然存在的展开节点，不自动展开新节点。
   // 这样可以保持“默认全折叠”与“用户手动展开优先”。
@@ -839,6 +946,108 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     }
   }, [isCreatingFirstDocument, stageDraftNodeAndEnterInlineEdit]);
 
+  const canDragItems = useCallback(
+    (draggingItems: TreeItem<WorkspaceTreeItemData>[]): boolean => {
+      if (!isDesktopDragEnabled || editingNodeId !== null) {
+        return false;
+      }
+      if (draggingItems.length !== 1) {
+        return false;
+      }
+
+      const draggingNodeID = String(draggingItems[0]?.index ?? "");
+      if (!draggingNodeID || draggingNodeID === WORKSPACE_TREE_ROOT_ID) {
+        return false;
+      }
+      if (!nodeById.has(draggingNodeID)) {
+        return false;
+      }
+      if (draftNodeByID.has(draggingNodeID) || creatingDraftNodeIdSet.has(draggingNodeID)) {
+        return false;
+      }
+      return true;
+    },
+    [creatingDraftNodeIdSet, draftNodeByID, editingNodeId, isDesktopDragEnabled, nodeById]
+  );
+
+  const canDropAt = useCallback(
+    (draggingItems: TreeItem<WorkspaceTreeItemData>[], target: DraggingPosition): boolean => {
+      if (!isDesktopDragEnabled || draggingItems.length !== 1) {
+        return false;
+      }
+      const draggingNodeID = String(draggingItems[0]?.index ?? "");
+      if (!draggingNodeID || draggingNodeID === WORKSPACE_TREE_ROOT_ID) {
+        return false;
+      }
+      if (!nodeById.has(draggingNodeID) || draftNodeByID.has(draggingNodeID)) {
+        return false;
+      }
+
+      const moveTarget = resolveWorkspaceNodeMoveTarget(target, nodeById, mergedNodes.length);
+      if (!moveTarget) {
+        return false;
+      }
+      if (moveTarget.targetParentId === draggingNodeID) {
+        return false;
+      }
+      if (!moveTarget.targetParentId) {
+        return true;
+      }
+
+      const descendantNodeIdSet = new Set(collectDescendantNodeIds(draggingNodeID, nodeById));
+      return !descendantNodeIdSet.has(moveTarget.targetParentId);
+    },
+    [draftNodeByID, isDesktopDragEnabled, mergedNodes.length, nodeById]
+  );
+
+  const handleDropNodes = useCallback(
+    (draggingItems: TreeItem<WorkspaceTreeItemData>[], target: DraggingPosition) => {
+      if (draggingItems.length !== 1) {
+        return;
+      }
+      const draggingNodeID = String(draggingItems[0]?.index ?? "");
+      if (!draggingNodeID || draggingNodeID === WORKSPACE_TREE_ROOT_ID) {
+        return;
+      }
+
+      const moveTarget = resolveWorkspaceNodeMoveTarget(target, nodeById, mergedNodes.length);
+      if (!moveTarget || moveTarget.targetParentId === draggingNodeID) {
+        return;
+      }
+      if (moveTarget.targetParentId) {
+        const descendantNodeIdSet = new Set(collectDescendantNodeIds(draggingNodeID, nodeById));
+        if (descendantNodeIdSet.has(moveTarget.targetParentId)) {
+          return;
+        }
+      }
+
+      let targetIndex = moveTarget.targetIndex;
+      // 同父级重排时，目标 childIndex 是基于“含源节点”的序列，需要扣除原位偏移。
+      if (target.targetType === "between-items") {
+        const draggingNode = nodeById.get(draggingNodeID);
+        if (draggingNode) {
+          const currentParentId = draggingNode.parentId ?? null;
+          if (currentParentId === moveTarget.targetParentId) {
+            const currentSiblingIndex = findWorkspaceSiblingIndex(draggingNodeID, nodeById, mergedNodes);
+            if (currentSiblingIndex >= 0 && currentSiblingIndex < targetIndex) {
+              targetIndex -= 1;
+            }
+          }
+        }
+      }
+      targetIndex = clampWorkspaceMoveIndex(targetIndex, Number.MAX_SAFE_INTEGER);
+
+      void onMoveNode({
+        nodeId: draggingNodeID,
+        targetParentId: moveTarget.targetParentId,
+        targetIndex
+      }).catch((error) => {
+        toast.error(`拖拽排序失败：${formatError(error)}`);
+      });
+    },
+    [mergedNodes, mergedNodes.length, nodeById, onMoveNode]
+  );
+
   const renderTreeItem = useCallback(
     ({
       item,
@@ -874,10 +1083,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       };
       const interactiveType = context.isRenaming || isInlineEditing ? undefined : "button";
       const InteractiveComponent = context.isRenaming || isInlineEditing ? "div" : "button";
-      const treeInteractiveElementProps =
-        !isInlineEditing && currentNode?.type !== "doc"
-          ? ((context.interactiveElementProps as any) ?? {})
-          : {};
+      const treeInteractiveElementProps = !isInlineEditing ? ((context.interactiveElementProps as any) ?? {}) : {};
 
       const openCurrentDocument = () => {
         if (!currentDocumentID || isDraftNode) {
@@ -897,6 +1103,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             className={mergeClassNames(
               "group relative flex min-h-[36px] w-full cursor-pointer items-center rounded-[10px] pr-2 text-[14px] text-[#2f2f30]",
               isActive ? "bg-[#d9dade]" : "bg-transparent hover:bg-[#e8e8ea]",
+              context.isDraggingOver && "bg-[#d5e5ff]",
+              context.isDraggingOverParent && "bg-[#e6f0ff]",
               context.isFocused && "outline-none"
             )}
             style={rowStyle}
@@ -1261,11 +1469,16 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           viewState={viewState}
           autoFocus={false}
           defaultInteractionMode={InteractionMode.ClickArrowToExpand}
-          canDragAndDrop={false}
-          canDropOnFolder={false}
-          canReorderItems={false}
+          canDragAndDrop={isDesktopDragEnabled}
+          canDropOnFolder
+          canDropOnNonFolder
+          canReorderItems
+          canDropBelowOpenFolders
+          canDrag={canDragItems}
+          canDropAt={canDropAt}
           canSearch={false}
           canRename={false}
+          onDrop={handleDropNodes}
           onExpandItem={handleExpandNode}
           onCollapseItem={handleCollapseNode}
           onPrimaryAction={handlePrimaryAction}
@@ -1284,6 +1497,12 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             >
               {children}
             </ul>
+          )}
+          renderDragBetweenLine={({ lineProps }) => (
+            <div
+              {...lineProps}
+              className={mergeClassNames("rounded-full border-t-2 border-[#4a76d1]", lineProps.className)}
+            />
           )}
           renderItem={renderTreeItem}
         >
