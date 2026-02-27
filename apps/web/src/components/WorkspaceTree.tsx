@@ -1036,14 +1036,28 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         }
       }
       targetIndex = clampWorkspaceMoveIndex(targetIndex, Number.MAX_SAFE_INTEGER);
+      const autoExpandParentNodeID =
+        target.targetType === "item" && moveTarget.targetParentId ? moveTarget.targetParentId : null;
 
       void onMoveNode({
         nodeId: draggingNodeID,
         targetParentId: moveTarget.targetParentId,
         targetIndex
-      }).catch((error) => {
-        toast.error(`拖拽排序失败：${formatError(error)}`);
-      });
+      })
+        .then(() => {
+          if (!autoExpandParentNodeID) {
+            return;
+          }
+          setManuallyExpandedNodeIds((previousExpandedNodeIds) => {
+            if (previousExpandedNodeIds.includes(autoExpandParentNodeID)) {
+              return previousExpandedNodeIds;
+            }
+            return [...previousExpandedNodeIds, autoExpandParentNodeID];
+          });
+        })
+        .catch((error) => {
+          toast.error(`拖拽排序失败：${formatError(error)}`);
+        });
     },
     [mergedNodes, mergedNodes.length, nodeById, onMoveNode]
   );
@@ -1080,6 +1094,10 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         ...(context.itemContainerWithoutChildrenProps.style ?? {}),
         paddingLeft: `${8 + depth * 20}px`,
         cursor: "pointer"
+      };
+      const childDropLineStyle = {
+        left: `${8 + (depth + 1) * 20}px`,
+        right: "8px"
       };
       const interactiveType = context.isRenaming || isInlineEditing ? undefined : "button";
       const InteractiveComponent = context.isRenaming || isInlineEditing ? "div" : "button";
@@ -1383,6 +1401,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                 ) : null}
               </div>
             )}
+            {context.isDraggingOver ? (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute bottom-0 border-t-2 border-[#4a76d1]"
+                style={childDropLineStyle}
+              />
+            ) : null}
           </div>
           {children}
         </li>
