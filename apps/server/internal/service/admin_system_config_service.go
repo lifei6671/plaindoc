@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
@@ -258,6 +259,7 @@ func (s *AdminSystemConfigService) TestLDAPConnection(
 	input TestAdminSystemConfigLDAPConnectionInput,
 ) (err error) {
 	defer func() {
+		logit.SetRequestAttrs(ctx, logit.Error("errmsg", err))
 		err = errcode.MapAdminSystemConfigError(err)
 	}()
 
