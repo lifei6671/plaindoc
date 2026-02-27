@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -68,85 +69,85 @@ func MapAdminUserError(err error, targets ...AdminUserErrorTargets) error {
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "platform admin role is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidStatusFilter,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_STATUS",
+			Code:    response.CodeInvalidStatus,
 			Message: "status filter is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidStatus,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_STATUS",
+			Code:    response.CodeInvalidStatus,
 			Message: "status must be active or banned",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.BanReasonRequired,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_REASON",
+			Code:    response.CodeInvalidReason,
 			Message: "ban reason is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.NotFound,
 			Status:  http.StatusNotFound,
-			Code:    "USER_NOT_FOUND",
+			Code:    response.CodeUserNotFound,
 			Message: "user not found",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidUserID,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_USER_ID",
+			Code:    response.CodeInvalidUserID,
 			Message: "user id is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.SelfOperationBlocked,
 			Status:  http.StatusBadRequest,
-			Code:    "SELF_OPERATION_FORBIDDEN",
+			Code:    response.CodeSelfOperationForbidden,
 			Message: "self operation is not allowed",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.AlreadyDeleted,
 			Status:  http.StatusBadRequest,
-			Code:    "USER_DELETED",
+			Code:    response.CodeUserDeleted,
 			Message: "user has been deleted",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidEmail,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_EMAIL",
+			Code:    response.CodeInvalidEmail,
 			Message: "email is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidName,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_NAME",
+			Code:    response.CodeInvalidName,
 			Message: "name is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidPassword,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_PASSWORD",
+			Code:    response.CodeInvalidPassword,
 			Message: "password must be at least 6 characters",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.EmailAlreadyExists,
 			Status:  http.StatusConflict,
-			Code:    "EMAIL_ALREADY_EXISTS",
+			Code:    response.CodeEmailAlreadyExists,
 			Message: "email already exists",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidRole,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_ROLE",
+			Code:    response.CodeInvalidRole,
 			Message: "role must be user or space_admin or platform_admin",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.RoleForbidden,
 			Status:  http.StatusForbidden,
-			Code:    "ROLE_FORBIDDEN",
+			Code:    response.CodeRoleForbidden,
 			Message: "can not edit higher role user",
 		},
 	)

@@ -8,12 +8,12 @@ var (
 	RouterErrRouteNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeRouteNotFound,
-		Message: "route not found",
+		Message: "路由不存在",
 	}
 	// RouterErrMethodNotAllowed 对应场景：method not allowed
 	RouterErrMethodNotAllowed = ErrorTemplate{
 		Status:  http.StatusMethodNotAllowed,
 		Code:    CodeMethodNotAllowed,
-		Message: "method not allowed",
+		Message: "请求方法不被允许",
 	}
 )

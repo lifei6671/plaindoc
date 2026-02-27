@@ -9,90 +9,90 @@ var (
 	AuthErrRegistrationDisabled = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeRegistrationDisabled,
-		Message: "registration is disabled",
+		Message: "注册功能已关闭",
 	}
 	// AuthErrRequestBody 对应场景：invalid request body
 	AuthErrRequestBody = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid request body",
+		Message: "请求体无效",
 	}
 	// AuthErrEmail 对应场景：email is invalid
 	AuthErrEmail = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidEmail,
-		Message: "email is invalid",
+		Message: "邮箱格式无效",
 	}
 	// AuthErrPasswordLeast6Characters 对应场景：password must be at least 6 characters
 	AuthErrPasswordLeast6Characters = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidPassword,
-		Message: "password must be at least 6 characters",
+		Message: "密码长度至少为 6 位",
 	}
 	// AuthErrNameRequired 对应场景：name is required
 	AuthErrNameRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidName,
-		Message: "name is required",
+		Message: "名称不能为空",
 	}
 	// AuthErrEmailAlreadyExists 对应场景：email already exists
 	AuthErrEmailAlreadyExists = ErrorTemplate{
 		Status:  http.StatusConflict,
 		Code:    CodeEmailAlreadyExists,
-		Message: "email already exists",
+		Message: "邮箱已存在",
 	}
 	// AuthErrEmailPasswordRequired 对应场景：email and password are required
 	AuthErrEmailPasswordRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "email and password are required",
+		Message: "邮箱和密码不能为空",
 	}
 	// AuthErrEmailPassword 对应场景：invalid email or password
 	AuthErrEmailPassword = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeInvalidCredentials,
-		Message: "invalid email or password",
+		Message: "邮箱或密码错误",
 	}
 	// AuthErrUserHasBeenBanned 对应场景：user has been banned
 	AuthErrUserHasBeenBanned = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeUserBanned,
-		Message: "user has been banned",
+		Message: "用户已被封禁",
 	}
 	// AuthErrUserHasBeenDeleted 对应场景：user has been deleted
 	AuthErrUserHasBeenDeleted = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeUserDeleted,
-		Message: "user has been deleted",
+		Message: "用户已被删除",
 	}
 	// AuthErrRefreshTokenRequired 对应场景：refresh token is required
 	AuthErrRefreshTokenRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "refresh token is required",
+		Message: "缺少刷新令牌",
 	}
 	// AuthErrRefreshToken 对应场景：invalid refresh token
 	AuthErrRefreshToken = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "invalid refresh token",
+		Message: "刷新令牌无效",
 	}
 	// AuthErrUserNotFound 对应场景：user not found
 	AuthErrUserNotFound = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "user not found",
+		Message: "用户不存在",
 	}
 	// AuthErrAuthorizationTokenRequired 对应场景：authorization token is required
 	AuthErrAuthorizationTokenRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "authorization token is required",
+		Message: "缺少授权令牌",
 	}
 	// AuthErrAccessToken 对应场景：invalid access token
 	AuthErrAccessToken = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "invalid access token",
+		Message: "访问令牌无效",
 	}
 )

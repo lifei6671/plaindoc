@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -53,55 +54,55 @@ func MapAdminThemeError(err error, targets ...AdminThemeErrorTargets) error {
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "admin role is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidThemeID,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_THEME_ID",
+			Code:    response.CodeInvalidThemeID,
 			Message: "theme id is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidName,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_NAME",
+			Code:    response.CodeInvalidName,
 			Message: "theme name is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidSyntax,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_SYNTAX_THEME",
+			Code:    response.CodeInvalidSyntaxTheme,
 			Message: "syntax theme must be one-light or one-dark",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.AlreadyExists,
 			Status:  http.StatusConflict,
-			Code:    "THEME_ALREADY_EXISTS",
+			Code:    response.CodeThemeAlreadyExists,
 			Message: "theme id already exists",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.NoChanges,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_REQUEST",
+			Code:    response.CodeInvalidRequest,
 			Message: "theme update changes are required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.NotFound,
 			Status:  http.StatusNotFound,
-			Code:    "THEME_NOT_FOUND",
+			Code:    response.CodeThemeNotFound,
 			Message: "theme not found",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.BuiltinImmutable,
 			Status:  http.StatusBadRequest,
-			Code:    "THEME_BUILTIN_IMMUTABLE",
+			Code:    response.CodeThemeBuiltinImmutable,
 			Message: "builtin theme can not be modified",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InUse,
 			Status:  http.StatusConflict,
-			Code:    "THEME_IN_USE",
+			Code:    response.CodeThemeInUse,
 			Message: "theme is referenced by documents",
 		},
 	)

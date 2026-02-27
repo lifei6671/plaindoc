@@ -9,30 +9,30 @@ var (
 	ThemeErrDocumentIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidDocumentID,
-		Message: "document id is required",
+		Message: "文档 ID 不能为空",
 	}
 	// ThemeErrThemeIDRequired 对应场景：themeId is required
 	ThemeErrThemeIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "themeId is required",
+		Message: "themeId 参数不能为空",
 	}
 	// ThemeErrInvalidThemeIdThemeIDRequired 对应场景：theme id is required
 	ThemeErrInvalidThemeIdThemeIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidThemeID,
-		Message: "theme id is required",
+		Message: "主题 ID 不能为空",
 	}
 	// ThemeErrThemeNotFound 对应场景：theme not found
 	ThemeErrThemeNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeThemeNotFound,
-		Message: "theme not found",
+		Message: "主题不存在",
 	}
 	// ThemeErrDocumentNotFound 对应场景：document not found
 	ThemeErrDocumentNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeDocumentNotFound,
-		Message: "document not found",
+		Message: "文档不存在",
 	}
 )

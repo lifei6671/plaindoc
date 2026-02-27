@@ -81,8 +81,8 @@ func TestRouter_NoRouteUsesUnifiedErrorShape(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if payload.Code != response.ResolveErrorCode("ROUTE_NOT_FOUND") {
-		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode("ROUTE_NOT_FOUND"), payload.Code)
+	if payload.Code != response.ResolveErrorCode(response.CodeRouteNotFound) {
+		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode(response.CodeRouteNotFound), payload.Code)
 	}
 	if payload.RequestID == "" {
 		t.Fatal("expected requestId in response body")
@@ -113,8 +113,8 @@ func TestRouter_NoMethodUsesUnifiedErrorShape(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if payload.Code != response.ResolveErrorCode("METHOD_NOT_ALLOWED") {
-		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode("METHOD_NOT_ALLOWED"), payload.Code)
+	if payload.Code != response.ResolveErrorCode(response.CodeMethodNotAllowed) {
+		t.Fatalf("expected code %d, got %d", response.ResolveErrorCode(response.CodeMethodNotAllowed), payload.Code)
 	}
 	if payload.RequestID == "" {
 		t.Fatal("expected requestId in response body")

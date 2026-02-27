@@ -9,6 +9,7 @@ const (
 	// 1000 段：认证与权限。
 	CodeUnauthorized         = "UNAUTHORIZED"
 	CodeForbidden            = "FORBIDDEN"
+	CodeRoleForbidden        = "ROLE_FORBIDDEN"
 	CodeInvalidCredentials   = "INVALID_CREDENTIALS"
 	CodeRegistrationDisabled = "REGISTRATION_DISABLED"
 	CodeUserBanned           = "USER_BANNED"
@@ -19,6 +20,9 @@ const (
 	CodeInvalidEmail            = "INVALID_EMAIL"
 	CodeInvalidPassword         = "INVALID_PASSWORD"
 	CodeInvalidName             = "INVALID_NAME"
+	CodeInvalidRole             = "INVALID_ROLE"
+	CodeInvalidStatus           = "INVALID_STATUS"
+	CodeInvalidReason           = "INVALID_REASON"
 	CodeInvalidPage             = "INVALID_PAGE"
 	CodeInvalidPageSize         = "INVALID_PAGE_SIZE"
 	CodeInvalidUserID           = "INVALID_USER_ID"
@@ -26,33 +30,76 @@ const (
 	CodeInvalidDocumentID       = "INVALID_DOCUMENT_ID"
 	CodeInvalidThemeID          = "INVALID_THEME_ID"
 	CodeInvalidVisibility       = "INVALID_VISIBILITY"
+	CodeInvalidSource           = "INVALID_SOURCE"
 	CodeInvalidUploadFile       = "INVALID_UPLOAD_FILE"
 	CodeInvalidFilePath         = "INVALID_FILE_PATH"
 	CodeInvalidConfigKey        = "INVALID_CONFIG_KEY"
+	CodeInvalidConfigValue      = "INVALID_CONFIG_VALUE"
+	CodeInvalidExpectedVersion  = "INVALID_EXPECTED_VERSION"
+	CodeInvalidOperation        = "INVALID_OPERATION"
+	CodeInvalidModule           = "INVALID_MODULE"
+	CodeInvalidAction           = "INVALID_ACTION"
 	CodeInvalidFrom             = "INVALID_FROM"
 	CodeInvalidTo               = "INVALID_TO"
+	CodeInvalidTimeRange        = "INVALID_TIME_RANGE"
+	CodeInvalidMemberRole       = "INVALID_MEMBER_ROLE"
 	CodeInvalidSpaceName        = "INVALID_SPACE_NAME"
+	CodeInvalidCoverImage       = "INVALID_COVER_IMAGE"
+	CodeInvalidSyntaxTheme      = "INVALID_SYNTAX_THEME"
+	CodeInvalidDescription      = "INVALID_DESCRIPTION"
 	CodeInvalidSpaceCategory    = "INVALID_SPACE_CATEGORY"
 	CodeInvalidNodeID           = "INVALID_NODE_ID"
+	CodeInvalidAvatarURL        = "INVALID_AVATAR_URL"
 	CodeInvalidNodeMove         = "INVALID_NODE_MOVE"
 	CodePasswordConfirmMismatch = "PASSWORD_CONFIRM_MISMATCH"
+	CodeInvalidCurrentPassword  = "INVALID_CURRENT_PASSWORD"
+	CodeInvalidNewPassword      = "INVALID_NEW_PASSWORD"
 
 	// 3000 段：资源不存在。
-	CodeUserNotFound     = "USER_NOT_FOUND"
-	CodeSpaceNotFound    = "SPACE_NOT_FOUND"
-	CodeDocumentNotFound = "DOCUMENT_NOT_FOUND"
-	CodeThemeNotFound    = "THEME_NOT_FOUND"
-	CodeFileNotFound     = "FILE_NOT_FOUND"
-	CodeNodeNotFound     = "NODE_NOT_FOUND"
-	CodeRouteNotFound    = "ROUTE_NOT_FOUND"
-	CodeMethodNotAllowed = "METHOD_NOT_ALLOWED"
+	CodeRouteNotFound          = "ROUTE_NOT_FOUND"
+	CodeMethodNotAllowed       = "METHOD_NOT_ALLOWED"
+	CodeUserNotFound           = "USER_NOT_FOUND"
+	CodeSpaceNotFound          = "SPACE_NOT_FOUND"
+	CodeDocumentNotFound       = "DOCUMENT_NOT_FOUND"
+	CodeThemeNotFound          = "THEME_NOT_FOUND"
+	CodeFileNotFound           = "FILE_NOT_FOUND"
+	CodeCoverAssetNotFound     = "COVER_ASSET_NOT_FOUND"
+	CodeMemberNotFound         = "MEMBER_NOT_FOUND"
+	CodeMemberTargetNotFound   = "MEMBER_TARGET_NOT_FOUND"
+	CodeTransferTargetNotFound = "TRANSFER_TARGET_NOT_FOUND"
+	CodeSpaceCategoryNotFound  = "SPACE_CATEGORY_NOT_FOUND"
+	CodeNodeNotFound           = "NODE_NOT_FOUND"
 
 	// 4000 段：冲突与并发状态。
-	CodeEmailAlreadyExists = "EMAIL_ALREADY_EXISTS"
+	CodeEmailAlreadyExists          = "EMAIL_ALREADY_EXISTS"
+	CodeConfigVersionConflict       = "CONFIG_VERSION_CONFLICT"
+	CodeThemeAlreadyExists          = "THEME_ALREADY_EXISTS"
+	CodeThemeInUse                  = "THEME_IN_USE"
+	CodeOperationTokenReplayed      = "OPERATION_TOKEN_REPLAYED"
+	CodeOperationTokenExpired       = "OPERATION_TOKEN_EXPIRED"
+	CodeOperationTokenScopeMismatch = "OPERATION_TOKEN_SCOPE_MISMATCH"
+	CodeOperationTokenInvalid       = "OPERATION_TOKEN_INVALID"
+	CodeSpaceCategoryNameExists     = "SPACE_CATEGORY_NAME_EXISTS"
+	CodeDocumentVersionConflict     = "DOCUMENT_VERSION_CONFLICT"
+	CodeSpaceAlreadyExists          = "SPACE_ALREADY_EXISTS"
 
 	// 5000 段：业务约束。
-	CodeFileTooLarge                 = "FILE_TOO_LARGE"
-	CodeImageHostingProviderDisabled = "IMAGE_HOSTING_PROVIDER_DISABLED"
+	CodeSpaceDeleted                  = "SPACE_DELETED"
+	CodeDocumentDeleted               = "DOCUMENT_DELETED"
+	CodeMemberTargetRequired          = "MEMBER_TARGET_REQUIRED"
+	CodeOwnerMemberImmutable          = "OWNER_MEMBER_IMMUTABLE"
+	CodeSelfOperationForbidden        = "SELF_OPERATION_FORBIDDEN"
+	CodeTransferTargetRequired        = "TRANSFER_TARGET_REQUIRED"
+	CodeTransferTargetNotMember       = "TRANSFER_TARGET_NOT_MEMBER"
+	CodeTransferTargetSelf            = "TRANSFER_TARGET_SELF"
+	CodeThemeBuiltinImmutable         = "THEME_BUILTIN_IMMUTABLE"
+	CodeOperationTokenRequired        = "OPERATION_TOKEN_REQUIRED"
+	CodeFileTooLarge                  = "FILE_TOO_LARGE"
+	CodeImageHostingProviderDisabled  = "IMAGE_HOSTING_PROVIDER_DISABLED"
+	CodeCoverImageTooLarge            = "COVER_IMAGE_TOO_LARGE"
+	CodeCoverFontUnavailable          = "COVER_FONT_UNAVAILABLE"
+	CodeSpaceCategoryDefaultImmutable = "SPACE_CATEGORY_DEFAULT_IMMUTABLE"
+	CodePasswordUnchanged             = "PASSWORD_UNCHANGED"
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout = "REQUEST_TIMEOUT"
@@ -64,7 +111,7 @@ var errorCodeRegistry = map[string]int{
 	CodeUnauthorized:         1001,
 	CodeInvalidCredentials:   1002,
 	CodeForbidden:            1003,
-	"ROLE_FORBIDDEN":         1004,
+	CodeRoleForbidden:        1004,
 	CodeRegistrationDisabled: 1005,
 	CodeUserBanned:           1006,
 	CodeUserDeleted:          1007,
@@ -74,9 +121,9 @@ var errorCodeRegistry = map[string]int{
 	CodeInvalidEmail:            2002,
 	CodeInvalidPassword:         2003,
 	CodeInvalidName:             2004,
-	"INVALID_ROLE":              2005,
-	"INVALID_STATUS":            2006,
-	"INVALID_REASON":            2007,
+	CodeInvalidRole:             2005,
+	CodeInvalidStatus:           2006,
+	CodeInvalidReason:           2007,
 	CodeInvalidPage:             2008,
 	CodeInvalidPageSize:         2009,
 	CodeInvalidUserID:           2010,
@@ -84,76 +131,76 @@ var errorCodeRegistry = map[string]int{
 	CodeInvalidDocumentID:       2012,
 	CodeInvalidThemeID:          2013,
 	CodeInvalidVisibility:       2014,
-	"INVALID_SOURCE":            2015,
+	CodeInvalidSource:           2015,
 	CodeInvalidUploadFile:       2016,
 	CodeInvalidFilePath:         2017,
 	CodeInvalidConfigKey:        2018,
-	"INVALID_CONFIG_VALUE":      2019,
-	"INVALID_EXPECTED_VERSION":  2020,
-	"INVALID_OPERATION":         2021,
-	"INVALID_MODULE":            2022,
-	"INVALID_ACTION":            2023,
+	CodeInvalidConfigValue:      2019,
+	CodeInvalidExpectedVersion:  2020,
+	CodeInvalidOperation:        2021,
+	CodeInvalidModule:           2022,
+	CodeInvalidAction:           2023,
 	CodeInvalidFrom:             2024,
 	CodeInvalidTo:               2025,
-	"INVALID_TIME_RANGE":        2026,
-	"INVALID_MEMBER_ROLE":       2027,
+	CodeInvalidTimeRange:        2026,
+	CodeInvalidMemberRole:       2027,
 	CodeInvalidSpaceName:        2028,
-	"INVALID_COVER_IMAGE":       2029,
-	"INVALID_SYNTAX_THEME":      2030,
-	"INVALID_DESCRIPTION":       2031,
+	CodeInvalidCoverImage:       2029,
+	CodeInvalidSyntaxTheme:      2030,
+	CodeInvalidDescription:      2031,
 	CodeInvalidSpaceCategory:    2032,
 	CodeInvalidNodeID:           2033,
-	"INVALID_AVATAR_URL":        2034,
+	CodeInvalidAvatarURL:        2034,
 	CodePasswordConfirmMismatch: 2035,
-	"INVALID_CURRENT_PASSWORD":  2036,
-	"INVALID_NEW_PASSWORD":      2037,
+	CodeInvalidCurrentPassword:  2036,
+	CodeInvalidNewPassword:      2037,
 	CodeInvalidNodeMove:         2038,
 
 	// 3000 段：资源不存在。
-	CodeRouteNotFound:           3001,
-	CodeMethodNotAllowed:        3002,
-	CodeUserNotFound:            3003,
-	CodeSpaceNotFound:           3004,
-	CodeDocumentNotFound:        3005,
-	CodeThemeNotFound:           3006,
-	CodeFileNotFound:            3007,
-	"COVER_ASSET_NOT_FOUND":     3008,
-	"MEMBER_NOT_FOUND":          3009,
-	"MEMBER_TARGET_NOT_FOUND":   3010,
-	"TRANSFER_TARGET_NOT_FOUND": 3011,
-	"SPACE_CATEGORY_NOT_FOUND":  3012,
-	CodeNodeNotFound:            3013,
+	CodeRouteNotFound:          3001,
+	CodeMethodNotAllowed:       3002,
+	CodeUserNotFound:           3003,
+	CodeSpaceNotFound:          3004,
+	CodeDocumentNotFound:       3005,
+	CodeThemeNotFound:          3006,
+	CodeFileNotFound:           3007,
+	CodeCoverAssetNotFound:     3008,
+	CodeMemberNotFound:         3009,
+	CodeMemberTargetNotFound:   3010,
+	CodeTransferTargetNotFound: 3011,
+	CodeSpaceCategoryNotFound:  3012,
+	CodeNodeNotFound:           3013,
 
 	// 4000 段：冲突与并发状态。
-	CodeEmailAlreadyExists:           4001,
-	"CONFIG_VERSION_CONFLICT":        4002,
-	"THEME_ALREADY_EXISTS":           4003,
-	"THEME_IN_USE":                   4004,
-	"OPERATION_TOKEN_REPLAYED":       4005,
-	"OPERATION_TOKEN_EXPIRED":        4006,
-	"OPERATION_TOKEN_SCOPE_MISMATCH": 4007,
-	"OPERATION_TOKEN_INVALID":        4008,
-	"SPACE_CATEGORY_NAME_EXISTS":     4009,
-	"DOCUMENT_VERSION_CONFLICT":      4010,
-	"SPACE_ALREADY_EXISTS":           4011,
+	CodeEmailAlreadyExists:          4001,
+	CodeConfigVersionConflict:       4002,
+	CodeThemeAlreadyExists:          4003,
+	CodeThemeInUse:                  4004,
+	CodeOperationTokenReplayed:      4005,
+	CodeOperationTokenExpired:       4006,
+	CodeOperationTokenScopeMismatch: 4007,
+	CodeOperationTokenInvalid:       4008,
+	CodeSpaceCategoryNameExists:     4009,
+	CodeDocumentVersionConflict:     4010,
+	CodeSpaceAlreadyExists:          4011,
 
 	// 5000 段：业务约束。
-	"SPACE_DELETED":                    5001,
-	"DOCUMENT_DELETED":                 5002,
-	"MEMBER_TARGET_REQUIRED":           5003,
-	"OWNER_MEMBER_IMMUTABLE":           5004,
-	"SELF_OPERATION_FORBIDDEN":         5005,
-	"TRANSFER_TARGET_REQUIRED":         5006,
-	"TRANSFER_TARGET_NOT_MEMBER":       5007,
-	"TRANSFER_TARGET_SELF":             5008,
-	"THEME_BUILTIN_IMMUTABLE":          5009,
-	"OPERATION_TOKEN_REQUIRED":         5010,
-	CodeImageHostingProviderDisabled:   5011,
-	"COVER_IMAGE_TOO_LARGE":            5012,
-	CodeFileTooLarge:                   5013,
-	"COVER_FONT_UNAVAILABLE":           5014,
-	"SPACE_CATEGORY_DEFAULT_IMMUTABLE": 5015,
-	"PASSWORD_UNCHANGED":               5016,
+	CodeSpaceDeleted:                  5001,
+	CodeDocumentDeleted:               5002,
+	CodeMemberTargetRequired:          5003,
+	CodeOwnerMemberImmutable:          5004,
+	CodeSelfOperationForbidden:        5005,
+	CodeTransferTargetRequired:        5006,
+	CodeTransferTargetNotMember:       5007,
+	CodeTransferTargetSelf:            5008,
+	CodeThemeBuiltinImmutable:         5009,
+	CodeOperationTokenRequired:        5010,
+	CodeImageHostingProviderDisabled:  5011,
+	CodeCoverImageTooLarge:            5012,
+	CodeFileTooLarge:                  5013,
+	CodeCoverFontUnavailable:          5014,
+	CodeSpaceCategoryDefaultImmutable: 5015,
+	CodePasswordUnchanged:             5016,
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout: 9001,

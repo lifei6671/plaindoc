@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -41,31 +42,31 @@ func MapAdminSystemConfigError(err error, targets ...AdminSystemConfigErrorTarge
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "platform admin role is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidKey,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_CONFIG_KEY",
+			Code:    response.CodeInvalidConfigKey,
 			Message: "config key is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidValue,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_CONFIG_VALUE",
+			Code:    response.CodeInvalidConfigValue,
 			Message: "config value is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.ExpectedVersion,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_EXPECTED_VERSION",
+			Code:    response.CodeInvalidExpectedVersion,
 			Message: "expectedVersion must be positive integer",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.VersionConflict,
 			Status:  http.StatusConflict,
-			Code:    "CONFIG_VERSION_CONFLICT",
+			Code:    response.CodeConfigVersionConflict,
 			Message: "config version conflict",
 		},
 	)

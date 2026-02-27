@@ -9,18 +9,18 @@ var (
 	AdminSystemConfigErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// AdminSystemConfigErrConfigKeyRequired 对应场景：config key is required
 	AdminSystemConfigErrConfigKeyRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidConfigKey,
-		Message: "config key is required",
+		Message: "配置键不能为空",
 	}
 	// AdminSystemConfigErrRequestBody 对应场景：invalid request body
 	AdminSystemConfigErrRequestBody = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid request body",
+		Message: "请求体无效",
 	}
 )

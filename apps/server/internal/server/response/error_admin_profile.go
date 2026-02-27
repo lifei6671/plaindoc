@@ -9,48 +9,48 @@ var (
 	AdminProfileErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// AdminProfileErrRequestBody 对应场景：invalid request body
 	AdminProfileErrRequestBody = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid request body",
+		Message: "请求体无效",
 	}
 	// AdminProfileErrNewPasswordConfirmPasswordMismatch 对应场景：new password and confirm password mismatch
 	AdminProfileErrNewPasswordConfirmPasswordMismatch = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodePasswordConfirmMismatch,
-		Message: "new password and confirm password mismatch",
+		Message: "新密码与确认密码不一致",
 	}
 	// AdminProfileErrFileRequired 对应场景：file is required
 	AdminProfileErrFileRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUploadFile,
-		Message: "file is required",
+		Message: "文件不能为空",
 	}
 	// AdminProfileErrFileEmpty 对应场景：file is empty
 	AdminProfileErrFileEmpty = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUploadFile,
-		Message: "file is empty",
+		Message: "文件为空",
 	}
 	// AdminProfileErrAvatarFileExceeds10mbLimit 对应场景：avatar file exceeds 10MB limit
 	AdminProfileErrAvatarFileExceeds10mbLimit = ErrorTemplate{
 		Status:  http.StatusRequestEntityTooLarge,
 		Code:    CodeFileTooLarge,
-		Message: "avatar file exceeds 10MB limit",
+		Message: "头像文件超过 10MB 限制",
 	}
 	// AdminProfileErrCannotReadUploadedFile 对应场景：cannot read uploaded file
 	AdminProfileErrCannotReadUploadedFile = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUploadFile,
-		Message: "cannot read uploaded file",
+		Message: "无法读取上传文件",
 	}
 	// AdminProfileErrOnlyImageFileAllowed 对应场景：only image file is allowed
 	AdminProfileErrOnlyImageFileAllowed = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUploadFile,
-		Message: "only image file is allowed",
+		Message: "仅允许图片文件",
 	}
 )

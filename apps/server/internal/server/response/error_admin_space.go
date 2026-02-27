@@ -9,54 +9,54 @@ var (
 	AdminSpaceErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// AdminSpaceErrRequestBody 对应场景：invalid request body
 	AdminSpaceErrRequestBody = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid request body",
+		Message: "请求体无效",
 	}
 	// AdminSpaceErrFileRequired 对应场景：file is required
 	AdminSpaceErrFileRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUploadFile,
-		Message: "file is required",
+		Message: "文件不能为空",
 	}
 	// AdminSpaceErrCannotReadUploadedFile 对应场景：cannot read uploaded file
 	AdminSpaceErrCannotReadUploadedFile = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUploadFile,
-		Message: "cannot read uploaded file",
+		Message: "无法读取上传文件",
 	}
 	// AdminSpaceErrPagePositiveInteger 对应场景：page must be a positive integer
 	AdminSpaceErrPagePositiveInteger = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidPage,
-		Message: "page must be a positive integer",
+		Message: "页码参数（page）必须是正整数",
 	}
 	// AdminSpaceErrPageSizePositiveInteger 对应场景：pageSize must be a positive integer
 	AdminSpaceErrPageSizePositiveInteger = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidPageSize,
-		Message: "pageSize must be a positive integer",
+		Message: "每页数量参数（pageSize）必须是正整数",
 	}
 	// AdminSpaceErrSpaceCategoryID 对应场景：space category id is invalid
 	AdminSpaceErrSpaceCategoryID = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceCategory,
-		Message: "space category id is invalid",
+		Message: "空间分类 ID 无效",
 	}
 	// AdminSpaceErrSpaceIDRequired 对应场景：space id is required
 	AdminSpaceErrSpaceIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceID,
-		Message: "space id is required",
+		Message: "空间 ID 不能为空",
 	}
 	// AdminSpaceErrMemberUserIDRequired 对应场景：member user id is required
 	AdminSpaceErrMemberUserIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUserID,
-		Message: "member user id is required",
+		Message: "成员用户 ID 不能为空",
 	}
 )

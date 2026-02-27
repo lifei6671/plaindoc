@@ -10,6 +10,6 @@ var (
 	MiddlewareTimeoutErrRequestTimeout = ErrorTemplate{
 		Status:  http.StatusGatewayTimeout,
 		Code:    CodeRequestTimeout,
-		Message: "request timeout",
+		Message: "请求超时",
 	}
 )

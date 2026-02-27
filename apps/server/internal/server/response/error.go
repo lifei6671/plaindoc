@@ -97,7 +97,7 @@ func preserveErrorHTTPStatus(status int) int {
 
 // InternalError 用于服务端兜底错误，避免暴露内部细节。
 func InternalError(c *gin.Context) {
-	Error(c, http.StatusInternalServerError, CodeInternalError, "internal server error")
+	Error(c, http.StatusInternalServerError, CodeInternalError, "服务器内部错误")
 }
 
 // FromError 优先按业务错误映射输出；无法识别时回落到 InternalError。

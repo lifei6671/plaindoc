@@ -704,10 +704,10 @@ func TestRouter_AdminSpaceCreateWithCustomIDAndConflict(t *testing.T) {
 	if duplicateRec.Code != http.StatusOK {
 		t.Fatalf("expected duplicate create space status 200, got %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
 	}
-	if decodeJSONResultCode(t, duplicateRec.Body.Bytes()) != response.ResolveErrorCode("SPACE_ALREADY_EXISTS") {
+	if decodeJSONResultCode(t, duplicateRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeSpaceAlreadyExists) {
 		t.Fatalf(
 			"expected duplicate create code %d, got %d body=%s",
-			response.ResolveErrorCode("SPACE_ALREADY_EXISTS"),
+			response.ResolveErrorCode(response.CodeSpaceAlreadyExists),
 			decodeJSONResultCode(t, duplicateRec.Body.Bytes()),
 			duplicateRec.Body.String(),
 		)
@@ -2066,10 +2066,10 @@ func TestRouter_AdminSystemConfig_SitemapConfigValidation(t *testing.T) {
 	if invalidRec.Code != http.StatusOK {
 		t.Fatalf("expected invalid sitemap config status 400, got %d body=%s", invalidRec.Code, invalidRec.Body.String())
 	}
-	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode("INVALID_CONFIG_VALUE") {
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidConfigValue) {
 		t.Fatalf(
 			"expected code %d, got %d body=%s",
-			response.ResolveErrorCode("INVALID_CONFIG_VALUE"),
+			response.ResolveErrorCode(response.CodeInvalidConfigValue),
 			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
 			invalidRec.Body.String(),
 		)
@@ -2097,10 +2097,10 @@ func TestRouter_AdminOperationTokenRequiredAndReplayGuard(t *testing.T) {
 			withoutTokenRec.Body.String(),
 		)
 	}
-	if decodeJSONResultCode(t, withoutTokenRec.Body.Bytes()) != response.ResolveErrorCode("OPERATION_TOKEN_REQUIRED") {
+	if decodeJSONResultCode(t, withoutTokenRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenRequired) {
 		t.Fatalf(
 			"expected code %d, got %d body=%s",
-			response.ResolveErrorCode("OPERATION_TOKEN_REQUIRED"),
+			response.ResolveErrorCode(response.CodeOperationTokenRequired),
 			decodeJSONResultCode(t, withoutTokenRec.Body.Bytes()),
 			withoutTokenRec.Body.String(),
 		)
@@ -2125,10 +2125,10 @@ func TestRouter_AdminOperationTokenRequiredAndReplayGuard(t *testing.T) {
 			scopeMismatchRec.Body.String(),
 		)
 	}
-	if decodeJSONResultCode(t, scopeMismatchRec.Body.Bytes()) != response.ResolveErrorCode("OPERATION_TOKEN_SCOPE_MISMATCH") {
+	if decodeJSONResultCode(t, scopeMismatchRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenScopeMismatch) {
 		t.Fatalf(
 			"expected code %d, got %d body=%s",
-			response.ResolveErrorCode("OPERATION_TOKEN_SCOPE_MISMATCH"),
+			response.ResolveErrorCode(response.CodeOperationTokenScopeMismatch),
 			decodeJSONResultCode(t, scopeMismatchRec.Body.Bytes()),
 			scopeMismatchRec.Body.String(),
 		)
@@ -2161,10 +2161,10 @@ func TestRouter_AdminOperationTokenRequiredAndReplayGuard(t *testing.T) {
 			replayRec.Body.String(),
 		)
 	}
-	if decodeJSONResultCode(t, replayRec.Body.Bytes()) != response.ResolveErrorCode("OPERATION_TOKEN_REPLAYED") {
+	if decodeJSONResultCode(t, replayRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenReplayed) {
 		t.Fatalf(
 			"expected code %d, got %d body=%s",
-			response.ResolveErrorCode("OPERATION_TOKEN_REPLAYED"),
+			response.ResolveErrorCode(response.CodeOperationTokenReplayed),
 			decodeJSONResultCode(t, replayRec.Body.Bytes()),
 			replayRec.Body.String(),
 		)
@@ -2294,10 +2294,10 @@ func TestRouter_AdminOperationTokenActorBinding(t *testing.T) {
 			platformDeleteRec.Body.String(),
 		)
 	}
-	if decodeJSONResultCode(t, platformDeleteRec.Body.Bytes()) != response.ResolveErrorCode("OPERATION_TOKEN_INVALID") {
+	if decodeJSONResultCode(t, platformDeleteRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenInvalid) {
 		t.Fatalf(
 			"expected code %d, got %d body=%s",
-			response.ResolveErrorCode("OPERATION_TOKEN_INVALID"),
+			response.ResolveErrorCode(response.CodeOperationTokenInvalid),
 			decodeJSONResultCode(t, platformDeleteRec.Body.Bytes()),
 			platformDeleteRec.Body.String(),
 		)

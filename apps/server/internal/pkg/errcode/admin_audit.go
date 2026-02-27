@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -50,49 +51,49 @@ func MapAdminAuditError(err error, targets ...AdminAuditErrorTargets) error {
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "insufficient admin permission",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidModule,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_MODULE",
+			Code:    response.CodeInvalidModule,
 			Message: "module is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidAction,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_ACTION",
+			Code:    response.CodeInvalidAction,
 			Message: "action is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidTargetType,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_REQUEST",
+			Code:    response.CodeInvalidRequest,
 			Message: "target type is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidTargetID,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_REQUEST",
+			Code:    response.CodeInvalidRequest,
 			Message: "target id is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidModuleFilter,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_MODULE",
+			Code:    response.CodeInvalidModule,
 			Message: "module filter is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidActionFilter,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_ACTION",
+			Code:    response.CodeInvalidAction,
 			Message: "action filter is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidTimeRange,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_TIME_RANGE",
+			Code:    response.CodeInvalidTimeRange,
 			Message: "from must be before to",
 		},
 	)

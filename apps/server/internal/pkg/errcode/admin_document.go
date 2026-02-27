@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -50,49 +51,49 @@ func MapAdminDocumentError(err error, targets ...AdminDocumentErrorTargets) erro
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "insufficient space admin permission",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidStatusFilter,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_STATUS",
+			Code:    response.CodeInvalidStatus,
 			Message: "status filter is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidVisibilityFilter,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_VISIBILITY",
+			Code:    response.CodeInvalidVisibility,
 			Message: "visibility filter is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidDocumentID,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_DOCUMENT_ID",
+			Code:    response.CodeInvalidDocumentID,
 			Message: "document id is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidStatus,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_STATUS",
+			Code:    response.CodeInvalidStatus,
 			Message: "status must be active or banned",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.BanReasonRequired,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_REASON",
+			Code:    response.CodeInvalidReason,
 			Message: "ban reason is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.NotFound,
 			Status:  http.StatusNotFound,
-			Code:    "DOCUMENT_NOT_FOUND",
+			Code:    response.CodeDocumentNotFound,
 			Message: "document not found",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.AlreadyDeleted,
 			Status:  http.StatusBadRequest,
-			Code:    "DOCUMENT_DELETED",
+			Code:    response.CodeDocumentDeleted,
 			Message: "document has been deleted",
 		},
 	)

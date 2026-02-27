@@ -9,144 +9,144 @@ var (
 	WorkspaceErrSpaceNameRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "space name is required",
+		Message: "空间名称不能为空",
 	}
 	// WorkspaceErrSpaceName 对应场景：invalid space name
 	WorkspaceErrSpaceName = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceName,
-		Message: "invalid space name",
+		Message: "空间名称无效",
 	}
 	// WorkspaceErrSpaceIDRequired 对应场景：space id is required
 	WorkspaceErrSpaceIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceID,
-		Message: "space id is required",
+		Message: "空间 ID 不能为空",
 	}
 	// WorkspaceErrSpaceNotFound 对应场景：space not found
 	WorkspaceErrSpaceNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeSpaceNotFound,
-		Message: "space not found",
+		Message: "空间不存在",
 	}
 	// WorkspaceErrLoginRequired 对应场景：login required
 	WorkspaceErrLoginRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "login required",
+		Message: "需要登录",
 	}
 	// WorkspaceErrInsufficientSpacePermission 对应场景：insufficient space permission
 	WorkspaceErrInsufficientSpacePermission = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "insufficient space permission",
+		Message: "空间权限不足",
 	}
 	// WorkspaceErrCreateNodeRequest 对应场景：invalid create node request
 	WorkspaceErrCreateNodeRequest = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid create node request",
+		Message: "创建节点请求无效",
 	}
 	// WorkspaceErrNodeType 对应场景：invalid node type
 	WorkspaceErrNodeType = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid node type",
+		Message: "节点类型无效",
 	}
 	// WorkspaceErrParentNodeNotFound 对应场景：parent node not found
 	WorkspaceErrParentNodeNotFound = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "parent node not found",
+		Message: "父节点不存在",
 	}
 	// WorkspaceErrParentNodeNotTargetSpace 对应场景：parent node not in target space
 	WorkspaceErrParentNodeNotTargetSpace = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "parent node not in target space",
+		Message: "父节点不在目标空间内",
 	}
 	// WorkspaceErrNodeIDRequired 对应场景：node id is required
 	WorkspaceErrNodeIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidNodeID,
-		Message: "node id is required",
+		Message: "节点 ID 不能为空",
 	}
 	// WorkspaceErrUpdateNodeRequest 对应场景：invalid update node request
 	WorkspaceErrUpdateNodeRequest = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid update node request",
+		Message: "更新节点请求无效",
 	}
 	// WorkspaceErrMoveNodeRequest 对应场景：invalid move node request
 	WorkspaceErrMoveNodeRequest = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid move node request",
+		Message: "移动节点请求无效",
 	}
 	// WorkspaceErrNodeNotFound 对应场景：node not found
 	WorkspaceErrNodeNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeNodeNotFound,
-		Message: "node not found",
+		Message: "节点不存在",
 	}
 	// WorkspaceErrNodeCannotItsOwnParent 对应场景：node cannot be its own parent
 	WorkspaceErrNodeCannotItsOwnParent = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "node cannot be its own parent",
+		Message: "节点不能设置为自身的父节点",
 	}
 	// WorkspaceErrNodeMoveCycleDetected 对应场景：node cannot move to its own descendant
 	WorkspaceErrNodeMoveCycleDetected = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidNodeMove,
-		Message: "node cannot move to its own descendant",
+		Message: "节点不能移动到其子孙节点下",
 	}
 	// WorkspaceErrDocumentIDRequired 对应场景：document id is required
 	WorkspaceErrDocumentIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidDocumentID,
-		Message: "document id is required",
+		Message: "文档 ID 不能为空",
 	}
 	// WorkspaceErrSaveDocumentRequest 对应场景：invalid save document request
 	WorkspaceErrSaveDocumentRequest = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid save document request",
+		Message: "保存文档请求无效",
 	}
 	// WorkspaceErrLocalizeRemoteImagesRequest 对应场景：invalid localize remote images request
 	WorkspaceErrLocalizeRemoteImagesRequest = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid localize remote images request",
+		Message: "转储外链图片请求无效",
 	}
 	// WorkspaceErrBaseversionRequired 对应场景：baseVersion is required
 	WorkspaceErrBaseversionRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "baseVersion is required",
+		Message: "baseVersion 参数不能为空",
 	}
 	// WorkspaceErrDocumentNotFound 对应场景：document not found
 	WorkspaceErrDocumentNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeDocumentNotFound,
-		Message: "document not found",
+		Message: "文档不存在",
 	}
 	// WorkspaceErrInsufficientDocumentPermission 对应场景：insufficient document permission
 	WorkspaceErrInsufficientDocumentPermission = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "insufficient document permission",
+		Message: "文档权限不足",
 	}
 	// WorkspaceErrAuthorizationTokenRequired 对应场景：authorization token is required
 	WorkspaceErrAuthorizationTokenRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "authorization token is required",
+		Message: "缺少授权令牌",
 	}
 	// WorkspaceErrAccessToken 对应场景：invalid access token
 	WorkspaceErrAccessToken = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "invalid access token",
+		Message: "访问令牌无效",
 	}
 )

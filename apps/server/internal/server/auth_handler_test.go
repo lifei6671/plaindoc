@@ -313,7 +313,7 @@ func TestRouter_AuthRegisterDisabledBySiteConfig(t *testing.T) {
 	if err := json.Unmarshal(registerRec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode register disabled response failed: %v", err)
 	}
-	if payload.Code != response.ResolveErrorCode("REGISTRATION_DISABLED") {
-		t.Fatalf("expected error code %d, got %d", response.ResolveErrorCode("REGISTRATION_DISABLED"), payload.Code)
+	if payload.Code != response.ResolveErrorCode(response.CodeRegistrationDisabled) {
+		t.Fatalf("expected error code %d, got %d", response.ResolveErrorCode(response.CodeRegistrationDisabled), payload.Code)
 	}
 }

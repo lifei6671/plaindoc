@@ -9,18 +9,18 @@ var (
 	AdminThemeErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// AdminThemeErrRequestBody 对应场景：invalid request body
 	AdminThemeErrRequestBody = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid request body",
+		Message: "请求体无效",
 	}
 	// AdminThemeErrThemeIDRequired 对应场景：theme id is required
 	AdminThemeErrThemeIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidThemeID,
-		Message: "theme id is required",
+		Message: "主题 ID 不能为空",
 	}
 )

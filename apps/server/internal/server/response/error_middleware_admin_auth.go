@@ -9,48 +9,48 @@ var (
 	MiddlewareAdminAuthErrAuthorizationTokenRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "authorization token is required",
+		Message: "缺少授权令牌",
 	}
 	// MiddlewareAdminAuthErrInvalidAccessToken 对应场景：invalid access token
 	MiddlewareAdminAuthErrInvalidAccessToken = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "invalid access token",
+		Message: "访问令牌无效",
 	}
 	// MiddlewareAdminAuthErrAdminRoleRequired 对应场景：admin role is required
 	MiddlewareAdminAuthErrAdminRoleRequired = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "admin role is required",
+		Message: "需要管理员角色",
 	}
 	// MiddlewareAdminAuthErrAdminActorMissing 对应场景：admin actor is missing
 	MiddlewareAdminAuthErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// MiddlewareAdminAuthErrAdminActorInvalid 对应场景：admin actor is invalid
 	MiddlewareAdminAuthErrAdminActorInvalid = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is invalid",
+		Message: "管理员身份无效",
 	}
 	// MiddlewareAdminAuthErrSpaceIDRequired 对应场景：space id is required
 	MiddlewareAdminAuthErrSpaceIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceID,
-		Message: "space id is required",
+		Message: "空间 ID 不能为空",
 	}
 	// MiddlewareAdminAuthErrInsufficientSpaceAdminPermission 对应场景：insufficient space admin permission
 	MiddlewareAdminAuthErrInsufficientSpaceAdminPermission = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "insufficient space admin permission",
+		Message: "空间管理权限不足",
 	}
 	// MiddlewareAdminAuthErrPlatformAdminRoleRequired 对应场景：platform admin role is required
 	MiddlewareAdminAuthErrPlatformAdminRoleRequired = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "platform admin role is required",
+		Message: "需要平台管理员角色",
 	}
 )

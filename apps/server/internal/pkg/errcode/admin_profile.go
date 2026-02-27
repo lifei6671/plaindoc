@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -47,43 +48,43 @@ func MapAdminProfileError(err error, targets ...AdminProfileErrorTargets) error 
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "admin role is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.NotFound,
 			Status:  http.StatusNotFound,
-			Code:    "USER_NOT_FOUND",
+			Code:    response.CodeUserNotFound,
 			Message: "admin user not found",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidName,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_NAME",
+			Code:    response.CodeInvalidName,
 			Message: "name is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidAvatarURL,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_AVATAR_URL",
+			Code:    response.CodeInvalidAvatarURL,
 			Message: "avatar url is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.CurrentPasswordInvalid,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_CURRENT_PASSWORD",
+			Code:    response.CodeInvalidCurrentPassword,
 			Message: "current password is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.PasswordTooShort,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_NEW_PASSWORD",
+			Code:    response.CodeInvalidNewPassword,
 			Message: "new password must be at least 6 characters",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.PasswordUnchanged,
 			Status:  http.StatusBadRequest,
-			Code:    "PASSWORD_UNCHANGED",
+			Code:    response.CodePasswordUnchanged,
 			Message: "new password can not be same as current password",
 		},
 	)

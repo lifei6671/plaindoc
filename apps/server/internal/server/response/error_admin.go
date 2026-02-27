@@ -9,18 +9,18 @@ var (
 	AdminErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// AdminErrAdminUserNotFound 对应场景：admin user not found
 	AdminErrAdminUserNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeUserNotFound,
-		Message: "admin user not found",
+		Message: "管理员用户不存在",
 	}
 	// AdminErrSpaceIDRequired 对应场景：space id is required
 	AdminErrSpaceIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceID,
-		Message: "space id is required",
+		Message: "空间 ID 不能为空",
 	}
 )

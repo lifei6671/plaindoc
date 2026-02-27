@@ -9,72 +9,72 @@ var (
 	AccessErrSpaceIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidSpaceID,
-		Message: "space id is required",
+		Message: "空间 ID 不能为空",
 	}
 	// AccessErrAccessToken 对应场景：invalid access token
 	AccessErrAccessToken = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "invalid access token",
+		Message: "访问令牌无效",
 	}
 	// AccessErrSpaceNotFound 对应场景：space not found
 	AccessErrSpaceNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeSpaceNotFound,
-		Message: "space not found",
+		Message: "空间不存在",
 	}
 	// AccessErrLoginRequired 对应场景：login required
 	AccessErrLoginRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "login required",
+		Message: "需要登录",
 	}
 	// AccessErrInsufficientSpacePermission 对应场景：insufficient space permission
 	AccessErrInsufficientSpacePermission = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "insufficient space permission",
+		Message: "空间权限不足",
 	}
 	// AccessErrVisibilityRequired 对应场景：visibility is required
 	AccessErrVisibilityRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "visibility is required",
+		Message: "可见性不能为空",
 	}
 	// AccessErrVisibilityPublicAuthenticatedMember 对应场景：visibility must be one of public/authenticated/member
 	AccessErrVisibilityPublicAuthenticatedMember = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidVisibility,
-		Message: "visibility must be one of public/authenticated/member",
+		Message: "可见性必须是 public/authenticated/member 之一",
 	}
 	// AccessErrOnlyOwnerCanUpdateSpaceVisibility 对应场景：only owner can update space visibility
 	AccessErrOnlyOwnerCanUpdateSpaceVisibility = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "only owner can update space visibility",
+		Message: "仅空间所有者可以修改空间可见性",
 	}
 	// AccessErrDocumentIDRequired 对应场景：document id is required
 	AccessErrDocumentIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidDocumentID,
-		Message: "document id is required",
+		Message: "文档 ID 不能为空",
 	}
 	// AccessErrDocumentNotFound 对应场景：document not found
 	AccessErrDocumentNotFound = ErrorTemplate{
 		Status:  http.StatusNotFound,
 		Code:    CodeDocumentNotFound,
-		Message: "document not found",
+		Message: "文档不存在",
 	}
 	// AccessErrInsufficientDocumentPermission 对应场景：insufficient document permission
 	AccessErrInsufficientDocumentPermission = ErrorTemplate{
 		Status:  http.StatusForbidden,
 		Code:    CodeForbidden,
-		Message: "insufficient document permission",
+		Message: "文档权限不足",
 	}
 	// AccessErrAuthorizationTokenRequired 对应场景：authorization token is required
 	AccessErrAuthorizationTokenRequired = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "authorization token is required",
+		Message: "缺少授权令牌",
 	}
 )

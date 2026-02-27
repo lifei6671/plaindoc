@@ -9,30 +9,30 @@ var (
 	AdminUserErrAdminActorMissing = ErrorTemplate{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeUnauthorized,
-		Message: "admin actor is missing",
+		Message: "缺少管理员身份",
 	}
 	// AdminUserErrRequestBody 对应场景：invalid request body
 	AdminUserErrRequestBody = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
-		Message: "invalid request body",
+		Message: "请求体无效",
 	}
 	// AdminUserErrPagePositiveInteger 对应场景：page must be a positive integer
 	AdminUserErrPagePositiveInteger = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidPage,
-		Message: "page must be a positive integer",
+		Message: "页码参数（page）必须是正整数",
 	}
 	// AdminUserErrPageSizePositiveInteger 对应场景：pageSize must be a positive integer
 	AdminUserErrPageSizePositiveInteger = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidPageSize,
-		Message: "pageSize must be a positive integer",
+		Message: "每页数量参数（pageSize）必须是正整数",
 	}
 	// AdminUserErrUserIDRequired 对应场景：user id is required
 	AdminUserErrUserIDRequired = ErrorTemplate{
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidUserID,
-		Message: "user id is required",
+		Message: "用户 ID 不能为空",
 	}
 )

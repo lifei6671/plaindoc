@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/protocol"
@@ -483,7 +484,7 @@ func (h *readerPageHandler) renderReaderAccessDeniedPage(
 		RequestOrigin: resolveRequestOrigin(c),
 		Viewer:        viewer,
 		Access: &readerPageAccessState{
-			Code:          "FORBIDDEN",
+			Code:          response.CodeForbidden,
 			Title:         "无权限访问",
 			Description:   accessDescription,
 			RequiresLogin: requiresLogin,

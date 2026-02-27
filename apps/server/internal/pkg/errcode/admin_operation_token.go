@@ -2,6 +2,7 @@ package errcode
 
 import (
 	"errors"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"net/http"
 )
 
@@ -47,43 +48,43 @@ func MapAdminOperationTokenError(err error, targets ...AdminOperationTokenErrorT
 		AppErrorMapping{
 			Target:  resolvedTargets.Forbidden,
 			Status:  http.StatusForbidden,
-			Code:    "FORBIDDEN",
+			Code:    response.CodeForbidden,
 			Message: "admin role is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.TokenRequired,
 			Status:  http.StatusBadRequest,
-			Code:    "OPERATION_TOKEN_REQUIRED",
+			Code:    response.CodeOperationTokenRequired,
 			Message: "operation token is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidOperation,
 			Status:  http.StatusBadRequest,
-			Code:    "INVALID_OPERATION",
+			Code:    response.CodeInvalidOperation,
 			Message: "operation is required",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.Replayed,
 			Status:  http.StatusConflict,
-			Code:    "OPERATION_TOKEN_REPLAYED",
+			Code:    response.CodeOperationTokenReplayed,
 			Message: "operation token already used",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.Expired,
 			Status:  http.StatusConflict,
-			Code:    "OPERATION_TOKEN_EXPIRED",
+			Code:    response.CodeOperationTokenExpired,
 			Message: "operation token is expired",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.ScopeMismatch,
 			Status:  http.StatusConflict,
-			Code:    "OPERATION_TOKEN_SCOPE_MISMATCH",
+			Code:    response.CodeOperationTokenScopeMismatch,
 			Message: "operation token scope mismatch",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.Invalid,
 			Status:  http.StatusConflict,
-			Code:    "OPERATION_TOKEN_INVALID",
+			Code:    response.CodeOperationTokenInvalid,
 			Message: "operation token is invalid",
 		},
 	)

@@ -1088,7 +1088,7 @@ func (h *workspaceHandler) loadSpaceAccess(
 
 func (h *workspaceHandler) writeDocumentVersionConflict(c *gin.Context, latest workspaceDocumentResponse) {
 	c.JSON(http.StatusOK, response.JsonResult[map[string]any]{
-		Code:      response.ResolveErrorCode("DOCUMENT_VERSION_CONFLICT"),
+		Code:      response.ResolveErrorCode(response.CodeDocumentVersionConflict),
 		Message:   "document version conflict",
 		RequestID: response.RequestIDFromContext(c),
 		Data: map[string]any{
