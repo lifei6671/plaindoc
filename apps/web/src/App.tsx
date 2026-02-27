@@ -29,7 +29,10 @@ import {
   Table2,
   Undo2
 } from "lucide-react";
+import createDOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
+import TurndownService from "turndown";
+import { gfm as turndownGfmPlugin } from "turndown-plugin-gfm";
 // KaTeX mhchem 扩展：支持 `\\ce{}` 化学公式语法。
 import "katex/contrib/mhchem";
 import {
@@ -385,6 +388,118 @@ function insertImageMarkdown(view: EditorView, markdownLines: string[]): void {
   });
 }
 
+function sanitizeClipboardHTML(htmlContent: string): string {
+  if (typeof window === "undefined") {
+    return htmlContent.trim();
+  }
+  const purifier = createDOMPurify(window);
+  return purifier
+    .sanitize(htmlContent, {
+      USE_PROFILES: { html: true }
+    })
+    .trim();
+}
+
+function convertHTMLToMarkdown(htmlContent: string): string {
+  const turndownService = new TurndownService({
+    codeBlockStyle: "fenced",
+    headingStyle: "atx",
+    bulletListMarker: "-"
+  });
+  turndownService.use(turndownGfmPlugin);
+  return turndownService
+    .turndown(htmlContent)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isRemoteImageURL(urlInput: string): boolean {
+  const normalized = urlInput.trim();
+  if (!normalized) {
+    return false;
+  }
+  try {
+    const parsedURL = new URL(normalized);
+    return parsedURL.protocol === "http:" || parsedURL.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function extractRemoteImageURLsFromMarkdown(markdownContent: string): string[] {
+  const remoteImageURLs: string[] = [];
+  const visitedImageURLSet = new Set<string>();
+  const imagePattern = /!\[[^\]]*\]\((\S+?)(?:\s+"[^"]*")?\)/g;
+
+  let matched = imagePattern.exec(markdownContent);
+  while (matched) {
+    const imageURL = (matched[1] ?? "").trim();
+    if (isRemoteImageURL(imageURL) && !visitedImageURLSet.has(imageURL)) {
+      visitedImageURLSet.add(imageURL);
+      remoteImageURLs.push(imageURL);
+    }
+    matched = imagePattern.exec(markdownContent);
+  }
+  return remoteImageURLs;
+}
+
+function replaceMarkdownImageURLs(
+  markdownContent: string,
+  imageURLMapping: Map<string, string>
+): string {
+  if (!imageURLMapping.size) {
+    return markdownContent;
+  }
+  const imagePattern = /!\[([^\]]*)\]\((\S+?)(?:\s+"([^"]*)")?\)/g;
+  return markdownContent.replace(imagePattern, (full, altText, imageURL, imageTitle) => {
+    const mappedImageURL = imageURLMapping.get(imageURL);
+    if (!mappedImageURL) {
+      return full;
+    }
+    if (typeof imageTitle === "string" && imageTitle.trim()) {
+      return `![${altText}](${mappedImageURL} "${imageTitle}")`;
+    }
+    return `![${altText}](${mappedImageURL})`;
+  });
+}
+
+function inferFileExtensionFromMimeType(mimeType: string): string {
+  switch (mimeType) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/gif":
+      return "gif";
+    case "image/webp":
+      return "webp";
+    case "image/svg+xml":
+      return "svg";
+    case "image/bmp":
+      return "bmp";
+    default:
+      return "png";
+  }
+}
+
+async function downloadRemoteImageAsFile(imageURL: string, index: number): Promise<File> {
+  const response = await fetch(imageURL, {
+    method: "GET",
+    mode: "cors",
+    credentials: "omit"
+  });
+  if (!response.ok) {
+    throw new Error(`下载失败（${response.status}）`);
+  }
+  const imageBlob = await response.blob();
+  if (!imageBlob.type.startsWith("image/")) {
+    throw new Error("链接内容不是图片");
+  }
+  const extension = inferFileExtensionFromMimeType(imageBlob.type);
+  const fileName = `pasted-remote-image-${Date.now()}-${index + 1}.${extension}`;
+  return new File([imageBlob], fileName, { type: imageBlob.type });
+}
+
 function replacePrimarySelection(
   view: EditorView,
   insertText: string,
@@ -663,6 +778,8 @@ export default function App() {
   const autoSaveInFlightRef = useRef(false);
   // 自动保存计划序号：仅允许最新一轮计划执行，旧计划直接丢弃。
   const autoSaveScheduleIDRef = useRef(0);
+  // 追踪最新编辑内容：供异步保存回调判断“请求期间是否发生继续编辑”。
+  const latestContentRef = useRef(content);
   // CodeMirror 实例引用：供顶部语法工具栏直接分发编辑命令。
   const editorViewRef = useRef<EditorView | null>(null);
 
@@ -986,6 +1103,10 @@ export default function App() {
     activeSpaceIDRef.current = activeSpaceId;
   }, [activeSpaceId]);
 
+  useEffect(() => {
+    latestContentRef.current = content;
+  }, [content]);
+
   // 统一图片上传流程：粘贴上传与“插入图片”按钮共用，避免权限与状态处理分叉。
   const uploadImageFilesToEditor = useCallback(
     async (view: EditorView, imageFiles: File[]) => {
@@ -1071,6 +1192,89 @@ export default function App() {
     [dataGateway]
   );
 
+  // 将 Markdown 中的外链图片下载并重新上传到本地图床，再替换链接。
+  const localizeRemoteImageURLsInMarkdown = useCallback(
+    async (markdownContent: string): Promise<string> => {
+      const remoteImageURLs = extractRemoteImageURLsFromMarkdown(markdownContent);
+      if (!remoteImageURLs.length) {
+        return markdownContent;
+      }
+      if (isImageHostingConfigLoadingRef.current) {
+        setStatusMessage("图床配置加载中，请稍后再试");
+        return markdownContent;
+      }
+      if (imageHostingConfigErrorRef.current) {
+        setStatusMessage(imageHostingConfigErrorRef.current);
+        toast.error(imageHostingConfigErrorRef.current);
+        return markdownContent;
+      }
+      if (isImageUploadingRef.current) {
+        setStatusMessage("图片上传中，请稍候...");
+        return markdownContent;
+      }
+
+      const spaceID = activeSpaceIDRef.current?.trim() ?? "";
+      if (!spaceID) {
+        setStatusMessage("当前未打开空间，无法转存外链图片");
+        toast.error("当前未打开空间，无法转存外链图片");
+        return markdownContent;
+      }
+
+      isImageUploadingRef.current = true;
+      setIsImageUploading(true);
+      setImageUploadTotalCount(remoteImageURLs.length);
+      setImageUploadCompletedCount(0);
+      setStatusMessage(`正在转存 ${remoteImageURLs.length} 张外链图片...`);
+
+      const imageURLMapping = new Map<string, string>();
+      const failedMessages: string[] = [];
+      try {
+        for (const [index, remoteImageURL] of remoteImageURLs.entries()) {
+          try {
+            const remoteImageFile = await downloadRemoteImageAsFile(remoteImageURL, index);
+            const uploadedImage = await dataGateway.imageHosting.uploadLocalImage(
+              remoteImageFile,
+              imageHostingConfigRef.current.local.uploadEndpoint,
+              { spaceId: spaceID }
+            );
+            imageURLMapping.set(remoteImageURL, uploadedImage.url);
+          } catch (error) {
+            console.error("[editor][image-localize] 外链图片转存失败", {
+              imageURL: remoteImageURL,
+              spaceId: spaceID,
+              error
+            });
+            failedMessages.push(`${remoteImageURL}：${formatError(error)}`);
+          } finally {
+            setImageUploadCompletedCount((previousCount) => previousCount + 1);
+          }
+        }
+
+        if (imageURLMapping.size) {
+          setStatusMessage(`已转存 ${imageURLMapping.size} 张外链图片`);
+          toast.success(`外链图片转存成功（${imageURLMapping.size}/${remoteImageURLs.length}）`);
+        }
+        if (failedMessages.length) {
+          const firstError = failedMessages[0];
+          setStatusMessage(`外链图片转存失败：${firstError}`);
+          toast.error(`部分外链图片转存失败：${firstError}`);
+        }
+        return replaceMarkdownImageURLs(markdownContent, imageURLMapping);
+      } catch (error) {
+        console.error("[editor][image-localize] 外链图片转存流程异常", error);
+        setStatusMessage(`外链图片转存异常：${formatError(error)}`);
+        toast.error(`外链图片转存异常：${formatError(error)}`);
+        return markdownContent;
+      } finally {
+        isImageUploadingRef.current = false;
+        setIsImageUploading(false);
+        setImageUploadTotalCount(0);
+        setImageUploadCompletedCount(0);
+      }
+    },
+    [dataGateway]
+  );
+
   const triggerImageFilePicker = useCallback(() => {
     const input = imageFileInputRef.current;
     if (!input) {
@@ -1143,12 +1347,52 @@ export default function App() {
     () => [
       // 编辑器软换行，避免横向滚动影响同步体验。
       EditorView.lineWrapping,
-      // 拦截粘贴图片：统一走后端上传接口并回填 Markdown 图片链接。
+      // 拦截粘贴：图片文件上传、富文本转 Markdown、外链图片本地化。
       EditorView.domEventHandlers({
         paste: (event, view) => {
           const imageFiles = extractImageFilesFromClipboard(event);
           if (!imageFiles.length) {
-            return false;
+            const clipboardData = event.clipboardData;
+            if (!clipboardData) {
+              return false;
+            }
+
+            const htmlContent = clipboardData.getData("text/html").trim();
+            if (htmlContent) {
+              event.preventDefault();
+              void (async () => {
+                try {
+                  const sanitizedHTML = sanitizeClipboardHTML(htmlContent);
+                  const markdownFromHTML = convertHTMLToMarkdown(sanitizedHTML);
+                  if (!markdownFromHTML) {
+                    return;
+                  }
+                  const localizedMarkdown = await localizeRemoteImageURLsInMarkdown(markdownFromHTML);
+                  replacePrimarySelection(view, localizedMarkdown);
+                } catch (error) {
+                  console.error("[editor][paste] 富文本粘贴转 Markdown 失败", error);
+                  toast.error(`富文本粘贴失败：${formatError(error)}`);
+                }
+              })();
+              return true;
+            }
+
+            const plainTextContent = clipboardData.getData("text/plain");
+            if (!extractRemoteImageURLsFromMarkdown(plainTextContent).length) {
+              return false;
+            }
+
+            event.preventDefault();
+            void (async () => {
+              try {
+                const localizedMarkdown = await localizeRemoteImageURLsInMarkdown(plainTextContent);
+                replacePrimarySelection(view, localizedMarkdown);
+              } catch (error) {
+                console.error("[editor][paste] 纯文本外链图片转存失败", error);
+                toast.error(`图片链接转存失败：${formatError(error)}`);
+              }
+            })();
+            return true;
           }
 
           event.preventDefault();
@@ -1162,7 +1406,7 @@ export default function App() {
         codeLanguages: languages
       })
     ],
-    [uploadImageFilesToEditor]
+    [localizeRemoteImageURLsInMarkdown, uploadImageFilesToEditor]
   );
   // remark 插件顺序：先 GFM/数学公式，再规整样式 span 容器，再按链接模式处理脚注，最后注入锚点属性。
   const remarkPlugins = useMemo(() => {
@@ -1694,19 +1938,25 @@ export default function App() {
         return;
       }
       autoSaveInFlightRef.current = true;
+      const contentAtSaveStart = latestContentRef.current;
       setSaveStatus("saving");
       setStatusMessage("保存中...");
       try {
         const result = await dataGateway.document.saveDocument({
           docId: activeDocId,
-          contentMd: content,
+          contentMd: contentAtSaveStart,
           baseVersion
         });
+        const savedContent = result.document.contentMd;
+        // 仅在保存期间用户未继续编辑时，回写服务端版本，避免覆盖后续输入。
+        if (latestContentRef.current === contentAtSaveStart && savedContent !== contentAtSaveStart) {
+          setContent(savedContent);
+        }
         setBaseVersion(result.document.version);
         setActiveDocumentTitle(result.document.title || "未命名文档");
         setActiveDocumentThemeId(result.document.themeId || DEFAULT_PREVIEW_THEME_ID);
         setLastSavedAt(result.document.updatedAt);
-        setLastSavedContent(result.document.contentMd);
+        setLastSavedContent(savedContent);
         setSaveStatus("saved");
         setStatusMessage(`已保存 v${result.document.version}`);
       } catch (error) {

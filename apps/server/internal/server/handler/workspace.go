@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,10 +25,16 @@ const (
 )
 
 type workspaceHandler struct {
-	workspaceRepo     repository.WorkspaceRepository
-	authService       *service.AuthService
-	visibilityService *service.VisibilityService
-	renderCache       *rendercache.Cache
+	workspaceRepo              repository.WorkspaceRepository
+	authService                *service.AuthService
+	visibilityService          *service.VisibilityService
+	imageHostingService        *service.ImageHostingService
+	localImageRootDir          string
+	remoteImageHTTPClient      *http.Client
+	remoteImageFailureCooldown time.Duration
+	remoteImageFailureMu       sync.Mutex
+	remoteImageFailureUntil    map[string]time.Time
+	renderCache                *rendercache.Cache
 }
 
 type workspaceSpaceResponse struct {
@@ -132,13 +139,21 @@ func NewWorkspaceHandler(
 	workspaceRepo repository.WorkspaceRepository,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
+	imageHostingService *service.ImageHostingService,
 	renderCache *rendercache.Cache,
 ) *workspaceHandler {
 	return &workspaceHandler{
-		workspaceRepo:     workspaceRepo,
-		authService:       authService,
-		visibilityService: visibilityService,
-		renderCache:       renderCache,
+		workspaceRepo:       workspaceRepo,
+		authService:         authService,
+		visibilityService:   visibilityService,
+		imageHostingService: imageHostingService,
+		localImageRootDir:   defaultLocalImageStorageRoot,
+		remoteImageHTTPClient: &http.Client{
+			Timeout: 12 * time.Second,
+		},
+		remoteImageFailureCooldown: defaultRemoteImageFailureCooldown,
+		remoteImageFailureUntil:    make(map[string]time.Time),
+		renderCache:                renderCache,
 	}
 }
 
@@ -784,13 +799,15 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		return
 	}
 
+	localizedContentMD := h.localizeRemoteImageURLsInMarkdown(c.Request.Context(), documentID, req.ContentMD)
+
 	now := time.Now().UTC()
 	nextVersion := current.Version + 1
 	revision := &models.DocumentRevision{
 		DocumentRevisionID: strings.ToLower(ulid.Make().String()),
 		DocumentID:         documentID,
 		Version:            nextVersion,
-		ContentMD:          req.ContentMD,
+		ContentMD:          localizedContentMD,
 		BaseVersion:        req.BaseVersion,
 		EditorUserID:       &actorUserID,
 		Source:             models.RevisionSourceRemote,
@@ -800,7 +817,7 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		DocumentID:  documentID,
 		BaseVersion: req.BaseVersion,
 		NextVersion: nextVersion,
-		ContentMD:   req.ContentMD,
+		ContentMD:   localizedContentMD,
 		ActorUserID: actorUserID,
 		NodeID:      current.NodeID,
 		SpaceID:     spaceID,
@@ -835,7 +852,7 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		h.renderCache.PurgeDoc(documentID)
 	}
 
-	current.ContentMD = req.ContentMD
+	current.ContentMD = localizedContentMD
 	current.Version = nextVersion
 	current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
 

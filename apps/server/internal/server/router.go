@@ -207,6 +207,7 @@ func newRouter(
 			workspaceRepo,
 			authService,
 			visibilityService,
+			imageHostingService,
 			readerRenderCache,
 		)
 
