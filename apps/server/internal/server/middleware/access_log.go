@@ -43,7 +43,12 @@ func AccessLog(logger *slog.Logger) gin.HandlerFunc {
 			logit.String("client_ip", c.ClientIP()),
 			logit.String("user_agent", c.Request.UserAgent()),
 		}
-
+		if c.Request.Header.Get("X-Forwarded-For") != "" {
+			baseAttrs = append(baseAttrs, logit.String("x_forwarded_for", c.Request.Header.Get("X-Forwarded-For")))
+		}
+		if c.Request.Header.Get(gin.PlatformCloudflare) != "" {
+			baseAttrs = append(baseAttrs, logit.String("cf_ray", c.Request.Header.Get(gin.PlatformCloudflare)))
+		}
 		requestAttrs := logit.SnapshotRequestAttrs(c.Request.Context())
 		attrs := mergeAttrs(baseAttrs, requestAttrs)
 
