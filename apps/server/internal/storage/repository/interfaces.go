@@ -31,6 +31,24 @@ type UserRepository interface {
 	SoftDelete(ctx context.Context, userID string, deletedAt time.Time) (bool, error)
 }
 
+// UserIdentityRepository 外部身份绑定仓储接口。
+type UserIdentityRepository interface {
+	Upsert(ctx context.Context, params UpsertUserIdentityParams) (*models.UserIdentity, error)
+	GetByProviderExternalID(ctx context.Context, providerID string, externalID string) (*models.UserIdentity, error)
+	ListByUserID(ctx context.Context, userID string) ([]models.UserIdentity, error)
+}
+
+// UpsertUserIdentityParams 用户外部身份写入参数。
+type UpsertUserIdentityParams struct {
+	UserID       string
+	ProviderType string
+	ProviderID   string
+	ExternalID   string
+	LoginName    string
+	LastLoginAt  *time.Time
+	Now          time.Time
+}
+
 // ListUsersParams 管理后台用户分页查询参数。
 type ListUsersParams struct {
 	Keyword  string

@@ -80,3 +80,43 @@ func TestLoad_InvalidAutoMigrateBool(t *testing.T) {
 		t.Fatal("expected error for invalid DB_AUTO_MIGRATE value")
 	}
 }
+
+func TestLoad_LDAPDefaultProviderRequiresEnable(t *testing.T) {
+	t.Setenv("AUTH_DEFAULT_PROVIDER", "ldap")
+	t.Setenv("AUTH_LDAP_ENABLED", "false")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error when ldap default provider is enabled but AUTH_LDAP_ENABLED is false")
+	}
+}
+
+func TestLoad_LDAPEnabledRequiresBaseDN(t *testing.T) {
+	t.Setenv("AUTH_LDAP_ENABLED", "true")
+	t.Setenv("AUTH_LDAP_HOST", "ldap.example.com")
+	t.Setenv("AUTH_LDAP_BASE_DN", "")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error when AUTH_LDAP_BASE_DN is empty")
+	}
+}
+
+func TestLoad_LDAPConfigValid(t *testing.T) {
+	t.Setenv("AUTH_LDAP_ENABLED", "true")
+	t.Setenv("AUTH_LDAP_HOST", "ldap.example.com")
+	t.Setenv("AUTH_LDAP_BASE_DN", "dc=example,dc=com")
+	t.Setenv("AUTH_LDAP_USER_FILTER", "(mail=%s)")
+	t.Setenv("AUTH_LDAP_TLS_MODE", "ldaps")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected valid ldap config, got err=%v", err)
+	}
+	if !cfg.Auth.LDAP.Enabled {
+		t.Fatal("expected ldap enabled")
+	}
+	if cfg.Auth.LDAP.Host != "ldap.example.com" {
+		t.Fatalf("expected ldap host ldap.example.com, got %s", cfg.Auth.LDAP.Host)
+	}
+}

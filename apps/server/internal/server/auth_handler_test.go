@@ -317,3 +317,157 @@ func TestRouter_AuthRegisterDisabledBySiteConfig(t *testing.T) {
 		t.Fatalf("expected error code %d, got %d", response.ResolveErrorCode(response.CodeRegistrationDisabled), payload.Code)
 	}
 }
+
+func TestRouter_AuthRegisterDisabledByAuthConfig(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	now := time.Now().UTC()
+	if err := database.ORM.WithContext(context.Background()).Create(&models.SystemConfig{
+		ConfigKey:       "site",
+		ConfigValueJSON: `{"allowRegistration":true,"defaultSpaceVisibility":"member"}`,
+		Version:         1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error; err != nil {
+		t.Fatalf("seed site config failed: %v", err)
+	}
+	if err := database.ORM.WithContext(context.Background()).Create(&models.SystemConfig{
+		ConfigKey: "auth",
+		ConfigValueJSON: `{
+			"loginMode":"ldap_only",
+			"defaultProviderId":"corp-ldap",
+			"allowUserRegister":false,
+			"providers":[
+				{"id":"corp-ldap","name":"Corp LDAP","type":"ldap","enabled":true,"priority":100}
+			]
+		}`,
+		Version:   1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed auth config failed: %v", err)
+	}
+
+	registerBody := []byte(`{"email":"closed-by-auth@example.com","password":"123456","name":"Closed User"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	var payload struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode register disabled response failed: %v", err)
+	}
+	if payload.Code != response.ResolveErrorCode(response.CodeRegistrationDisabled) {
+		t.Fatalf("expected error code %d, got %d", response.ResolveErrorCode(response.CodeRegistrationDisabled), payload.Code)
+	}
+}
+
+func TestRouter_AuthLoginWithIdentifier(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	registerBody := []byte(`{"email":"identifier@example.com","password":"123456","name":"Identifier User"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	loginBody := []byte(`{"identifier":"identifier@example.com","password":"123456"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := serve(loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", loginRec.Code, loginRec.Body.String())
+	}
+
+	loginPayload := decodeJSONResultData[struct {
+		User struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}](t, loginRec.Body.Bytes())
+	if loginPayload.User.Email != "identifier@example.com" {
+		t.Fatalf("expected login user identifier@example.com, got %s", loginPayload.User.Email)
+	}
+}
+
+func TestRouter_AuthOptions(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	now := time.Now().UTC()
+	if err := database.ORM.WithContext(context.Background()).Create(&models.SystemConfig{
+		ConfigKey:       "site",
+		ConfigValueJSON: `{"allowRegistration":false,"defaultSpaceVisibility":"member"}`,
+		Version:         1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error; err != nil {
+		t.Fatalf("seed site config failed: %v", err)
+	}
+	if err := database.ORM.WithContext(context.Background()).Create(&models.SystemConfig{
+		ConfigKey: "auth",
+		ConfigValueJSON: `{
+			"loginMode":"mixed",
+			"defaultProviderId":"corp-ldap",
+			"allowUserRegister":true,
+			"providers":[
+				{"id":"backup-ldap","name":"Backup LDAP","type":"ldap","enabled":true,"priority":80},
+				{"id":"corp-ldap","name":"Corp LDAP","type":"ldap","enabled":true,"priority":100},
+				{"id":"disabled-ldap","name":"Disabled LDAP","type":"ldap","enabled":false,"priority":999}
+			]
+		}`,
+		Version:   1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed auth config failed: %v", err)
+	}
+
+	optionsReq := httptest.NewRequest(http.MethodGet, "/api/auth/options", nil)
+	optionsRec := serve(optionsReq)
+	if optionsRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", optionsRec.Code, optionsRec.Body.String())
+	}
+
+	payload := decodeJSONResultData[struct {
+		LoginMode         string `json:"loginMode"`
+		DefaultProviderID string `json:"defaultProviderId"`
+		AllowUserRegister bool   `json:"allowUserRegister"`
+		Providers         []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			Priority int    `json:"priority"`
+		} `json:"providers"`
+	}](t, optionsRec.Body.Bytes())
+
+	if payload.LoginMode != "mixed" {
+		t.Fatalf("expected login mode mixed, got %s", payload.LoginMode)
+	}
+	if payload.DefaultProviderID != "corp-ldap" {
+		t.Fatalf("expected default provider corp-ldap, got %s", payload.DefaultProviderID)
+	}
+	if payload.AllowUserRegister {
+		t.Fatal("expected allowUserRegister=false because site config disabled registration")
+	}
+	if len(payload.Providers) != 2 {
+		t.Fatalf("expected 2 enabled providers, got %d", len(payload.Providers))
+	}
+	if payload.Providers[0].ID != "corp-ldap" || payload.Providers[1].ID != "backup-ldap" {
+		t.Fatalf("unexpected provider order: %#v", payload.Providers)
+	}
+}

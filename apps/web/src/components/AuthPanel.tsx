@@ -1,10 +1,12 @@
 import { LoaderCircle, LogIn, UserPlus } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import type { AuthLoginInput, AuthLoginMode, AuthLoginProviderOption } from "../data-access";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 type AuthMode = "login" | "register";
 
@@ -15,7 +17,10 @@ interface AuthPanelProps {
   checking: boolean;
   submitting: boolean;
   errorMessage: string | null;
-  onLogin: (input: { email: string; password: string }) => Promise<void>;
+  loginMode: AuthLoginMode;
+  allowUserRegister: boolean;
+  providerOptions: AuthLoginProviderOption[];
+  onLogin: (input: AuthLoginInput) => Promise<void>;
   onRegister: (input: { name: string; email: string; password: string }) => Promise<void>;
 }
 
@@ -27,13 +32,18 @@ export function AuthPanel({
   checking,
   submitting,
   errorMessage,
+  loginMode,
+  allowUserRegister,
+  providerOptions,
   onLogin,
   onRegister
 }: AuthPanelProps) {
   const [name, setName] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [provider, setProvider] = useState("__auto__");
 
   const validationErrorMessage = useMemo(() => {
     if (mode !== "register") {
@@ -52,7 +62,8 @@ export function AuthPanel({
     if (checking || submitting) {
       return false;
     }
-    if (!email.trim() || !password.trim()) {
+    const loginIdentifier = mode === "login" ? identifier : email;
+    if (!loginIdentifier.trim() || !password.trim()) {
       return false;
     }
     if (mode === "register" && !name.trim()) {
@@ -67,7 +78,7 @@ export function AuthPanel({
       }
     }
     return true;
-  }, [checking, confirmPassword, email, mode, name, password, submitting]);
+  }, [checking, confirmPassword, email, identifier, mode, name, password, submitting]);
 
   const submitText = useMemo(() => {
     if (checking) {
@@ -84,6 +95,9 @@ export function AuthPanel({
   const headingText = mode === "login" ? "PlainDoc 登录" : "PlainDoc 注册";
   const introText = mode === "login" ? "登录后开始编辑文档" : "注册后创建你的文档空间";
   const badgeText = mode === "login" ? "账号登录" : "账号注册";
+  const showProviderSelector =
+    mode === "login" && loginMode !== "local_only" && providerOptions.length > 0;
+  const canSwitchToRegister = mode === "register" || allowUserRegister;
   const switchHref = useMemo(() => {
     if (!redirectTarget) {
       return switchPath;
@@ -97,9 +111,11 @@ export function AuthPanel({
       return;
     }
     if (mode === "login") {
+      const selectedProvider = provider !== "__auto__" ? provider : undefined;
       await onLogin({
-        email: email.trim(),
-        password
+        identifier: identifier.trim(),
+        password,
+        provider: selectedProvider
       });
       setPassword("");
       return;
@@ -111,7 +127,7 @@ export function AuthPanel({
     });
     setPassword("");
     setConfirmPassword("");
-  }, [canSubmit, email, mode, name, onLogin, onRegister, password]);
+  }, [canSubmit, email, identifier, mode, name, onLogin, onRegister, password, provider]);
 
   return (
     <div className="admin-auth-page">
@@ -142,17 +158,55 @@ export function AuthPanel({
               </label>
             ) : null}
 
-            <label className="admin-auth-form__field">
-              <span>邮箱</span>
-              <Input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="name@example.com"
-                autoComplete="email"
-                disabled={checking || submitting}
-              />
-            </label>
+            {mode === "login" ? (
+              <label className="admin-auth-form__field">
+                <span>账号（邮箱或用户名）</span>
+                <Input
+                  type="text"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
+                  placeholder="name@example.com 或 username"
+                  autoComplete="username"
+                  disabled={checking || submitting}
+                />
+              </label>
+            ) : (
+              <label className="admin-auth-form__field">
+                <span>邮箱</span>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="name@example.com"
+                  autoComplete="email"
+                  disabled={checking || submitting}
+                />
+              </label>
+            )}
+
+            {showProviderSelector ? (
+              <label className="admin-auth-form__field">
+                <span>认证源（可选）</span>
+                <Select
+                  value={provider}
+                  onValueChange={(value) => setProvider(value)}
+                  disabled={checking || submitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__auto__">自动选择（推荐）</SelectItem>
+                    {loginMode === "mixed" ? <SelectItem value="local">本地账号（local）</SelectItem> : null}
+                    {providerOptions.map((providerOption) => (
+                      <SelectItem key={providerOption.id} value={providerOption.id}>
+                        {providerOption.name}（{providerOption.id}）
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            ) : null}
 
             <label className="admin-auth-form__field">
               <span>密码</span>
@@ -188,12 +242,16 @@ export function AuthPanel({
               <span>{submitText}</span>
             </Button>
 
-            <p className="text-center text-sm text-slate-600">
-              <span>{switchPromptText}</span>
-              <a href={switchHref} className="ml-2 font-medium text-cyan-700 hover:text-cyan-800 hover:underline">
-                {switchActionText}
-              </a>
-            </p>
+            {canSwitchToRegister ? (
+              <p className="text-center text-sm text-slate-600">
+                <span>{switchPromptText}</span>
+                <a href={switchHref} className="ml-2 font-medium text-cyan-700 hover:text-cyan-800 hover:underline">
+                  {switchActionText}
+                </a>
+              </p>
+            ) : (
+              <p className="text-center text-sm text-slate-500">当前站点已关闭注册入口。</p>
+            )}
           </form>
         </CardContent>
       </Card>

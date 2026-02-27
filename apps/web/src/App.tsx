@@ -67,6 +67,8 @@ import {
   AUTH_UNAUTHORIZED_EVENT,
   ConflictError,
   getDataGateway,
+  type AuthLoginInput,
+  type AuthLoginOptions,
   type AuthSession,
   type AuthUnauthorizedEventDetail,
   type CreateNodeResult
@@ -140,6 +142,12 @@ const EDITOR_ROUTE_BASE_PATH = "/editor";
 const ADMIN_SPACES_ROUTE_PATH = `${ADMIN_ROUTE_BASE_PATH}/spaces`;
 const AUTO_SAVE_DEBOUNCE_MS = 800;
 const EDITOR_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
+const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
+  loginMode: "local_only",
+  defaultProviderId: "local",
+  allowUserRegister: true,
+  providers: []
+};
 
 export type AppRoute =
   | { kind: "login" }
@@ -711,6 +719,9 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+  const [authLoginOptions, setAuthLoginOptions] = useState<AuthLoginOptions>(
+    DEFAULT_AUTH_LOGIN_OPTIONS
+  );
   const activeUser = authSession.user;
   // 工作区状态层：统一管理空间/目录树/文档加载，减少 App 根组件职责。
   const {
@@ -946,6 +957,30 @@ export default function App() {
     };
   }, [dataGateway]);
 
+  // 登录页策略：读取后端认证选项，决定注册入口与 provider 兜底选择能力。
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLoginOptions = async () => {
+      try {
+        const options = await dataGateway.auth.getLoginOptions();
+        if (!cancelled) {
+          setAuthLoginOptions(options);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("[auth] 登录策略读取失败", error);
+          setAuthLoginOptions(DEFAULT_AUTH_LOGIN_OPTIONS);
+        }
+      }
+    };
+
+    void loadLoginOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataGateway]);
+
   // 登录态与路由守卫：未登录固定到 /login，已登录固定到 /editor 系列路由。
   useEffect(() => {
     if (isAuthChecking) {
@@ -963,6 +998,9 @@ export default function App() {
         const currentPathWithSearch =
           `${location.pathname}${location.search}${location.hash}` || "/";
         navigate(buildAuthEntryPath(LOGIN_ROUTE_PATH, currentPathWithSearch), { replace: true });
+      } else if (route.kind === "register" && !authLoginOptions.allowUserRegister) {
+        setAuthErrorMessage("当前站点已关闭注册入口，请使用已有账号登录。");
+        navigate(buildAuthEntryPath(LOGIN_ROUTE_PATH, authRedirectTarget), { replace: true });
       }
       return;
     }
@@ -997,7 +1035,8 @@ export default function App() {
     location.hash,
     location.pathname,
     location.search,
-    route.kind
+    route.kind,
+    authLoginOptions.allowUserRegister
   ]);
 
   // 加载并监听外部自定义样式：支持 window 变量、localStorage 与自定义事件三种入口。
@@ -2113,7 +2152,7 @@ export default function App() {
 
   // 登录动作：认证成功后切换到工作区，并触发工作区启动流程。
   const handleAuthLogin = useCallback(
-    async (input: { email: string; password: string }) => {
+    async (input: AuthLoginInput) => {
       setIsAuthSubmitting(true);
       setAuthErrorMessage(null);
       try {
@@ -2224,6 +2263,9 @@ export default function App() {
           checking={isAuthChecking}
           submitting={isAuthSubmitting}
           errorMessage={authErrorMessage}
+          loginMode={authLoginOptions.loginMode}
+          allowUserRegister={authLoginOptions.allowUserRegister}
+          providerOptions={authLoginOptions.providers}
           onLogin={handleAuthLogin}
           onRegister={handleAuthRegister}
         />

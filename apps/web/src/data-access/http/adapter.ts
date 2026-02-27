@@ -19,6 +19,10 @@ import {
   type AdminUser,
   type AdminUserListInput,
   type AdminUserListResult,
+  type AuthLoginInput,
+  type AuthLoginMode,
+  type AuthLoginOptions,
+  type AuthLoginProviderOption,
   type AuthSession,
   type AuthGateway,
   ConflictError,
@@ -111,12 +115,71 @@ interface JsonResultEnvelope<T> {
   data?: T;
 }
 
+const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
+  loginMode: "local_only",
+  defaultProviderId: "local",
+  allowUserRegister: true,
+  providers: []
+};
+
 function isJsonResultEnvelope(value: unknown): value is JsonResultEnvelope<unknown> {
   if (!value || typeof value !== "object") {
     return false;
   }
   const record = value as Record<string, unknown>;
   return "code" in record && "data" in record;
+}
+
+function normalizeAuthLoginMode(value: unknown): AuthLoginMode {
+  if (value === "local_only" || value === "ldap_only" || value === "mixed") {
+    return value;
+  }
+  return DEFAULT_AUTH_LOGIN_OPTIONS.loginMode;
+}
+
+function normalizeAuthLoginOptions(value: unknown): AuthLoginOptions {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_AUTH_LOGIN_OPTIONS;
+  }
+  const record = value as Record<string, unknown>;
+  const providersRaw = Array.isArray(record.providers) ? record.providers : [];
+  const providers: AuthLoginProviderOption[] = providersRaw
+    .map((provider) => {
+      if (!provider || typeof provider !== "object") {
+        return null;
+      }
+      const providerRecord = provider as Record<string, unknown>;
+      const id = typeof providerRecord.id === "string" ? providerRecord.id.trim() : "";
+      if (!id) {
+        return null;
+      }
+      const name = typeof providerRecord.name === "string" ? providerRecord.name.trim() : id;
+      const type = typeof providerRecord.type === "string" ? providerRecord.type.trim().toLowerCase() : "";
+      const priorityValue = Number(providerRecord.priority);
+      return {
+        id,
+        name: name || id,
+        type: type || "ldap",
+        priority: Number.isFinite(priorityValue) ? Math.trunc(priorityValue) : 0
+      };
+    })
+    .filter((provider): provider is AuthLoginProviderOption => provider !== null)
+    .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
+
+  const defaultProviderIdRaw =
+    typeof record.defaultProviderId === "string" ? record.defaultProviderId.trim() : "";
+  const defaultProviderId = defaultProviderIdRaw || DEFAULT_AUTH_LOGIN_OPTIONS.defaultProviderId;
+  const allowUserRegister =
+    typeof record.allowUserRegister === "boolean"
+      ? record.allowUserRegister
+      : DEFAULT_AUTH_LOGIN_OPTIONS.allowUserRegister;
+
+  return {
+    loginMode: normalizeAuthLoginMode(record.loginMode),
+    defaultProviderId,
+    allowUserRegister,
+    providers
+  };
 }
 
 function parseResponsePayload(rawBody: string): unknown {
@@ -395,6 +458,17 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   };
 
   const auth: AuthGateway = {
+    async getLoginOptions() {
+      const options = await request<unknown>(
+        "/auth/options",
+        undefined,
+        {
+          skipAuth: true,
+          retryOnUnauthorized: false
+        }
+      );
+      return normalizeAuthLoginOptions(options);
+    },
     async getSession() {
       try {
         const session = await request<HttpAuthSession>("/auth/me", undefined, {
@@ -423,9 +497,23 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
     },
     async login(input) {
+      const payload: AuthLoginInput = {
+        password: input.password
+      };
+      const identifier = typeof input.identifier === "string" ? input.identifier.trim() : "";
+      const email = typeof input.email === "string" ? input.email.trim() : "";
+      const provider = typeof input.provider === "string" ? input.provider.trim() : "";
+      if (identifier) {
+        payload.identifier = identifier;
+      } else if (email) {
+        payload.email = email;
+      }
+      if (provider) {
+        payload.provider = provider;
+      }
       const session = await request<HttpAuthSession>("/auth/login", {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify(payload)
       });
       saveSessionTokens(session);
       return {
@@ -1277,7 +1365,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig[]>("/admin/system-configs");
     },
     async upsertSystemConfig(input: {
-      configKey: "site" | "editor" | "security" | "image-hosting" | "sitemap";
+      configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap";
       value: Record<string, unknown>;
       expectedVersion?: number;
     }) {
@@ -1304,6 +1392,18 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig>(`/admin/system-configs/${encodeURIComponent(configKey)}`, {
         method: "PUT",
         headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify(payload)
+      });
+    },
+    async testAuthLDAPConnection(input: { value: Record<string, unknown>; providerId?: string }) {
+      const payload: { value: Record<string, unknown>; providerId?: string } = {
+        value: input.value ?? {}
+      };
+      if (typeof input.providerId === "string" && input.providerId.trim()) {
+        payload.providerId = input.providerId.trim();
+      }
+      return request<{ ok: boolean }>("/admin/system-configs/auth/providers/ldap/test", {
+        method: "POST",
         body: JSON.stringify(payload)
       });
     },

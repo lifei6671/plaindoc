@@ -1,6 +1,6 @@
 # 后端开发指南（`apps/server`）
 
-**Last Updated**: 2026-02-26  
+**Last Updated**: 2026-02-27  
 **适用对象**: 新加入项目的后端工程师、全栈工程师、AI Agent  
 **目标**: 统一后端认知口径，快速进入可开发、可联调、可发布状态
 
@@ -62,6 +62,8 @@
 3. `POST /api/auth/refresh`：刷新 access token，同时执行 refresh token 旋转与旧 token 失效。
 4. `GET /api/auth/me`：获取当前登录用户信息（会话校验入口）。
 5. `POST /api/auth/logout`：退出当前会话并吊销对应服务端会话状态。
+
+LDAP/统一认证改造任务请优先阅读：`docs/LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`。
 
 ### 4.2 空间与文档协作
 
@@ -204,3 +206,4 @@ docker run --rm -p 8080:8080 plaindoc:latest
 6. `docs/SPACE_READER_SSR_SUBPROCESS_TECHNICAL_PROPOSAL.md`
 7. `docs/SPACE_READER_SSR_SUBPROCESS_IMPLEMENTATION_PHASES.md`
 8. `docs/SPACE_CATEGORY_REFACTOR_NOTES.md`
+9. `docs/LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`

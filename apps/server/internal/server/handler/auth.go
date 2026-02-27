@@ -14,6 +14,7 @@ import (
 
 type authHandler struct {
 	authService                   *service.AuthService
+	authLoginOrchestrator         *service.AuthLoginOrchestrator
 	authRegistrationPolicyService *service.AuthRegistrationPolicyService
 	accessTokenTTL                time.Duration
 	refreshTokenTTL               time.Duration
@@ -26,12 +27,28 @@ type registerRequest struct {
 }
 
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email      string `json:"email"`
+	Identifier string `json:"identifier"`
+	Provider   string `json:"provider"`
+	Password   string `json:"password"`
 }
 
 type refreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
+}
+
+type authLoginProviderOptionResponse struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Priority int    `json:"priority"`
+}
+
+type authLoginOptionsResponse struct {
+	LoginMode         string                            `json:"loginMode"`
+	DefaultProviderID string                            `json:"defaultProviderId"`
+	AllowUserRegister bool                              `json:"allowUserRegister"`
+	Providers         []authLoginProviderOptionResponse `json:"providers"`
 }
 
 type authUserResponse struct {
@@ -56,10 +73,18 @@ const (
 func NewAuthHandler(
 	authService *service.AuthService,
 	authRegistrationPolicyService *service.AuthRegistrationPolicyService,
+	authLoginOrchestrator *service.AuthLoginOrchestrator,
 	jwtConfig config.JWTConfig,
 ) *authHandler {
+	if authLoginOrchestrator == nil {
+		authLoginOrchestrator = service.NewAuthLoginOrchestrator(
+			service.AuthProviderLocalID,
+			service.NewLocalAuthLoginProvider(authService),
+		)
+	}
 	return &authHandler{
 		authService:                   authService,
+		authLoginOrchestrator:         authLoginOrchestrator,
 		authRegistrationPolicyService: authRegistrationPolicyService,
 		accessTokenTTL:                jwtConfig.AccessTokenTTL,
 		refreshTokenTTL:               jwtConfig.RefreshTokenTTL,
@@ -130,9 +155,45 @@ func (h *authHandler) Register(c *gin.Context) {
 	})
 }
 
+// Options 返回登录页所需的认证策略选项（不包含敏感配置）。
+func (h *authHandler) Options(c *gin.Context) {
+	if h == nil || h.authRegistrationPolicyService == nil {
+		response.JSON(c, http.StatusOK, authLoginOptionsResponse{
+			LoginMode:         "local_only",
+			DefaultProviderID: service.AuthProviderLocalID,
+			AllowUserRegister: true,
+			Providers:         []authLoginProviderOptionResponse{},
+		})
+		return
+	}
+
+	options, err := h.authRegistrationPolicyService.ResolveLoginOptions(c.Request.Context())
+	if err != nil {
+		response.InternalError(c)
+		return
+	}
+
+	providers := make([]authLoginProviderOptionResponse, 0, len(options.Providers))
+	for _, provider := range options.Providers {
+		providers = append(providers, authLoginProviderOptionResponse{
+			ID:       provider.ID,
+			Name:     provider.Name,
+			Type:     provider.Type,
+			Priority: provider.Priority,
+		})
+	}
+
+	response.JSON(c, http.StatusOK, authLoginOptionsResponse{
+		LoginMode:         options.LoginMode,
+		DefaultProviderID: options.DefaultProviderID,
+		AllowUserRegister: options.AllowUserRegister,
+		Providers:         providers,
+	})
+}
+
 // Login 校验账号密码并返回会话 token。
 func (h *authHandler) Login(c *gin.Context) {
-	if h == nil || h.authService == nil {
+	if h == nil || h.authService == nil || h.authLoginOrchestrator == nil {
 		response.InternalError(c)
 		return
 	}
@@ -143,16 +204,27 @@ func (h *authHandler) Login(c *gin.Context) {
 		return
 	}
 
-	email := normalizeEmail(req.Email)
-	if email == "" || req.Password == "" {
+	identifier := strings.TrimSpace(req.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.Email)
+	}
+	if identifier == "" || req.Password == "" {
 		response.AuthErrEmailPasswordRequired.Write(c)
 		return
 	}
 
-	session, err := h.authService.Login(c.Request.Context(), email, req.Password)
+	session, err := h.authLoginOrchestrator.Login(c.Request.Context(), service.AuthProviderLoginInput{
+		Provider:   strings.TrimSpace(req.Provider),
+		Identifier: identifier,
+		Password:   req.Password,
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidCredentials):
+			response.AuthErrEmailPassword.Write(c)
+		case errors.Is(err, service.ErrAuthProviderUnavailable):
+			response.AuthErrEmailPassword.Write(c)
+		case errors.Is(err, service.ErrAuthProviderFailure):
 			response.AuthErrEmailPassword.Write(c)
 		case errors.Is(err, service.ErrUserBanned):
 			response.AuthErrUserHasBeenBanned.Write(c)

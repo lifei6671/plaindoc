@@ -25,6 +25,7 @@ type Config struct {
 	IdleTimeout    time.Duration
 	Database       DatabaseConfig
 	JWT            JWTConfig
+	Auth           AuthConfig
 	SSRWorker      SSRWorkerConfig
 }
 
@@ -40,6 +41,31 @@ type JWTConfig struct {
 	Secret          string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
+}
+
+// AuthConfig 认证入口配置（当前用于 local/ldap provider 选择与 LDAP 连接参数）。
+type AuthConfig struct {
+	DefaultProvider string
+	LDAP            LDAPConfig
+}
+
+// LDAPConfig LDAP provider 配置。
+type LDAPConfig struct {
+	Enabled            bool
+	ProviderID         string
+	Host               string
+	Port               int
+	TLSMode            string
+	BaseDN             string
+	BindDN             string
+	BindPassword       string
+	UserFilter         string
+	IDAttribute        string
+	EmailAttribute     string
+	NameAttribute      string
+	ConnectTimeout     time.Duration
+	ReadTimeout        time.Duration
+	InsecureSkipVerify bool
 }
 
 // SSRWorkerConfig 描述 Go 进程内管理的 Node SSR 子进程配置。
@@ -67,6 +93,22 @@ func Load() (Config, error) {
 		},
 		JWT: JWTConfig{
 			Secret: getenv("JWT_SECRET", "plaindoc-dev-secret"),
+		},
+		Auth: AuthConfig{
+			DefaultProvider: strings.ToLower(getenv("AUTH_DEFAULT_PROVIDER", "local")),
+			LDAP: LDAPConfig{
+				ProviderID:     getenv("AUTH_LDAP_PROVIDER_ID", "ldap"),
+				Host:           getenv("AUTH_LDAP_HOST", ""),
+				Port:           636,
+				TLSMode:        strings.ToLower(getenv("AUTH_LDAP_TLS_MODE", "ldaps")),
+				BaseDN:         getenv("AUTH_LDAP_BASE_DN", ""),
+				BindDN:         getenv("AUTH_LDAP_BIND_DN", ""),
+				BindPassword:   os.Getenv("AUTH_LDAP_BIND_PASSWORD"),
+				UserFilter:     getenv("AUTH_LDAP_USER_FILTER", "(mail=%s)"),
+				IDAttribute:    getenv("AUTH_LDAP_ID_ATTRIBUTE", "entryUUID"),
+				EmailAttribute: getenv("AUTH_LDAP_EMAIL_ATTRIBUTE", "mail"),
+				NameAttribute:  getenv("AUTH_LDAP_NAME_ATTRIBUTE", "cn"),
+			},
 		},
 		SSRWorker: SSRWorkerConfig{
 			Exec:            getenv("SSR_WORKER_EXEC", "node"),
@@ -128,6 +170,46 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.JWT.RefreshTokenTTL = refreshTokenTTL
+
+	ldapEnabled, err := parseBool("AUTH_LDAP_ENABLED", "false")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Auth.LDAP.Enabled = ldapEnabled
+
+	ldapPort, err := parseInt("AUTH_LDAP_PORT", "636")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Auth.LDAP.Port = ldapPort
+	cfg.Auth.LDAP.ProviderID = strings.TrimSpace(cfg.Auth.LDAP.ProviderID)
+	cfg.Auth.LDAP.Host = strings.TrimSpace(cfg.Auth.LDAP.Host)
+	cfg.Auth.LDAP.TLSMode = strings.ToLower(strings.TrimSpace(cfg.Auth.LDAP.TLSMode))
+	cfg.Auth.LDAP.BaseDN = strings.TrimSpace(cfg.Auth.LDAP.BaseDN)
+	cfg.Auth.LDAP.BindDN = strings.TrimSpace(cfg.Auth.LDAP.BindDN)
+	cfg.Auth.LDAP.UserFilter = strings.TrimSpace(cfg.Auth.LDAP.UserFilter)
+	cfg.Auth.LDAP.IDAttribute = strings.TrimSpace(cfg.Auth.LDAP.IDAttribute)
+	cfg.Auth.LDAP.EmailAttribute = strings.TrimSpace(cfg.Auth.LDAP.EmailAttribute)
+	cfg.Auth.LDAP.NameAttribute = strings.TrimSpace(cfg.Auth.LDAP.NameAttribute)
+
+	ldapConnectTimeout, err := parseDuration("AUTH_LDAP_CONNECT_TIMEOUT", "3s")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Auth.LDAP.ConnectTimeout = ldapConnectTimeout
+
+	ldapReadTimeout, err := parseDuration("AUTH_LDAP_READ_TIMEOUT", "3s")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Auth.LDAP.ReadTimeout = ldapReadTimeout
+
+	ldapInsecureSkipVerify, err := parseBool("AUTH_LDAP_INSECURE_SKIP_VERIFY", "false")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Auth.LDAP.InsecureSkipVerify = ldapInsecureSkipVerify
+	cfg.Auth.DefaultProvider = strings.ToLower(strings.TrimSpace(cfg.Auth.DefaultProvider))
 
 	ssrWorkerEnabled, err := parseBool("SSR_WORKER_ENABLED", "false")
 	if err != nil {
@@ -196,6 +278,43 @@ func (c Config) Validate() error {
 	}
 	if c.JWT.AccessTokenTTL <= 0 || c.JWT.RefreshTokenTTL <= 0 {
 		return errors.New("JWT token TTL must be greater than 0")
+	}
+	switch c.Auth.DefaultProvider {
+	case "local":
+	case "ldap":
+		if !c.Auth.LDAP.Enabled {
+			return errors.New("AUTH_DEFAULT_PROVIDER=ldap requires AUTH_LDAP_ENABLED=true")
+		}
+	default:
+		return fmt.Errorf("AUTH_DEFAULT_PROVIDER must be local/ldap, got %q", c.Auth.DefaultProvider)
+	}
+	if c.Auth.LDAP.Enabled {
+		if c.Auth.LDAP.ProviderID == "" {
+			return errors.New("AUTH_LDAP_PROVIDER_ID must not be empty when AUTH_LDAP_ENABLED is true")
+		}
+		if c.Auth.LDAP.Host == "" {
+			return errors.New("AUTH_LDAP_HOST must not be empty when AUTH_LDAP_ENABLED is true")
+		}
+		if c.Auth.LDAP.Port <= 0 {
+			return errors.New("AUTH_LDAP_PORT must be greater than 0 when AUTH_LDAP_ENABLED is true")
+		}
+		switch strings.ToLower(strings.TrimSpace(c.Auth.LDAP.TLSMode)) {
+		case "ldaps", "starttls":
+		default:
+			return fmt.Errorf("AUTH_LDAP_TLS_MODE must be ldaps/starttls, got %q", c.Auth.LDAP.TLSMode)
+		}
+		if c.Auth.LDAP.BaseDN == "" {
+			return errors.New("AUTH_LDAP_BASE_DN must not be empty when AUTH_LDAP_ENABLED is true")
+		}
+		if !strings.Contains(c.Auth.LDAP.UserFilter, "%s") {
+			return errors.New("AUTH_LDAP_USER_FILTER must include %s placeholder")
+		}
+		if c.Auth.LDAP.IDAttribute == "" || c.Auth.LDAP.EmailAttribute == "" || c.Auth.LDAP.NameAttribute == "" {
+			return errors.New("AUTH_LDAP_*_ATTRIBUTE must not be empty when AUTH_LDAP_ENABLED is true")
+		}
+		if c.Auth.LDAP.ConnectTimeout <= 0 || c.Auth.LDAP.ReadTimeout <= 0 {
+			return errors.New("AUTH_LDAP_*_TIMEOUT must be greater than 0 when AUTH_LDAP_ENABLED is true")
+		}
 	}
 	switch c.LogOutput {
 	case "stdout", "file", "both":

@@ -33,6 +33,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 
 	requiredTables := []string{
 		"users",
+		"user_identities",
 		"user_sessions",
 		"user_admin_roles",
 		"system_configs",
@@ -134,6 +135,16 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 		Status:       models.EntityStatusActive,
 	}
 	if err := orm.WithContext(ctx).Create(user).Error; err != nil {
+		return err
+	}
+	userIdentity := &models.UserIdentity{
+		UserID:       userID,
+		ProviderType: "local",
+		ProviderID:   "local",
+		ExternalID:   "tester@example.com",
+		LoginName:    "tester@example.com",
+	}
+	if err := orm.WithContext(ctx).Create(userIdentity).Error; err != nil {
 		return err
 	}
 

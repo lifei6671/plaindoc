@@ -29,6 +29,11 @@ type upsertAdminSystemConfigRequest struct {
 	ExpectedVersion *int `json:"expectedVersion"`
 }
 
+type testAdminLDAPConnectionRequest struct {
+	Value      any    `json:"value"`
+	ProviderID string `json:"providerId"`
+}
+
 // NewAdminSystemConfigHandler 创建后台系统配置处理器。
 func NewAdminSystemConfigHandler(
 	adminSystemConfigService *service.AdminSystemConfigService,
@@ -100,6 +105,40 @@ func (h *adminSystemConfigHandler) UpsertConfig(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, mapAdminSystemConfigResponse(item))
+}
+
+// TestLDAPConnection 测试 auth 配置中的 LDAP provider 连通性（不落库）。
+func (h *adminSystemConfigHandler) TestLDAPConnection(c *gin.Context) {
+	if h == nil || h.adminSystemConfigService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
+		return
+	}
+
+	var req testAdminLDAPConnectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.AdminSystemConfigErrRequestBody.Write(c)
+		return
+	}
+
+	if err := h.adminSystemConfigService.TestLDAPConnection(
+		c.Request.Context(),
+		service.TestAdminSystemConfigLDAPConnectionInput{
+			ActorUserID: actorUserID,
+			Value:       req.Value,
+			ProviderID:  strings.TrimSpace(req.ProviderID),
+		},
+	); err != nil {
+		response.FromError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func mapAdminSystemConfigResponse(value service.AdminSystemConfigRecord) adminSystemConfigResponse {

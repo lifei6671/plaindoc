@@ -99,6 +99,7 @@ func newRouter(
 	// ---- Repository 装配层 ----
 	// 所有仓储统一由 GORM 实现并在此注入，便于后续替换实现时维持依赖清晰。
 	userRepo := repository.NewGormUserRepository(db)
+	userIdentityRepo := repository.NewGormUserIdentityRepository(db)
 	userSessionRepo := repository.NewGormUserSessionRepository(db)
 	spaceRepo := repository.NewGormSpaceRepository(db)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
@@ -181,8 +182,45 @@ func newRouter(
 		// ---- 认证与会话 API ----
 		// 注册策略独立成服务，便于从系统配置动态控制开放注册。
 		authRegistrationPolicyService := service.NewAuthRegistrationPolicyService(systemConfigRepo)
-		authHandler := handler.NewAuthHandler(authService, authRegistrationPolicyService, cfg.JWT)
+		authProviders := []service.AuthLoginProvider{
+			service.NewLocalAuthLoginProvider(authService),
+		}
+		if cfg.Auth.LDAP.Enabled {
+			ldapProvider, err := service.NewLDAPAuthLoginProvider(
+				service.LDAPAuthProviderConfig{
+					ProviderID:         cfg.Auth.LDAP.ProviderID,
+					Host:               cfg.Auth.LDAP.Host,
+					Port:               cfg.Auth.LDAP.Port,
+					TLSMode:            service.LDAPTLSMode(cfg.Auth.LDAP.TLSMode),
+					InsecureSkipVerify: cfg.Auth.LDAP.InsecureSkipVerify,
+					BaseDN:             cfg.Auth.LDAP.BaseDN,
+					BindDN:             cfg.Auth.LDAP.BindDN,
+					BindPassword:       cfg.Auth.LDAP.BindPassword,
+					UserFilter:         cfg.Auth.LDAP.UserFilter,
+					IDAttribute:        cfg.Auth.LDAP.IDAttribute,
+					EmailAttribute:     cfg.Auth.LDAP.EmailAttribute,
+					NameAttribute:      cfg.Auth.LDAP.NameAttribute,
+					ConnectTimeout:     cfg.Auth.LDAP.ConnectTimeout,
+					ReadTimeout:        cfg.Auth.LDAP.ReadTimeout,
+					HealthCheckBaseDN:  cfg.Auth.LDAP.BaseDN,
+				},
+				authService,
+				userRepo,
+				userIdentityRepo,
+			)
+			if err != nil {
+				if logger != nil {
+					logger.Error("ldap auth provider initialization failed", slog.String("error", err.Error()))
+				}
+			} else {
+				authProviders = append(authProviders, ldapProvider)
+			}
+		}
+		authLoginOrchestrator := service.NewAuthLoginOrchestrator(cfg.Auth.DefaultProvider, authProviders...)
+		authHandler := handler.NewAuthHandler(authService, authRegistrationPolicyService, authLoginOrchestrator, cfg.JWT)
 
+		// 登录策略选项（登录页模式、provider 列表与注册开关）。
+		api.GET("/auth/options", authHandler.Options)
 		// 用户注册。
 		api.POST("/auth/register", authHandler.Register)
 		// 用户登录，签发 access/refresh token。
@@ -513,6 +551,11 @@ func newRouter(
 					},
 				),
 				adminSystemConfigHandler.UpsertConfig,
+			)
+			adminAPI.POST(
+				"/system-configs/auth/providers/ldap/test",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSystemConfigHandler.TestLDAPConnection,
 			)
 
 			// ---- 审计检索（仅平台管理员）----

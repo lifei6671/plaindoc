@@ -167,6 +167,45 @@ func (s *AuthService) Login(ctx context.Context, email string, password string) 
 	}, nil
 }
 
+// LoginByUserID 直接以 user_id 签发登录会话，用于外部 provider 完成身份校验后的会话复用。
+func (s *AuthService) LoginByUserID(ctx context.Context, userID string) (AuthSession, error) {
+	if s == nil || s.userRepo == nil || s.userSessionRepo == nil {
+		return AuthSession{}, errors.New("auth service dependencies are nil")
+	}
+
+	normalizedUserID := strings.TrimSpace(userID)
+	if normalizedUserID == "" {
+		return AuthSession{}, ErrInvalidCredentials
+	}
+
+	user, err := s.userRepo.GetByUserID(ctx, normalizedUserID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AuthSession{}, ErrInvalidCredentials
+		}
+		return AuthSession{}, err
+	}
+	if err := ensureAuthUserActive(user); err != nil {
+		return AuthSession{}, err
+	}
+
+	accessToken, refreshToken, err := s.issueSessionTokens(ctx, user.UserID)
+	if err != nil {
+		return AuthSession{}, err
+	}
+
+	return AuthSession{
+		User: AuthUser{
+			ID:        user.UserID,
+			Email:     user.Email,
+			Name:      user.Name,
+			AvatarURL: strings.TrimSpace(user.AvatarURL),
+		},
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (AuthSession, error) {
 	if s == nil || s.userRepo == nil || s.userSessionRepo == nil {
 		return AuthSession{}, errors.New("auth service dependencies are nil")

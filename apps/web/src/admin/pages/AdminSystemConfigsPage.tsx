@@ -30,9 +30,10 @@ import {
   type LocalImageHostingConfig
 } from "../../settings/image-hosting";
 
-type SystemConfigKey = "site" | "editor" | "security" | "image-hosting" | "sitemap";
+type SystemConfigKey = "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
+type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
 
 interface SiteSystemConfigValue {
   allowRegistration: boolean;
@@ -47,6 +48,48 @@ interface EditorSystemConfigValue {
 interface SecuritySystemConfigValue {
   accessTokenTTLMinutes: number;
   refreshTokenTTLMinutes: number;
+}
+
+interface AuthProviderLdapConfig {
+  host: string;
+  port: number;
+  tlsMode: "ldaps" | "starttls";
+  baseDN: string;
+  bindDN: string;
+  bindPasswordCiphertext: string;
+  userFilter: string;
+  idAttribute: string;
+  emailAttribute: string;
+  nameAttribute: string;
+  groupAttribute: string;
+  connectTimeoutMs: number;
+  readTimeoutMs: number;
+}
+
+interface AuthProviderMatchRules {
+  emailDomains: string[];
+  usernameRegex: string;
+}
+
+interface AuthProviderConfig {
+  id: string;
+  name: string;
+  type: "ldap";
+  enabled: boolean;
+  priority: number;
+  matchRules: AuthProviderMatchRules;
+  ldap: AuthProviderLdapConfig;
+}
+
+interface AuthSystemConfigValue {
+  loginMode: AuthLoginMode;
+  defaultProviderId: string;
+  allowUserRegister: boolean;
+  providers: AuthProviderConfig[];
+  breakGlass: {
+    enabled: boolean;
+    localAdminEmails: string[];
+  };
 }
 
 interface SitemapSystemConfigValue {
@@ -78,6 +121,12 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     key: "security",
     label: "安全设置",
     description: "Token 生命周期",
+    icon: Lock
+  },
+  {
+    key: "auth",
+    label: "认证设置",
+    description: "登录模式与 LDAP",
     icon: Lock
   },
   {
@@ -123,6 +172,14 @@ const SITEMAP_GENERATION_MODE_OPTIONS: Array<{
   }
 ];
 
+const AUTH_LOGIN_MODE_OPTIONS: Array<{ value: AuthLoginMode; label: string }> = [
+  { value: "local_only", label: "仅本地账号（local_only）" },
+  { value: "ldap_only", label: "仅 LDAP（ldap_only）" },
+  { value: "mixed", label: "本地 + LDAP（mixed）" }
+];
+
+const AUTH_SECRET_MASK = "********";
+
 const SITE_TEMPLATE: SiteSystemConfigValue = {
   allowRegistration: true,
   defaultSpaceVisibility: "member"
@@ -136,6 +193,44 @@ const EDITOR_TEMPLATE: EditorSystemConfigValue = {
 const SECURITY_TEMPLATE: SecuritySystemConfigValue = {
   accessTokenTTLMinutes: 120,
   refreshTokenTTLMinutes: 10080
+};
+
+const AUTH_PROVIDER_TEMPLATE: AuthProviderConfig = {
+  id: "corp-ldap",
+  name: "Corp LDAP",
+  type: "ldap",
+  enabled: true,
+  priority: 100,
+  matchRules: {
+    emailDomains: ["corp.example.com"],
+    usernameRegex: "^[a-z0-9._-]+$"
+  },
+  ldap: {
+    host: "ldap.corp.example.com",
+    port: 636,
+    tlsMode: "ldaps",
+    baseDN: "dc=corp,dc=example,dc=com",
+    bindDN: "",
+    bindPasswordCiphertext: "",
+    userFilter: "(mail=%s)",
+    idAttribute: "entryUUID",
+    emailAttribute: "mail",
+    nameAttribute: "cn",
+    groupAttribute: "memberOf",
+    connectTimeoutMs: 3000,
+    readTimeoutMs: 3000
+  }
+};
+
+const AUTH_TEMPLATE: AuthSystemConfigValue = {
+  loginMode: "mixed",
+  defaultProviderId: "corp-ldap",
+  allowUserRegister: true,
+  providers: [{ ...AUTH_PROVIDER_TEMPLATE }],
+  breakGlass: {
+    enabled: true,
+    localAdminEmails: ["platform-admin@example.com"]
+  }
 };
 
 const SITEMAP_TEMPLATE: SitemapSystemConfigValue = {
@@ -228,6 +323,107 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
   };
 }
 
+function parseStringArray(value: unknown, fallbackValue: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallbackValue];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function parseAuthConfig(value: unknown): AuthSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return {
+      ...AUTH_TEMPLATE,
+      providers: AUTH_TEMPLATE.providers.map((provider) => ({
+        ...provider,
+        matchRules: { ...provider.matchRules },
+        ldap: { ...provider.ldap }
+      })),
+      breakGlass: { ...AUTH_TEMPLATE.breakGlass, localAdminEmails: [...AUTH_TEMPLATE.breakGlass.localAdminEmails] }
+    };
+  }
+
+  const loginModeRaw = parseString(payload.loginMode, AUTH_TEMPLATE.loginMode);
+  const loginMode: AuthLoginMode =
+    loginModeRaw === "local_only" || loginModeRaw === "ldap_only" || loginModeRaw === "mixed"
+      ? loginModeRaw
+      : AUTH_TEMPLATE.loginMode;
+  const defaultProviderId = parseString(payload.defaultProviderId, AUTH_TEMPLATE.defaultProviderId);
+  const allowUserRegister =
+    typeof payload.allowUserRegister === "boolean" ? payload.allowUserRegister : AUTH_TEMPLATE.allowUserRegister;
+
+  const providers = Array.isArray(payload.providers) ? payload.providers : [];
+  const parsedProviders: AuthProviderConfig[] = providers
+    .map((rawProvider) => asRecord(rawProvider))
+    .filter((provider): provider is Record<string, unknown> => provider !== null)
+    .map((provider) => {
+      const matchRules = asRecord(provider.matchRules);
+      const ldap = asRecord(provider.ldap);
+      return {
+        id: parseString(provider.id, AUTH_PROVIDER_TEMPLATE.id),
+        name: parseString(provider.name, AUTH_PROVIDER_TEMPLATE.name),
+        type: "ldap",
+        enabled: typeof provider.enabled === "boolean" ? provider.enabled : AUTH_PROVIDER_TEMPLATE.enabled,
+        priority: parseInteger(provider.priority, AUTH_PROVIDER_TEMPLATE.priority),
+        matchRules: {
+          emailDomains: parseStringArray(matchRules?.emailDomains, AUTH_PROVIDER_TEMPLATE.matchRules.emailDomains),
+          usernameRegex: parseString(matchRules?.usernameRegex, AUTH_PROVIDER_TEMPLATE.matchRules.usernameRegex)
+        },
+        ldap: {
+          host: parseString(ldap?.host, AUTH_PROVIDER_TEMPLATE.ldap.host),
+          port: parseInteger(ldap?.port, AUTH_PROVIDER_TEMPLATE.ldap.port),
+          tlsMode:
+            parseString(ldap?.tlsMode, AUTH_PROVIDER_TEMPLATE.ldap.tlsMode) === "starttls" ? "starttls" : "ldaps",
+          baseDN: parseString(ldap?.baseDN, AUTH_PROVIDER_TEMPLATE.ldap.baseDN),
+          bindDN: parseString(ldap?.bindDN, AUTH_PROVIDER_TEMPLATE.ldap.bindDN),
+          bindPasswordCiphertext: parseString(ldap?.bindPasswordCiphertext, AUTH_PROVIDER_TEMPLATE.ldap.bindPasswordCiphertext),
+          userFilter: parseString(ldap?.userFilter, AUTH_PROVIDER_TEMPLATE.ldap.userFilter),
+          idAttribute: parseString(ldap?.idAttribute, AUTH_PROVIDER_TEMPLATE.ldap.idAttribute),
+          emailAttribute: parseString(ldap?.emailAttribute, AUTH_PROVIDER_TEMPLATE.ldap.emailAttribute),
+          nameAttribute: parseString(ldap?.nameAttribute, AUTH_PROVIDER_TEMPLATE.ldap.nameAttribute),
+          groupAttribute: parseString(ldap?.groupAttribute, AUTH_PROVIDER_TEMPLATE.ldap.groupAttribute),
+          connectTimeoutMs: parseInteger(ldap?.connectTimeoutMs, AUTH_PROVIDER_TEMPLATE.ldap.connectTimeoutMs),
+          readTimeoutMs: parseInteger(ldap?.readTimeoutMs, AUTH_PROVIDER_TEMPLATE.ldap.readTimeoutMs)
+        }
+      };
+    });
+
+  const breakGlass = asRecord(payload.breakGlass);
+  const parsedBreakGlass = {
+    enabled: typeof breakGlass?.enabled === "boolean" ? breakGlass.enabled : AUTH_TEMPLATE.breakGlass.enabled,
+    localAdminEmails: parseStringArray(breakGlass?.localAdminEmails, AUTH_TEMPLATE.breakGlass.localAdminEmails)
+  };
+
+  return {
+    loginMode,
+    defaultProviderId,
+    allowUserRegister,
+    providers: parsedProviders.length > 0 ? parsedProviders : [{ ...AUTH_PROVIDER_TEMPLATE, matchRules: { ...AUTH_PROVIDER_TEMPLATE.matchRules }, ldap: { ...AUTH_PROVIDER_TEMPLATE.ldap } }],
+    breakGlass: parsedBreakGlass
+  };
+}
+
+function cloneAuthConfig(value: AuthSystemConfigValue): AuthSystemConfigValue {
+  return {
+    ...value,
+    providers: value.providers.map((provider) => ({
+      ...provider,
+      matchRules: {
+        ...provider.matchRules,
+        emailDomains: [...provider.matchRules.emailDomains]
+      },
+      ldap: { ...provider.ldap }
+    })),
+    breakGlass: {
+      ...value.breakGlass,
+      localAdminEmails: [...value.breakGlass.localAdminEmails]
+    }
+  };
+}
+
 function parseSitemapConfig(value: unknown): SitemapSystemConfigValue {
   const payload = asRecord(value);
   if (!payload) {
@@ -262,10 +458,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [configs, setConfigs] = useState<AdminSystemConfig[]>([]);
   const [selectedKey, setSelectedKey] = useState<SystemConfigKey>("site");
   const [imageHostingProviderTab, setImageHostingProviderTab] = useState<ImageHostingProvider>("local");
+  const [selectedAuthProviderID, setSelectedAuthProviderID] = useState<string>(AUTH_TEMPLATE.defaultProviderId);
 
   const [siteDraft, setSiteDraft] = useState<SiteSystemConfigValue>({ ...SITE_TEMPLATE });
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
+  const [authDraft, setAuthDraft] = useState<AuthSystemConfigValue>(cloneAuthConfig(AUTH_TEMPLATE));
   const [sitemapDraft, setSitemapDraft] = useState<SitemapSystemConfigValue>({ ...SITEMAP_TEMPLATE });
   const [imageHostingDraft, setImageHostingDraft] = useState<ImageHostingConfig>(
     cloneImageHostingConfig(IMAGE_HOSTING_TEMPLATE)
@@ -275,11 +473,13 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     site: false,
     editor: false,
     security: false,
+    auth: false,
     sitemap: false,
     "image-hosting": false
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testingLDAP, setTestingLDAP] = useState(false);
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -335,6 +535,11 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     if (!dirtyKeys.security) {
       setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
     }
+    if (!dirtyKeys.auth) {
+      const parsedConfig = parseAuthConfig(findConfigValue("auth"));
+      setAuthDraft(parsedConfig);
+      setSelectedAuthProviderID(parsedConfig.providers[0]?.id ?? parsedConfig.defaultProviderId);
+    }
     if (!dirtyKeys.sitemap) {
       setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
     }
@@ -375,6 +580,11 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setSecurityDraft({ ...SECURITY_TEMPLATE });
         markDirty("security");
         return;
+      case "auth":
+        setAuthDraft(cloneAuthConfig(AUTH_TEMPLATE));
+        setSelectedAuthProviderID(AUTH_TEMPLATE.defaultProviderId);
+        markDirty("auth");
+        return;
       case "sitemap":
         setSitemapDraft({ ...SITEMAP_TEMPLATE });
         markDirty("sitemap");
@@ -403,6 +613,13 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
         clearDirty("security");
         return;
+      case "auth": {
+        const parsedConfig = parseAuthConfig(findConfigValue("auth"));
+        setAuthDraft(parsedConfig);
+        setSelectedAuthProviderID(parsedConfig.providers[0]?.id ?? parsedConfig.defaultProviderId);
+        clearDirty("auth");
+        return;
+      }
       case "sitemap":
         setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
         clearDirty("sitemap");
@@ -436,6 +653,8 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
           accessTokenTTLMinutes: securityDraft.accessTokenTTLMinutes,
           refreshTokenTTLMinutes: securityDraft.refreshTokenTTLMinutes
         };
+      case "auth":
+        return cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
       case "sitemap":
         return {
           generationMode: sitemapDraft.generationMode,
@@ -446,7 +665,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return {};
     }
-  }, [editorDraft, imageHostingDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
+  }, [authDraft, editorDraft, imageHostingDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -500,6 +719,53 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     markDirty("image-hosting");
   }, [markDirty]);
 
+  const selectedAuthProvider = useMemo(() => {
+    return authDraft.providers.find((provider) => provider.id === selectedAuthProviderID) ?? authDraft.providers[0] ?? null;
+  }, [authDraft.providers, selectedAuthProviderID]);
+
+  const updateSelectedAuthProvider = useCallback(
+    (updater: (provider: AuthProviderConfig) => AuthProviderConfig) => {
+      setAuthDraft((previousConfig) => {
+        const nextProviders = previousConfig.providers.map((provider) => {
+          if (provider.id !== selectedAuthProviderID) {
+            return provider;
+          }
+          return updater(provider);
+        });
+        return {
+          ...previousConfig,
+          providers: nextProviders
+        };
+      });
+      markDirty("auth");
+    },
+    [markDirty, selectedAuthProviderID]
+  );
+
+  const handleTestLDAPConnection = useCallback(async () => {
+    if (!selectedAuthProvider) {
+      openToast("请先配置 LDAP Provider", "info");
+      return;
+    }
+    setTestingLDAP(true);
+    try {
+      const payload = cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
+      const result = await dataGateway.admin.testAuthLDAPConnection({
+        value: payload,
+        providerId: selectedAuthProvider.id
+      });
+      if (result.ok) {
+        openToast(`LDAP 连接测试成功：${selectedAuthProvider.name}`, "success");
+      } else {
+        openToast(`LDAP 连接测试失败：${selectedAuthProvider.name}`);
+      }
+    } catch (error) {
+      openToast(`LDAP 连接测试失败：${formatError(error)}`);
+    } finally {
+      setTestingLDAP(false);
+    }
+  }, [authDraft, dataGateway.admin, openToast, selectedAuthProvider]);
+
   return (
     <section aria-label="系统配置管理">
       <AdminPageCard>
@@ -549,6 +815,17 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                   <RefreshCw size={14} />
                   <span>{loading ? "刷新中..." : "刷新"}</span>
                 </Button>
+                {selectedKey === "auth" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={loading || saving || testingLDAP}
+                    onClick={() => void handleTestLDAPConnection()}
+                  >
+                    <RefreshCw size={14} />
+                    <span>{testingLDAP ? "测试中..." : "测试 LDAP 连接"}</span>
+                  </Button>
+                ) : null}
                 <Button type="button" disabled={loading || saving || !isSelectedDirty} onClick={() => void handleSave()}>
                   <Save size={14} />
                   <span>{saving ? "保存中..." : "保存配置"}</span>
@@ -708,6 +985,466 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                       disabled={saving}
                     />
                   </label>
+                </div>
+              </div>
+            ) : null}
+
+            {selectedKey === "auth" ? (
+              <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-semibold tracking-wide text-slate-600">登录模式</span>
+                    <Select
+                      value={authDraft.loginMode}
+                      onValueChange={(value) => {
+                        setAuthDraft((previous) => ({
+                          ...previous,
+                          loginMode: value as AuthLoginMode
+                        }));
+                        markDirty("auth");
+                      }}
+                      disabled={saving}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {AUTH_LOGIN_MODE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-semibold tracking-wide text-slate-600">默认 Provider ID</span>
+                    <Input
+                      value={authDraft.defaultProviderId}
+                      onChange={(event) => {
+                        setAuthDraft((previous) => ({
+                          ...previous,
+                          defaultProviderId: parseString(event.target.value, previous.defaultProviderId)
+                        }));
+                        markDirty("auth");
+                      }}
+                      disabled={saving}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                    <Checkbox
+                      checked={authDraft.allowUserRegister}
+                      onCheckedChange={(checked) => {
+                        setAuthDraft((previous) => ({
+                          ...previous,
+                          allowUserRegister: checked === true
+                        }));
+                        markDirty("auth");
+                      }}
+                      disabled={saving}
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-sm font-medium text-slate-700">允许用户注册</span>
+                      <p className="text-xs text-slate-500">`ldap_only` 场景建议关闭。</p>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                    <Checkbox
+                      checked={authDraft.breakGlass.enabled}
+                      onCheckedChange={(checked) => {
+                        setAuthDraft((previous) => ({
+                          ...previous,
+                          breakGlass: {
+                            ...previous.breakGlass,
+                            enabled: checked === true
+                          }
+                        }));
+                        markDirty("auth");
+                      }}
+                      disabled={saving}
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-sm font-medium text-slate-700">启用 break-glass</span>
+                      <p className="text-xs text-slate-500">保留本地管理员应急登录能力。</p>
+                    </div>
+                  </label>
+                  <label className="space-y-1.5 sm:col-span-2">
+                    <span className="text-xs font-semibold tracking-wide text-slate-600">
+                      break-glass 本地管理员邮箱（逗号分隔）
+                    </span>
+                    <Input
+                      value={authDraft.breakGlass.localAdminEmails.join(",")}
+                      onChange={(event) => {
+                        const emails = event.target.value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter((item) => item.length > 0);
+                        setAuthDraft((previous) => ({
+                          ...previous,
+                          breakGlass: {
+                            ...previous.breakGlass,
+                            localAdminEmails: emails
+                          }
+                        }));
+                        markDirty("auth");
+                      }}
+                      disabled={saving}
+                    />
+                  </label>
+                </div>
+
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-1.5">
+                      <span className="text-xs font-semibold tracking-wide text-slate-600">LDAP Provider</span>
+                      <Select
+                        value={selectedAuthProvider?.id ?? ""}
+                        onValueChange={(value) => setSelectedAuthProviderID(value)}
+                        disabled={saving || authDraft.providers.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择 Provider" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {authDraft.providers.map((provider) => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              {provider.name}（{provider.id}）
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-white px-3 py-3">
+                      <Checkbox
+                        checked={selectedAuthProvider?.enabled ?? false}
+                        onCheckedChange={(checked) => {
+                          if (!selectedAuthProvider) {
+                            return;
+                          }
+                          updateSelectedAuthProvider((provider) => ({
+                            ...provider,
+                            enabled: checked === true
+                          }));
+                        }}
+                        disabled={saving || !selectedAuthProvider}
+                      />
+                      <span className="text-sm font-medium text-slate-700">启用当前 Provider</span>
+                    </label>
+                  </div>
+
+                  {selectedAuthProvider ? (
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Provider ID</span>
+                        <Input
+                          value={selectedAuthProvider.id}
+                          onChange={(event) => {
+                            const nextProviderID = parseString(event.target.value, selectedAuthProvider.id);
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              id: nextProviderID
+                            }));
+                            setSelectedAuthProviderID(nextProviderID);
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Provider 名称</span>
+                        <Input
+                          value={selectedAuthProvider.name}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              name: parseString(event.target.value, provider.name)
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">优先级</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={10000}
+                          value={String(selectedAuthProvider.priority)}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              priority: normalizeIntegerInput(event.target.value, provider.priority)
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">匹配邮箱域名（逗号分隔）</span>
+                        <Input
+                          value={selectedAuthProvider.matchRules.emailDomains.join(",")}
+                          onChange={(event) => {
+                            const emailDomains = event.target.value
+                              .split(",")
+                              .map((item) => item.trim())
+                              .filter((item) => item.length > 0);
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              matchRules: {
+                                ...provider.matchRules,
+                                emailDomains
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">用户名匹配正则</span>
+                        <Input
+                          value={selectedAuthProvider.matchRules.usernameRegex}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              matchRules: {
+                                ...provider.matchRules,
+                                usernameRegex: parseString(event.target.value, provider.matchRules.usernameRegex)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Host</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.host}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                host: parseString(event.target.value, provider.ldap.host)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Port</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={String(selectedAuthProvider.ldap.port)}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                port: normalizeIntegerInput(event.target.value, provider.ldap.port)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">TLS 模式</span>
+                        <Select
+                          value={selectedAuthProvider.ldap.tlsMode}
+                          onValueChange={(value) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                tlsMode: value === "starttls" ? "starttls" : "ldaps"
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ldaps">LDAPS</SelectItem>
+                            <SelectItem value="starttls">StartTLS</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Base DN</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.baseDN}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                baseDN: parseString(event.target.value, provider.ldap.baseDN)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Bind DN</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.bindDN}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                bindDN: event.target.value.trim()
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Bind Password</span>
+                        <Input
+                          type="password"
+                          value={selectedAuthProvider.ldap.bindPasswordCiphertext}
+                          placeholder={AUTH_SECRET_MASK}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                bindPasswordCiphertext: event.target.value.trim()
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">User Filter</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.userFilter}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                userFilter: parseString(event.target.value, provider.ldap.userFilter)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">ID 属性</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.idAttribute}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                idAttribute: parseString(event.target.value, provider.ldap.idAttribute)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Email 属性</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.emailAttribute}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                emailAttribute: parseString(event.target.value, provider.ldap.emailAttribute)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Name 属性</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.nameAttribute}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                nameAttribute: parseString(event.target.value, provider.ldap.nameAttribute)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Group 属性</span>
+                        <Input
+                          value={selectedAuthProvider.ldap.groupAttribute}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                groupAttribute: event.target.value.trim()
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">连接超时（ms）</span>
+                        <Input
+                          type="number"
+                          min={100}
+                          max={30000}
+                          value={String(selectedAuthProvider.ldap.connectTimeoutMs)}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                connectTimeoutMs: normalizeIntegerInput(event.target.value, provider.ldap.connectTimeoutMs)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">读取超时（ms）</span>
+                        <Input
+                          type="number"
+                          min={100}
+                          max={30000}
+                          value={String(selectedAuthProvider.ldap.readTimeoutMs)}
+                          onChange={(event) => {
+                            updateSelectedAuthProvider((provider) => ({
+                              ...provider,
+                              ldap: {
+                                ...provider.ldap,
+                                readTimeoutMs: normalizeIntegerInput(event.target.value, provider.ldap.readTimeoutMs)
+                              }
+                            }));
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">当前没有可编辑的 LDAP Provider，请先在配置中补充 providers。</p>
+                  )}
                 </div>
               </div>
             ) : null}

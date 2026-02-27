@@ -16,6 +16,29 @@ export interface AuthSession {
   token?: string;
 }
 
+export type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
+
+export interface AuthLoginProviderOption {
+  id: string;
+  name: string;
+  type: string;
+  priority: number;
+}
+
+export interface AuthLoginOptions {
+  loginMode: AuthLoginMode;
+  defaultProviderId: string;
+  allowUserRegister: boolean;
+  providers: AuthLoginProviderOption[];
+}
+
+export interface AuthLoginInput {
+  identifier?: string;
+  email?: string;
+  provider?: string;
+  password: string;
+}
+
 export interface Space {
   id: string;
   name: string;
@@ -130,8 +153,9 @@ export class ConflictError extends Error {
 }
 
 export interface AuthGateway {
+  getLoginOptions(): Promise<AuthLoginOptions>;
   getSession(): Promise<AuthSession>;
-  login(input: { email: string; password: string }): Promise<AuthSession>;
+  login(input: AuthLoginInput): Promise<AuthSession>;
   register(input: { email: string; password: string; name: string }): Promise<AuthSession>;
   logout(): Promise<void>;
 }
@@ -497,10 +521,14 @@ export interface AdminGateway {
   deleteTheme(themeId: string): Promise<void>;
   listSystemConfigs(): Promise<AdminSystemConfig[]>;
   upsertSystemConfig(input: {
-    configKey: "site" | "editor" | "security" | "image-hosting" | "sitemap";
+    configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap";
     value: Record<string, unknown>;
     expectedVersion?: number;
   }): Promise<AdminSystemConfig>;
+  testAuthLDAPConnection(input: {
+    value: Record<string, unknown>;
+    providerId?: string;
+  }): Promise<{ ok: boolean }>;
   listAudits(input?: AdminAuditListInput): Promise<AdminAuditListResult>;
 }
 

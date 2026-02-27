@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,10 +20,16 @@ var systemConfigValidators = map[string]func(map[string]any) error{
 	"site":                          validateSiteConfig,
 	"editor":                        validateEditorConfig,
 	"security":                      validateSecurityConfig,
+	SystemConfigKeyAuth:             validateAuthConfig,
 	"image-hosting":                 validateImageHostingConfig,
 	SitemapConfigKey:                validateSitemapConfig,
 	HomepageAnonymousCacheConfigKey: validateHomepageAnonymousCacheConfig,
 }
+
+const (
+	SystemConfigKeyAuth  = "auth"
+	authConfigSecretMask = "********"
+)
 
 // AdminSystemConfigRecord 后台系统配置记录。
 type AdminSystemConfigRecord struct {
@@ -41,6 +48,13 @@ type UpsertAdminSystemConfigInput struct {
 	ConfigKey       string
 	Value           any
 	ExpectedVersion *int
+}
+
+// TestAdminSystemConfigLDAPConnectionInput 后台 LDAP 连接测试参数。
+type TestAdminSystemConfigLDAPConnectionInput struct {
+	ActorUserID string
+	Value       any
+	ProviderID  string
 }
 
 // AdminSystemConfigService 封装后台系统配置读写。
@@ -115,10 +129,25 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	if err != nil {
 		return AdminSystemConfigRecord{}, err
 	}
+	existingNotFound := false
+	existing, err := s.systemConfigRepo.GetByConfigKey(ctx, configKey)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			existingNotFound = true
+		} else {
+			return AdminSystemConfigRecord{}, err
+		}
+	}
 
 	valueMap, ok := input.Value.(map[string]any)
 	if !ok || valueMap == nil {
 		return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigInvalidValue
+	}
+	if configKey == SystemConfigKeyAuth {
+		valueMap, err = normalizeAuthConfigSecretsForPersist(valueMap, existing)
+		if err != nil {
+			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+		}
 	}
 	if err := validator(valueMap); err != nil {
 		return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
@@ -129,11 +158,6 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	}
 	valueJSON := string(valueJSONBytes)
 
-	existing, err := s.systemConfigRepo.GetByConfigKey(ctx, configKey)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return AdminSystemConfigRecord{}, err
-	}
-
 	now := time.Now().UTC()
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	var updatedBy *string
@@ -141,7 +165,7 @@ func (s *AdminSystemConfigService) UpsertConfig(
 		updatedBy = &actorUserID
 	}
 
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if existingNotFound {
 		if input.ExpectedVersion != nil && *input.ExpectedVersion != 0 {
 			return AdminSystemConfigRecord{}, errcode.ErrAdminSystemConfigVersionConflict
 		}
@@ -228,6 +252,63 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	return record, nil
 }
 
+// TestLDAPConnection 测试 auth 配置中的 LDAP provider 连通性，不落库存储。
+func (s *AdminSystemConfigService) TestLDAPConnection(
+	ctx context.Context,
+	input TestAdminSystemConfigLDAPConnectionInput,
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
+	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil {
+		return errors.New("admin system config service dependencies are nil")
+	}
+	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
+		return err
+	}
+
+	valueMap, ok := input.Value.(map[string]any)
+	if !ok || valueMap == nil {
+		return errcode.ErrAdminSystemConfigInvalidValue
+	}
+	existing, err := s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyAuth)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	normalizedValueMap, err := normalizeAuthConfigSecretsForPersist(valueMap, existing)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+	if err := validateAuthConfig(normalizedValueMap); err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+
+	providerID := strings.TrimSpace(input.ProviderID)
+	if providerID == "" {
+		defaultProviderID, err := getRequiredString(normalizedValueMap, "defaultProviderId")
+		if err != nil {
+			return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+		}
+		providerID = defaultProviderID
+	}
+	ldapProviderConfig, err := buildLDAPProviderConfigFromAuthConfig(normalizedValueMap, providerID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+
+	ldapProvider, err := NewLDAPAuthLoginProvider(ldapProviderConfig, nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+	if err := ldapProvider.CheckHealth(ctx); err != nil {
+		return fmt.Errorf("%w: ldap provider test failed", errcode.ErrAdminSystemConfigInvalidValue)
+	}
+
+	return nil
+}
+
 func (s *AdminSystemConfigService) ensurePlatformAdmin(ctx context.Context, actorUserID string) error {
 	userID := strings.TrimSpace(actorUserID)
 	if userID == "" {
@@ -271,10 +352,15 @@ func (s *AdminSystemConfigService) recordSystemConfigAudit(
 		summaryPrefix = "system config created: "
 	}
 
+	detailValue := valueMap
+	if strings.EqualFold(strings.TrimSpace(record.ConfigKey), SystemConfigKeyAuth) {
+		detailValue = maskAuthConfigSecrets(valueMap)
+	}
+
 	detail := map[string]any{
 		"configKey": record.ConfigKey,
 		"version":   record.Version,
-		"value":     valueMap,
+		"value":     detailValue,
 	}
 	if expectedVersion != nil {
 		detail["expectedVersion"] = *expectedVersion
@@ -301,6 +387,9 @@ func mapSystemConfigToRecord(value models.SystemConfig) (AdminSystemConfigRecord
 		if payload == nil {
 			payload = map[string]any{}
 		}
+	}
+	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyAuth) {
+		payload = maskAuthConfigSecrets(payload)
 	}
 
 	return AdminSystemConfigRecord{
@@ -388,6 +477,271 @@ func validateSecurityConfig(payload map[string]any) error {
 	}
 	if refreshTokenTTL < 60 || refreshTokenTTL > 43200 {
 		return fmt.Errorf("refreshTokenTTLMinutes must be between 60 and 43200")
+	}
+
+	return nil
+}
+
+func validateAuthConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"loginMode":         {},
+		"defaultProviderId": {},
+		"allowUserRegister": {},
+		"providers":         {},
+		"breakGlass":        {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+
+	loginMode, err := getRequiredString(payload, "loginMode")
+	if err != nil {
+		return err
+	}
+	switch loginMode {
+	case "local_only", "ldap_only", "mixed":
+	default:
+		return fmt.Errorf("loginMode must be local_only/ldap_only/mixed")
+	}
+
+	defaultProviderID, err := getRequiredString(payload, "defaultProviderId")
+	if err != nil {
+		return err
+	}
+
+	allowUserRegister, err := getRequiredBool(payload, "allowUserRegister")
+	if err != nil {
+		return err
+	}
+	if loginMode == "ldap_only" && allowUserRegister {
+		return fmt.Errorf("allowUserRegister must be false in ldap_only mode")
+	}
+
+	providers, err := getRequiredArray(payload, "providers")
+	if err != nil {
+		return err
+	}
+	providerIndexByID := make(map[string]int, len(providers))
+	enabledLDAPProviderCount := 0
+	for index, rawProvider := range providers {
+		provider, ok := rawProvider.(map[string]any)
+		if !ok || provider == nil {
+			return fmt.Errorf("providers[%d] must be object", index)
+		}
+
+		if err := validateNoUnknownKeys(provider, map[string]struct{}{
+			"id":         {},
+			"name":       {},
+			"type":       {},
+			"enabled":    {},
+			"priority":   {},
+			"matchRules": {},
+			"ldap":       {},
+		}); err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+
+		providerID, err := getRequiredString(provider, "id")
+		if err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		if _, exists := providerIndexByID[providerID]; exists {
+			return fmt.Errorf("providers[%d] duplicated id %q", index, providerID)
+		}
+		providerIndexByID[providerID] = index
+
+		if _, err := getRequiredString(provider, "name"); err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		providerType, err := getRequiredString(provider, "type")
+		if err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		if providerType != AuthProviderTypeLDAP {
+			return fmt.Errorf("providers[%d].type must be ldap", index)
+		}
+
+		providerEnabled, err := getRequiredBool(provider, "enabled")
+		if err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		if providerEnabled {
+			enabledLDAPProviderCount += 1
+		}
+
+		priority, err := getRequiredInt(provider, "priority")
+		if err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		if priority < 0 || priority > 10000 {
+			return fmt.Errorf("providers[%d].priority must be between 0 and 10000", index)
+		}
+
+		matchRules, err := getRequiredObject(provider, "matchRules")
+		if err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		if err := validateNoUnknownKeys(matchRules, map[string]struct{}{
+			"emailDomains":  {},
+			"usernameRegex": {},
+		}); err != nil {
+			return fmt.Errorf("providers[%d].matchRules %w", index, err)
+		}
+		emailDomains, err := getRequiredArray(matchRules, "emailDomains")
+		if err != nil {
+			return fmt.Errorf("providers[%d].matchRules %w", index, err)
+		}
+		for domainIndex, rawDomain := range emailDomains {
+			domain, ok := rawDomain.(string)
+			if !ok {
+				return fmt.Errorf("providers[%d].matchRules.emailDomains[%d] must be string", index, domainIndex)
+			}
+			normalizedDomain := strings.TrimSpace(domain)
+			if normalizedDomain == "" {
+				return fmt.Errorf("providers[%d].matchRules.emailDomains[%d] must not be empty", index, domainIndex)
+			}
+			if strings.Contains(normalizedDomain, "@") || strings.Contains(normalizedDomain, " ") {
+				return fmt.Errorf("providers[%d].matchRules.emailDomains[%d] is invalid", index, domainIndex)
+			}
+		}
+		usernameRegex, err := getRequiredStringAllowEmpty(matchRules, "usernameRegex")
+		if err != nil {
+			return fmt.Errorf("providers[%d].matchRules %w", index, err)
+		}
+		if usernameRegex != "" {
+			if _, compileErr := regexp.Compile(usernameRegex); compileErr != nil {
+				return fmt.Errorf("providers[%d].matchRules.usernameRegex is invalid", index)
+			}
+		}
+
+		ldapConfig, err := getRequiredObject(provider, "ldap")
+		if err != nil {
+			return fmt.Errorf("providers[%d] %w", index, err)
+		}
+		if err := validateNoUnknownKeys(ldapConfig, map[string]struct{}{
+			"host":                   {},
+			"port":                   {},
+			"tlsMode":                {},
+			"baseDN":                 {},
+			"bindDN":                 {},
+			"bindPasswordCiphertext": {},
+			"userFilter":             {},
+			"idAttribute":            {},
+			"emailAttribute":         {},
+			"nameAttribute":          {},
+			"groupAttribute":         {},
+			"connectTimeoutMs":       {},
+			"readTimeoutMs":          {},
+		}); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if _, err := getRequiredString(ldapConfig, "host"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		ldapPort, err := getRequiredInt(ldapConfig, "port")
+		if err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if ldapPort <= 0 || ldapPort > 65535 {
+			return fmt.Errorf("providers[%d].ldap.port must be between 1 and 65535", index)
+		}
+		ldapTLSMode, err := getRequiredString(ldapConfig, "tlsMode")
+		if err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		switch ldapTLSMode {
+		case string(LDAPTLSModeLDAPS), string(LDAPTLSModeStartTLS):
+		default:
+			return fmt.Errorf("providers[%d].ldap.tlsMode must be ldaps/starttls", index)
+		}
+		if _, err := getRequiredString(ldapConfig, "baseDN"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if _, err := getRequiredStringAllowEmpty(ldapConfig, "bindDN"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if _, err := getRequiredStringAllowEmpty(ldapConfig, "bindPasswordCiphertext"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		userFilter, err := getRequiredString(ldapConfig, "userFilter")
+		if err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if !strings.Contains(userFilter, "%s") {
+			return fmt.Errorf("providers[%d].ldap.userFilter must include %%s placeholder", index)
+		}
+		if _, err := getRequiredString(ldapConfig, "idAttribute"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if _, err := getRequiredString(ldapConfig, "emailAttribute"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if _, err := getRequiredString(ldapConfig, "nameAttribute"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if _, err := getRequiredStringAllowEmpty(ldapConfig, "groupAttribute"); err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		connectTimeoutMS, err := getRequiredInt(ldapConfig, "connectTimeoutMs")
+		if err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if connectTimeoutMS < 100 || connectTimeoutMS > 30000 {
+			return fmt.Errorf("providers[%d].ldap.connectTimeoutMs must be between 100 and 30000", index)
+		}
+		readTimeoutMS, err := getRequiredInt(ldapConfig, "readTimeoutMs")
+		if err != nil {
+			return fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if readTimeoutMS < 100 || readTimeoutMS > 30000 {
+			return fmt.Errorf("providers[%d].ldap.readTimeoutMs must be between 100 and 30000", index)
+		}
+	}
+
+	if defaultProviderID != AuthProviderLocalID {
+		if _, exists := providerIndexByID[defaultProviderID]; !exists {
+			return fmt.Errorf("defaultProviderId must be local or one of providers.id")
+		}
+	}
+	if loginMode == "ldap_only" {
+		if defaultProviderID == AuthProviderLocalID {
+			return fmt.Errorf("defaultProviderId must not be local in ldap_only mode")
+		}
+		if enabledLDAPProviderCount == 0 {
+			return fmt.Errorf("ldap_only mode requires at least one enabled ldap provider")
+		}
+	}
+
+	breakGlass, err := getRequiredObject(payload, "breakGlass")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(breakGlass, map[string]struct{}{
+		"enabled":          {},
+		"localAdminEmails": {},
+	}); err != nil {
+		return fmt.Errorf("breakGlass %w", err)
+	}
+	breakGlassEnabled, err := getRequiredBool(breakGlass, "enabled")
+	if err != nil {
+		return fmt.Errorf("breakGlass %w", err)
+	}
+	localAdminEmails, err := getRequiredArray(breakGlass, "localAdminEmails")
+	if err != nil {
+		return fmt.Errorf("breakGlass %w", err)
+	}
+	for index, rawEmail := range localAdminEmails {
+		email, ok := rawEmail.(string)
+		if !ok {
+			return fmt.Errorf("breakGlass.localAdminEmails[%d] must be string", index)
+		}
+		normalizedEmail := strings.TrimSpace(email)
+		if normalizedEmail == "" || !strings.Contains(normalizedEmail, "@") {
+			return fmt.Errorf("breakGlass.localAdminEmails[%d] is invalid", index)
+		}
+	}
+	if breakGlassEnabled && loginMode == "ldap_only" && len(localAdminEmails) == 0 {
+		return fmt.Errorf("breakGlass.localAdminEmails must not be empty when breakGlass is enabled")
 	}
 
 	return nil
@@ -604,6 +958,227 @@ func validateHomepageAnonymousCacheConfig(payload map[string]any) error {
 	return nil
 }
 
+func buildLDAPProviderConfigFromAuthConfig(
+	authConfig map[string]any,
+	providerID string,
+) (LDAPAuthProviderConfig, error) {
+	providers, err := getRequiredArray(authConfig, "providers")
+	if err != nil {
+		return LDAPAuthProviderConfig{}, err
+	}
+
+	normalizedProviderID := strings.TrimSpace(providerID)
+	for index, rawProvider := range providers {
+		provider, ok := rawProvider.(map[string]any)
+		if !ok || provider == nil {
+			continue
+		}
+		currentProviderID, _ := getRequiredString(provider, "id")
+		if currentProviderID != normalizedProviderID {
+			continue
+		}
+		providerType, _ := getRequiredString(provider, "type")
+		if providerType != AuthProviderTypeLDAP {
+			return LDAPAuthProviderConfig{}, fmt.Errorf("providers[%d].type must be ldap", index)
+		}
+		ldapConfig, err := getRequiredObject(provider, "ldap")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+
+		host, err := getRequiredString(ldapConfig, "host")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		port, err := getRequiredInt(ldapConfig, "port")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		tlsMode, err := getRequiredString(ldapConfig, "tlsMode")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		baseDN, err := getRequiredString(ldapConfig, "baseDN")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		bindDN, err := getRequiredStringAllowEmpty(ldapConfig, "bindDN")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		bindPassword, err := getRequiredStringAllowEmpty(ldapConfig, "bindPasswordCiphertext")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		userFilter, err := getRequiredString(ldapConfig, "userFilter")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		idAttribute, err := getRequiredString(ldapConfig, "idAttribute")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		emailAttribute, err := getRequiredString(ldapConfig, "emailAttribute")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		nameAttribute, err := getRequiredString(ldapConfig, "nameAttribute")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		connectTimeoutMS, err := getRequiredInt(ldapConfig, "connectTimeoutMs")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+		readTimeoutMS, err := getRequiredInt(ldapConfig, "readTimeoutMs")
+		if err != nil {
+			return LDAPAuthProviderConfig{}, err
+		}
+
+		return NormalizeLDAPAuthProviderConfig(LDAPAuthProviderConfig{
+			ProviderID:     currentProviderID,
+			Host:           host,
+			Port:           port,
+			TLSMode:        LDAPTLSMode(strings.ToLower(tlsMode)),
+			BaseDN:         baseDN,
+			BindDN:         bindDN,
+			BindPassword:   bindPassword,
+			UserFilter:     userFilter,
+			IDAttribute:    idAttribute,
+			EmailAttribute: emailAttribute,
+			NameAttribute:  nameAttribute,
+			ConnectTimeout: time.Duration(connectTimeoutMS) * time.Millisecond,
+			ReadTimeout:    time.Duration(readTimeoutMS) * time.Millisecond,
+		})
+	}
+
+	return LDAPAuthProviderConfig{}, fmt.Errorf("provider %q not found", normalizedProviderID)
+}
+
+func normalizeAuthConfigSecretsForPersist(
+	value map[string]any,
+	existing *models.SystemConfig,
+) (map[string]any, error) {
+	normalizedValue, err := cloneMapAny(value)
+	if err != nil {
+		return nil, err
+	}
+
+	normalizedExisting := map[string]any{}
+	if existing != nil && strings.TrimSpace(existing.ConfigValueJSON) != "" {
+		if err := json.Unmarshal([]byte(existing.ConfigValueJSON), &normalizedExisting); err != nil {
+			return nil, err
+		}
+	}
+
+	providers, err := getRequiredArray(normalizedValue, "providers")
+	if err != nil {
+		return nil, err
+	}
+	existingPasswordByProviderID := buildAuthProviderPasswordMap(normalizedExisting)
+
+	for index, rawProvider := range providers {
+		provider, ok := rawProvider.(map[string]any)
+		if !ok || provider == nil {
+			return nil, fmt.Errorf("providers[%d] must be object", index)
+		}
+		providerID, err := getRequiredString(provider, "id")
+		if err != nil {
+			return nil, fmt.Errorf("providers[%d] %w", index, err)
+		}
+		ldapConfig, err := getRequiredObject(provider, "ldap")
+		if err != nil {
+			return nil, fmt.Errorf("providers[%d] %w", index, err)
+		}
+		bindPassword, err := getRequiredStringAllowEmpty(ldapConfig, "bindPasswordCiphertext")
+		if err != nil {
+			return nil, fmt.Errorf("providers[%d].ldap %w", index, err)
+		}
+		if bindPassword != authConfigSecretMask {
+			continue
+		}
+		existingPassword, exists := existingPasswordByProviderID[providerID]
+		if !exists {
+			return nil, fmt.Errorf("providers[%d].ldap.bindPasswordCiphertext is masked but no stored secret exists", index)
+		}
+		ldapConfig["bindPasswordCiphertext"] = existingPassword
+	}
+
+	return normalizedValue, nil
+}
+
+func maskAuthConfigSecrets(value map[string]any) map[string]any {
+	clonedValue, err := cloneMapAny(value)
+	if err != nil {
+		return map[string]any{}
+	}
+
+	providers, err := getRequiredArray(clonedValue, "providers")
+	if err != nil {
+		return clonedValue
+	}
+	for _, rawProvider := range providers {
+		provider, ok := rawProvider.(map[string]any)
+		if !ok || provider == nil {
+			continue
+		}
+		ldapConfig, err := getRequiredObject(provider, "ldap")
+		if err != nil {
+			continue
+		}
+		bindPassword, err := getRequiredStringAllowEmpty(ldapConfig, "bindPasswordCiphertext")
+		if err != nil || bindPassword == "" {
+			continue
+		}
+		ldapConfig["bindPasswordCiphertext"] = authConfigSecretMask
+	}
+
+	return clonedValue
+}
+
+func buildAuthProviderPasswordMap(config map[string]any) map[string]string {
+	passwordByProviderID := map[string]string{}
+	providers, err := getRequiredArray(config, "providers")
+	if err != nil {
+		return passwordByProviderID
+	}
+	for _, rawProvider := range providers {
+		provider, ok := rawProvider.(map[string]any)
+		if !ok || provider == nil {
+			continue
+		}
+		providerID, err := getRequiredString(provider, "id")
+		if err != nil {
+			continue
+		}
+		ldapConfig, err := getRequiredObject(provider, "ldap")
+		if err != nil {
+			continue
+		}
+		bindPassword, err := getRequiredStringAllowEmpty(ldapConfig, "bindPasswordCiphertext")
+		if err != nil || bindPassword == "" {
+			continue
+		}
+		passwordByProviderID[providerID] = bindPassword
+	}
+	return passwordByProviderID
+}
+
+func cloneMapAny(value map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var cloned map[string]any
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return nil, err
+	}
+	if cloned == nil {
+		return map[string]any{}, nil
+	}
+	return cloned, nil
+}
+
 func validateNoUnknownKeys(payload map[string]any, allowed map[string]struct{}) error {
 	if len(payload) != len(allowed) {
 		return fmt.Errorf("unexpected config keys")
@@ -664,6 +1239,18 @@ func getRequiredObject(payload map[string]any, key string) (map[string]any, erro
 	value, ok := rawValue.(map[string]any)
 	if !ok || value == nil {
 		return nil, fmt.Errorf("%s must be object", key)
+	}
+	return value, nil
+}
+
+func getRequiredArray(payload map[string]any, key string) ([]any, error) {
+	rawValue, ok := payload[key]
+	if !ok {
+		return nil, fmt.Errorf("%s is required", key)
+	}
+	value, ok := rawValue.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be array", key)
 	}
 	return value, nil
 }

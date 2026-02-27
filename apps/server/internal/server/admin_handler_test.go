@@ -2076,6 +2076,269 @@ func TestRouter_AdminSystemConfig_SitemapConfigValidation(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSystemConfig_AuthConfigValidationAndSecretMasking(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-auth-platform-admin@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+	if err := database.ORM.Table("system_configs").Where("config_key = ?", "auth").Delete(nil).Error; err != nil {
+		t.Fatalf("clear auth config before test failed: %v", err)
+	}
+
+	createBody := `{
+		"value": {
+			"loginMode": "mixed",
+			"defaultProviderId": "corp-ldap",
+			"allowUserRegister": true,
+			"providers": [
+				{
+					"id": "corp-ldap",
+					"name": "Corp LDAP",
+					"type": "ldap",
+					"enabled": true,
+					"priority": 100,
+					"matchRules": {
+						"emailDomains": ["corp.example.com"],
+						"usernameRegex": "^[a-z0-9._-]+$"
+					},
+					"ldap": {
+						"host": "ldap.example.com",
+						"port": 636,
+						"tlsMode": "ldaps",
+						"baseDN": "dc=corp,dc=example,dc=com",
+						"bindDN": "cn=readonly,dc=corp,dc=example,dc=com",
+						"bindPasswordCiphertext": "top-secret-password",
+						"userFilter": "(mail=%s)",
+						"idAttribute": "entryUUID",
+						"emailAttribute": "mail",
+						"nameAttribute": "cn",
+						"groupAttribute": "memberOf",
+						"connectTimeoutMs": 3000,
+						"readTimeoutMs": 3000
+					}
+				}
+			],
+			"breakGlass": {
+				"enabled": true,
+				"localAdminEmails": ["admin@example.com"]
+			}
+		}
+	}`
+	createReq := httptest.NewRequest(http.MethodPut, "/api/admin/system-configs/auth", bytes.NewReader([]byte(createBody)))
+	createReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		createReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"auth",
+	)
+	createRec := serve(createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected create auth config status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	if decodeJSONResultCode(t, createRec.Body.Bytes()) != 0 {
+		t.Fatalf("expected create auth config success code=0, got body=%s", createRec.Body.String())
+	}
+	if strings.Contains(createRec.Body.String(), "top-secret-password") {
+		t.Fatalf("expected response mask auth secret, body=%s", createRec.Body.String())
+	}
+
+	createPayload := decodeJSONResultData[struct {
+		Version int            `json:"version"`
+		Value   map[string]any `json:"value"`
+	}](t, createRec.Body.Bytes())
+	if createPayload.Version != 1 {
+		t.Fatalf("expected auth config version 1, got %d", createPayload.Version)
+	}
+
+	var storedRawJSON string
+	if err := database.ORM.Table("system_configs").
+		Select("config_value_json").
+		Where("config_key = ?", "auth").
+		Take(&storedRawJSON).Error; err != nil {
+		t.Fatalf("query auth config failed: %v", err)
+	}
+	if !strings.Contains(storedRawJSON, "top-secret-password") {
+		t.Fatalf("expected auth config persist raw secret value, got %s", storedRawJSON)
+	}
+
+	updateBody := `{
+		"expectedVersion": 1,
+		"value": {
+			"loginMode": "mixed",
+			"defaultProviderId": "corp-ldap",
+			"allowUserRegister": true,
+			"providers": [
+				{
+					"id": "corp-ldap",
+					"name": "Corp LDAP",
+					"type": "ldap",
+					"enabled": true,
+					"priority": 100,
+					"matchRules": {
+						"emailDomains": ["corp.example.com"],
+						"usernameRegex": "^[a-z0-9._-]+$"
+					},
+					"ldap": {
+						"host": "ldap.example.com",
+						"port": 636,
+						"tlsMode": "ldaps",
+						"baseDN": "dc=corp,dc=example,dc=com",
+						"bindDN": "cn=readonly,dc=corp,dc=example,dc=com",
+						"bindPasswordCiphertext": "********",
+						"userFilter": "(mail=%s)",
+						"idAttribute": "entryUUID",
+						"emailAttribute": "mail",
+						"nameAttribute": "cn",
+						"groupAttribute": "memberOf",
+						"connectTimeoutMs": 3000,
+						"readTimeoutMs": 3500
+					}
+				}
+			],
+			"breakGlass": {
+				"enabled": true,
+				"localAdminEmails": ["admin@example.com"]
+			}
+		}
+	}`
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/admin/system-configs/auth", bytes.NewReader([]byte(updateBody)))
+	updateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	updateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		updateReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"auth",
+	)
+	updateRec := serve(updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected update auth config status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	if strings.Contains(updateRec.Body.String(), "top-secret-password") {
+		t.Fatalf("expected update response mask auth secret, body=%s", updateRec.Body.String())
+	}
+
+	var updatedRawJSON string
+	if err := database.ORM.Table("system_configs").
+		Select("config_value_json").
+		Where("config_key = ?", "auth").
+		Take(&updatedRawJSON).Error; err != nil {
+		t.Fatalf("query updated auth config failed: %v", err)
+	}
+	if !strings.Contains(updatedRawJSON, "top-secret-password") {
+		t.Fatalf("expected masked secret keep original stored secret, got %s", updatedRawJSON)
+	}
+	if !strings.Contains(updatedRawJSON, `"readTimeoutMs":3500`) {
+		t.Fatalf("expected update payload persisted, got %s", updatedRawJSON)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/admin/system-configs", nil)
+	listReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	listRec := serve(listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected list system configs status 200, got %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	if strings.Contains(listRec.Body.String(), "top-secret-password") {
+		t.Fatalf("expected list response never expose auth secret, body=%s", listRec.Body.String())
+	}
+}
+
+func TestRouter_AdminSystemConfig_TestLDAPConnectionPermissionAndValidation(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "config-auth-test-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-auth-test-platform-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	spaceAdminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/system-configs/auth/providers/ldap/test",
+		bytes.NewReader([]byte(`{"providerId":"corp-ldap","value":{"providers":[]}}`)),
+	)
+	spaceAdminReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminReq.Header.Set("Content-Type", "application/json")
+	spaceAdminRec := serve(spaceAdminReq)
+	if spaceAdminRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin test ldap connection status 403, got %d body=%s",
+			spaceAdminRec.Code,
+			spaceAdminRec.Body.String(),
+		)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/system-configs/auth/providers/ldap/test",
+		bytes.NewReader([]byte(`{
+			"providerId":"corp-ldap",
+			"value":{
+				"loginMode":"mixed",
+				"defaultProviderId":"corp-ldap",
+				"allowUserRegister":true,
+				"providers":[
+					{
+						"id":"corp-ldap",
+						"name":"Corp LDAP",
+						"type":"ldap",
+						"enabled":true,
+						"priority":100,
+						"matchRules":{"emailDomains":["corp.example.com"],"usernameRegex":"^[a-z]+$"},
+						"ldap":{
+							"host":"",
+							"port":636,
+							"tlsMode":"ldaps",
+							"baseDN":"dc=corp,dc=example,dc=com",
+							"bindDN":"cn=readonly,dc=corp,dc=example,dc=com",
+							"bindPasswordCiphertext":"test",
+							"userFilter":"(mail=%s)",
+							"idAttribute":"entryUUID",
+							"emailAttribute":"mail",
+							"nameAttribute":"cn",
+							"groupAttribute":"memberOf",
+							"connectTimeoutMs":3000,
+							"readTimeoutMs":3000
+						}
+					}
+				],
+				"breakGlass":{"enabled":true,"localAdminEmails":["admin@example.com"]}
+			}
+		}`)),
+	)
+	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidRec := serve(invalidReq)
+	if invalidRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected invalid ldap test config status 400, got %d body=%s",
+			invalidRec.Code,
+			invalidRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidConfigValue) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeInvalidConfigValue),
+			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
+			invalidRec.Body.String(),
+		)
+	}
+}
+
 func TestRouter_AdminOperationTokenRequiredAndReplayGuard(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

@@ -37,6 +37,7 @@
 3. `BACKEND_IMPLEMENTATION_PHASES.md`
 4. `ADMIN_CONSOLE_IMPLEMENTATION_PHASES.md`
 5. `SPACE_READER_SSR_SUBPROCESS_TECHNICAL_PROPOSAL.md`
+6. `LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`（涉及 LDAP/统一认证改造时）
 
 ### AI Agent / 新同学快速上手
 
@@ -44,6 +45,7 @@
 2. `BACKEND_DEVELOPER_GUIDE.md`
 3. `ENGINEERING_STANDARDS.md`
 4. `DAILY_PROGRESS_2026-02-23.md`（最近阶段快照）
+5. `LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`（认证体系改造任务清单）
 
 ---
 
@@ -71,6 +73,7 @@
 
 1. `SPACE_CATEGORY_REFACTOR_NOTES.md`
 2. `BACKEND_IMPLEMENTATION_PHASES.md`
+3. `LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`
 
 ### E. 交接与踩坑记录
 
@@ -91,6 +94,7 @@
 2. 需要“理解某条链路设计”：读对应专题实施文档（第 3 节 B/C/D）。
 3. 需要“排查历史问题”：读踩坑与日报（第 3 节 E）。
 4. 需要“上线/发布”：优先走 `ADMIN_CONSOLE_RELEASE_CHECKLIST.md`。
+5. 需要“接入 LDAP / 认证方式改造”：优先走 `LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`。
 
 ---
 
@@ -155,6 +159,7 @@ cd apps/server && go test ./... -count=1
 11. 改服务启动入口与 SSR Worker 生命周期：`apps/server/cmd/server/main.go`。
 12. 改 SPA 托管入口（`/login`、`/editor/*`、`/admin/*`）：`apps/server/internal/server/web_spa.go`。
 13. 改前后端 API 契约：先看 `apps/web/src/data-access/http/adapter.ts`，再对照 `apps/server/internal/server/handler/*`。
+14. 改登录认证方式（LDAP/混合登录）：先读 `docs/LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`，再看 `apps/server/internal/server/handler/auth.go`、`apps/server/internal/service/auth_service.go`、`apps/web/src/components/AuthPanel.tsx`。
 
 ---
 
