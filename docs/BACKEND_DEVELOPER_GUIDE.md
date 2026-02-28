@@ -449,7 +449,7 @@
 3. 封禁/删除/配置变更等高风险写操作必须走 operation token。
 4. 审计必须覆盖关键后台写操作。
 5. 生产必须替换 `JWT_SECRET` 与关键环境变量。
-6. LDAP 只允许 `ldaps/starttls`。
+6. LDAP 优先使用 `ldaps/starttls`；`plain` 仅建议在受控内网环境下使用。
 
 ---
 

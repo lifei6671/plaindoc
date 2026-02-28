@@ -64,7 +64,7 @@ interface DataRetentionSystemConfigValue {
 interface AuthProviderLdapConfig {
   host: string;
   port: number;
-  tlsMode: "ldaps" | "starttls";
+  tlsMode: "ldaps" | "starttls" | "plain";
   baseDN: string;
   bindDN: string;
   bindPasswordCiphertext: string;
@@ -195,6 +195,7 @@ const AUTH_LOGIN_MODE_OPTIONS: Array<{ value: AuthLoginMode; label: string }> = 
   { value: "mixed", label: "本地 + LDAP（mixed）" }
 ];
 
+const AUTH_LOCAL_PROVIDER_ID = "local";
 const AUTH_SECRET_MASK = "********";
 
 const SITE_TEMPLATE: SiteSystemConfigValue = {
@@ -393,6 +394,32 @@ function parseStringArray(value: unknown, fallbackValue: string[]): string[] {
     .filter((item) => item.length > 0);
 }
 
+function parseAuthLDAPTLSMode(value: unknown, fallbackValue: AuthProviderLdapConfig["tlsMode"]): AuthProviderLdapConfig["tlsMode"] {
+  const normalizedValue = parseString(value, fallbackValue);
+  if (normalizedValue === "starttls") {
+    return "starttls";
+  }
+  if (normalizedValue === "plain") {
+    return "plain";
+  }
+  return "ldaps";
+}
+
+function resolvePreferredLDAPProviderID(
+  providers: AuthProviderConfig[],
+  fallbackProviderID: string,
+): string {
+  const enabledProvider = providers.find((provider) => provider.enabled && provider.id.trim().length > 0);
+  if (enabledProvider) {
+    return enabledProvider.id;
+  }
+  const firstProvider = providers.find((provider) => provider.id.trim().length > 0);
+  if (firstProvider) {
+    return firstProvider.id;
+  }
+  return fallbackProviderID;
+}
+
 function parseAuthConfig(value: unknown): AuthSystemConfigValue {
   const payload = asRecord(value);
   if (!payload) {
@@ -436,8 +463,7 @@ function parseAuthConfig(value: unknown): AuthSystemConfigValue {
         ldap: {
           host: parseString(ldap?.host, AUTH_PROVIDER_TEMPLATE.ldap.host),
           port: parseInteger(ldap?.port, AUTH_PROVIDER_TEMPLATE.ldap.port),
-          tlsMode:
-            parseString(ldap?.tlsMode, AUTH_PROVIDER_TEMPLATE.ldap.tlsMode) === "starttls" ? "starttls" : "ldaps",
+          tlsMode: parseAuthLDAPTLSMode(ldap?.tlsMode, AUTH_PROVIDER_TEMPLATE.ldap.tlsMode),
           baseDN: parseString(ldap?.baseDN, AUTH_PROVIDER_TEMPLATE.ldap.baseDN),
           bindDN: parseString(ldap?.bindDN, AUTH_PROVIDER_TEMPLATE.ldap.bindDN),
           bindPasswordCiphertext: parseString(ldap?.bindPasswordCiphertext, AUTH_PROVIDER_TEMPLATE.ldap.bindPasswordCiphertext),
@@ -1255,9 +1281,16 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                         <Select
                           value={authDraft.loginMode}
                           onValueChange={(value) => {
+                            const nextLoginMode = value as AuthLoginMode;
                             setAuthDraft((previous) => ({
                               ...previous,
-                              loginMode: value as AuthLoginMode
+                              loginMode: nextLoginMode,
+                              allowUserRegister: nextLoginMode === "ldap_only" ? false : previous.allowUserRegister,
+                              defaultProviderId:
+                                nextLoginMode === "ldap_only" &&
+                                  previous.defaultProviderId === AUTH_LOCAL_PROVIDER_ID
+                                  ? resolvePreferredLDAPProviderID(previous.providers, previous.defaultProviderId)
+                                  : previous.defaultProviderId
                             }));
                             markDirty("auth");
                           }}
@@ -1291,19 +1324,23 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                       </label>
                       <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
                         <Checkbox
-                          checked={authDraft.allowUserRegister}
+                          checked={authDraft.loginMode === "ldap_only" ? false : authDraft.allowUserRegister}
                           onCheckedChange={(checked) => {
                             setAuthDraft((previous) => ({
                               ...previous,
-                              allowUserRegister: checked === true
+                              allowUserRegister: previous.loginMode === "ldap_only" ? false : checked === true
                             }));
                             markDirty("auth");
                           }}
-                          disabled={saving}
+                          disabled={saving || authDraft.loginMode === "ldap_only"}
                         />
                         <div className="space-y-0.5">
                           <span className="text-sm font-medium text-slate-700">允许用户注册</span>
-                          <p className="text-xs text-slate-500">`ldap_only` 场景建议关闭。</p>
+                          <p className="text-xs text-slate-500">
+                            {authDraft.loginMode === "ldap_only"
+                              ? "`ldap_only` 模式下此项会自动关闭。"
+                              : "`ldap_only` 场景建议关闭。"}
+                          </p>
                         </div>
                       </label>
                       <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
@@ -1398,11 +1435,27 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                               value={selectedAuthProvider.id}
                               onChange={(event) => {
                                 const nextProviderID = parseString(event.target.value, selectedAuthProvider.id);
-                                updateSelectedAuthProvider((provider) => ({
-                                  ...provider,
-                                  id: nextProviderID
-                                }));
+                                setAuthDraft((previousConfig) => {
+                                  const nextProviders = previousConfig.providers.map((provider) => {
+                                    if (provider.id !== selectedAuthProviderID) {
+                                      return provider;
+                                    }
+                                    return {
+                                      ...provider,
+                                      id: nextProviderID
+                                    };
+                                  });
+                                  return {
+                                    ...previousConfig,
+                                    defaultProviderId:
+                                      previousConfig.defaultProviderId === selectedAuthProviderID
+                                        ? nextProviderID
+                                        : previousConfig.defaultProviderId,
+                                    providers: nextProviders
+                                  };
+                                });
                                 setSelectedAuthProviderID(nextProviderID);
+                                markDirty("auth");
                               }}
                               disabled={saving}
                             />
@@ -1516,7 +1569,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                                   ...provider,
                                   ldap: {
                                     ...provider.ldap,
-                                    tlsMode: value === "starttls" ? "starttls" : "ldaps"
+                                    tlsMode: parseAuthLDAPTLSMode(value, provider.ldap.tlsMode)
                                   }
                                 }));
                               }}
@@ -1528,6 +1581,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                               <SelectContent>
                                 <SelectItem value="ldaps">LDAPS</SelectItem>
                                 <SelectItem value="starttls">StartTLS</SelectItem>
+                                <SelectItem value="plain">Plain（不加密）</SelectItem>
                               </SelectContent>
                             </Select>
                           </label>

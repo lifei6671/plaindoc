@@ -177,7 +177,12 @@ func Load() (Config, error) {
 	}
 	cfg.Auth.LDAP.Enabled = ldapEnabled
 
-	ldapPort, err := parseInt("AUTH_LDAP_PORT", "636")
+	defaultLDAPPort := "636"
+	switch strings.ToLower(strings.TrimSpace(cfg.Auth.LDAP.TLSMode)) {
+	case "starttls", "plain":
+		defaultLDAPPort = "389"
+	}
+	ldapPort, err := parseInt("AUTH_LDAP_PORT", defaultLDAPPort)
 	if err != nil {
 		return Config{}, err
 	}
@@ -299,9 +304,9 @@ func (c Config) Validate() error {
 			return errors.New("AUTH_LDAP_PORT must be greater than 0 when AUTH_LDAP_ENABLED is true")
 		}
 		switch strings.ToLower(strings.TrimSpace(c.Auth.LDAP.TLSMode)) {
-		case "ldaps", "starttls":
+		case "ldaps", "starttls", "plain":
 		default:
-			return fmt.Errorf("AUTH_LDAP_TLS_MODE must be ldaps/starttls, got %q", c.Auth.LDAP.TLSMode)
+			return fmt.Errorf("AUTH_LDAP_TLS_MODE must be ldaps/starttls/plain, got %q", c.Auth.LDAP.TLSMode)
 		}
 		if c.Auth.LDAP.BaseDN == "" {
 			return errors.New("AUTH_LDAP_BASE_DN must not be empty when AUTH_LDAP_ENABLED is true")

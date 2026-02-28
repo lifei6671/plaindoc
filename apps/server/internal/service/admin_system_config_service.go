@@ -141,6 +141,9 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	input UpsertAdminSystemConfigInput,
 ) (result AdminSystemConfigRecord, err error) {
 	defer func() {
+		if err != nil {
+			logit.SetRequestAttrs(ctx, logit.Error("errmsg", err))
+		}
 		err = errcode.MapAdminSystemConfigError(err)
 	}()
 
@@ -297,41 +300,90 @@ func (s *AdminSystemConfigService) TestLDAPConnection(
 
 	valueMap, ok := input.Value.(map[string]any)
 	if !ok || valueMap == nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_test_stage", "parse_request_value"),
+			logit.String("ldap_test_result", "failed"),
+		)
 		return errcode.ErrAdminSystemConfigInvalidValue
 	}
 	existing, err := s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyAuth)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_test_stage", "load_existing_auth_config"),
+			logit.String("ldap_test_result", "failed"),
+			logit.Error("ldap_test_error", err),
+		)
 		return err
 	}
 
 	normalizedValueMap, err := normalizeAuthConfigSecretsForPersist(valueMap, existing)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
-	}
-	if err := validateAuthConfig(normalizedValueMap); err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_test_stage", "normalize_auth_config"),
+			logit.String("ldap_test_result", "failed"),
+			logit.Error("ldap_test_error", err),
+		)
 		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 	}
 
 	providerID := strings.TrimSpace(input.ProviderID)
+	logit.SetRequestAttrs(ctx, logit.String("ldap_test_requested_provider_id", providerID))
 	if providerID == "" {
 		defaultProviderID, err := getRequiredString(normalizedValueMap, "defaultProviderId")
 		if err != nil {
+			logit.SetRequestAttrs(ctx,
+				logit.String("ldap_test_stage", "resolve_default_provider"),
+				logit.String("ldap_test_result", "failed"),
+				logit.Error("ldap_test_error", err),
+			)
 			return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 		}
 		providerID = defaultProviderID
 	}
 	ldapProviderConfig, err := buildLDAPProviderConfigFromAuthConfig(normalizedValueMap, providerID)
 	if err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_test_stage", "build_provider_config"),
+			logit.String("ldap_test_result", "failed"),
+			logit.String("ldap_test_provider_id", providerID),
+			logit.Error("ldap_test_error", err),
+		)
 		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 	}
+	logit.SetRequestAttrs(ctx,
+		logit.String("ldap_test_provider_id", ldapProviderConfig.ProviderID),
+		logit.String("ldap_test_host", ldapProviderConfig.Host),
+		logit.Int("ldap_test_port", ldapProviderConfig.Port),
+		logit.String("ldap_test_tls_mode", string(ldapProviderConfig.TLSMode)),
+		logit.String("ldap_test_base_dn", ldapProviderConfig.BaseDN),
+		logit.Bool("ldap_test_bind_dn_present", strings.TrimSpace(ldapProviderConfig.BindDN) != ""),
+		logit.Bool("ldap_test_bind_password_present", strings.TrimSpace(ldapProviderConfig.BindPassword) != ""),
+		logit.Int("ldap_test_connect_timeout_ms", int(ldapProviderConfig.ConnectTimeout/time.Millisecond)),
+		logit.Int("ldap_test_read_timeout_ms", int(ldapProviderConfig.ReadTimeout/time.Millisecond)),
+	)
 
 	ldapProvider, err := NewLDAPAuthLoginProvider(ldapProviderConfig, nil, nil, nil)
 	if err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_test_stage", "create_provider"),
+			logit.String("ldap_test_result", "failed"),
+			logit.Error("ldap_test_error", err),
+		)
 		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 	}
+	logit.SetRequestAttrs(ctx, logit.String("ldap_test_stage", "health_check"))
 	if err := ldapProvider.CheckHealth(ctx); err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_test_stage", "health_check"),
+			logit.String("ldap_test_result", "failed"),
+			logit.Error("ldap_test_error", err),
+		)
 		return fmt.Errorf("%w: ldap provider test failed", errcode.ErrAdminSystemConfigInvalidValue)
 	}
+	logit.SetRequestAttrs(ctx,
+		logit.String("ldap_test_stage", "health_check"),
+		logit.String("ldap_test_result", "success"),
+	)
 
 	return nil
 }
@@ -850,9 +902,9 @@ func validateAuthConfig(payload map[string]any) error {
 			return fmt.Errorf("providers[%d].ldap %w", index, err)
 		}
 		switch ldapTLSMode {
-		case string(LDAPTLSModeLDAPS), string(LDAPTLSModeStartTLS):
+		case string(LDAPTLSModeLDAPS), string(LDAPTLSModeStartTLS), string(LDAPTLSModePlain):
 		default:
-			return fmt.Errorf("providers[%d].ldap.tlsMode must be ldaps/starttls", index)
+			return fmt.Errorf("providers[%d].ldap.tlsMode must be ldaps/starttls/plain", index)
 		}
 		if _, err := getRequiredString(ldapConfig, "baseDN"); err != nil {
 			return fmt.Errorf("providers[%d].ldap %w", index, err)

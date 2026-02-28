@@ -43,6 +43,7 @@ type mockLDAPConn struct {
 	searchResult    *ldap.SearchResult
 	searchErr       error
 	startTLSErr     error
+	startTLSCalls   int
 	timeout         time.Duration
 	closedCallCount int
 }
@@ -52,6 +53,7 @@ func (c *mockLDAPConn) SetTimeout(timeout time.Duration) {
 }
 
 func (c *mockLDAPConn) StartTLS(_ *tls.Config) error {
+	c.startTLSCalls += 1
 	return c.startTLSErr
 }
 
@@ -197,6 +199,58 @@ func TestLDAPAuthLoginProvider_CheckHealth(t *testing.T) {
 	provider.dialer = &mockLDAPDialer{err: errors.New("dial failed")}
 	if err := provider.CheckHealth(context.Background()); !errors.Is(err, ErrAuthProviderFailure) {
 		t.Fatalf("expected ErrAuthProviderFailure when dial failed, got %v", err)
+	}
+}
+
+func TestLDAPAuthLoginProvider_CheckHealthPlain(t *testing.T) {
+	provider, cleanup := setupLDAPAuthProviderTest(t)
+	defer cleanup()
+	provider.config.TLSMode = LDAPTLSModePlain
+	provider.config.Port = 389
+
+	mockConn := &mockLDAPConn{
+		searchResult: &ldap.SearchResult{
+			Entries: []*ldap.Entry{
+				{
+					DN: "dc=example,dc=com",
+					Attributes: []*ldap.EntryAttribute{
+						{Name: "dn", Values: []string{"dc=example,dc=com"}},
+					},
+				},
+			},
+		},
+	}
+	mockDialer := &mockLDAPDialer{conn: mockConn}
+	provider.dialer = mockDialer
+
+	if err := provider.CheckHealth(context.Background()); err != nil {
+		t.Fatalf("expected plain health check success, got err=%v", err)
+	}
+	if mockDialer.dialURL != "ldap://ldap.example.com:389" {
+		t.Fatalf("expected plain mode dial url ldap://ldap.example.com:389, got %s", mockDialer.dialURL)
+	}
+	if mockConn.startTLSCalls != 0 {
+		t.Fatalf("expected plain mode not call StartTLS, got %d", mockConn.startTLSCalls)
+	}
+}
+
+func TestNormalizeLDAPAuthProviderConfig_PlainMode(t *testing.T) {
+	cfg, err := NormalizeLDAPAuthProviderConfig(LDAPAuthProviderConfig{
+		Host:           "ldap.example.com",
+		TLSMode:        LDAPTLSModePlain,
+		BaseDN:         "dc=example,dc=com",
+		UserFilter:     "(mail=%s)",
+		IDAttribute:    "entryUUID",
+		EmailAttribute: "mail",
+		NameAttribute:  "cn",
+		ConnectTimeout: 3 * time.Second,
+		ReadTimeout:    3 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("expected plain mode config valid, got err=%v", err)
+	}
+	if cfg.Port != 389 {
+		t.Fatalf("expected plain mode default port 389, got %d", cfg.Port)
 	}
 }
 

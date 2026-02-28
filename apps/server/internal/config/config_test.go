@@ -120,3 +120,23 @@ func TestLoad_LDAPConfigValid(t *testing.T) {
 		t.Fatalf("expected ldap host ldap.example.com, got %s", cfg.Auth.LDAP.Host)
 	}
 }
+
+func TestLoad_LDAPConfigValidPlainMode(t *testing.T) {
+	t.Setenv("AUTH_LDAP_ENABLED", "true")
+	t.Setenv("AUTH_LDAP_HOST", "ldap.example.com")
+	t.Setenv("AUTH_LDAP_BASE_DN", "dc=example,dc=com")
+	t.Setenv("AUTH_LDAP_USER_FILTER", "(mail=%s)")
+	t.Setenv("AUTH_LDAP_TLS_MODE", "plain")
+	t.Setenv("AUTH_LDAP_PORT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected valid plain ldap config, got err=%v", err)
+	}
+	if cfg.Auth.LDAP.TLSMode != "plain" {
+		t.Fatalf("expected ldap tls mode plain, got %s", cfg.Auth.LDAP.TLSMode)
+	}
+	if cfg.Auth.LDAP.Port != 389 {
+		t.Fatalf("expected plain mode default ldap port 389, got %d", cfg.Auth.LDAP.Port)
+	}
+}

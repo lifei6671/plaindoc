@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"github.com/oklog/ulid/v2"
@@ -33,6 +34,7 @@ type LDAPTLSMode string
 const (
 	LDAPTLSModeLDAPS    LDAPTLSMode = "ldaps"
 	LDAPTLSModeStartTLS LDAPTLSMode = "starttls"
+	LDAPTLSModePlain    LDAPTLSMode = "plain"
 )
 
 // LDAPAuthProviderConfig LDAP 登录 provider 配置。
@@ -115,7 +117,7 @@ func NormalizeLDAPAuthProviderConfig(raw LDAPAuthProviderConfig) (LDAPAuthProvid
 		cfg.TLSMode = LDAPTLSModeLDAPS
 	}
 	if cfg.Port <= 0 {
-		if cfg.TLSMode == LDAPTLSModeStartTLS {
+		if cfg.TLSMode == LDAPTLSModeStartTLS || cfg.TLSMode == LDAPTLSModePlain {
 			cfg.Port = 389
 		} else {
 			cfg.Port = 636
@@ -150,7 +152,7 @@ func NormalizeLDAPAuthProviderConfig(raw LDAPAuthProviderConfig) (LDAPAuthProvid
 		return LDAPAuthProviderConfig{}, errors.New("ldap base dn must not be empty")
 	}
 	switch cfg.TLSMode {
-	case LDAPTLSModeLDAPS, LDAPTLSModeStartTLS:
+	case LDAPTLSModeLDAPS, LDAPTLSModeStartTLS, LDAPTLSModePlain:
 	default:
 		return LDAPAuthProviderConfig{}, fmt.Errorf("unsupported ldap tls mode %q", cfg.TLSMode)
 	}
@@ -248,19 +250,46 @@ func (p *ldapAuthLoginProvider) Login(
 // CheckHealth 探测 LDAP provider 健康状态：连通性、TLS 升级与 service bind 是否可用。
 func (p *ldapAuthLoginProvider) CheckHealth(ctx context.Context) error {
 	if p == nil || p.dialer == nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_health_stage", "init"),
+			logit.String("ldap_health_result", "failed"),
+			logit.String("ldap_health_error_detail", "provider_or_dialer_nil"),
+		)
 		return ErrAuthProviderFailure
 	}
+	logit.SetRequestAttrs(ctx,
+		logit.String("ldap_health_stage", "open_connection"),
+		logit.String("ldap_health_result", "running"),
+		logit.String("ldap_health_provider_id", p.config.ProviderID),
+		logit.String("ldap_health_host", p.config.Host),
+		logit.Int("ldap_health_port", p.config.Port),
+		logit.String("ldap_health_tls_mode", string(p.config.TLSMode)),
+		logit.String("ldap_health_base_dn", p.config.HealthCheckBaseDN),
+		logit.Bool("ldap_health_bind_dn_present", strings.TrimSpace(p.config.BindDN) != ""),
+	)
 
 	conn, err := p.openConnection(ctx)
 	if err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_health_stage", "open_connection"),
+			logit.String("ldap_health_result", "failed"),
+			logit.Error("ldap_health_error", err),
+		)
 		return ErrAuthProviderFailure
 	}
 	defer func() { _ = conn.Close() }()
 
-	if err := p.bindServiceAccount(conn); err != nil {
+	logit.SetRequestAttrs(ctx, logit.String("ldap_health_stage", "bind_service_account"))
+	if err := p.bindServiceAccount(ctx, conn); err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_health_stage", "bind_service_account"),
+			logit.String("ldap_health_result", "failed"),
+			logit.Error("ldap_health_error", err),
+		)
 		return ErrAuthProviderFailure
 	}
 
+	logit.SetRequestAttrs(ctx, logit.String("ldap_health_stage", "base_dn_search"))
 	result, err := conn.Search(ldap.NewSearchRequest(
 		p.config.HealthCheckBaseDN,
 		ldap.ScopeBaseObject,
@@ -272,9 +301,26 @@ func (p *ldapAuthLoginProvider) CheckHealth(ctx context.Context) error {
 		[]string{"dn"},
 		nil,
 	))
-	if err != nil || result == nil {
+	if err != nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_health_stage", "base_dn_search"),
+			logit.String("ldap_health_result", "failed"),
+			logit.Error("ldap_health_error", err),
+		)
 		return ErrAuthProviderFailure
 	}
+	if result == nil {
+		logit.SetRequestAttrs(ctx,
+			logit.String("ldap_health_stage", "base_dn_search"),
+			logit.String("ldap_health_result", "failed"),
+			logit.String("ldap_health_error_detail", "empty_search_result"),
+		)
+		return ErrAuthProviderFailure
+	}
+	logit.SetRequestAttrs(ctx,
+		logit.String("ldap_health_stage", "done"),
+		logit.String("ldap_health_result", "success"),
+	)
 	return nil
 }
 
@@ -289,7 +335,7 @@ func (p *ldapAuthLoginProvider) authenticate(
 	}
 	defer func() { _ = conn.Close() }()
 
-	if err := p.bindServiceAccount(conn); err != nil {
+	if err := p.bindServiceAccount(ctx, conn); err != nil {
 		return ldapLoginPrincipal{}, err
 	}
 
@@ -328,19 +374,21 @@ func (p *ldapAuthLoginProvider) openConnection(ctx context.Context) (ldapConn, e
 		connectTimeout = defaultLDAPConnectTimeout
 	}
 
-	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS12,
-		ServerName:         p.config.Host,
-		InsecureSkipVerify: p.config.InsecureSkipVerify,
-	}
 	dialOptions := []ldap.DialOpt{
 		ldap.DialWithDialer(&net.Dialer{Timeout: connectTimeout}),
 	}
 
 	url := fmt.Sprintf("ldaps://%s:%d", p.config.Host, p.config.Port)
-	if p.config.TLSMode == LDAPTLSModeStartTLS {
+	if p.config.TLSMode == LDAPTLSModeStartTLS || p.config.TLSMode == LDAPTLSModePlain {
 		url = fmt.Sprintf("ldap://%s:%d", p.config.Host, p.config.Port)
-	} else {
+	}
+
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		ServerName:         p.config.Host,
+		InsecureSkipVerify: p.config.InsecureSkipVerify,
+	}
+	if p.config.TLSMode == LDAPTLSModeLDAPS {
 		dialOptions = append(dialOptions, ldap.DialWithTLSConfig(tlsConfig))
 	}
 
@@ -360,15 +408,17 @@ func (p *ldapAuthLoginProvider) openConnection(ctx context.Context) (ldapConn, e
 	return conn, nil
 }
 
-func (p *ldapAuthLoginProvider) bindServiceAccount(conn ldapConn) error {
+func (p *ldapAuthLoginProvider) bindServiceAccount(ctx context.Context, conn ldapConn) error {
 	if strings.TrimSpace(p.config.BindDN) == "" {
 		return nil
 	}
 	if err := conn.Bind(p.config.BindDN, p.config.BindPassword); err != nil {
 		if isLDAPInvalidCredentialsError(err) {
-			return ErrInvalidCredentials
+			logit.SetRequestAttrs(ctx, logit.Error("ldap_bind_error", err))
+			return fmt.Errorf("%w: %v", ErrInvalidCredentials, err)
 		}
-		return ErrAuthProviderFailure
+		logit.SetRequestAttrs(ctx, logit.Error("ldap_bind_error", err))
+		return fmt.Errorf("%w: %v", ErrAuthProviderFailure, err)
 	}
 	return nil
 }
