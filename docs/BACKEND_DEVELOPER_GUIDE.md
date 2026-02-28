@@ -1,209 +1,406 @@
-# 后端开发指南（`apps/server`）
+# 后端统一开发文档（`apps/server`）
 
-**Last Updated**: 2026-02-27  
-**适用对象**: 新加入项目的后端工程师、全栈工程师、AI Agent  
-**目标**: 统一后端认知口径，快速进入可开发、可联调、可发布状态
-
----
-
-## 1. 后端定位与现状
-
-`apps/server` 是 PlainDoc 的单体入口，当前承担：
-
-1. 业务 API（认证、空间、文档、主题、管理后台）。
-2. 页面 SSR（首页、分类页、阅读页网关）。
-3. Node SSR Worker 生命周期管理（Go 拉起子进程）。
-4. 统一权限、审计、错误协议、配置加载与日志链路。
-
-截至 2026-02-26，后端主链路已可用，阅读页 SSR 的测试/性能加固仍在持续完善。
+**Last Updated**: 2026-02-28  
+**适用对象**: 后端工程师、全栈工程师、AI Agent  
+**目标**: 用一份文档覆盖后端架构、配置、接口、SSR、数据模型、发布与排障，作为唯一后端事实口径。
 
 ---
 
-## 2. 技术栈
+## 1. 当前状态（结论先看）
 
-核心栈（来自 `apps/server/go.mod`）：
+截至 2026-02-28，后端主链路已可用：
 
-1. Go `1.26`
-2. Gin `1.11`
-3. GORM `1.31`
-4. SQLite / MySQL / PostgreSQL 三驱动
-5. JWT v5 + bcrypt（认证会话）
-6. `gg` + `x/image` + `webp`（封面生成与图片规范化）
-7. 自研 SSR 子进程池（`internal/ssr/*`）
+1. 单体入口（API + 页面 SSR + SPA 托管 + SSR Worker 管理）。
+2. 认证体系（local + LDAP provider）与 JWT/refresh 会话轮换。
+3. 工作区协作（空间/节点/文档/修订/可见性/主题）。
+4. 管理后台（用户、空间、文档、主题、系统配置、审计、operation token）。
+5. 双 SSR：
+   - 首页/分类页：Go 模板 SSR
+   - 阅读页：Go 调 Node Worker SSR
 
----
+仍在持续收口：
 
-## 3. 架构与代码结构
-
-### 3.1 分层规则
-
-1. `handler`：参数校验、HTTP 映射、调用 service。
-2. `service`：业务编排、权限规则、审计落点。
-3. `repository`：GORM 数据访问实现与事务边界。
-4. `router`：统一依赖注入与中间件顺序控制。
-
-### 3.2 关键目录
-
-1. `apps/server/cmd/server/main.go`：服务启动、配置加载、SSR Worker 初始化。
-2. `apps/server/internal/config/`：配置模型与校验。
-3. `apps/server/internal/server/`：路由、handler、中间件、响应协议、视图模板。
-4. `apps/server/internal/service/`：业务服务层。
-5. `apps/server/internal/storage/`：数据库连接、迁移、模型、仓储。
-6. `apps/server/internal/ssr/`：Worker 协议、进程、进程池、调度器。
+1. 阅读页 SSR 自动化一致性（M6）与性能/发布加固（M7）。
+2. LDAP 改造 Phase 6（灰度、告警、回滚演练）。
 
 ---
 
-## 4. 已实现功能（按模块）
+## 2. 技术栈与分层约束
 
-### 4.1 认证与会话
+核心栈：
 
-1. `POST /api/auth/register`：注册新用户账号，并返回可用会话信息。
-2. `POST /api/auth/login`：账号登录，签发 access/refresh token。
-3. `POST /api/auth/refresh`：刷新 access token，同时执行 refresh token 旋转与旧 token 失效。
-4. `GET /api/auth/me`：获取当前登录用户信息（会话校验入口）。
-5. `POST /api/auth/logout`：退出当前会话并吊销对应服务端会话状态。
+1. Go 1.26
+2. Gin 1.11
+3. GORM 1.31
+4. SQLite / MySQL / PostgreSQL
+5. JWT v5 + bcrypt
+6. `gg` + `x/image` + `webp`（封面处理）
+7. 自研 SSR 子进程池（Go 管理 Node Worker）
 
-LDAP/统一认证改造任务请优先阅读：`docs/LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`。
+分层约束（必须遵守）：
 
-### 4.2 空间与文档协作
+1. `handler`：参数校验、HTTP 映射、错误协议。
+2. `service`：业务规则、权限判断、审计编排。
+3. `repository`：数据访问与事务边界。
+4. `router.go`：依赖注入与路由注册唯一入口。
 
-1. `GET/POST /api/spaces`：`GET` 用于获取当前用户可见空间列表；`POST` 用于创建新空间并建立 owner 关系。
-2. `GET /api/spaces/:spaceId/tree`：获取空间目录树（编辑器左侧树数据源）。
-3. `POST /api/spaces/:spaceId/nodes`：在指定空间下创建目录或文档节点（文档节点会联动创建文档记录）。
-4. `PATCH/DELETE /api/nodes/:nodeId`：`PATCH` 用于节点重命名/移动/排序；`DELETE` 用于删除节点及其子树数据。
-5. `GET/PUT /api/docs/:docId`：`GET` 读取文档正文与元信息；`PUT` 保存文档并执行版本冲突检测。
-6. `GET /api/docs/:docId/revisions`：获取文档修订历史列表，用于版本追溯。
-7. `PUT /api/spaces/:spaceId/visibility`：更新空间可见性（`public/authenticated/member`）。
-8. `PUT /api/docs/:docId/visibility`：更新文档可见性策略（文档级访问控制）。
-9. `PUT /api/docs/:docId/theme`：为文档设置主题（theme_id 绑定）。
+统一返回协议：`JsonResult(code/message/requestId/data)`。
 
-### 4.3 管理后台
+### 2.1 强制代码规范（后端）
 
-当前后台接口已覆盖：
+1. 分层边界必须清晰：
+   - `handler` 只做参数校验、响应映射、错误模板选择
+   - `service` 承载业务规则、权限判定、审计编排
+   - `repository` 承载 SQL/GORM 细节与事务编排
+2. 路由注册与依赖注入只能在 `apps/server/internal/server/router.go` 集中维护；禁止新增并行入口。
+3. 业务代码禁止直接读取环境变量；统一通过 `config.Load()` 注入后的配置对象传递。
+4. 错误语义必须落到 `JsonResult.code`，禁止在业务层散落“魔法字符串/魔法数字”错误码。
+5. 高风险后台写操作（封禁/删除/角色变更/系统配置变更等）必须叠加 `RequireAdminOperationToken`。
+6. 后台请求链路必须保留 `AttachAdminAuditContext`，并在审计记录中带 `request_id`。
+7. 权限模型必须保持：
+   - 管理端：`platform_admin` 与 `space_admin` 边界不可穿透
+   - 协作端：`owner > collaborator > reader`
+8. 认证链路必须保持：
+   - 密码仅允许 `bcrypt` 哈希存储
+   - refresh token 必须走服务端会话状态并支持旋转后旧 token 失效
+9. Go 代码提交前必须 `gofmt`；复杂流程（鉴权、并发、回滚、兼容分支）需补充简洁函数和行内中文注释。
 
-1. `GET /api/admin/me` 与个人资料管理。
-2. 用户治理（列表、创建、角色、封禁/解封、删除）。
-3. 空间治理（列表、新建、封面资产、分类管理、成员管理、状态、元数据、转移、删除）。
-4. 文档治理（列表、状态、删除）。
-5. 主题治理（仅 `platform_admin`）。
-6. 系统配置治理（仅 `platform_admin`）。
-7. 审计日志检索（仅 `platform_admin`）。
-8. 高风险操作一次性 token（防重放、绑定 actor/operation/target）。
+### 2.2 强制代码规范（数据与迁移）
 
-### 4.4 SSR 与页面
-
-1. 首页 SSR：`GET /`
-2. 分类页 SSR：`GET /explore/:categoryId`
-3. 阅读入口：`GET /r/:spaceId`
-4. 阅读页 SSR：`GET /r/:spaceId/:docId`（Go -> Node Worker）
-5. 降级策略：Worker 失败时回退基础壳页，避免 500 雪崩
-
----
-
-## 5. 本地运行与编译打包教程
-
-### 5.1 环境要求
-
-1. Go `1.26+`
-2. Node.js `>=20`（启用 SSR Worker 时必需）
-3. C 编译环境（编译时使用 `github.com/chai2010/webp` 需要 CGO）
-
-### 5.2 本地启动
-
-```bash
-cd apps/server
-cp .env.example .env
-go mod tidy
-go run ./cmd/server
-```
-
-默认地址：`http://localhost:8080`
-
-### 5.3 本地测试
-
-```bash
-cd apps/server
-go test ./... -count=1
-```
-
-常用专项：
-
-```bash
-cd apps/server
-go test ./internal/server -run TestRouter_Admin -count=1
-go test ./internal/storage -run TestMigrateUpAndDown_SQLite -count=1
-```
-
-### 5.4 后端二进制编译
-
-```bash
-cd apps/server
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../release/plaindoc-server-linux-amd64 ./cmd/server
-```
-
-说明：`CGO_ENABLED=1` 是当前必需条件（`webp` 依赖）。
-
-### 5.5 发布打包（Release 流程）
-
-GitHub Actions `release.yml` 会自动产出：
-
-1. `plaindoc-server-linux-amd64`
-2. `plaindoc-server-linux-amd64-<tag>.tar.gz`（含后端 + `dist` + `dist-ssr`）
-3. `plaindoc-web-<tag>.tar.gz`
-4. `checksums-<tag>.txt`
-
-### 5.6 Docker 打包
-
-仓库根目录：
-
-```bash
-docker build -t plaindoc:latest .
-docker run --rm -p 8080:8080 plaindoc:latest
-```
+1. 业务对外 ID 统一使用语义化字段名（如 `UserID/SpaceID/DocumentID`），并保持 GORM `column` 标签与实际列名一致（`*_id`）。
+2. SQLite 场景禁止无差别 `SELECT *` 扫描复杂时间字段模型；优先显式 `Select` 所需列并做归一化。
+3. 多表写入（例如状态变更 + 审计 + 会话吊销）必须放在同一事务内，保证原子性。
+4. 结构变更必须同步补齐三套迁移脚本（sqlite/mysql/postgres），并补迁移回归测试。
+5. 涉及唯一约束、外键、排序语义的变更必须在迁移层显式表达，不能只依赖应用层校验。
 
 ---
 
-## 6. 常见踩坑指南（高频）
+## 3. 目录与入口速查
 
-1. SQLite 时间字段扫描失败：避免盲目 `SELECT *` 直接扫 `time.Time`，必要时先按字符串解析归一化。
-2. JWT TTL 单位误用：`time.Duration(1)` 是 1 纳秒，必须显式 `time.Hour` 等时长。
-3. SSR Worker 启动失败：优先检查 `SSR_WORKER_EXEC`、`SSR_WORKER_ENTRY`、`SSR_PROTOCOL_VERSION`。
-4. `.env` 不生效：后端会按多候选路径加载，但系统环境变量优先级更高。
-5. 编译失败出现 `webp` 符号问题：确认 CGO 已开启且构建环境具备 C 工具链。
-6. 阅读页/图片本地不可访问：前端开发代理必须包含 `/r` 与 `/uploads`。
-7. operation token 校验失败：确认目标类型/目标 ID/操作者绑定一致，且 token 未消费过。
-8. 分类数据异常：默认分类“未分类”不可删不可改名，删除普通分类要事务迁移空间。
+优先阅读文件：
 
----
+1. `apps/server/cmd/server/main.go`
+2. `apps/server/internal/config/config.go`
+3. `apps/server/internal/server/router.go`
+4. `apps/server/internal/server/web_spa.go`
+5. `apps/server/internal/service/*`
+6. `apps/server/internal/storage/*`
+7. `apps/server/internal/ssr/*`
 
-## 7. 运维与配置要点
+目录职责：
 
-1. 生产必须替换 `JWT_SECRET`。
-2. 使用 SQLite 时建议开启 WAL 并配置数据备份策略。
-3. 阅读 SSR 依赖 Node 运行时，缺失时可临时 `SSR_WORKER_ENABLED=false` 降级。
-4. 管理后台高风险操作依赖审计与 operation token，不建议绕开。
-
----
-
-## 8. 上手建议（新成员 / AI Agent）
-
-1. 先读 `cmd/server/main.go`、`internal/server/router.go`、`internal/config/config.go`。
-2. 再读目标业务的 `handler/service/repository` 三层实现。
-3. 改动 API 契约前先核对 `apps/web/src/data-access/types.ts` 与 `http/adapter.ts`。
-4. 提交前至少执行：
-   - `go test ./... -count=1`
-   - `npm run web:build`（跨端契约回归）
+1. `cmd/server`：启动、日志、DB、SSR Worker 生命周期。
+2. `internal/config`：环境变量解析与校验。
+3. `internal/server`：router/handler/middleware/响应协议/模板。
+4. `internal/service`：业务编排与策略。
+5. `internal/storage`：迁移、模型、仓储。
+6. `internal/ssr`：协议、进程、进程池、分发。
 
 ---
 
-## 9. 关联文档（历史与专项）
+## 4. 运行时链路（从启动到请求）
 
-1. `docs/BACKEND_IMPLEMENTATION_PHASES.md`
-2. `docs/backend-ai-handoff.md`
-3. `docs/ADMIN_CONSOLE_IMPLEMENTATION_PHASES.md`
-4. `docs/ADMIN_CONSOLE_RELEASE_CHECKLIST.md`
-5. `docs/HOMEPAGE_SSR_IMPLEMENTATION_PHASES.md`
-6. `docs/SPACE_READER_SSR_SUBPROCESS_TECHNICAL_PROPOSAL.md`
-7. `docs/SPACE_READER_SSR_SUBPROCESS_IMPLEMENTATION_PHASES.md`
-8. `docs/SPACE_CATEGORY_REFACTOR_NOTES.md`
-9. `docs/LDAP_DIRECT_AUTH_IMPLEMENTATION_PLAN.md`
+### 4.1 启动链路
+
+入口：`apps/server/cmd/server/main.go`
+
+1. `loadDotEnvCandidates()` 尝试加载 `.env` 候选路径。
+2. 调用 `config.Load()` 解析与校验配置。
+3. 初始化日志 writer（stdout/file/both）。
+4. 若 `SSR_WORKER_ENABLED=true`，先 `validateSSRWorkerRuntime()` 再启动 WorkerPool。
+5. 初始化数据库与迁移。
+6. 构建 router 并启动 HTTP Server。
+
+### 4.2 `.env` 与系统环境变量优先级
+
+实现位置：`main.go` 的 `loadDotEnvCandidates()` + `loadDotEnvFile()`
+
+加载候选顺序：
+
+1. `.env`
+2. `apps/server/.env`
+3. `cmd/server/.env`
+4. `apps/server/cmd/server/.env`
+
+优先级规则：
+
+1. 系统环境变量优先（已存在键不会被 `.env` 覆盖）。
+2. `.env` 仅用于补缺。
+
+### 4.3 请求链路
+
+1. Gin 中间件（request_id、timeout、recovery、access_log、cors）。
+2. handler -> service -> repository。
+3. 统一 `JsonResult` 输出。
+
+---
+
+## 5. 配置系统（来源、默认值、消费点）
+
+### 5.1 配置定义与校验来源
+
+1. 配置定义与默认值：`apps/server/internal/config/config.go` 的 `Load()`。
+2. 配置合法性校验：`config.go` 的 `Validate()`。
+3. 环境变量示例：`apps/server/.env.example`。
+4. 启动实际生效摘要：`main.go` 的 `server starting` 日志。
+
+### 5.2 环境变量配置矩阵（含消费位置）
+
+| 配置项 | 默认值 | 解析位置 | 主要消费位置 | 说明 |
+| --- | --- | --- | --- | --- |
+| `APP_ENV` | `development` | `config.Load()` | `main.go` | 生产环境触发更严格校验（如 JWT 密钥）。 |
+| `APP_ADDR` | `:8080` | `config.Load()` | `http.Server.Addr` | 服务监听地址。 |
+| `WEB_ORIGIN` | `http://localhost:3001` | `config.Load()` | `router`/handler | CORS 与页面链接构造。 |
+| `WEB_DIST_DIR` | `apps/web/dist` | `config.Load()` | `web_spa.go` | SPA 托管目录。 |
+| `DB_DRIVER` | `sqlite` | `config.Load()` | `storage.OpenDatabase` | 支持 sqlite/postgres/mysql。 |
+| `DB_DSN` | sqlite 本地 DSN | `config.Load()` | `storage.OpenDatabase` | 数据源连接串。 |
+| `DB_AUTO_MIGRATE` | `true` | `config.Load()` | `main.go` | 启动时是否执行迁移。 |
+| `JWT_SECRET` | `plaindoc-dev-secret` | `config.Load()` | AuthService/JWT | 生产必须替换。 |
+| `JWT_ACCESS_TOKEN_TTL` | `15m` | `config.Load()` | `authHandler`/AuthService | access token TTL。 |
+| `JWT_REFRESH_TOKEN_TTL` | `168h` | `config.Load()` | `authHandler`/AuthService | refresh token TTL。 |
+| `AUTH_DEFAULT_PROVIDER` | `local` | `config.Load()` | `AuthLoginOrchestrator` | local/ldap 入口路由默认 provider。 |
+| `AUTH_LDAP_*` | 见 `config.go` | `config.Load()` | LDAP provider 构建 | LDAP 主机、TLS、DN、过滤器、超时等。 |
+| `SSR_WORKER_ENABLED` | `false` | `config.Load()` | `main.go` | 是否启用阅读 SSR 子进程链路。 |
+| `SSR_WORKER_EXEC` | `node` | `config.Load()` | `validateSSRWorkerRuntime`/worker process | Node 可执行命令。 |
+| `SSR_WORKER_ENTRY` | 空字符串 | `config.Load()` | `validateSSRWorkerRuntime`/worker process | Worker 入口 JS 文件路径。 |
+| `SSR_WORKER_COUNT` | `2` | `config.Load()` | `pool.New().Start()` | 常驻 worker 数量。 |
+| `SSR_RENDER_TIMEOUT` | `1500ms` | `config.Load()` | `worker.Process.Render()` | 单次渲染超时。 |
+| `SSR_WORKER_START_TIMEOUT` | `5s` | `config.Load()` | `pool.Start` context | 启动与握手超时。 |
+| `SSR_WORKER_MAX_PAYLOAD_BYTES` | `1048576` | `config.Load()` | `stdioCodec`/`Render()` | 单次 payload 限制。 |
+| `SSR_PROTOCOL_VERSION` | `v1` | `config.Load()` | handshake/request version | Go 与 Worker 协议版本。 |
+
+### 5.3 数据库系统配置（`system_configs`）键与消费点
+
+这些配置不是环境变量，而是后台可在线编辑配置（`/api/admin/system-configs`）：
+
+| 配置键 | 读取服务 | 校验服务 | 作用 |
+| --- | --- | --- | --- |
+| `auth` | `AuthRegistrationPolicyService`、LDAP 相关服务 | `AdminSystemConfigService.validateAuthConfig` | 登录模式、provider 列表、break-glass 等。 |
+| `site` | `AuthRegistrationPolicyService` | `validateSiteConfig` | 站点级开关（如注册策略叠加）。 |
+| `image-hosting` | `ImageHostingService.GetConfig` | `validateImageHostingConfig` | 图床 provider 与参数。 |
+| `sitemap` | `SitemapService.GetConfig` | `validateSitemapConfig` | sitemap 生成策略。 |
+| `homepage.ssr.anonymous_cache` | `HomeService.resolveAnonymousCacheControl` | `validateHomepageAnonymousCacheConfig` | 首页匿名缓存头策略。 |
+| `editor`、`security` | 对应服务按需读取 | 对应 validator | 编辑器与安全策略配置项。 |
+
+校验实现文件：`apps/server/internal/service/admin_system_config_service.go`。
+
+---
+
+## 6. API 功能域总览
+
+### 6.1 认证与会话
+
+1. `POST /api/auth/register`
+2. `POST /api/auth/login`
+3. `POST /api/auth/refresh`
+4. `GET /api/auth/me`
+5. `POST /api/auth/logout`
+6. `GET /api/auth/options`
+
+说明：
+
+1. 登录支持 `identifier + provider`，兼容旧 `email`。
+2. refresh token 使用服务端会话状态，支持旋转后旧 token 失效。
+
+### 6.2 工作区与文档协作
+
+1. `GET/POST /api/spaces`
+2. `GET /api/spaces/:spaceId`
+3. `GET /api/spaces/:spaceId/tree`
+4. `POST /api/spaces/:spaceId/nodes`
+5. `PATCH /api/nodes/:nodeId`
+6. `POST /api/nodes/:nodeId/move`
+7. `DELETE /api/nodes/:nodeId`
+8. `GET/PUT /api/docs/:docId`
+9. `GET /api/docs/:docId/revisions`
+10. `PUT /api/spaces/:spaceId/visibility`
+11. `PUT /api/docs/:docId/visibility`
+12. `PUT /api/docs/:docId/theme`
+13. `POST /api/docs/:docId/remote-images/localize`
+
+### 6.3 管理后台（`/api/admin/*`）
+
+中间件前置：
+
+1. `RequireAdmin`
+2. `AttachAdminAuditContext`
+
+模块：
+
+1. 管理员信息与个人资料。
+2. operation token 签发。
+3. 用户治理（平台管理员）。
+4. 空间治理（平台全量/空间管理员按 scope）。
+5. 文档治理。
+6. 主题治理（平台管理员）。
+7. 系统配置治理（平台管理员）。
+8. 审计检索（平台管理员）。
+
+### 6.4 页面与静态资源
+
+1. `GET /`、`GET /explore/:categoryId`（Go Template SSR）
+2. `GET /r/:spaceId`、`GET /r/:spaceId/:docId`（阅读 SSR）
+3. `GET /uploads/*path`
+4. `/login`、`/register`、`/editor/*`、`/admin/*`（SPA 托管）
+
+---
+
+## 7. 阅读页 SSR（Go 子进程）深度说明
+
+### 7.1 运行模型
+
+1. `reader_page_handler` 聚合 payload 并鉴权。
+2. 调用 `Dispatcher.Render` 分发到 WorkerPool。
+3. Worker 通过 JSONL 协议返回 `RenderResponse`。
+4. 渲染失败时走降级页，避免全链路 500。
+
+关键代码：
+
+1. 协议定义：`apps/server/internal/ssr/protocol/messages.go`
+2. 单进程管理：`apps/server/internal/ssr/worker/process.go`
+3. 进程池：`apps/server/internal/ssr/pool/pool.go`
+4. 分发器：`apps/server/internal/ssr/pool/dispatcher.go`
+5. 页面调用与降级：`apps/server/internal/server/handler/reader_page.go`
+
+### 7.2 SSR 核心配置逐项含义
+
+| 配置项 | 含义 | 生效代码 | 失败行为 |
+| --- | --- | --- | --- |
+| `SSR_WORKER_ENABLED` | 开关；关闭时不启动 worker 池 | `main.go` | 阅读页走无 worker 分支（降级页面）。 |
+| `SSR_WORKER_EXEC` | Node 可执行命令 | `validateSSRWorkerRuntime` + `exec.Command` | 启动前失败并退出。 |
+| `SSR_WORKER_ENTRY` | worker 入口 JS 文件 | `validateSSRWorkerRuntime` + `exec.Command` | 文件不存在/是目录会启动失败。 |
+| `SSR_WORKER_COUNT` | 常驻子进程数 | `pool.Start` | 非法值在 `Validate()` 即拒绝。 |
+| `SSR_RENDER_TIMEOUT` | 单次渲染超时（也写入 `deadlineMs`） | `worker.Process.Render` | 超时杀进程并返回错误，页面降级。 |
+| `SSR_WORKER_START_TIMEOUT` | worker 启动+握手超时 | `context.WithTimeout` in `main.go` | 启动失败并退出。 |
+| `SSR_WORKER_MAX_PAYLOAD_BYTES` | payload 上限 | `stdioCodec` + `Render()` | 超限直接报错，不发请求。 |
+| `SSR_PROTOCOL_VERSION` | 握手与请求版本号 | `performHandshakeLocked` + request version | 版本不匹配，worker 握手失败。 |
+
+### 7.3 路径与产物要求
+
+1. Worker 构建产物默认在 `apps/web/dist-ssr/worker-entry.js`。
+2. `SSR_WORKER_ENTRY` 支持相对路径；相对路径相对于服务启动工作目录解析。
+3. 推荐在开发脚本中使用绝对路径（`Makefile` 的 `server-dev-ssr` 已这样处理）。
+
+### 7.4 缓存与可用性
+
+1. 阅读渲染缓存实现：`apps/server/internal/pkg/rendercache/rendercache.go`。
+2. 失败策略：`pool.Render` 对“worker 不可用错误”先尝试一次重启再重试。
+3. `reader_page_handler` 里有 fallback HTML，避免读页面完全不可用。
+
+---
+
+## 8. 数据模型与迁移（逐表说明）
+
+### 8.1 Schema 真正来源
+
+1. 迁移脚本是结构真值来源：
+   - `apps/server/internal/storage/migrations/sqlite/*.sql`
+   - `apps/server/internal/storage/migrations/mysql/*.sql`
+   - `apps/server/internal/storage/migrations/postgres/*.sql`
+2. GORM 模型用于代码映射：`apps/server/internal/storage/models/*.go`。
+
+当前迁移版本到 `0014_user_identities`。
+
+### 8.2 业务主链表
+
+| 表名 | 用途 | 关键字段 | 主要读写链路 |
+| --- | --- | --- | --- |
+| `users` | 用户主体与状态 | `user_id`、`email`、`password_hash`、`status` | AuthService、AdminUserService |
+| `user_sessions` | refresh 会话状态与轮换 | `session_id`、`refresh_token_hash`、`expires_at`、`revoked_at` | AuthService（login/refresh/logout） |
+| `user_identities` | 外部身份映射（LDAP 等） | `provider_id`、`external_id`、`login_name` | LDAP provider、Auth 映射逻辑 |
+| `spaces` | 空间元数据与治理状态 | `space_id`、`owner_user_id`、`visibility`、`status`、`category_id` | Workspace、AdminSpace、Home/Reader |
+| `space_members` | 空间成员与角色 | `space_id`、`user_id`、`role` | Workspace、AdminSpace |
+| `space_categories` | 空间分类实体 | `category_id`、`name`、`is_default` | AdminSpace、HomeService |
+| `space_cover_assets` | 空间封面资产元信息 | `asset_id`、`object_key/url`、`source`、`normalized` | AdminSpace 封面上传/生成 |
+| `nodes` | 目录树节点（目录/文档） | `node_id`、`space_id`、`parent_node_id`、`type`、`sort` | Workspace（树、拖拽、删除） |
+| `documents` | 文档正文与状态 | `document_id`、`node_id`、`content_md`、`version`、`visibility`、`status` | Workspace、Reader、AdminDocument |
+| `document_revisions` | 文档修订历史 | `document_revision_id`、`document_id`、`version`、`base_version` | Workspace 保存历史 |
+| `node_permissions` | 节点级授权（ACL） | `node_id`、`user_id`、`role` | 权限求值与治理链路 |
+| `document_permissions` | 文档级授权（覆盖/补充） | `document_id`、`user_id`、`role` | 权限求值与治理链路 |
+| `themes` | 文档主题库 | `theme_id`、`is_builtin`、`is_enabled` | Theme API、AdminTheme |
+
+补充：默认分类常量在 `models/space_category.go`：
+
+1. `DefaultSpaceCategoryID = 01jmf4v2x7m7f1m6qv5kh0t2mn`
+2. `DefaultSpaceCategoryName = 未分类`
+
+### 8.3 后台治理与系统表
+
+| 表名 | 用途 | 关键字段 | 主要读写链路 |
+| --- | --- | --- | --- |
+| `user_admin_roles` | 管理员角色绑定 | `user_id`、`role` | AdminAccessService |
+| `space_admin_scopes` | 空间管理员管理范围 | `user_id`、`space_id` | AdminAccessService |
+| `system_configs` | 系统配置中心（JSON + version） | `config_key`、`config_value_json`、`version` | AdminSystemConfigService、各配置消费者 |
+| `audit_logs` | 后台审计轨迹 | `actor_user_id`、`action`、`target_type/id`、`request_id` | AdminAuditService |
+
+### 8.4 状态与枚举（模型常量）
+
+定义文件：`apps/server/internal/storage/models/types.go`
+
+1. `Role`: `owner/collaborator/reader`
+2. `NodeType`: `folder/doc`
+3. `Visibility`: `public/authenticated/member`
+4. `AdminRole`: `platform_admin/space_admin`
+5. `EntityStatus`: `active/banned/deleted`
+
+---
+
+## 9. 本地开发、测试、构建、打包
+
+优先使用根目录 `Makefile`：
+
+1. `make server-dev`
+2. `make server-dev-ssr`
+3. `make test-server`
+4. `make server-build`
+5. `make build`
+6. `make package`
+
+最小回归：
+
+1. `cd apps/server && go test ./... -count=1`
+2. `npm run web:build`
+
+高风险改动追加回归（按需执行）：
+
+1. 后台权限/operation token/审计链路：`cd apps/server && go test ./internal/server -run TestRouter_Admin -count=1`
+2. 迁移与数据库兼容：`cd apps/server && go test ./internal/storage/... -count=1`
+3. 阅读页 SSR 改动：手工验证 `/r/:spaceId/:docId` 正常渲染、无权限分流、SSR 失败降级链路
+
+发布产物：
+
+1. `release/plaindoc-server-linux-amd64`
+2. `release/plaindoc-server-linux-amd64-<version>.tar.gz`
+3. `release/plaindoc-web-<version>.tar.gz`
+4. `release/checksums-<version>.txt`
+
+---
+
+## 10. 安全与权限基线
+
+1. 权限必须后端强校验，前端只做可见性优化。
+2. `platform_admin` 与 `space_admin` 边界不可互相穿透。
+3. 封禁/删除/配置变更等高风险写操作必须走 operation token。
+4. 审计必须覆盖关键后台写操作。
+5. 生产必须替换 `JWT_SECRET` 与关键环境变量。
+6. LDAP 只允许 `ldaps/starttls`。
+
+---
+
+## 11. 高频坑与排障
+
+1. `go.mod` 不在仓库根：应在 `apps/server` 下执行 `go run ./cmd/server`。
+2. SQLite 时间扫描异常：避免 `SELECT *` 直接扫 `time.Time`。
+3. JWT TTL 单位误用：`time.Duration(1)` 是 1ns。
+4. `.env` 未生效：检查启动 cwd 与“系统环境优先”规则。
+5. SSR worker 启动失败：先查 `SSR_WORKER_EXEC`、`SSR_WORKER_ENTRY`、`SSR_PROTOCOL_VERSION`。
+6. `webp` 构建错误：后端构建需 `CGO_ENABLED=1`。
+7. operation token 校验失败：核对 actor/operation/target 是否一致，token 是否已消费。
+
+---
+
+## 12. 待继续推进
+
+1. 阅读页 SSR M6/M7（一致性自动化、性能与发布加固）未完全收口。
+2. LDAP Phase 6（灰度、监控、回滚演练）待完成。
+3. 后续文档维护只更新本文件，不再新增并行“后端主文档”。
