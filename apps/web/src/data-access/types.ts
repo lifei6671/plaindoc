@@ -56,6 +56,12 @@ export interface AuthCaptchaChallenge {
   expiresInSeconds: number;
 }
 
+export interface AuthCaptchaRefreshInput {
+  scene: "login" | "register";
+  identifier: string;
+  captchaId?: string;
+}
+
 export interface Space {
   id: string;
   name: string;
@@ -174,6 +180,7 @@ export interface AuthGateway {
   getSession(): Promise<AuthSession>;
   login(input: AuthLoginInput): Promise<AuthSession>;
   register(input: AuthRegisterInput): Promise<AuthSession>;
+  refreshCaptcha(input: AuthCaptchaRefreshInput): Promise<AuthCaptchaChallenge>;
   logout(): Promise<void>;
 }
 

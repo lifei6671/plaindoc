@@ -38,6 +38,13 @@ type loginRequest struct {
 	CaptchaAnswer string `json:"captchaAnswer"`
 }
 
+type refreshCaptchaRequest struct {
+	Scene      string `json:"scene"`
+	Identifier string `json:"identifier"`
+	Email      string `json:"email"`
+	CaptchaID  string `json:"captchaId"`
+}
+
 type refreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
 }
@@ -335,6 +342,56 @@ func (h *authHandler) Login(c *gin.Context) {
 		Token:        session.Token,
 		RefreshToken: session.RefreshToken,
 	})
+}
+
+// RefreshCaptcha 刷新登录/注册验证码挑战图片。
+func (h *authHandler) RefreshCaptcha(c *gin.Context) {
+	if h == nil || h.authRiskControlService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	var req refreshCaptchaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.AuthErrRequestBody.Write(c)
+		return
+	}
+
+	scene := strings.ToLower(strings.TrimSpace(req.Scene))
+	if scene != "login" && scene != "register" {
+		response.AuthErrRequestBody.Write(c)
+		return
+	}
+
+	identifier := strings.TrimSpace(req.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.Email)
+	}
+	if scene == "register" {
+		identifier = normalizeEmail(identifier)
+	}
+	if identifier == "" {
+		response.AuthErrRequestBody.Write(c)
+		return
+	}
+
+	challenge, err := h.authRiskControlService.RefreshChallenge(c.Request.Context(), service.AuthRiskRefreshInput{
+		Scene:      scene,
+		ClientIP:   strings.TrimSpace(c.ClientIP()),
+		Identifier: identifier,
+		CaptchaID:  strings.TrimSpace(req.CaptchaID),
+	})
+	if err != nil {
+		var riskErr *service.AuthRiskError
+		if errors.As(err, &riskErr) {
+			h.writeAuthRiskError(c, riskErr)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, challenge)
 }
 
 // Refresh 使用 refresh token 换发新 token。

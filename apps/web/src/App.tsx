@@ -68,6 +68,7 @@ import {
   ConflictError,
   getDataGateway,
   type AuthCaptchaChallenge,
+  type AuthCaptchaRefreshInput,
   type AuthLoginInput,
   type AuthLoginOptions,
   type AuthRegisterInput,
@@ -2314,6 +2315,39 @@ export default function App() {
     [authRedirectTarget, dataGateway]
   );
 
+  const handleAuthCaptchaRefresh = useCallback(
+    async (input: AuthCaptchaRefreshInput) => {
+      setAuthErrorMessage(null);
+      try {
+        const challenge = await dataGateway.auth.refreshCaptcha(input);
+        setAuthChallenge(challenge);
+      } catch (error) {
+        const errorCode = extractAuthRiskErrorCode(error);
+        if (errorCode === AUTH_CAPTCHA_REQUIRED_CODE || errorCode === AUTH_CAPTCHA_INVALID_CODE) {
+          const challenge = parseAuthCaptchaChallenge(error);
+          if (challenge) {
+            setAuthChallenge(challenge);
+            return;
+          }
+          setAuthErrorMessage("验证码刷新失败：当前无需验证码");
+          return;
+        }
+        if (errorCode === AUTH_TEMPORARILY_LOCKED_CODE) {
+          setAuthChallenge(null);
+          const lockedUntil = parseAuthLockedUntil(error);
+          if (lockedUntil) {
+            setAuthErrorMessage(`验证码刷新失败：触发安全锁定，请在 ${lockedUntil} 后重试`);
+          } else {
+            setAuthErrorMessage("验证码刷新失败：触发安全锁定，请稍后再试");
+          }
+          return;
+        }
+        setAuthErrorMessage(`验证码刷新失败：${formatError(error)}`);
+      }
+    },
+    [dataGateway]
+  );
+
   // 退出登录：清除会话并返回登录页。
   const handleAuthLogout = useCallback(async () => {
     setIsAuthSubmitting(true);
@@ -2344,6 +2378,7 @@ export default function App() {
           authChallenge={authChallenge}
           dataGateway={dataGateway}
           onLogin={handleAuthLogin}
+          onRefreshCaptcha={handleAuthCaptchaRefresh}
           onLogout={handleAuthLogout}
         />
       </>
@@ -2383,6 +2418,7 @@ export default function App() {
           authChallenge={authChallenge}
           onLogin={handleAuthLogin}
           onRegister={handleAuthRegister}
+          onRefreshCaptcha={handleAuthCaptchaRefresh}
         />
       </>
     );

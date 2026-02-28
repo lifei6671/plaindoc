@@ -21,6 +21,8 @@ import {
   type AdminUserListResult,
   type AuthLoginInput,
   type AuthRegisterInput,
+  type AuthCaptchaChallenge,
+  type AuthCaptchaRefreshInput,
   type AuthLoginMode,
   type AuthLoginOptions,
   type AuthLoginProviderOption,
@@ -182,6 +184,27 @@ function normalizeAuthLoginOptions(value: unknown): AuthLoginOptions {
     defaultProviderId,
     allowUserRegister,
     providers
+  };
+}
+
+function normalizeAuthCaptchaChallenge(value: unknown): AuthCaptchaChallenge {
+  if (!value || typeof value !== "object") {
+    throw new Error("验证码挑战数据格式不正确");
+  }
+  const record = value as Record<string, unknown>;
+  const captchaId = typeof record.captchaId === "string" ? record.captchaId.trim() : "";
+  const captchaImageDataUrl =
+    typeof record.captchaImageDataUrl === "string" ? record.captchaImageDataUrl.trim() : "";
+  const level = Number(record.level);
+  const expiresInSeconds = Number(record.expiresInSeconds);
+  if (!captchaId || !captchaImageDataUrl || !Number.isFinite(level) || !Number.isFinite(expiresInSeconds)) {
+    throw new Error("验证码挑战数据不完整");
+  }
+  return {
+    captchaId,
+    captchaImageDataUrl,
+    level: Math.trunc(level),
+    expiresInSeconds: Math.trunc(expiresInSeconds)
   };
 }
 
@@ -555,6 +578,36 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         user: session.user,
         token: session.token
       };
+    },
+    async refreshCaptcha(input: AuthCaptchaRefreshInput) {
+      const scene = typeof input.scene === "string" ? input.scene.trim() : "";
+      if (scene !== "login" && scene !== "register") {
+        throw new Error("验证码刷新场景无效");
+      }
+      const identifier = typeof input.identifier === "string" ? input.identifier.trim() : "";
+      if (!identifier) {
+        throw new Error("验证码刷新账号不能为空");
+      }
+      const payload: AuthCaptchaRefreshInput = {
+        scene,
+        identifier
+      };
+      const captchaId = typeof input.captchaId === "string" ? input.captchaId.trim() : "";
+      if (captchaId) {
+        payload.captchaId = captchaId;
+      }
+      const challenge = await request<unknown>(
+        "/auth/captcha/refresh",
+        {
+          method: "POST",
+          body: JSON.stringify(payload)
+        },
+        {
+          skipAuth: true,
+          retryOnUnauthorized: false
+        }
+      );
+      return normalizeAuthCaptchaChallenge(challenge);
     },
     async logout() {
       try {

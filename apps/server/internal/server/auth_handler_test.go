@@ -586,3 +586,73 @@ func TestRouter_AuthRegisterRiskCaptchaRequired(t *testing.T) {
 		t.Fatalf("expected captcha required code %d, got %d", response.ResolveErrorCode(response.CodeCaptchaRequired), code)
 	}
 }
+
+func TestRouter_AuthCaptchaRefresh(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	registerBody := []byte(`{"email":"refresh-captcha@example.com","password":"123456","name":"Refresh Captcha"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	for index := 0; index < 3; index += 1 {
+		loginBody := []byte(`{"email":"refresh-captcha@example.com","password":"wrong-password"}`)
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := serve(loginReq)
+		if loginRec.Code != http.StatusForbidden {
+			t.Fatalf("expected invalid credentials status 403, got %d body=%s", loginRec.Code, loginRec.Body.String())
+		}
+	}
+
+	captchaRequiredReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"refresh-captcha@example.com","password":"wrong-password"}`)),
+	)
+	captchaRequiredReq.Header.Set("Content-Type", "application/json")
+	captchaRequiredRec := serve(captchaRequiredReq)
+	if captchaRequiredRec.Code != http.StatusOK {
+		t.Fatalf("expected captcha required status 200, got %d body=%s", captchaRequiredRec.Code, captchaRequiredRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, captchaRequiredRec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeCaptchaRequired) {
+		t.Fatalf("expected captcha required code %d, got %d", response.ResolveErrorCode(response.CodeCaptchaRequired), code)
+	}
+	initialChallenge := decodeJSONResultData[struct {
+		CaptchaID           string `json:"captchaId"`
+		CaptchaImageDataURL string `json:"captchaImageDataUrl"`
+	}](t, captchaRequiredRec.Body.Bytes())
+	if strings.TrimSpace(initialChallenge.CaptchaID) == "" || strings.TrimSpace(initialChallenge.CaptchaImageDataURL) == "" {
+		t.Fatalf("expected captcha challenge data, got %+v", initialChallenge)
+	}
+
+	refreshReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/captcha/refresh",
+		bytes.NewReader([]byte(`{"scene":"login","identifier":"refresh-captcha@example.com","captchaId":"`+initialChallenge.CaptchaID+`"}`)),
+	)
+	refreshReq.Header.Set("Content-Type", "application/json")
+	refreshRec := serve(refreshReq)
+	if refreshRec.Code != http.StatusOK {
+		t.Fatalf("expected captcha refresh status 200, got %d body=%s", refreshRec.Code, refreshRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, refreshRec.Body.Bytes()); code != 0 {
+		t.Fatalf("expected captcha refresh code 0, got %d", code)
+	}
+	refreshedChallenge := decodeJSONResultData[struct {
+		CaptchaID           string `json:"captchaId"`
+		CaptchaImageDataURL string `json:"captchaImageDataUrl"`
+	}](t, refreshRec.Body.Bytes())
+	if strings.TrimSpace(refreshedChallenge.CaptchaID) == "" || strings.TrimSpace(refreshedChallenge.CaptchaImageDataURL) == "" {
+		t.Fatalf("expected refreshed captcha challenge data, got %+v", refreshedChallenge)
+	}
+	if refreshedChallenge.CaptchaID == initialChallenge.CaptchaID {
+		t.Fatalf("expected refreshed captcha id to change, got same value %s", refreshedChallenge.CaptchaID)
+	}
+}

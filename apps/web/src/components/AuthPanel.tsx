@@ -1,8 +1,9 @@
 import { LoaderCircle, LogIn, UserPlus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type {
   AuthCaptchaChallenge,
+  AuthCaptchaRefreshInput,
   AuthLoginInput,
   AuthLoginMode,
   AuthLoginProviderOption,
@@ -15,6 +16,7 @@ import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 type AuthMode = "login" | "register";
+const CAPTCHA_REFRESH_DEBOUNCE_MS = 800;
 
 interface AuthPanelProps {
   mode: AuthMode;
@@ -29,6 +31,7 @@ interface AuthPanelProps {
   authChallenge: AuthCaptchaChallenge | null;
   onLogin: (input: AuthLoginInput) => Promise<void>;
   onRegister: (input: AuthRegisterInput) => Promise<void>;
+  onRefreshCaptcha: (input: AuthCaptchaRefreshInput) => Promise<void>;
 }
 
 // 登录注册入口：独立于编辑器主视图，避免未登录状态触发业务加载链路。
@@ -44,7 +47,8 @@ export function AuthPanel({
   providerOptions,
   authChallenge,
   onLogin,
-  onRegister
+  onRegister,
+  onRefreshCaptcha
 }: AuthPanelProps) {
   const [name, setName] = useState("");
   const [identifier, setIdentifier] = useState("");
@@ -53,6 +57,8 @@ export function AuthPanel({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [provider, setProvider] = useState("__auto__");
   const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [refreshingCaptcha, setRefreshingCaptcha] = useState(false);
+  const lastCaptchaRefreshAtRef = useRef(0);
 
   useEffect(() => {
     setCaptchaAnswer("");
@@ -72,7 +78,7 @@ export function AuthPanel({
   }, [confirmPassword, mode, password]);
 
   const canSubmit = useMemo(() => {
-    if (checking || submitting) {
+    if (checking || submitting || refreshingCaptcha) {
       return false;
     }
     const loginIdentifier = mode === "login" ? identifier : email;
@@ -94,7 +100,24 @@ export function AuthPanel({
       return false;
     }
     return true;
-  }, [authChallenge, captchaAnswer, checking, confirmPassword, email, identifier, mode, name, password, submitting]);
+  }, [authChallenge, captchaAnswer, checking, confirmPassword, email, identifier, mode, name, password, refreshingCaptcha, submitting]);
+
+  const captchaIdentifier = useMemo(() => {
+    if (mode === "login") {
+      return identifier.trim();
+    }
+    return email.trim();
+  }, [email, identifier, mode]);
+
+  const canRefreshCaptcha = useMemo(() => {
+    if (!authChallenge) {
+      return false;
+    }
+    if (checking || submitting || refreshingCaptcha) {
+      return false;
+    }
+    return captchaIdentifier.length > 0;
+  }, [authChallenge, captchaIdentifier, checking, refreshingCaptcha, submitting]);
 
   const submitText = useMemo(() => {
     if (checking) {
@@ -148,6 +171,28 @@ export function AuthPanel({
     setPassword("");
     setConfirmPassword("");
   }, [authChallenge?.captchaId, canSubmit, captchaAnswer, email, identifier, mode, name, onLogin, onRegister, password, provider]);
+
+  const handleRefreshCaptcha = useCallback(async () => {
+    if (!authChallenge || !canRefreshCaptcha) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastCaptchaRefreshAtRef.current < CAPTCHA_REFRESH_DEBOUNCE_MS) {
+      return;
+    }
+    lastCaptchaRefreshAtRef.current = now;
+    setRefreshingCaptcha(true);
+    try {
+      await onRefreshCaptcha({
+        scene: mode,
+        identifier: captchaIdentifier,
+        captchaId: authChallenge.captchaId
+      });
+      setCaptchaAnswer("");
+    } finally {
+      setRefreshingCaptcha(false);
+    }
+  }, [authChallenge, canRefreshCaptcha, captchaIdentifier, mode, onRefreshCaptcha]);
 
   return (
     <div className="admin-auth-page">
@@ -259,11 +304,22 @@ export function AuthPanel({
                 <p className="text-xs text-slate-600">
                   已触发验证码校验（{authChallenge.level} 位数字）
                 </p>
-                <img
-                  src={authChallenge.captchaImageDataUrl}
-                  alt="验证码"
-                  className="h-14 w-full rounded border border-slate-200 bg-white object-contain"
-                />
+                <button
+                  type="button"
+                  onClick={() => void handleRefreshCaptcha()}
+                  disabled={!canRefreshCaptcha}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-70"
+                  title="看不清？点击刷新验证码"
+                >
+                  <img
+                    src={authChallenge.captchaImageDataUrl}
+                    alt="验证码（点击刷新）"
+                    className="h-14 w-full rounded border border-slate-200 bg-white object-contain"
+                  />
+                </button>
+                <p className="text-[11px] text-slate-500">
+                  看不清图片可点击刷新{refreshingCaptcha ? "（刷新中...）" : ""}
+                </p>
                 <label className="admin-auth-form__field">
                   <span>验证码</span>
                   <Input

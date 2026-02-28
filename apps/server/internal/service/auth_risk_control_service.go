@@ -53,6 +53,14 @@ type AuthRiskRecordInput struct {
 	Success    bool
 }
 
+// AuthRiskRefreshInput 描述验证码刷新输入。
+type AuthRiskRefreshInput struct {
+	Scene      string
+	ClientIP   string
+	Identifier string
+	CaptchaID  string
+}
+
 // AuthCaptchaChallenge 供前端展示的验证码挑战信息。
 type AuthCaptchaChallenge struct {
 	CaptchaID           string `json:"captchaId"`
@@ -211,6 +219,42 @@ func (s *AuthRiskControlService) Check(ctx context.Context, input AuthRiskCheckI
 			Challenge: challenge,
 		},
 	}
+}
+
+// RefreshChallenge 在已触发验证码场景下刷新挑战图片。
+func (s *AuthRiskControlService) RefreshChallenge(ctx context.Context, input AuthRiskRefreshInput) (*AuthCaptchaChallenge, error) {
+	policy, now, scene, _, states, err := s.prepareSceneStates(ctx, input.Scene, input.ClientIP, input.Identifier)
+	if err != nil {
+		return nil, err
+	}
+	if !policy.Enabled {
+		return nil, &AuthRiskError{
+			Type:    AuthRiskErrorTypeCaptchaRequired,
+			Message: "当前无需验证码",
+		}
+	}
+
+	if lockUntil, retryAfter := detectStateLock(states, now); lockUntil != nil {
+		return nil, &AuthRiskError{
+			Type:    AuthRiskErrorTypeTemporarilyLock,
+			Message: "操作过于频繁，请稍后再试",
+			Result: AuthRiskResult{
+				LockedUntil:       lockUntil,
+				RetryAfterSeconds: retryAfter,
+			},
+		}
+	}
+
+	requiredLevel, dominantState := resolveRequiredCaptchaLevel(scene, states, policy)
+	if requiredLevel <= 0 || dominantState == nil {
+		return nil, &AuthRiskError{
+			Type:    AuthRiskErrorTypeCaptchaRequired,
+			Message: "当前无需验证码",
+		}
+	}
+
+	// 中文注释：刷新验证码时沿用当前最高风险主体，避免切换到更低风险主体绕过策略。
+	return s.issueChallenge(ctx, scene, dominantState.SubjectHash, input.ClientIP, requiredLevel, policy)
 }
 
 // RecordResult 在登录/注册结束后回写风控计数。

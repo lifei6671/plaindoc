@@ -17,7 +17,14 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { type AdminRole, type AdminIdentity, type AuthCaptchaChallenge, type AuthSession, type DataGateway } from "../data-access";
+import {
+  type AdminRole,
+  type AdminIdentity,
+  type AuthCaptchaChallenge,
+  type AuthCaptchaRefreshInput,
+  type AuthSession,
+  type DataGateway
+} from "../data-access";
 import { formatError } from "../editor/status-utils";
 import { AdminAuthPanel } from "../components/AdminAuthPanel";
 import { Badge } from "../components/ui/badge";
@@ -52,6 +59,7 @@ interface AdminAppProps {
   authChallenge: AuthCaptchaChallenge | null;
   dataGateway: DataGateway;
   onLogin: (input: { email: string; password: string; captchaId?: string; captchaAnswer?: string }) => Promise<void>;
+  onRefreshCaptcha: (input: AuthCaptchaRefreshInput) => Promise<void>;
   onLogout: () => Promise<void>;
 }
 
@@ -471,6 +479,7 @@ export function AdminApp({
   authChallenge,
   dataGateway,
   onLogin,
+  onRefreshCaptcha,
   onLogout
 }: AdminAppProps) {
   const location = useLocation();
@@ -618,6 +627,7 @@ export function AdminApp({
         errorMessage={errorMessage}
         authChallenge={authChallenge}
         onLogin={onLogin}
+        onRefreshCaptcha={onRefreshCaptcha}
       />
     );
   }
