@@ -58,7 +58,18 @@ export function AuthPanel({
   const [provider, setProvider] = useState("__auto__");
   const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [refreshingCaptcha, setRefreshingCaptcha] = useState(false);
-  const lastCaptchaRefreshAtRef = useRef(0);
+  const refreshDelayTimerRef = useRef<number | null>(null);
+  const refreshCancelledRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      refreshCancelledRef.current = true;
+      if (refreshDelayTimerRef.current !== null) {
+        window.clearTimeout(refreshDelayTimerRef.current);
+        refreshDelayTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setCaptchaAnswer("");
@@ -176,13 +187,17 @@ export function AuthPanel({
     if (!authChallenge || !canRefreshCaptcha) {
       return;
     }
-    const now = Date.now();
-    if (now - lastCaptchaRefreshAtRef.current < CAPTCHA_REFRESH_DEBOUNCE_MS) {
-      return;
-    }
-    lastCaptchaRefreshAtRef.current = now;
     setRefreshingCaptcha(true);
     try {
+      await new Promise<void>((resolve) => {
+        refreshDelayTimerRef.current = window.setTimeout(() => {
+          refreshDelayTimerRef.current = null;
+          resolve();
+        }, CAPTCHA_REFRESH_DEBOUNCE_MS);
+      });
+      if (refreshCancelledRef.current) {
+        return;
+      }
       await onRefreshCaptcha({
         scene: mode,
         identifier: captchaIdentifier,
@@ -190,7 +205,9 @@ export function AuthPanel({
       });
       setCaptchaAnswer("");
     } finally {
-      setRefreshingCaptcha(false);
+      if (!refreshCancelledRef.current) {
+        setRefreshingCaptcha(false);
+      }
     }
   }, [authChallenge, canRefreshCaptcha, captchaIdentifier, mode, onRefreshCaptcha]);
 
@@ -308,14 +325,16 @@ export function AuthPanel({
                   type="button"
                   onClick={() => void handleRefreshCaptcha()}
                   disabled={!canRefreshCaptcha}
-                  className="w-full disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-block max-w-full disabled:cursor-not-allowed disabled:opacity-70"
                   title="看不清？点击刷新验证码"
                 >
-                  <img
-                    src={authChallenge.captchaImageDataUrl}
-                    alt="验证码（点击刷新）"
-                    className="h-14 w-full rounded border border-slate-200 object-contain"
-                  />
+                  <div className="flex min-h-14 items-center justify-center">
+                    <img
+                      src={authChallenge.captchaImageDataUrl}
+                      alt="验证码（点击刷新）"
+                      className="block h-auto w-auto max-w-full rounded border border-slate-200"
+                    />
+                  </div>
                 </button>
                 <p className="text-[11px] text-slate-500">
                   看不清图片可点击刷新{refreshingCaptcha ? "（刷新中...）" : ""}
