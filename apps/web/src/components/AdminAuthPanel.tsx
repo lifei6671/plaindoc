@@ -1,7 +1,8 @@
 import { LoaderCircle } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { ADMIN_BRAND_LOGO_SRC } from "../admin/brand";
+import type { AuthCaptchaChallenge } from "../data-access";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -11,20 +12,32 @@ interface AdminAuthPanelProps {
   checking: boolean;
   submitting: boolean;
   errorMessage: string | null;
-  onLogin: (input: { email: string; password: string }) => Promise<void>;
+  authChallenge: AuthCaptchaChallenge | null;
+  onLogin: (input: { email: string; password: string; captchaId?: string; captchaAnswer?: string }) => Promise<void>;
 }
 
 // 管理后台登录面板：复用现有账号体系，仅允许登录入口（不提供注册）。
-export function AdminAuthPanel({ checking, submitting, errorMessage, onLogin }: AdminAuthPanelProps) {
+export function AdminAuthPanel({ checking, submitting, errorMessage, authChallenge, onLogin }: AdminAuthPanelProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+
+  useEffect(() => {
+    setCaptchaAnswer("");
+  }, [authChallenge?.captchaId]);
 
   const canSubmit = useMemo(() => {
     if (checking || submitting) {
       return false;
     }
-    return Boolean(email.trim() && password.trim());
-  }, [checking, email, password, submitting]);
+    if (!email.trim() || !password.trim()) {
+      return false;
+    }
+    if (authChallenge && !captchaAnswer.trim()) {
+      return false;
+    }
+    return true;
+  }, [authChallenge, captchaAnswer, checking, email, password, submitting]);
 
   const submitText = useMemo(() => {
     if (checking) {
@@ -43,10 +56,12 @@ export function AdminAuthPanel({ checking, submitting, errorMessage, onLogin }: 
     }
     await onLogin({
       email: email.trim(),
-      password
+      password,
+      captchaId: authChallenge?.captchaId,
+      captchaAnswer: captchaAnswer.trim()
     });
     setPassword("");
-  }, [canSubmit, email, onLogin, password]);
+  }, [authChallenge?.captchaId, canSubmit, captchaAnswer, email, onLogin, password]);
 
   return (
     <div className="admin-auth-page">
@@ -89,6 +104,27 @@ export function AdminAuthPanel({ checking, submitting, errorMessage, onLogin }: 
                 disabled={checking || submitting}
               />
             </label>
+            {authChallenge ? (
+              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs text-slate-600">已触发验证码校验（{authChallenge.level} 位数字）</p>
+                <img
+                  src={authChallenge.captchaImageDataUrl}
+                  alt="验证码"
+                  className="h-14 w-full rounded border border-slate-200 bg-white object-contain"
+                />
+                <label className="admin-auth-form__field">
+                  <span>验证码</span>
+                  <Input
+                    type="text"
+                    value={captchaAnswer}
+                    onChange={(event) => setCaptchaAnswer(event.target.value)}
+                    placeholder="输入图片中的验证码"
+                    autoComplete="off"
+                    disabled={checking || submitting}
+                  />
+                </label>
+              </div>
+            ) : null}
             {errorMessage ? <p className="admin-auth-form__error">{errorMessage}</p> : null}
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {checking || submitting ? <LoaderCircle className="admin-auth-form__submit-loader" size={14} /> : null}

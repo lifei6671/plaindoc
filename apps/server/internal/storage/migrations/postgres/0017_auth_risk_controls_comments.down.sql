@@ -1,0 +1,27 @@
+COMMENT ON TABLE auth_risk_states IS NULL;
+COMMENT ON COLUMN auth_risk_states.id IS NULL;
+COMMENT ON COLUMN auth_risk_states.scene IS NULL;
+COMMENT ON COLUMN auth_risk_states.subject_type IS NULL;
+COMMENT ON COLUMN auth_risk_states.subject_hash IS NULL;
+COMMENT ON COLUMN auth_risk_states.window_started_at IS NULL;
+COMMENT ON COLUMN auth_risk_states.attempt_count IS NULL;
+COMMENT ON COLUMN auth_risk_states.failed_count IS NULL;
+COMMENT ON COLUMN auth_risk_states.captcha_failed_count IS NULL;
+COMMENT ON COLUMN auth_risk_states.lock_until IS NULL;
+COMMENT ON COLUMN auth_risk_states.created_at IS NULL;
+COMMENT ON COLUMN auth_risk_states.updated_at IS NULL;
+
+COMMENT ON TABLE auth_captcha_challenges IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.id IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.captcha_id IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.scene IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.subject_hash IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.level IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.answer_hash IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.answer_salt IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.issued_ip_hash IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.expires_at IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.consumed_at IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.failed_verify_count IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.created_at IS NULL;
+COMMENT ON COLUMN auth_captcha_challenges.updated_at IS NULL;

@@ -471,3 +471,118 @@ func TestRouter_AuthOptions(t *testing.T) {
 		t.Fatalf("unexpected provider order: %#v", payload.Providers)
 	}
 }
+
+func TestRouter_AuthLoginRiskCaptchaAndLock(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	registerBody := []byte(`{"email":"risk-login@example.com","password":"123456","name":"Risk Login"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	for index := 0; index < 3; index += 1 {
+		loginBody := []byte(`{"email":"risk-login@example.com","password":"wrong-password"}`)
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := serve(loginReq)
+		if loginRec.Code != http.StatusForbidden {
+			t.Fatalf("expected invalid credentials status 403, got %d body=%s", loginRec.Code, loginRec.Body.String())
+		}
+	}
+
+	captchaRequiredReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"risk-login@example.com","password":"wrong-password"}`)),
+	)
+	captchaRequiredReq.Header.Set("Content-Type", "application/json")
+	captchaRequiredRec := serve(captchaRequiredReq)
+	if captchaRequiredRec.Code != http.StatusOK {
+		t.Fatalf("expected captcha required status 200, got %d body=%s", captchaRequiredRec.Code, captchaRequiredRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, captchaRequiredRec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeCaptchaRequired) {
+		t.Fatalf("expected captcha required code %d, got %d", response.ResolveErrorCode(response.CodeCaptchaRequired), code)
+	}
+
+	for index := 0; index < 8; index += 1 {
+		body := []byte(`{"email":"risk-login@example.com","password":"wrong-password","captchaId":"invalid","captchaAnswer":"AAAA"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := serve(req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected captcha invalid status 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		if code := decodeJSONResultCode(t, rec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeCaptchaInvalid) {
+			t.Fatalf("expected captcha invalid code %d, got %d", response.ResolveErrorCode(response.CodeCaptchaInvalid), code)
+		}
+	}
+
+	lockReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"risk-login@example.com","password":"wrong-password","captchaId":"invalid","captchaAnswer":"AAAA"}`)),
+	)
+	lockReq.Header.Set("Content-Type", "application/json")
+	lockRec := serve(lockReq)
+	if lockRec.Code != http.StatusOK {
+		t.Fatalf("expected lock status 200, got %d body=%s", lockRec.Code, lockRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, lockRec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeAuthTemporarilyLocked) {
+		t.Fatalf("expected lock code %d, got %d", response.ResolveErrorCode(response.CodeAuthTemporarilyLocked), code)
+	}
+}
+
+func TestRouter_AuthRegisterRiskCaptchaRequired(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	firstRegisterReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/register",
+		bytes.NewReader([]byte(`{"email":"risk-register@example.com","password":"123456","name":"Risk Register"}`)),
+	)
+	firstRegisterReq.Header.Set("Content-Type", "application/json")
+	firstRegisterRec := serve(firstRegisterReq)
+	if firstRegisterRec.Code != http.StatusOK {
+		t.Fatalf("expected first register status 200, got %d body=%s", firstRegisterRec.Code, firstRegisterRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, firstRegisterRec.Body.Bytes()); code != 0 {
+		t.Fatalf("expected first register business code 0, got %d", code)
+	}
+
+	duplicateRegisterReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/register",
+		bytes.NewReader([]byte(`{"email":"risk-register@example.com","password":"123456","name":"Risk Register"}`)),
+	)
+	duplicateRegisterReq.Header.Set("Content-Type", "application/json")
+	duplicateRegisterRec := serve(duplicateRegisterReq)
+	if duplicateRegisterRec.Code != http.StatusOK {
+		t.Fatalf("expected duplicate register status 200, got %d body=%s", duplicateRegisterRec.Code, duplicateRegisterRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, duplicateRegisterRec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeEmailAlreadyExists) {
+		t.Fatalf("expected duplicate register code %d, got %d", response.ResolveErrorCode(response.CodeEmailAlreadyExists), code)
+	}
+
+	captchaReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/register",
+		bytes.NewReader([]byte(`{"email":"risk-register@example.com","password":"123456","name":"Risk Register"}`)),
+	)
+	captchaReq.Header.Set("Content-Type", "application/json")
+	captchaRec := serve(captchaReq)
+	if captchaRec.Code != http.StatusOK {
+		t.Fatalf("expected captcha required status 200, got %d body=%s", captchaRec.Code, captchaRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, captchaRec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeCaptchaRequired) {
+		t.Fatalf("expected captcha required code %d, got %d", response.ResolveErrorCode(response.CodeCaptchaRequired), code)
+	}
+}

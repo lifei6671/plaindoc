@@ -37,6 +37,23 @@ export interface AuthLoginInput {
   email?: string;
   provider?: string;
   password: string;
+  captchaId?: string;
+  captchaAnswer?: string;
+}
+
+export interface AuthRegisterInput {
+  email: string;
+  password: string;
+  name: string;
+  captchaId?: string;
+  captchaAnswer?: string;
+}
+
+export interface AuthCaptchaChallenge {
+  captchaId: string;
+  captchaImageDataUrl: string;
+  level: number;
+  expiresInSeconds: number;
 }
 
 export interface Space {
@@ -156,7 +173,7 @@ export interface AuthGateway {
   getLoginOptions(): Promise<AuthLoginOptions>;
   getSession(): Promise<AuthSession>;
   login(input: AuthLoginInput): Promise<AuthSession>;
-  register(input: { email: string; password: string; name: string }): Promise<AuthSession>;
+  register(input: AuthRegisterInput): Promise<AuthSession>;
   logout(): Promise<void>;
 }
 

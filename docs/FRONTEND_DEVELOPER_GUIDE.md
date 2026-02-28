@@ -190,6 +190,46 @@
 2. 再在目标写请求头里注入 `X-Admin-Operation-Token`。
 3. 后端中间件对 token 做操作者、操作类型、目标绑定校验。
 
+### 6.5 认证风控（验证码 + 封禁）前端契约
+
+契约文件与字段来源：
+
+1. 类型定义：`apps/web/src/data-access/types.ts`
+   - `AuthLoginInput`：新增 `captchaId`、`captchaAnswer`
+   - `AuthRegisterInput`：注册入参新增 `captchaId`、`captchaAnswer`
+   - `AuthCaptchaChallenge`：`captchaId`、`captchaImageDataUrl`、`level`、`expiresInSeconds`
+   - `level` 语义为验证码位数（例如 `4/5/6`），用于提示“输入几位数字”
+2. 网关实现：`apps/web/src/data-access/http/adapter.ts`
+   - `HttpRequestError` 新增 `data` 字段，透传后端 `JsonResult.data`
+3. 业务编排：`apps/web/src/App.tsx`
+   - 解析风控错误码与 `data`
+   - 维护 `authChallenge` 状态并分发给登录/注册与后台登录组件
+
+错误码约定（前端必须识别）：
+
+1. `1008`：`CAPTCHA_REQUIRED`
+2. `1009`：`CAPTCHA_INVALID`
+3. `1010`：`AUTH_TEMPORARILY_LOCKED`
+
+页面组件消费点：
+
+1. `apps/web/src/components/AuthPanel.tsx`
+   - 登录/注册共用验证码展示与提交
+2. `apps/web/src/components/AdminAuthPanel.tsx`
+   - 后台登录同样支持验证码挑战
+3. `apps/web/src/admin/AdminApp.tsx`
+   - 透传 `authChallenge` 到后台登录面板
+
+状态流约束：
+
+1. 收到 `1008/1009` 时：
+   - 展示后端返回的 `captchaImageDataUrl`
+   - 下一次提交必须附带 `captchaId + captchaAnswer`
+2. 收到 `1010` 时：
+   - 清空验证码挑战
+   - 展示封禁提示（优先使用 `retryAfterSeconds`/`lockedUntil`）
+3. 登录成功、登出或会话切换时必须清空 `authChallenge`，防止复用旧挑战。
+
 ---
 
 ## 7. 编辑器预览链路与硬约束

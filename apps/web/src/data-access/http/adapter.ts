@@ -20,6 +20,7 @@ import {
   type AdminUserListInput,
   type AdminUserListResult,
   type AuthLoginInput,
+  type AuthRegisterInput,
   type AuthLoginMode,
   type AuthLoginOptions,
   type AuthLoginProviderOption,
@@ -69,13 +70,15 @@ class HttpRequestError extends Error {
   readonly status: number;
   readonly body: string;
   readonly code?: number;
+  readonly data?: unknown;
 
-  constructor(status: number, body: string, code?: number) {
+  constructor(status: number, body: string, code?: number, data?: unknown) {
     super(body || `Request failed: ${status}`);
     this.name = "HttpRequestError";
     this.status = status;
     this.body = body;
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -104,8 +107,8 @@ function removeStoredValue(key: string): void {
   }
 }
 
-function toRequestError(status: number, body: string, code?: number): HttpRequestError {
-  return new HttpRequestError(status, body, code);
+function toRequestError(status: number, body: string, code?: number, data?: unknown): HttpRequestError {
+  return new HttpRequestError(status, body, code, data);
 }
 
 interface JsonResultEnvelope<T> {
@@ -409,7 +412,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (response.status === 403 && resultCode === JSON_RESULT_UNAUTHORIZED_CODE) {
         notifyUnauthorized(response.status, resultCode, message);
       }
-      throw toRequestError(response.status, message, resultCode);
+      throw toRequestError(response.status, message, resultCode, envelope?.data);
     }
 
     if (
@@ -418,7 +421,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       envelope.code !== JSON_RESULT_SUCCESS_CODE
     ) {
       const message = extractErrorMessage(response.status, payload, rawBody);
-      throw toRequestError(response.status, message, envelope.code);
+      throw toRequestError(response.status, message, envelope.code, envelope.data);
     }
 
     if (response.status === 204) {
@@ -511,6 +514,14 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (provider) {
         payload.provider = provider;
       }
+      const captchaId = typeof input.captchaId === "string" ? input.captchaId.trim() : "";
+      const captchaAnswer = typeof input.captchaAnswer === "string" ? input.captchaAnswer.trim() : "";
+      if (captchaId) {
+        payload.captchaId = captchaId;
+      }
+      if (captchaAnswer) {
+        payload.captchaAnswer = captchaAnswer;
+      }
       const session = await request<HttpAuthSession>("/auth/login", {
         method: "POST",
         body: JSON.stringify(payload)
@@ -521,10 +532,23 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         token: session.token
       };
     },
-    async register(input) {
+    async register(input: AuthRegisterInput) {
+      const payload: AuthRegisterInput = {
+        email: input.email,
+        password: input.password,
+        name: input.name
+      };
+      const captchaId = typeof input.captchaId === "string" ? input.captchaId.trim() : "";
+      const captchaAnswer = typeof input.captchaAnswer === "string" ? input.captchaAnswer.trim() : "";
+      if (captchaId) {
+        payload.captchaId = captchaId;
+      }
+      if (captchaAnswer) {
+        payload.captchaAnswer = captchaAnswer;
+      }
       const session = await request<HttpAuthSession>("/auth/register", {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify(payload)
       });
       saveSessionTokens(session);
       return {

@@ -101,6 +101,8 @@ func newRouter(
 	userRepo := repository.NewGormUserRepository(db)
 	userIdentityRepo := repository.NewGormUserIdentityRepository(db)
 	userSessionRepo := repository.NewGormUserSessionRepository(db)
+	authRiskStateRepo := repository.NewGormAuthRiskStateRepository(db)
+	authCaptchaChallengeRepo := repository.NewGormAuthCaptchaChallengeRepository(db)
 	spaceRepo := repository.NewGormSpaceRepository(db)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
 	documentRepo := repository.NewGormDocumentRepository(db)
@@ -182,6 +184,13 @@ func newRouter(
 		// ---- 认证与会话 API ----
 		// 注册策略独立成服务，便于从系统配置动态控制开放注册。
 		authRegistrationPolicyService := service.NewAuthRegistrationPolicyService(systemConfigRepo)
+		authRiskPolicyService := service.NewAuthRiskPolicyService(systemConfigRepo)
+		authRiskControlService := service.NewAuthRiskControlService(
+			authRiskPolicyService,
+			authRiskStateRepo,
+			authCaptchaChallengeRepo,
+			cfg.JWT.Secret,
+		)
 		authProviders := []service.AuthLoginProvider{
 			service.NewLocalAuthLoginProvider(authService),
 		}
@@ -217,7 +226,13 @@ func newRouter(
 			}
 		}
 		authLoginOrchestrator := service.NewAuthLoginOrchestrator(cfg.Auth.DefaultProvider, authProviders...)
-		authHandler := handler.NewAuthHandler(authService, authRegistrationPolicyService, authLoginOrchestrator, cfg.JWT)
+		authHandler := handler.NewAuthHandler(
+			authService,
+			authRegistrationPolicyService,
+			authLoginOrchestrator,
+			authRiskControlService,
+			cfg.JWT,
+		)
 
 		// 登录策略选项（登录页模式、provider 列表与注册开关）。
 		api.GET("/auth/options", authHandler.Options)

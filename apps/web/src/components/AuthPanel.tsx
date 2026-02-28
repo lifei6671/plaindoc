@@ -1,7 +1,13 @@
 import { LoaderCircle, LogIn, UserPlus } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import type { AuthLoginInput, AuthLoginMode, AuthLoginProviderOption } from "../data-access";
+import type {
+  AuthCaptchaChallenge,
+  AuthLoginInput,
+  AuthLoginMode,
+  AuthLoginProviderOption,
+  AuthRegisterInput
+} from "../data-access";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -20,8 +26,9 @@ interface AuthPanelProps {
   loginMode: AuthLoginMode;
   allowUserRegister: boolean;
   providerOptions: AuthLoginProviderOption[];
+  authChallenge: AuthCaptchaChallenge | null;
   onLogin: (input: AuthLoginInput) => Promise<void>;
-  onRegister: (input: { name: string; email: string; password: string }) => Promise<void>;
+  onRegister: (input: AuthRegisterInput) => Promise<void>;
 }
 
 // 登录注册入口：独立于编辑器主视图，避免未登录状态触发业务加载链路。
@@ -35,6 +42,7 @@ export function AuthPanel({
   loginMode,
   allowUserRegister,
   providerOptions,
+  authChallenge,
   onLogin,
   onRegister
 }: AuthPanelProps) {
@@ -44,6 +52,11 @@ export function AuthPanel({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [provider, setProvider] = useState("__auto__");
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+
+  useEffect(() => {
+    setCaptchaAnswer("");
+  }, [authChallenge?.captchaId]);
 
   const validationErrorMessage = useMemo(() => {
     if (mode !== "register") {
@@ -77,8 +90,11 @@ export function AuthPanel({
         return false;
       }
     }
+    if (authChallenge && !captchaAnswer.trim()) {
+      return false;
+    }
     return true;
-  }, [checking, confirmPassword, email, identifier, mode, name, password, submitting]);
+  }, [authChallenge, captchaAnswer, checking, confirmPassword, email, identifier, mode, name, password, submitting]);
 
   const submitText = useMemo(() => {
     if (checking) {
@@ -115,7 +131,9 @@ export function AuthPanel({
       await onLogin({
         identifier: identifier.trim(),
         password,
-        provider: selectedProvider
+        provider: selectedProvider,
+        captchaId: authChallenge?.captchaId,
+        captchaAnswer: captchaAnswer.trim()
       });
       setPassword("");
       return;
@@ -123,11 +141,13 @@ export function AuthPanel({
     await onRegister({
       name: name.trim(),
       email: email.trim(),
-      password
+      password,
+      captchaId: authChallenge?.captchaId,
+      captchaAnswer: captchaAnswer.trim()
     });
     setPassword("");
     setConfirmPassword("");
-  }, [canSubmit, email, identifier, mode, name, onLogin, onRegister, password, provider]);
+  }, [authChallenge?.captchaId, canSubmit, captchaAnswer, email, identifier, mode, name, onLogin, onRegister, password, provider]);
 
   return (
     <div className="admin-auth-page">
@@ -232,6 +252,30 @@ export function AuthPanel({
                   disabled={checking || submitting}
                 />
               </label>
+            ) : null}
+
+            {authChallenge ? (
+              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs text-slate-600">
+                  已触发验证码校验（{authChallenge.level} 位数字）
+                </p>
+                <img
+                  src={authChallenge.captchaImageDataUrl}
+                  alt="验证码"
+                  className="h-14 w-full rounded border border-slate-200 bg-white object-contain"
+                />
+                <label className="admin-auth-form__field">
+                  <span>验证码</span>
+                  <Input
+                    type="text"
+                    value={captchaAnswer}
+                    onChange={(event) => setCaptchaAnswer(event.target.value)}
+                    placeholder="输入图片中的验证码"
+                    autoComplete="off"
+                    disabled={checking || submitting}
+                  />
+                </label>
+              </div>
             ) : null}
 
             {validationErrorMessage ? <p className="admin-auth-form__error">{validationErrorMessage}</p> : null}

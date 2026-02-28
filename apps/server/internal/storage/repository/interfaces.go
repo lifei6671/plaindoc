@@ -93,6 +93,20 @@ type UserSessionRepository interface {
 	RevokeAllByUserID(ctx context.Context, userID string, revokedAt time.Time) error
 }
 
+// AuthRiskStateRepository 认证风控状态仓储接口。
+type AuthRiskStateRepository interface {
+	GetByKey(ctx context.Context, scene string, subjectType string, subjectHash string) (*models.AuthRiskState, error)
+	Create(ctx context.Context, state *models.AuthRiskState) error
+	Update(ctx context.Context, state *models.AuthRiskState) error
+}
+
+// AuthCaptchaChallengeRepository 认证验证码挑战仓储接口。
+type AuthCaptchaChallengeRepository interface {
+	GetByCaptchaID(ctx context.Context, captchaID string) (*models.AuthCaptchaChallenge, error)
+	Create(ctx context.Context, challenge *models.AuthCaptchaChallenge) error
+	Update(ctx context.Context, challenge *models.AuthCaptchaChallenge) error
+}
+
 // AdminRoleRepository 管理角色仓储接口。
 type AdminRoleRepository interface {
 	HasRole(ctx context.Context, userID string, role models.AdminRole) (bool, error)

@@ -67,8 +67,10 @@ import {
   AUTH_UNAUTHORIZED_EVENT,
   ConflictError,
   getDataGateway,
+  type AuthCaptchaChallenge,
   type AuthLoginInput,
   type AuthLoginOptions,
+  type AuthRegisterInput,
   type AuthSession,
   type AuthUnauthorizedEventDetail,
   type CreateNodeResult
@@ -142,6 +144,9 @@ const EDITOR_ROUTE_BASE_PATH = "/editor";
 const ADMIN_SPACES_ROUTE_PATH = `${ADMIN_ROUTE_BASE_PATH}/spaces`;
 const AUTO_SAVE_DEBOUNCE_MS = 800;
 const EDITOR_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
+const AUTH_CAPTCHA_REQUIRED_CODE = 1008;
+const AUTH_CAPTCHA_INVALID_CODE = 1009;
+const AUTH_TEMPORARILY_LOCKED_CODE = 1010;
 const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
   loginMode: "local_only",
   defaultProviderId: "local",
@@ -164,6 +169,70 @@ interface EditorAccessErrorState {
   spaceId: string | null;
   description: string;
   technicalMessage?: string | null;
+}
+
+function extractAuthRiskErrorCode(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const record = error as Record<string, unknown>;
+  return typeof record.code === "number" ? record.code : null;
+}
+
+function extractAuthRiskErrorData(error: unknown): Record<string, unknown> | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const record = error as Record<string, unknown>;
+  if (!record.data || typeof record.data !== "object") {
+    return null;
+  }
+  return record.data as Record<string, unknown>;
+}
+
+function parseAuthCaptchaChallenge(error: unknown): AuthCaptchaChallenge | null {
+  const data = extractAuthRiskErrorData(error);
+  if (!data) {
+    return null;
+  }
+  const captchaId = typeof data.captchaId === "string" ? data.captchaId.trim() : "";
+  const captchaImageDataUrl =
+    typeof data.captchaImageDataUrl === "string" ? data.captchaImageDataUrl.trim() : "";
+  const level = Number(data.level);
+  const expiresInSeconds = Number(data.expiresInSeconds);
+  if (!captchaId || !captchaImageDataUrl || !Number.isFinite(level) || !Number.isFinite(expiresInSeconds)) {
+    return null;
+  }
+  return {
+    captchaId,
+    captchaImageDataUrl,
+    level: Math.trunc(level),
+    expiresInSeconds: Math.trunc(expiresInSeconds)
+  };
+}
+
+function parseAuthLockedUntil(error: unknown): string | null {
+  const data = extractAuthRiskErrorData(error);
+  if (!data) {
+    return null;
+  }
+  const lockedUntil = typeof data.lockedUntil === "string" ? data.lockedUntil.trim() : "";
+  if (!lockedUntil) {
+    return null;
+  }
+  const dateValue = new Date(lockedUntil);
+  if (Number.isNaN(dateValue.getTime())) {
+    return lockedUntil;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(dateValue);
 }
 
 function normalizeBrowserTitleSegment(value: string, fallback: string): string {
@@ -719,6 +788,7 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+  const [authChallenge, setAuthChallenge] = useState<AuthCaptchaChallenge | null>(null);
   const [authLoginOptions, setAuthLoginOptions] = useState<AuthLoginOptions>(
     DEFAULT_AUTH_LOGIN_OPTIONS
   );
@@ -865,6 +935,7 @@ export default function App() {
       pendingRouteDocumentIDRef.current = null;
       setAuthSession({ user: null });
       setAuthErrorMessage(null);
+      setAuthChallenge(null);
       setIsAuthSubmitting(false);
       setSaveStatus("loading");
       setLastSavedAt(null);
@@ -931,18 +1002,23 @@ export default function App() {
     const checkSession = async () => {
       setIsAuthChecking(true);
       setAuthErrorMessage(null);
+      setAuthChallenge(null);
       try {
         const session = await dataGateway.auth.getSession();
         if (cancelled) {
           return;
         }
         setAuthSession(session);
+        if (session.user) {
+          setAuthChallenge(null);
+        }
       } catch (error) {
         if (cancelled) {
           return;
         }
         console.error("[auth] 会话检查失败", error);
         setAuthSession({ user: null });
+        setAuthChallenge(null);
         setAuthErrorMessage(`会话检查失败：${formatError(error)}`);
       } finally {
         if (!cancelled) {
@@ -2162,12 +2238,30 @@ export default function App() {
           return;
         }
         setAuthSession(session);
+        setAuthChallenge(null);
         setSaveStatus("loading");
         setStatusMessage(`欢迎回来，${session.user.name}`);
         if (authRedirectTarget) {
           window.location.assign(authRedirectTarget);
         }
       } catch (error) {
+        const errorCode = extractAuthRiskErrorCode(error);
+        if (errorCode === AUTH_CAPTCHA_REQUIRED_CODE || errorCode === AUTH_CAPTCHA_INVALID_CODE) {
+          const challenge = parseAuthCaptchaChallenge(error);
+          if (challenge) {
+            setAuthChallenge(challenge);
+          }
+        }
+        if (errorCode === AUTH_TEMPORARILY_LOCKED_CODE) {
+          setAuthChallenge(null);
+          const lockedUntil = parseAuthLockedUntil(error);
+          if (lockedUntil) {
+            setAuthErrorMessage(`登录失败：触发安全锁定，请在 ${lockedUntil} 后重试`);
+          } else {
+            setAuthErrorMessage("登录失败：触发安全锁定，请稍后再试");
+          }
+          return;
+        }
         setAuthErrorMessage(`登录失败：${formatError(error)}`);
       } finally {
         setIsAuthSubmitting(false);
@@ -2178,7 +2272,7 @@ export default function App() {
 
   // 注册动作：注册成功后直接进入登录态。
   const handleAuthRegister = useCallback(
-    async (input: { name: string; email: string; password: string }) => {
+    async (input: AuthRegisterInput) => {
       setIsAuthSubmitting(true);
       setAuthErrorMessage(null);
       try {
@@ -2188,12 +2282,30 @@ export default function App() {
           return;
         }
         setAuthSession(session);
+        setAuthChallenge(null);
         setSaveStatus("loading");
         setStatusMessage(`欢迎使用，${session.user.name}`);
         if (authRedirectTarget) {
           window.location.assign(authRedirectTarget);
         }
       } catch (error) {
+        const errorCode = extractAuthRiskErrorCode(error);
+        if (errorCode === AUTH_CAPTCHA_REQUIRED_CODE || errorCode === AUTH_CAPTCHA_INVALID_CODE) {
+          const challenge = parseAuthCaptchaChallenge(error);
+          if (challenge) {
+            setAuthChallenge(challenge);
+          }
+        }
+        if (errorCode === AUTH_TEMPORARILY_LOCKED_CODE) {
+          setAuthChallenge(null);
+          const lockedUntil = parseAuthLockedUntil(error);
+          if (lockedUntil) {
+            setAuthErrorMessage(`注册失败：触发安全锁定，请在 ${lockedUntil} 后重试`);
+          } else {
+            setAuthErrorMessage("注册失败：触发安全锁定，请稍后再试");
+          }
+          return;
+        }
         setAuthErrorMessage(`注册失败：${formatError(error)}`);
       } finally {
         setIsAuthSubmitting(false);
@@ -2209,6 +2321,7 @@ export default function App() {
     try {
       await dataGateway.auth.logout();
       setAuthSession({ user: null });
+      setAuthChallenge(null);
       setSaveStatus("loading");
       setStatusMessage("已退出登录");
       setLastSavedAt(null);
@@ -2228,6 +2341,7 @@ export default function App() {
           checking={isAuthChecking}
           submitting={isAuthSubmitting}
           errorMessage={authErrorMessage}
+          authChallenge={authChallenge}
           dataGateway={dataGateway}
           onLogin={handleAuthLogin}
           onLogout={handleAuthLogout}
@@ -2266,6 +2380,7 @@ export default function App() {
           loginMode={authLoginOptions.loginMode}
           allowUserRegister={authLoginOptions.allowUserRegister}
           providerOptions={authLoginOptions.providers}
+          authChallenge={authChallenge}
           onLogin={handleAuthLogin}
           onRegister={handleAuthRegister}
         />

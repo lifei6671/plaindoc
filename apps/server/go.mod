@@ -8,6 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-ldap/ldap/v3 v3.4.12
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/mojocn/base64Captcha v1.3.8
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/crypto v0.48.0
 	golang.org/x/image v0.32.0

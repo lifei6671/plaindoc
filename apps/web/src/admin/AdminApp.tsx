@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { type AdminRole, type AdminIdentity, type AuthSession, type DataGateway } from "../data-access";
+import { type AdminRole, type AdminIdentity, type AuthCaptchaChallenge, type AuthSession, type DataGateway } from "../data-access";
 import { formatError } from "../editor/status-utils";
 import { AdminAuthPanel } from "../components/AdminAuthPanel";
 import { Badge } from "../components/ui/badge";
@@ -49,8 +49,9 @@ interface AdminAppProps {
   checking: boolean;
   submitting: boolean;
   errorMessage: string | null;
+  authChallenge: AuthCaptchaChallenge | null;
   dataGateway: DataGateway;
-  onLogin: (input: { email: string; password: string }) => Promise<void>;
+  onLogin: (input: { email: string; password: string; captchaId?: string; captchaAnswer?: string }) => Promise<void>;
   onLogout: () => Promise<void>;
 }
 
@@ -467,6 +468,7 @@ export function AdminApp({
   checking,
   submitting,
   errorMessage,
+  authChallenge,
   dataGateway,
   onLogin,
   onLogout
@@ -614,6 +616,7 @@ export function AdminApp({
         checking={checking}
         submitting={submitting}
         errorMessage={errorMessage}
+        authChallenge={authChallenge}
         onLogin={onLogin}
       />
     );

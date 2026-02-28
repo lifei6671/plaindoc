@@ -485,15 +485,18 @@ func validateSecurityConfig(payload map[string]any) error {
 }
 
 func validateAuthConfig(payload map[string]any) error {
-	requiredKeys := map[string]struct{}{
+	allowedKeys := map[string]struct{}{
 		"loginMode":         {},
 		"defaultProviderId": {},
 		"allowUserRegister": {},
 		"providers":         {},
 		"breakGlass":        {},
+		"riskControl":       {},
 	}
-	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
-		return err
+	for key := range payload {
+		if _, ok := allowedKeys[key]; !ok {
+			return fmt.Errorf("unknown config key %q", key)
+		}
 	}
 
 	loginMode, err := getRequiredString(payload, "loginMode")
@@ -746,6 +749,113 @@ func validateAuthConfig(payload map[string]any) error {
 		return fmt.Errorf("breakGlass.localAdminEmails must not be empty when breakGlass is enabled")
 	}
 
+	if rawRiskControl, exists := payload["riskControl"]; exists {
+		riskControl, ok := rawRiskControl.(map[string]any)
+		if !ok || riskControl == nil {
+			return fmt.Errorf("riskControl must be object")
+		}
+		if err := validateAuthRiskControlConfig(riskControl); err != nil {
+			return fmt.Errorf("riskControl %w", err)
+		}
+	}
+
+	return nil
+}
+
+func validateAuthRiskControlConfig(payload map[string]any) error {
+	if err := validateNoUnknownKeys(payload, map[string]struct{}{
+		"enabled":            {},
+		"windowSeconds":      {},
+		"lockSeconds":        {},
+		"loginThresholds":    {},
+		"registerThresholds": {},
+		"captcha":            {},
+	}); err != nil {
+		return err
+	}
+
+	if _, err := getRequiredBool(payload, "enabled"); err != nil {
+		return err
+	}
+	windowSeconds, err := getRequiredInt(payload, "windowSeconds")
+	if err != nil {
+		return err
+	}
+	if windowSeconds < 60 || windowSeconds > 86400 {
+		return fmt.Errorf("windowSeconds must be between 60 and 86400")
+	}
+	lockSeconds, err := getRequiredInt(payload, "lockSeconds")
+	if err != nil {
+		return err
+	}
+	if lockSeconds < 300 || lockSeconds > 604800 {
+		return fmt.Errorf("lockSeconds must be between 300 and 604800")
+	}
+
+	if err := validateAuthRiskThresholdConfig(payload, "loginThresholds"); err != nil {
+		return fmt.Errorf("loginThresholds %w", err)
+	}
+	if err := validateAuthRiskThresholdConfig(payload, "registerThresholds"); err != nil {
+		return fmt.Errorf("registerThresholds %w", err)
+	}
+
+	captchaConfig, err := getRequiredObject(payload, "captcha")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(captchaConfig, map[string]struct{}{
+		"ttlSeconds": {},
+	}); err != nil {
+		return fmt.Errorf("captcha %w", err)
+	}
+	ttlSeconds, err := getRequiredInt(captchaConfig, "ttlSeconds")
+	if err != nil {
+		return fmt.Errorf("captcha %w", err)
+	}
+	if ttlSeconds < 30 || ttlSeconds > 900 {
+		return fmt.Errorf("captcha.ttlSeconds must be between 30 and 900")
+	}
+
+	return nil
+}
+
+func validateAuthRiskThresholdConfig(parent map[string]any, key string) error {
+	thresholds, err := getRequiredObject(parent, key)
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(thresholds, map[string]struct{}{
+		"l1":   {},
+		"l2":   {},
+		"l3":   {},
+		"lock": {},
+	}); err != nil {
+		return err
+	}
+
+	l1, err := getRequiredInt(thresholds, "l1")
+	if err != nil {
+		return err
+	}
+	l2, err := getRequiredInt(thresholds, "l2")
+	if err != nil {
+		return err
+	}
+	l3, err := getRequiredInt(thresholds, "l3")
+	if err != nil {
+		return err
+	}
+	lock, err := getRequiredInt(thresholds, "lock")
+	if err != nil {
+		return err
+	}
+
+	if l1 < 1 || l2 < 1 || l3 < 1 || lock < 1 {
+		return fmt.Errorf("all thresholds must be greater than 0")
+	}
+	if !(l1 <= l2 && l2 <= l3 && l3 <= lock) {
+		return fmt.Errorf("threshold relation must satisfy l1 <= l2 <= l3 <= lock")
+	}
 	return nil
 }
 

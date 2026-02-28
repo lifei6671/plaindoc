@@ -16,21 +16,26 @@ type authHandler struct {
 	authService                   *service.AuthService
 	authLoginOrchestrator         *service.AuthLoginOrchestrator
 	authRegistrationPolicyService *service.AuthRegistrationPolicyService
+	authRiskControlService        *service.AuthRiskControlService
 	accessTokenTTL                time.Duration
 	refreshTokenTTL               time.Duration
 }
 
 type registerRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
+	Email         string `json:"email"`
+	Password      string `json:"password"`
+	Name          string `json:"name"`
+	CaptchaID     string `json:"captchaId"`
+	CaptchaAnswer string `json:"captchaAnswer"`
 }
 
 type loginRequest struct {
-	Email      string `json:"email"`
-	Identifier string `json:"identifier"`
-	Provider   string `json:"provider"`
-	Password   string `json:"password"`
+	Email         string `json:"email"`
+	Identifier    string `json:"identifier"`
+	Provider      string `json:"provider"`
+	Password      string `json:"password"`
+	CaptchaID     string `json:"captchaId"`
+	CaptchaAnswer string `json:"captchaAnswer"`
 }
 
 type refreshRequest struct {
@@ -69,11 +74,59 @@ const (
 	refreshTokenCookieName = "refreshToken"
 )
 
+var (
+	authRegisterErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrEmailAlreadyExists,
+			Template: response.AuthErrEmailAlreadyExists,
+		},
+	}
+	authLoginErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrInvalidCredentials,
+			Template: response.AuthErrEmailPassword,
+		},
+		{
+			Target:   service.ErrAuthProviderUnavailable,
+			Template: response.AuthErrEmailPassword,
+		},
+		{
+			Target:   service.ErrAuthProviderFailure,
+			Template: response.AuthErrEmailPassword,
+		},
+		{
+			Target:   service.ErrUserBanned,
+			Template: response.AuthErrUserHasBeenBanned,
+		},
+		{
+			Target:   service.ErrUserDeleted,
+			Template: response.AuthErrUserHasBeenDeleted,
+		},
+	}
+	authRefreshErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrInvalidRefreshToken,
+			Template: response.AuthErrRefreshToken,
+		},
+		{
+			Target:   service.ErrUnauthorized,
+			Template: response.AuthErrUserNotFound,
+		},
+	}
+	authMeErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrUnauthorized,
+			Template: response.AuthErrAccessToken,
+		},
+	}
+)
+
 // NewAuthHandler 创建认证处理器，负责注册、登录、会话校验和 token 刷新。
 func NewAuthHandler(
 	authService *service.AuthService,
 	authRegistrationPolicyService *service.AuthRegistrationPolicyService,
 	authLoginOrchestrator *service.AuthLoginOrchestrator,
+	authRiskControlService *service.AuthRiskControlService,
 	jwtConfig config.JWTConfig,
 ) *authHandler {
 	if authLoginOrchestrator == nil {
@@ -86,6 +139,7 @@ func NewAuthHandler(
 		authService:                   authService,
 		authLoginOrchestrator:         authLoginOrchestrator,
 		authRegistrationPolicyService: authRegistrationPolicyService,
+		authRiskControlService:        authRiskControlService,
 		accessTokenTTL:                jwtConfig.AccessTokenTTL,
 		refreshTokenTTL:               jwtConfig.RefreshTokenTTL,
 	}
@@ -130,17 +184,38 @@ func (h *authHandler) Register(c *gin.Context) {
 		response.AuthErrNameRequired.Write(c)
 		return
 	}
+	if err := h.checkAuthRisk(
+		c,
+		service.AuthRiskCheckInput{
+			Scene:         "register",
+			ClientIP:      strings.TrimSpace(c.ClientIP()),
+			Identifier:    email,
+			CaptchaID:     strings.TrimSpace(req.CaptchaID),
+			CaptchaAnswer: strings.TrimSpace(req.CaptchaAnswer),
+		},
+	); err != nil {
+		return
+	}
 
 	session, err := h.authService.Register(c.Request.Context(), email, password, name)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrEmailAlreadyExists):
-			response.AuthErrEmailAlreadyExists.Write(c)
-		default:
+		h.recordAuthRisk(c, service.AuthRiskRecordInput{
+			Scene:      "register",
+			ClientIP:   strings.TrimSpace(c.ClientIP()),
+			Identifier: email,
+			Success:    false,
+		})
+		if !response.WriteMappedError(c, err, authRegisterErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
 	}
+	h.recordAuthRisk(c, service.AuthRiskRecordInput{
+		Scene:      "register",
+		ClientIP:   strings.TrimSpace(c.ClientIP()),
+		Identifier: email,
+		Success:    true,
+	})
 	h.writeSessionCookies(c, session.Token, session.RefreshToken)
 
 	response.JSON(c, http.StatusCreated, authSessionResponse{
@@ -212,6 +287,18 @@ func (h *authHandler) Login(c *gin.Context) {
 		response.AuthErrEmailPasswordRequired.Write(c)
 		return
 	}
+	if err := h.checkAuthRisk(
+		c,
+		service.AuthRiskCheckInput{
+			Scene:         "login",
+			ClientIP:      strings.TrimSpace(c.ClientIP()),
+			Identifier:    identifier,
+			CaptchaID:     strings.TrimSpace(req.CaptchaID),
+			CaptchaAnswer: strings.TrimSpace(req.CaptchaAnswer),
+		},
+	); err != nil {
+		return
+	}
 
 	session, err := h.authLoginOrchestrator.Login(c.Request.Context(), service.AuthProviderLoginInput{
 		Provider:   strings.TrimSpace(req.Provider),
@@ -219,22 +306,23 @@ func (h *authHandler) Login(c *gin.Context) {
 		Password:   req.Password,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidCredentials):
-			response.AuthErrEmailPassword.Write(c)
-		case errors.Is(err, service.ErrAuthProviderUnavailable):
-			response.AuthErrEmailPassword.Write(c)
-		case errors.Is(err, service.ErrAuthProviderFailure):
-			response.AuthErrEmailPassword.Write(c)
-		case errors.Is(err, service.ErrUserBanned):
-			response.AuthErrUserHasBeenBanned.Write(c)
-		case errors.Is(err, service.ErrUserDeleted):
-			response.AuthErrUserHasBeenDeleted.Write(c)
-		default:
+		h.recordAuthRisk(c, service.AuthRiskRecordInput{
+			Scene:      "login",
+			ClientIP:   strings.TrimSpace(c.ClientIP()),
+			Identifier: identifier,
+			Success:    false,
+		})
+		if !response.WriteMappedError(c, err, authLoginErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
 	}
+	h.recordAuthRisk(c, service.AuthRiskRecordInput{
+		Scene:      "login",
+		ClientIP:   strings.TrimSpace(c.ClientIP()),
+		Identifier: identifier,
+		Success:    true,
+	})
 	h.writeSessionCookies(c, session.Token, session.RefreshToken)
 
 	response.JSON(c, http.StatusOK, authSessionResponse{
@@ -282,12 +370,7 @@ func (h *authHandler) Refresh(c *gin.Context) {
 
 	session, err := h.authService.Refresh(c.Request.Context(), refreshToken)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidRefreshToken):
-			response.AuthErrRefreshToken.Write(c)
-		case errors.Is(err, service.ErrUnauthorized):
-			response.AuthErrUserNotFound.Write(c)
-		default:
+		if !response.WriteMappedError(c, err, authRefreshErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
@@ -321,10 +404,7 @@ func (h *authHandler) Me(c *gin.Context) {
 
 	session, err := h.authService.Me(c.Request.Context(), accessToken)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrUnauthorized):
-			response.AuthErrAccessToken.Write(c)
-		default:
+		if !response.WriteMappedError(c, err, authMeErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
@@ -355,6 +435,91 @@ func (h *authHandler) Logout(c *gin.Context) {
 	}
 	clearSessionCookies(c)
 	response.JSON(c, http.StatusOK, struct{}{})
+}
+
+func (h *authHandler) checkAuthRisk(c *gin.Context, input service.AuthRiskCheckInput) error {
+	if h == nil || h.authRiskControlService == nil {
+		return nil
+	}
+	if c == nil || c.Request == nil {
+		return nil
+	}
+
+	if err := h.authRiskControlService.Check(c.Request.Context(), input); err != nil {
+		var riskErr *service.AuthRiskError
+		if errors.As(err, &riskErr) {
+			h.writeAuthRiskError(c, riskErr)
+			return err
+		}
+		response.InternalError(c)
+		return err
+	}
+	return nil
+}
+
+func (h *authHandler) recordAuthRisk(c *gin.Context, input service.AuthRiskRecordInput) {
+	if h == nil || h.authRiskControlService == nil {
+		return
+	}
+	if c == nil || c.Request == nil {
+		return
+	}
+	_ = h.authRiskControlService.RecordResult(c.Request.Context(), input)
+}
+
+func (h *authHandler) writeAuthRiskError(c *gin.Context, riskErr *service.AuthRiskError) {
+	if c == nil {
+		return
+	}
+	if riskErr == nil {
+		response.InternalError(c)
+		return
+	}
+
+	code := response.CodeInternalError
+	message := strings.TrimSpace(riskErr.Message)
+	if message == "" {
+		message = "认证风控策略触发"
+	}
+	payload := map[string]any{}
+
+	switch strings.TrimSpace(riskErr.Type) {
+	case service.AuthRiskErrorTypeCaptchaRequired:
+		code = response.CodeCaptchaRequired
+		if message == "认证风控策略触发" {
+			message = "需要验证码校验"
+		}
+	case service.AuthRiskErrorTypeCaptchaInvalid:
+		code = response.CodeCaptchaInvalid
+		if message == "认证风控策略触发" {
+			message = "验证码错误或已过期"
+		}
+	case service.AuthRiskErrorTypeTemporarilyLock:
+		code = response.CodeAuthTemporarilyLocked
+		if message == "认证风控策略触发" {
+			message = "操作过于频繁，请稍后再试"
+		}
+	default:
+		code = response.CodeInternalError
+	}
+
+	if riskErr.Result.Challenge != nil {
+		payload["captchaId"] = riskErr.Result.Challenge.CaptchaID
+		payload["captchaImageDataUrl"] = riskErr.Result.Challenge.CaptchaImageDataURL
+		payload["level"] = riskErr.Result.Challenge.Level
+		payload["expiresInSeconds"] = riskErr.Result.Challenge.ExpiresInSeconds
+	}
+	if riskErr.Result.LockedUntil != nil {
+		payload["lockedUntil"] = riskErr.Result.LockedUntil.UTC().Format(time.RFC3339)
+		payload["retryAfterSeconds"] = riskErr.Result.RetryAfterSeconds
+	}
+
+	c.JSON(http.StatusOK, response.JsonResult[map[string]any]{
+		Code:      response.ResolveErrorCode(code),
+		Message:   message,
+		RequestID: response.RequestIDFromContext(c),
+		Data:      payload,
+	})
 }
 
 func normalizeEmail(value string) string {

@@ -55,15 +55,19 @@
 2. 路由注册与依赖注入只能在 `apps/server/internal/server/router.go` 集中维护；禁止新增并行入口。
 3. 业务代码禁止直接读取环境变量；统一通过 `config.Load()` 注入后的配置对象传递。
 4. 错误语义必须落到 `JsonResult.code`，禁止在业务层散落“魔法字符串/魔法数字”错误码。
-5. 高风险后台写操作（封禁/删除/角色变更/系统配置变更等）必须叠加 `RequireAdminOperationToken`。
-6. 后台请求链路必须保留 `AttachAdminAuditContext`，并在审计记录中带 `request_id`。
-7. 权限模型必须保持：
+5. 错误映射必须统一走 `response`：
+   - `service` 返回 `MappedError/AppError` 时，`handler` 只调用 `response.FromError(c, err)`。
+   - 遗留 sentinel 错误需要在 `handler` 定义 `[]response.ErrorTemplateMapping`，并调用 `response.WriteMappedError(c, err, mappings...)`。
+   - 禁止在 `handler` 散落重复 `switch errors.Is` 映射块；统一保留 `response.InternalError(c)` 兜底。
+6. 高风险后台写操作（封禁/删除/角色变更/系统配置变更等）必须叠加 `RequireAdminOperationToken`。
+7. 后台请求链路必须保留 `AttachAdminAuditContext`，并在审计记录中带 `request_id`。
+8. 权限模型必须保持：
    - 管理端：`platform_admin` 与 `space_admin` 边界不可穿透
    - 协作端：`owner > collaborator > reader`
-8. 认证链路必须保持：
+9. 认证链路必须保持：
    - 密码仅允许 `bcrypt` 哈希存储
    - refresh token 必须走服务端会话状态并支持旋转后旧 token 失效
-9. Go 代码提交前必须 `gofmt`；复杂流程（鉴权、并发、回滚、兼容分支）需补充简洁函数和行内中文注释。
+10. Go 代码提交前必须 `gofmt`；复杂流程（鉴权、并发、回滚、兼容分支）需补充简洁函数和行内中文注释。
 
 ### 2.2 强制代码规范（数据与迁移）
 
@@ -175,7 +179,7 @@
 
 | 配置键 | 读取服务 | 校验服务 | 作用 |
 | --- | --- | --- | --- |
-| `auth` | `AuthRegistrationPolicyService`、LDAP 相关服务 | `AdminSystemConfigService.validateAuthConfig` | 登录模式、provider 列表、break-glass 等。 |
+| `auth` | `AuthRegistrationPolicyService`、`AuthRiskPolicyService`、LDAP 相关服务 | `AdminSystemConfigService.validateAuthConfig`（含 `validateAuthRiskControlConfig`） | 登录模式、provider 列表、break-glass、认证风控（验证码/封禁）策略。 |
 | `site` | `AuthRegistrationPolicyService` | `validateSiteConfig` | 站点级开关（如注册策略叠加）。 |
 | `image-hosting` | `ImageHostingService.GetConfig` | `validateImageHostingConfig` | 图床 provider 与参数。 |
 | `sitemap` | `SitemapService.GetConfig` | `validateSitemapConfig` | sitemap 生成策略。 |
@@ -201,6 +205,68 @@
 
 1. 登录支持 `identifier + provider`，兼容旧 `email`。
 2. refresh token 使用服务端会话状态，支持旋转后旧 token 失效。
+
+### 6.1.1 认证风控（验证码 + 临时封禁）
+
+入口与核心文件：
+
+1. HTTP 接入：`apps/server/internal/server/handler/auth.go`
+   - 预检：`checkAuthRisk(...)`
+   - 结果回写：`recordAuthRisk(...)`
+   - 错误映射：`authRegisterErrorMappings` / `authLoginErrorMappings` / `authRefreshErrorMappings` / `authMeErrorMappings` + `response.WriteMappedError(...)`
+2. 策略解析：`apps/server/internal/service/auth_risk_policy_service.go`
+3. 状态机执行：`apps/server/internal/service/auth_risk_control_service.go`
+4. 配置校验：`apps/server/internal/service/admin_system_config_service.go`（`validateAuthRiskControlConfig`）
+
+请求/响应协议扩展：
+
+1. 登录/注册请求体新增可选字段：`captchaId`、`captchaAnswer`。
+2. 新增错误码：
+   - `1008` `CAPTCHA_REQUIRED`
+   - `1009` `CAPTCHA_INVALID`
+   - `1010` `AUTH_TEMPORARILY_LOCKED`
+3. 错误 `data` 字段：
+   - 验证码挑战：`captchaId`、`captchaImageDataUrl`、`level`、`expiresInSeconds`
+   - 其中 `level` 为验证码字符数量（位数），例如 `4/5/6`
+   - 封禁反馈：`lockedUntil`、`retryAfterSeconds`
+
+风险主体维度：
+
+1. 登录：`IP`、`identifier`、`IP+identifier` 并行计数，取最高风险级别。
+2. 注册：`email`、`IP+email` 计数，避免同出口 IP 的不同新用户相互污染。
+3. 所有主体键写库前会做 HMAC-SHA256，不落明文。
+
+默认策略（可被系统配置覆盖）：
+
+1. 登录阈值：`3/6/9` 触发 L1/L2/L3 验证码，`12` 触发 24h 封禁。
+2. 注册阈值：`2/5/8` 触发 L1/L2/L3 验证码，`10` 触发 24h 封禁。
+3. 统计窗口：`15m`；验证码 TTL：`120s`；封禁时长：`24h`。
+
+验证码实现：
+
+1. 使用 `github.com/mojocn/base64Captcha` 的 `DriverDigit` 生成图片验证码。
+2. 落库字段 `auth_captcha_challenges.level` 记录验证码字符数量，不记录风险等级编号。
+
+`system_configs.auth.riskControl` 配置来源：
+
+1. 写入入口：`PUT /api/admin/system-configs/auth`。
+2. 读取消费：`AuthRiskPolicyService.Resolve(...)`。
+3. 支持字段：
+   - `enabled`
+   - `windowSeconds`
+   - `lockSeconds`
+   - `captcha.ttlSeconds`
+   - `loginThresholds.{l1,l2,l3,lock}`
+   - `registerThresholds.{l1,l2,l3,lock}`
+
+关联核心表（本功能新增）：
+
+1. `auth_risk_states`
+   - 主用途：按 `scene + subject_type + subject_hash` 维护风险窗口状态。
+   - 关键列：`attempt_count`、`failed_count`、`captcha_fail_count`、`lock_until`、`window_started_at`。
+2. `auth_captcha_challenges`
+   - 主用途：管理验证码挑战生命周期与一次性消费。
+   - 关键列：`captcha_id`、`scene`、`subject_hash`、`level`、`answer_hash`、`answer_salt`、`expires_at`、`consumed_at`、`issued_ip_hash`。
 
 ### 6.2 工作区与文档协作
 

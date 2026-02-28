@@ -77,6 +77,24 @@ var (
 		Code:    CodeUnauthorized,
 		Message: "刷新令牌无效",
 	}
+	// AuthErrCaptchaRequired 对应场景：captcha is required.
+	AuthErrCaptchaRequired = ErrorTemplate{
+		Status:  http.StatusTooManyRequests,
+		Code:    CodeCaptchaRequired,
+		Message: "需要验证码校验",
+	}
+	// AuthErrCaptchaInvalid 对应场景：captcha is invalid.
+	AuthErrCaptchaInvalid = ErrorTemplate{
+		Status:  http.StatusUnauthorized,
+		Code:    CodeCaptchaInvalid,
+		Message: "验证码错误或已过期",
+	}
+	// AuthErrTemporarilyLocked 对应场景：auth operation is temporarily locked.
+	AuthErrTemporarilyLocked = ErrorTemplate{
+		Status:  http.StatusTooManyRequests,
+		Code:    CodeAuthTemporarilyLocked,
+		Message: "操作过于频繁，请稍后再试",
+	}
 	// AuthErrUserNotFound 对应场景：user not found
 	AuthErrUserNotFound = ErrorTemplate{
 		Status:  http.StatusUnauthorized,

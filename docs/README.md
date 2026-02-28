@@ -16,6 +16,13 @@
 
 ---
 
+## 1.1 安全专项文档
+
+1. `AUTH_SECURITY_HARDENING_PLAN.md`  
+   注册/登录安全加固专项实施文档（验证码分级、失败封禁、实施清单与落地状态）。
+
+---
+
 ## 2. 旧文档迁移映射（信息已并入两份主文档）
 
 1. 后台治理/发布相关内容 -> 已并入 `BACKEND_DEVELOPER_GUIDE.md`。
@@ -30,4 +37,3 @@
 1. 新成员先读：`BACKEND_DEVELOPER_GUIDE.md`
 2. 前端开发读：`FRONTEND_DEVELOPER_GUIDE.md`
 3. 涉及跨端联调：两份文档都读（尤其契约与 SSR 章节）
-

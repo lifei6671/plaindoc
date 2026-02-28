@@ -7,13 +7,16 @@ const (
 	UnknownErrorCode = 9999
 
 	// 1000 段：认证与权限。
-	CodeUnauthorized         = "UNAUTHORIZED"
-	CodeForbidden            = "FORBIDDEN"
-	CodeRoleForbidden        = "ROLE_FORBIDDEN"
-	CodeInvalidCredentials   = "INVALID_CREDENTIALS"
-	CodeRegistrationDisabled = "REGISTRATION_DISABLED"
-	CodeUserBanned           = "USER_BANNED"
-	CodeUserDeleted          = "USER_DELETED"
+	CodeUnauthorized          = "UNAUTHORIZED"
+	CodeForbidden             = "FORBIDDEN"
+	CodeRoleForbidden         = "ROLE_FORBIDDEN"
+	CodeInvalidCredentials    = "INVALID_CREDENTIALS"
+	CodeRegistrationDisabled  = "REGISTRATION_DISABLED"
+	CodeUserBanned            = "USER_BANNED"
+	CodeUserDeleted           = "USER_DELETED"
+	CodeCaptchaRequired       = "CAPTCHA_REQUIRED"
+	CodeCaptchaInvalid        = "CAPTCHA_INVALID"
+	CodeAuthTemporarilyLocked = "AUTH_TEMPORARILY_LOCKED"
 
 	// 2000 段：请求参数与输入校验。
 	CodeInvalidRequest          = "INVALID_REQUEST"
@@ -108,13 +111,16 @@ const (
 
 var errorCodeRegistry = map[string]int{
 	// 1000 段：认证与权限。
-	CodeUnauthorized:         1001,
-	CodeInvalidCredentials:   1002,
-	CodeForbidden:            1003,
-	CodeRoleForbidden:        1004,
-	CodeRegistrationDisabled: 1005,
-	CodeUserBanned:           1006,
-	CodeUserDeleted:          1007,
+	CodeUnauthorized:          1001,
+	CodeInvalidCredentials:    1002,
+	CodeForbidden:             1003,
+	CodeRoleForbidden:         1004,
+	CodeRegistrationDisabled:  1005,
+	CodeUserBanned:            1006,
+	CodeUserDeleted:           1007,
+	CodeCaptchaRequired:       1008,
+	CodeCaptchaInvalid:        1009,
+	CodeAuthTemporarilyLocked: 1010,
 
 	// 2000 段：请求参数与输入校验。
 	CodeInvalidRequest:          2001,
