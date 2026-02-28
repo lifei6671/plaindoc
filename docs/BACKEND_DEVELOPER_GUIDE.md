@@ -68,6 +68,12 @@
    - 密码仅允许 `bcrypt` 哈希存储
    - refresh token 必须走服务端会话状态并支持旋转后旧 token 失效
 10. Go 代码提交前必须 `gofmt`；复杂流程（鉴权、并发、回滚、兼容分支）需补充简洁函数和行内中文注释。
+11. 错误日志强制规范（MUST）：
+   - 只要进入 `error` 分支（`if err != nil`），必须在返回前将该错误写入请求上下文日志容器。
+   - 统一 key：`errmsg`。
+   - 统一方式：`logit.SetRequestAttrs(c.Request.Context(), logit.Error("errmsg", err))`。
+   - 需要补充语义时，必须使用 wrap（示例：`fmt.Errorf("查询附件失败: %w", err)`）后再写入 `errmsg`。
+   - 禁止仅写 `fmt.Sprintf(...%v, err)` 字符串而不保留原始 error 链。
 
 ### 2.2 强制代码规范（数据与迁移）
 

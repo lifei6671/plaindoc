@@ -102,6 +102,33 @@ export interface DocumentRevision {
   source: "local" | "remote";
 }
 
+export type DocumentAttachmentPreviewKind = "none" | "image" | "pdf" | "office" | "text";
+
+export interface DocumentAttachment {
+  attachmentId: string;
+  documentId: string;
+  spaceId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageProvider: string;
+  previewKind: DocumentAttachmentPreviewKind;
+  previewSupported: boolean;
+  requiresAuthDownload: boolean;
+  publicDownloadUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export interface DocumentAttachmentAccessLink {
+  url: string;
+  purpose: "download" | "preview";
+  previewKind: DocumentAttachmentPreviewKind;
+  requiresAuth: boolean;
+  expiresAt?: string;
+}
+
 export interface CreateSpaceInput {
   name: string;
 }
@@ -203,6 +230,14 @@ export interface DocumentGateway {
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
   localizeRemoteImages(input: LocalizeRemoteImagesInput): Promise<LocalizeRemoteImagesResult>;
   listRevisions(docId: string): Promise<DocumentRevision[]>;
+  listAttachments(docId: string): Promise<DocumentAttachment[]>;
+  uploadAttachment(input: { docId: string; file: File }): Promise<DocumentAttachment>;
+  deleteAttachment(input: { docId: string; attachmentId: string; physicalDelete?: boolean }): Promise<void>;
+  createAttachmentAccessLink(input: {
+    docId: string;
+    attachmentId: string;
+    purpose?: "download" | "preview";
+  }): Promise<DocumentAttachmentAccessLink>;
   setDocumentTheme(docId: string, themeId: string): Promise<Document>;
   updateDocumentVisibility(docId: string, visibility: Visibility): Promise<Document>;
 }

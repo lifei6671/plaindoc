@@ -1,0 +1,862 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/oklog/ulid/v2"
+	"gorm.io/gorm"
+)
+
+const (
+	maxWorkspaceAttachmentSizeBytes = 100 << 20 // 100MB
+)
+
+const (
+	documentAttachmentPreviewKindNone   = "none"
+	documentAttachmentPreviewKindImage  = "image"
+	documentAttachmentPreviewKindPDF    = "pdf"
+	documentAttachmentPreviewKindOffice = "office"
+	documentAttachmentPreviewKindText   = "text"
+)
+
+type workspaceDocumentAttachmentResponse struct {
+	AttachmentID         string     `json:"attachmentId"`
+	DocumentID           string     `json:"documentId"`
+	SpaceID              string     `json:"spaceId"`
+	FileName             string     `json:"fileName"`
+	MimeType             string     `json:"mimeType"`
+	SizeBytes            int64      `json:"sizeBytes"`
+	StorageProvider      string     `json:"storageProvider"`
+	PreviewKind          string     `json:"previewKind"`
+	PreviewSupported     bool       `json:"previewSupported"`
+	RequiresAuthDownload bool       `json:"requiresAuthDownload"`
+	PublicDownloadURL    string     `json:"publicDownloadUrl,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
+	DeletedAt            *time.Time `json:"deletedAt,omitempty"`
+}
+
+type workspaceDocumentAttachmentListResponse struct {
+	Items []workspaceDocumentAttachmentResponse `json:"items"`
+}
+
+type workspaceDocumentAttachmentAccessLinkResponse struct {
+	URL          string `json:"url"`
+	Purpose      string `json:"purpose"`
+	PreviewKind  string `json:"previewKind"`
+	RequiresAuth bool   `json:"requiresAuth"`
+	ExpiresAt    string `json:"expiresAt,omitempty"`
+}
+
+type workspaceDocumentAttachmentPurpose string
+
+const (
+	workspaceDocumentAttachmentPurposeDownload workspaceDocumentAttachmentPurpose = "download"
+	workspaceDocumentAttachmentPurposePreview  workspaceDocumentAttachmentPurpose = "preview"
+)
+
+// ListDocumentAttachments 返回文档附件列表。
+func (h *workspaceHandler) ListDocumentAttachments(c *gin.Context) {
+	if h == nil || h.documentAttachmentRepo == nil || h.visibilityService == nil {
+		setRequestErrmsgText(c, "初始化失败: handler or dependencies is nil")
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+
+	viewerUserID, err := h.resolveOptionalViewerUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
+		response.WorkspaceErrAccessToken.Write(c)
+		return
+	}
+	if _, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, viewerUserID); err != nil {
+		setRequestErrmsg(c, err, "验证文档访问权限失败")
+		writeWorkspaceDocumentAccessError(c, err)
+		return
+	}
+
+	attachments, err := h.documentAttachmentRepo.ListByDocumentID(c.Request.Context(), documentID, false)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档附件失败")
+		response.InternalError(c)
+		return
+	}
+
+	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
+	config := service.DefaultImageHostingConfig()
+	if h.imageHostingService != nil {
+		if loadedConfig, configErr := h.imageHostingService.GetConfig(c.Request.Context()); configErr == nil {
+			config = loadedConfig
+		}
+	}
+
+	items := make([]workspaceDocumentAttachmentResponse, 0, len(attachments))
+	for _, attachment := range attachments {
+		publicDownloadURL := ""
+		if publicReadable {
+			publicDownloadURL = h.resolveAttachmentPublicDownloadURL(c.Request.Context(), attachment, config)
+		}
+		items = append(items, mapWorkspaceDocumentAttachmentResponse(
+			attachment,
+			publicDownloadURL,
+			!publicReadable,
+		))
+	}
+
+	response.JSON(c, http.StatusOK, workspaceDocumentAttachmentListResponse{
+		Items: items,
+	})
+}
+
+// UploadDocumentAttachment 上传文档附件（当前支持 local provider）。
+func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil || h.documentAttachmentRepo == nil || h.imageHostingService == nil {
+		setRequestErrmsgText(c, "初始化失败: handler or dependencies is nil")
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+
+	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档失败")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrDocumentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(currentRecord.SpaceID)
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+		setRequestErrmsg(c, err, "验证空间权限失败")
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.WorkspaceErrSpaceNotFound.Write(c)
+		case errors.Is(err, service.ErrSpaceAccessDenied):
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
+		default:
+			setRequestErrmsg(c, err, "验证空间权限失败")
+			response.InternalError(c)
+		}
+		return
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil || fileHeader == nil {
+		if err != nil {
+			setRequestErrmsg(c, err, "读取上传文件失败")
+		} else {
+			setRequestErrmsgText(c, "上传文件为空")
+		}
+		response.DocumentAttachmentErrUploadFileRequired.Write(c)
+		return
+	}
+	if fileHeader.Size <= 0 {
+		response.DocumentAttachmentErrUploadFileEmpty.Write(c)
+		return
+	}
+	if fileHeader.Size > maxWorkspaceAttachmentSizeBytes {
+		response.DocumentAttachmentErrUploadFileTooLarge.Write(c)
+		return
+	}
+
+	config, err := h.imageHostingService.GetConfig(c.Request.Context())
+	if err != nil {
+		setRequestErrmsg(c, err, "获取图片托管服务配置失败")
+		response.InternalError(c)
+		return
+	}
+	if config.DefaultProvider != service.ImageHostingProviderLocal {
+		setRequestErrmsgText(c, "当前图片托管服务提供商不支持上传文档附件")
+		response.ImageHostingProviderDisabled(c)
+		return
+	}
+
+	contentType, err := detectUploadedFileContentType(fileHeader)
+	if err != nil {
+		setRequestErrmsg(c, err, "检测上传文件内容类型失败")
+		response.ImageHostingUploadFileUnreadable(c)
+		return
+	}
+	objectKey, err := buildDocumentAttachmentObjectKey(fileHeader.Filename, contentType, time.Now().UTC())
+	if err != nil {
+		setRequestErrmsg(c, err, "生成对象存储键失败")
+		response.InternalError(c)
+		return
+	}
+
+	targetPath, err := h.resolveLocalAttachmentTargetPath(objectKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析本地附件目标路径失败")
+		response.InternalError(c)
+		return
+	}
+	targetDir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		setRequestErrmsg(c, err, "创建本地附件目录失败")
+		response.InternalError(c)
+		return
+	}
+	if err := c.SaveUploadedFile(fileHeader, targetPath); err != nil {
+		setRequestErrmsg(c, err, "保存上传文件失败")
+		response.InternalError(c)
+		return
+	}
+
+	now := time.Now().UTC()
+	createdBy := actorUserID
+	attachment := &models.DocumentAttachment{
+		AttachmentID:    strings.ToLower(ulid.Make().String()),
+		DocumentID:      documentID,
+		SpaceID:         spaceID,
+		StorageProvider: string(service.ImageHostingProviderLocal),
+		FileName:        strings.TrimSpace(fileHeader.Filename),
+		ObjectKey:       objectKey,
+		ObjectURL:       resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"),
+		MimeType:        contentType,
+		SizeBytes:       fileHeader.Size,
+		PreviewKind:     resolveDocumentAttachmentPreviewKind(contentType, fileHeader.Filename),
+		Status:          models.EntityStatusActive,
+		CreatedByUserID: &createdBy,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if strings.TrimSpace(attachment.FileName) == "" {
+		attachment.FileName = attachment.AttachmentID
+	}
+	if strings.TrimSpace(attachment.MimeType) == "" {
+		attachment.MimeType = "application/octet-stream"
+	}
+	if strings.TrimSpace(attachment.PreviewKind) == "" {
+		attachment.PreviewKind = documentAttachmentPreviewKindNone
+	}
+
+	if err := h.documentAttachmentRepo.Create(c.Request.Context(), attachment); err != nil {
+		setRequestErrmsg(c, err, "创建文档附件记录失败")
+		response.InternalError(c)
+		return
+	}
+
+	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
+	publicDownloadURL := ""
+	if publicReadable {
+		publicDownloadURL = h.resolveAttachmentPublicDownloadURL(c.Request.Context(), *attachment, config)
+	}
+	response.JSON(
+		c,
+		http.StatusOK,
+		mapWorkspaceDocumentAttachmentResponse(*attachment, publicDownloadURL, !publicReadable),
+	)
+}
+
+// DeleteDocumentAttachment 删除文档附件（默认软删除；可选物理删除本地文件）。
+func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil || h.documentAttachmentRepo == nil {
+		setRequestErrmsgText(c, "初始化失败: handler or dependencies is nil")
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+	attachmentID := strings.TrimSpace(c.Param("attachmentId"))
+	if attachmentID == "" {
+		response.DocumentAttachmentErrAttachmentIDRequired.Write(c)
+		return
+	}
+
+	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档失败")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrDocumentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	spaceID := strings.TrimSpace(currentRecord.SpaceID)
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+		setRequestErrmsg(c, err, "验证空间权限失败")
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.WorkspaceErrSpaceNotFound.Write(c)
+		case errors.Is(err, service.ErrSpaceAccessDenied):
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	attachment, err := h.documentAttachmentRepo.GetByAttachmentID(c.Request.Context(), attachmentID)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档附件失败")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if strings.TrimSpace(attachment.DocumentID) != documentID {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+	if attachment.Status == models.EntityStatusDeleted {
+		response.JSON(c, http.StatusOK, struct{}{})
+		return
+	}
+
+	deleted, err := h.documentAttachmentRepo.SoftDelete(c.Request.Context(), attachmentID, time.Now().UTC())
+	if err != nil {
+		setRequestErrmsg(c, err, "删除文档附件失败")
+		response.InternalError(c)
+		return
+	}
+	if !deleted {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+
+	physicalDelete := parseBoolLikeValue(c.Query("physicalDelete"))
+	if physicalDelete && strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
+		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
+		if pathErr == nil {
+			if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				setRequestErrmsg(c, removeErr, "删除本地附件文件失败")
+				response.InternalError(c)
+				return
+			}
+		}
+	}
+
+	response.JSON(c, http.StatusOK, struct{}{})
+}
+
+// CreateDocumentAttachmentAccessLink 生成附件下载或预览访问链接。
+func (h *workspaceHandler) CreateDocumentAttachmentAccessLink(c *gin.Context) {
+	if h == nil || h.documentAttachmentRepo == nil || h.visibilityService == nil || h.attachmentTokenService == nil {
+		setRequestErrmsgText(c, "初始化失败: handler or dependencies is nil")
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+	attachmentID := strings.TrimSpace(c.Param("attachmentId"))
+	if attachmentID == "" {
+		response.DocumentAttachmentErrAttachmentIDRequired.Write(c)
+		return
+	}
+
+	viewerUserID, err := h.resolveOptionalViewerUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
+		response.WorkspaceErrAccessToken.Write(c)
+		return
+	}
+	if _, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, viewerUserID); err != nil {
+		setRequestErrmsg(c, err, "验证文档访问权限失败")
+		writeWorkspaceDocumentAccessError(c, err)
+		return
+	}
+
+	attachment, err := h.documentAttachmentRepo.GetByAttachmentID(c.Request.Context(), attachmentID)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档附件失败")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if strings.TrimSpace(attachment.DocumentID) != documentID || attachment.Status == models.EntityStatusDeleted {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+
+	rawPurpose := strings.TrimSpace(c.Query("purpose"))
+	purpose := normalizeWorkspaceDocumentAttachmentPurpose(rawPurpose)
+	if rawPurpose != "" && purpose == "" {
+		response.DocumentAttachmentErrInvalidPurpose.Write(c)
+		return
+	}
+	if purpose == "" {
+		purpose = workspaceDocumentAttachmentPurposeDownload
+	}
+	if purpose == workspaceDocumentAttachmentPurposePreview && !isDocumentAttachmentPreviewSupported(attachment.PreviewKind) {
+		response.DocumentAttachmentErrPreviewUnsupported.Write(c)
+		return
+	}
+
+	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
+	if publicReadable {
+		config := service.DefaultImageHostingConfig()
+		if h.imageHostingService != nil {
+			if loadedConfig, configErr := h.imageHostingService.GetConfig(c.Request.Context()); configErr == nil {
+				config = loadedConfig
+			}
+		}
+		publicDownloadURL := h.resolveAttachmentPublicDownloadURL(c.Request.Context(), *attachment, config)
+		if publicDownloadURL != "" {
+			response.JSON(c, http.StatusOK, workspaceDocumentAttachmentAccessLinkResponse{
+				URL:          publicDownloadURL,
+				Purpose:      string(purpose),
+				PreviewKind:  normalizeDocumentAttachmentPreviewKind(attachment.PreviewKind),
+				RequiresAuth: false,
+			})
+			return
+		}
+	}
+
+	token, expiresAt, err := h.attachmentTokenService.Issue(service.IssueDocumentAttachmentDownloadTokenInput{
+		AttachmentID: attachmentID,
+		DocumentID:   documentID,
+		Purpose:      service.DocumentAttachmentLinkPurpose(purpose),
+	})
+	if err != nil {
+		setRequestErrmsg(c, err, "签发附件访问令牌失败")
+		response.InternalError(c)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, workspaceDocumentAttachmentAccessLinkResponse{
+		URL:          "/api/attachment-downloads/" + url.PathEscape(token),
+		Purpose:      string(purpose),
+		PreviewKind:  normalizeDocumentAttachmentPreviewKind(attachment.PreviewKind),
+		RequiresAuth: !publicReadable,
+		ExpiresAt:    expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// ServeDocumentAttachmentByToken 通过签名链接下载或预览附件。
+func (h *workspaceHandler) ServeDocumentAttachmentByToken(c *gin.Context) {
+	if h == nil || h.documentAttachmentRepo == nil || h.visibilityService == nil || h.attachmentTokenService == nil {
+		setRequestErrmsgText(c, "初始化失败: handler or dependencies is nil")
+		response.InternalError(c)
+		return
+	}
+
+	rawToken := strings.TrimSpace(c.Param("token"))
+	if rawToken == "" {
+		response.DocumentAttachmentErrDownloadLinkInvalid.Write(c)
+		return
+	}
+	claims, err := h.attachmentTokenService.Parse(rawToken)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析附件访问令牌失败")
+		if errors.Is(err, service.ErrDocumentAttachmentDownloadTokenExpired) {
+			response.DocumentAttachmentErrDownloadLinkExpired.Write(c)
+			return
+		}
+		response.DocumentAttachmentErrDownloadLinkInvalid.Write(c)
+		return
+	}
+
+	attachment, err := h.documentAttachmentRepo.GetByAttachmentID(c.Request.Context(), claims.AttachmentID)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档附件失败")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if strings.TrimSpace(attachment.DocumentID) != strings.TrimSpace(claims.DocumentID) || attachment.Status == models.EntityStatusDeleted {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+
+	viewerUserID, err := h.resolveOptionalViewerUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
+		response.WorkspaceErrAccessToken.Write(c)
+		return
+	}
+	if _, err := h.visibilityService.GetDocument(c.Request.Context(), claims.DocumentID, viewerUserID); err != nil {
+		setRequestErrmsg(c, err, "验证文档访问权限失败")
+		writeWorkspaceDocumentAccessError(c, err)
+		return
+	}
+
+	if claims.Purpose == service.DocumentAttachmentLinkPurposePreview &&
+		!isDocumentAttachmentPreviewSupported(attachment.PreviewKind) {
+		response.DocumentAttachmentErrPreviewUnsupported.Write(c)
+		return
+	}
+
+	if strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
+		h.serveLocalDocumentAttachment(c, attachment, claims.Purpose)
+		return
+	}
+
+	targetURL := h.resolveNonLocalAttachmentObjectURL(c.Request.Context(), *attachment)
+	if targetURL == "" {
+		setRequestErrmsgText(c, "附件对象 URL 为空")
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+	c.Redirect(http.StatusTemporaryRedirect, targetURL)
+}
+
+func (h *workspaceHandler) serveLocalDocumentAttachment(
+	c *gin.Context,
+	attachment *models.DocumentAttachment,
+	purpose service.DocumentAttachmentLinkPurpose,
+) {
+	if c == nil || attachment == nil {
+		setRequestErrmsgText(c, "本地附件下载处理参数无效")
+		response.InternalError(c)
+		return
+	}
+
+	targetPath, err := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析本地附件目标路径失败")
+		response.ImageHostingInvalidFilePath(c)
+		return
+	}
+	fileInfo, err := os.Stat(targetPath)
+	if err != nil {
+		setRequestErrmsg(c, err, "读取本地附件文件失败")
+		if errors.Is(err, os.ErrNotExist) {
+			response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if fileInfo.IsDir() {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+
+	mimeType := strings.TrimSpace(attachment.MimeType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	fileName := strings.TrimSpace(attachment.FileName)
+	if fileName == "" {
+		fileName = strings.TrimSpace(attachment.AttachmentID)
+	}
+	dispositionType := "attachment"
+	if purpose == service.DocumentAttachmentLinkPurposePreview {
+		dispositionType = "inline"
+	}
+	c.Header(
+		"Content-Disposition",
+		fmt.Sprintf("%s; filename*=UTF-8''%s", dispositionType, url.PathEscape(fileName)),
+	)
+	c.Header("Content-Type", mimeType)
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+	c.File(targetPath)
+}
+
+func (h *workspaceHandler) resolveOptionalViewerUserID(c *gin.Context) (string, error) {
+	rawToken, ok := bearerTokenFromRequest(c)
+	if !ok {
+		return "", nil
+	}
+	return h.resolveViewerUserIDByToken(c, rawToken)
+}
+
+func (h *workspaceHandler) resolveViewerUserIDByToken(c *gin.Context, rawToken string) (string, error) {
+	if h == nil || h.authService == nil {
+		return "", errors.New("auth service is nil")
+	}
+	session, err := h.authService.Me(c.Request.Context(), rawToken)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
+		return "", err
+	}
+	return strings.TrimSpace(session.User.ID), nil
+}
+
+func (h *workspaceHandler) isDocumentPubliclyReadable(ctx context.Context, documentID string) bool {
+	if h == nil || h.visibilityService == nil {
+		return false
+	}
+	_, err := h.visibilityService.GetDocument(ctx, documentID, "")
+	return err == nil
+}
+
+func writeWorkspaceDocumentAccessError(c *gin.Context, err error) {
+	setRequestErrmsg(c, err, "文档访问权限校验失败")
+	switch {
+	case errors.Is(err, service.ErrDocumentNotFound):
+		response.WorkspaceErrDocumentNotFound.Write(c)
+	case errors.Is(err, service.ErrViewerLoginRequired):
+		response.WorkspaceErrLoginRequired.Write(c)
+	case errors.Is(err, service.ErrDocumentAccessDenied):
+		response.WorkspaceErrInsufficientDocumentPermission.Write(c)
+	default:
+		response.InternalError(c)
+	}
+}
+
+func setRequestErrmsg(c *gin.Context, err error, message string) {
+	if c == nil || err == nil {
+		return
+	}
+	wrappedErr := err
+	normalizedMessage := strings.TrimSpace(message)
+	if normalizedMessage != "" {
+		wrappedErr = fmt.Errorf("%s: %w", normalizedMessage, err)
+	}
+	logit.SetRequestAttrs(c.Request.Context(), logit.Error("errmsg", wrappedErr))
+}
+
+func setRequestErrmsgText(c *gin.Context, message string) {
+	if c == nil {
+		return
+	}
+	normalizedMessage := strings.TrimSpace(message)
+	if normalizedMessage == "" {
+		return
+	}
+	logit.SetRequestAttrs(c.Request.Context(), logit.Error("errmsg", errors.New(normalizedMessage)))
+}
+
+func mapWorkspaceDocumentAttachmentResponse(
+	attachment models.DocumentAttachment,
+	publicDownloadURL string,
+	requiresAuthDownload bool,
+) workspaceDocumentAttachmentResponse {
+	previewKind := normalizeDocumentAttachmentPreviewKind(attachment.PreviewKind)
+	return workspaceDocumentAttachmentResponse{
+		AttachmentID:         strings.TrimSpace(attachment.AttachmentID),
+		DocumentID:           strings.TrimSpace(attachment.DocumentID),
+		SpaceID:              strings.TrimSpace(attachment.SpaceID),
+		FileName:             strings.TrimSpace(attachment.FileName),
+		MimeType:             strings.TrimSpace(attachment.MimeType),
+		SizeBytes:            attachment.SizeBytes,
+		StorageProvider:      strings.TrimSpace(attachment.StorageProvider),
+		PreviewKind:          previewKind,
+		PreviewSupported:     isDocumentAttachmentPreviewSupported(previewKind),
+		RequiresAuthDownload: requiresAuthDownload,
+		PublicDownloadURL:    strings.TrimSpace(publicDownloadURL),
+		CreatedAt:            attachment.CreatedAt,
+		UpdatedAt:            attachment.UpdatedAt,
+		DeletedAt:            attachment.DeletedAt,
+	}
+}
+
+func (h *workspaceHandler) resolveAttachmentPublicDownloadURL(
+	ctx context.Context,
+	attachment models.DocumentAttachment,
+	config service.ImageHostingConfig,
+) string {
+	provider := strings.ToLower(strings.TrimSpace(attachment.StorageProvider))
+	switch provider {
+	case string(service.ImageHostingProviderLocal):
+		return resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads")
+	default:
+		return h.resolveNonLocalAttachmentObjectURL(ctx, attachment)
+	}
+}
+
+func (h *workspaceHandler) resolveNonLocalAttachmentObjectURL(
+	ctx context.Context,
+	attachment models.DocumentAttachment,
+) string {
+	targetURL := strings.TrimSpace(attachment.ObjectURL)
+	if targetURL != "" {
+		return targetURL
+	}
+
+	if h == nil || h.imageHostingService == nil {
+		return ""
+	}
+	config, err := h.imageHostingService.GetConfig(ctx)
+	if err != nil {
+		logit.SetRequestAttrs(ctx, logit.Error("errmsg", fmt.Errorf("获取图片托管服务配置失败: %w", err)))
+		return ""
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(attachment.StorageProvider))
+	switch provider {
+	case string(service.ImageHostingProviderCloudflareR2):
+		return resolvePublicURL(config.CloudflareR2.PublicBaseURL, attachment.ObjectKey, "")
+	case string(service.ImageHostingProviderAliyunOSS):
+		return resolvePublicURL(config.AliyunOSS.PublicBaseURL, attachment.ObjectKey, "")
+	default:
+		return ""
+	}
+}
+
+func normalizeWorkspaceDocumentAttachmentPurpose(
+	rawPurpose string,
+) workspaceDocumentAttachmentPurpose {
+	switch workspaceDocumentAttachmentPurpose(strings.ToLower(strings.TrimSpace(rawPurpose))) {
+	case workspaceDocumentAttachmentPurposeDownload:
+		return workspaceDocumentAttachmentPurposeDownload
+	case workspaceDocumentAttachmentPurposePreview:
+		return workspaceDocumentAttachmentPurposePreview
+	default:
+		return ""
+	}
+}
+
+func parseBoolLikeValue(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildDocumentAttachmentObjectKey(fileName string, contentType string, now time.Time) (string, error) {
+	extension := resolveDocumentAttachmentFileExtension(fileName, contentType)
+	randomSuffix, err := randomHex(4)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"plaindoc-attachments/%04d/%02d/%02d/%d-%s.%s",
+		now.Year(),
+		int(now.Month()),
+		now.Day(),
+		now.UnixMilli(),
+		randomSuffix,
+		extension,
+	), nil
+}
+
+func resolveDocumentAttachmentFileExtension(fileName string, contentType string) string {
+	extension := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(path.Ext(fileName)), "."))
+	if isSafeFileExtension(extension) {
+		return extension
+	}
+	extensions, err := mime.ExtensionsByType(strings.TrimSpace(contentType))
+	if err == nil {
+		for _, item := range extensions {
+			candidate := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(item), "."))
+			if isSafeFileExtension(candidate) {
+				return candidate
+			}
+		}
+	}
+	return "bin"
+}
+
+func normalizeDocumentAttachmentPreviewKind(rawPreviewKind string) string {
+	switch strings.ToLower(strings.TrimSpace(rawPreviewKind)) {
+	case documentAttachmentPreviewKindImage:
+		return documentAttachmentPreviewKindImage
+	case documentAttachmentPreviewKindPDF:
+		return documentAttachmentPreviewKindPDF
+	case documentAttachmentPreviewKindOffice:
+		return documentAttachmentPreviewKindOffice
+	case documentAttachmentPreviewKindText:
+		return documentAttachmentPreviewKindText
+	default:
+		return documentAttachmentPreviewKindNone
+	}
+}
+
+func resolveDocumentAttachmentPreviewKind(contentType string, fileName string) string {
+	mimeType := strings.ToLower(strings.TrimSpace(contentType))
+	if strings.HasPrefix(mimeType, "image/") {
+		return documentAttachmentPreviewKindImage
+	}
+	if mimeType == "application/pdf" {
+		return documentAttachmentPreviewKindPDF
+	}
+	if strings.HasPrefix(mimeType, "text/") || mimeType == "application/json" || mimeType == "application/xml" {
+		return documentAttachmentPreviewKindText
+	}
+
+	extension := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(path.Ext(fileName)), "."))
+	switch extension {
+	case "pdf":
+		return documentAttachmentPreviewKindPDF
+	case "doc", "docx", "xls", "xlsx", "ppt", "pptx":
+		return documentAttachmentPreviewKindOffice
+	case "md", "markdown", "txt", "json", "xml", "yaml", "yml":
+		return documentAttachmentPreviewKindText
+	}
+	return documentAttachmentPreviewKindNone
+}
+
+func isDocumentAttachmentPreviewSupported(previewKind string) bool {
+	normalizedPreviewKind := normalizeDocumentAttachmentPreviewKind(previewKind)
+	return normalizedPreviewKind == documentAttachmentPreviewKindImage ||
+		normalizedPreviewKind == documentAttachmentPreviewKindPDF ||
+		normalizedPreviewKind == documentAttachmentPreviewKindOffice ||
+		normalizedPreviewKind == documentAttachmentPreviewKindText
+}
+
+func (h *workspaceHandler) resolveLocalAttachmentTargetPath(objectKey string) (string, error) {
+	normalizedObjectKey := strings.TrimSpace(strings.TrimPrefix(objectKey, "/"))
+	if normalizedObjectKey == "" {
+		return "", errors.New("object key is empty")
+	}
+	cleanObjectKey := path.Clean(normalizedObjectKey)
+	if cleanObjectKey == "." || cleanObjectKey == "/" || strings.HasPrefix(cleanObjectKey, "../") {
+		return "", errors.New("object key is invalid")
+	}
+
+	localRootDir := strings.TrimSpace(h.localImageRootDir)
+	if localRootDir == "" {
+		localRootDir = defaultLocalImageStorageRoot
+	}
+	targetPath := filepath.Join(localRootDir, filepath.FromSlash(cleanObjectKey))
+	targetAbsPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", err
+	}
+	rootAbsPath, err := filepath.Abs(localRootDir)
+	if err != nil {
+		return "", err
+	}
+	if !isPathWithinRoot(rootAbsPath, targetAbsPath) {
+		return "", errors.New("object key is out of root")
+	}
+	return targetAbsPath, nil
+}

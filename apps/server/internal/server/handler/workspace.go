@@ -26,9 +26,11 @@ const (
 
 type workspaceHandler struct {
 	workspaceRepo              repository.WorkspaceRepository
+	documentAttachmentRepo     repository.DocumentAttachmentRepository
 	authService                *service.AuthService
 	visibilityService          *service.VisibilityService
 	imageHostingService        *service.ImageHostingService
+	attachmentTokenService     *service.DocumentAttachmentDownloadTokenService
 	localImageRootDir          string
 	remoteImageHTTPClient      *http.Client
 	remoteImageFailureCooldown time.Duration
@@ -145,17 +147,21 @@ type workspaceTreeNode struct {
 // NewWorkspaceHandler 创建编辑器工作区处理器。
 func NewWorkspaceHandler(
 	workspaceRepo repository.WorkspaceRepository,
+	documentAttachmentRepo repository.DocumentAttachmentRepository,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
 	imageHostingService *service.ImageHostingService,
+	attachmentTokenService *service.DocumentAttachmentDownloadTokenService,
 	renderCache *rendercache.Cache,
 ) *workspaceHandler {
 	return &workspaceHandler{
-		workspaceRepo:       workspaceRepo,
-		authService:         authService,
-		visibilityService:   visibilityService,
-		imageHostingService: imageHostingService,
-		localImageRootDir:   defaultLocalImageStorageRoot,
+		workspaceRepo:          workspaceRepo,
+		documentAttachmentRepo: documentAttachmentRepo,
+		authService:            authService,
+		visibilityService:      visibilityService,
+		imageHostingService:    imageHostingService,
+		attachmentTokenService: attachmentTokenService,
+		localImageRootDir:      defaultLocalImageStorageRoot,
 		remoteImageHTTPClient: &http.Client{
 			Timeout: 12 * time.Second,
 		},

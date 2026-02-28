@@ -53,6 +53,7 @@ import { EditorAccessErrorPage } from "./components/EditorAccessErrorPage";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
+import { DocumentAttachmentPopover } from "./components/DocumentAttachmentPopover";
 import { useConfirmDialog } from "./components/ConfirmDialog";
 import { Toaster } from "./components/ui/sonner";
 import {
@@ -74,7 +75,8 @@ import {
   type AuthRegisterInput,
   type AuthSession,
   type AuthUnauthorizedEventDetail,
-  type CreateNodeResult
+  type CreateNodeResult,
+  type DocumentAttachment,
 } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
@@ -148,6 +150,7 @@ const EDITOR_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档�
 const AUTH_CAPTCHA_REQUIRED_CODE = 1008;
 const AUTH_CAPTCHA_INVALID_CODE = 1009;
 const AUTH_TEMPORARILY_LOCKED_CODE = 1010;
+const ACCESS_TOKEN_STORAGE_KEY = "plaindoc.auth.access-token";
 const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
   loginMode: "local_only",
   defaultProviderId: "local",
@@ -580,6 +583,126 @@ function inferFileExtensionFromMimeType(mimeType: string): string {
   }
 }
 
+function readStoredAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+    if (!token) {
+      return null;
+    }
+    const normalizedToken = token.trim();
+    return normalizedToken || null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeAttachmentFileName(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function resolveAttachmentFileNameFromContentDisposition(
+  contentDisposition: string | null
+): string | null {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const encodedMatch = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (encodedMatch?.[1]) {
+    const decodedName = decodeAttachmentFileName(encodedMatch[1].trim());
+    return decodedName || null;
+  }
+
+  const plainMatch = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition);
+  if (plainMatch?.[1]) {
+    const fileName = plainMatch[1].trim();
+    return fileName || null;
+  }
+
+  return null;
+}
+
+function resolveAttachmentAccessURL(rawURL: string): string {
+  const normalizedURL = rawURL.trim();
+  if (!normalizedURL) {
+    return "";
+  }
+  if (/^(https?:)?\/\//i.test(normalizedURL) || /^blob:|^data:/i.test(normalizedURL)) {
+    return normalizedURL;
+  }
+  if (typeof window === "undefined") {
+    return normalizedURL;
+  }
+  return new URL(normalizedURL, window.location.origin).toString();
+}
+
+function triggerDownloadByURL(resourceURL: string, suggestedFileName?: string): void {
+  const normalizedURL = resolveAttachmentAccessURL(resourceURL);
+  if (!normalizedURL) {
+    return;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = normalizedURL;
+  anchor.rel = "noopener noreferrer";
+  if (suggestedFileName && suggestedFileName.trim()) {
+    anchor.download = suggestedFileName.trim();
+  }
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function triggerDownloadByBlob(blob: Blob, suggestedFileName: string): void {
+  const objectURL = URL.createObjectURL(blob);
+  triggerDownloadByURL(objectURL, suggestedFileName);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectURL);
+  }, 15_000);
+}
+
+function triggerPreviewByBlob(blob: Blob): void {
+  const objectURL = URL.createObjectURL(blob);
+  const previewWindow = window.open(objectURL, "_blank", "noopener,noreferrer");
+  if (!previewWindow) {
+    window.location.assign(objectURL);
+  }
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectURL);
+  }, 60_000);
+}
+
+async function fetchAttachmentBlobWithAuth(resourceURL: string): Promise<{
+  blob: Blob;
+  fileName: string | null;
+}> {
+  const resolvedURL = resolveAttachmentAccessURL(resourceURL);
+  if (!resolvedURL) {
+    throw new Error("附件访问链接为空");
+  }
+  const headers = new Headers();
+  const accessToken = readStoredAccessToken();
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+  const response = await fetch(resolvedURL, {
+    method: "GET",
+    headers,
+    credentials: "include"
+  });
+  if (!response.ok) {
+    throw new Error(`附件访问失败（${response.status}）`);
+  }
+  const blob = await response.blob();
+  const fileName = resolveAttachmentFileNameFromContentDisposition(
+    response.headers.get("Content-Disposition")
+  );
+  return { blob, fileName };
+}
+
 async function downloadRemoteImageAsFile(imageURL: string, index: number): Promise<File> {
   const response = await fetch(imageURL, {
     method: "GET",
@@ -845,6 +968,14 @@ export default function App() {
   // 当前上传任务总数与已处理数量：用于展示实时上传进度。
   const [imageUploadTotalCount, setImageUploadTotalCount] = useState(0);
   const [imageUploadCompletedCount, setImageUploadCompletedCount] = useState(0);
+  // 文档附件列表与交互状态。
+  const [documentAttachments, setDocumentAttachments] = useState<DocumentAttachment[]>([]);
+  const [isAttachmentListLoading, setIsAttachmentListLoading] = useState(false);
+  const [isAttachmentUploading, setIsAttachmentUploading] = useState(false);
+  const [pendingAttachmentAction, setPendingAttachmentAction] = useState<{
+    attachmentId: string;
+    action: "download" | "preview" | "delete";
+  } | null>(null);
   const { confirm: confirmByModal, dialog: confirmDialog } = useConfirmDialog();
   // 图床配置读取状态。
   const [isImageHostingConfigLoading, setIsImageHostingConfigLoading] = useState(true);
@@ -1484,6 +1615,237 @@ export default function App() {
       void uploadImageFilesToEditor(view, imageFiles);
     },
     [uploadImageFilesToEditor]
+  );
+
+  // 拉取当前文档附件列表。
+  const reloadDocumentAttachments = useCallback(
+    async (docIDInput?: string): Promise<void> => {
+      const targetDocumentID = (docIDInput ?? activeDocIDRef.current ?? "").trim();
+      if (!targetDocumentID) {
+        setDocumentAttachments([]);
+        return;
+      }
+      setIsAttachmentListLoading(true);
+      try {
+        const attachmentItems = await dataGateway.document.listAttachments(targetDocumentID);
+        setDocumentAttachments(attachmentItems);
+      } catch (error) {
+        console.error("[editor][attachment] 附件列表读取失败", {
+          docId: targetDocumentID,
+          error
+        });
+        setStatusMessage(`读取附件列表失败：${formatError(error)}`);
+        toast.error(`读取附件列表失败：${formatError(error)}`);
+      } finally {
+        setIsAttachmentListLoading(false);
+      }
+    },
+    [dataGateway]
+  );
+
+  // 文档切换后自动刷新附件列表；无文档时清空列表。
+  useEffect(() => {
+    if (!activeUser || !activeDocId) {
+      setDocumentAttachments([]);
+      setIsAttachmentListLoading(false);
+      return;
+    }
+    void reloadDocumentAttachments(activeDocId);
+  }, [activeDocId, activeUser, reloadDocumentAttachments]);
+
+  const handleUploadDocumentAttachments = useCallback(
+    async (files: File[]): Promise<void> => {
+      const targetDocumentID = activeDocIDRef.current?.trim() ?? "";
+      if (!targetDocumentID) {
+        setStatusMessage("当前未打开文档，无法上传附件");
+        toast.error("当前未打开文档，无法上传附件");
+        return;
+      }
+      if (!files.length) {
+        return;
+      }
+
+      setIsAttachmentUploading(true);
+      setStatusMessage(`正在上传 ${files.length} 个附件...`);
+      try {
+        for (const file of files) {
+          await dataGateway.document.uploadAttachment({
+            docId: targetDocumentID,
+            file
+          });
+        }
+        setStatusMessage(`附件上传成功（${files.length} 个）`);
+        toast.success(`附件上传成功（${files.length} 个）`);
+        await reloadDocumentAttachments(targetDocumentID);
+      } catch (error) {
+        console.error("[editor][attachment] 附件上传失败", {
+          docId: targetDocumentID,
+          error
+        });
+        setStatusMessage(`附件上传失败：${formatError(error)}`);
+        toast.error(`附件上传失败：${formatError(error)}`);
+      } finally {
+        setIsAttachmentUploading(false);
+      }
+    },
+    [dataGateway, reloadDocumentAttachments]
+  );
+
+  const handleDeleteDocumentAttachment = useCallback(
+    async (attachment: DocumentAttachment): Promise<void> => {
+      const targetDocumentID = activeDocIDRef.current?.trim() ?? "";
+      if (!targetDocumentID) {
+        setStatusMessage("当前未打开文档，无法删除附件");
+        toast.error("当前未打开文档，无法删除附件");
+        return;
+      }
+
+      const confirmDelete = await confirmByModal({
+        title: "删除附件确认",
+        description: `确定删除附件「${attachment.fileName}」吗？`,
+        confirmText: "继续删除",
+        tone: "warning"
+      });
+      if (!confirmDelete) {
+        return;
+      }
+
+      const confirmPhysicalDelete = await confirmByModal({
+        title: "是否物理删除文件",
+        description: "确认后将同时尝试删除底层文件；取消则只做逻辑删除。",
+        confirmText: "物理删除",
+        cancelText: "仅逻辑删除",
+        tone: "danger"
+      });
+
+      setPendingAttachmentAction({
+        attachmentId: attachment.attachmentId,
+        action: "delete"
+      });
+      try {
+        await dataGateway.document.deleteAttachment({
+          docId: targetDocumentID,
+          attachmentId: attachment.attachmentId,
+          physicalDelete: confirmPhysicalDelete
+        });
+        setStatusMessage("附件删除成功");
+        toast.success("附件删除成功");
+        await reloadDocumentAttachments(targetDocumentID);
+      } catch (error) {
+        console.error("[editor][attachment] 附件删除失败", {
+          docId: targetDocumentID,
+          attachmentId: attachment.attachmentId,
+          error
+        });
+        setStatusMessage(`附件删除失败：${formatError(error)}`);
+        toast.error(`附件删除失败：${formatError(error)}`);
+      } finally {
+        setPendingAttachmentAction((previousAction) => {
+          if (previousAction?.attachmentId !== attachment.attachmentId) {
+            return previousAction;
+          }
+          return null;
+        });
+      }
+    },
+    [confirmByModal, dataGateway, reloadDocumentAttachments]
+  );
+
+  const handleDownloadDocumentAttachment = useCallback(
+    async (attachment: DocumentAttachment): Promise<void> => {
+      const targetDocumentID = activeDocIDRef.current?.trim() ?? "";
+      if (!targetDocumentID) {
+        setStatusMessage("当前未打开文档，无法下载附件");
+        toast.error("当前未打开文档，无法下载附件");
+        return;
+      }
+
+      setPendingAttachmentAction({
+        attachmentId: attachment.attachmentId,
+        action: "download"
+      });
+      try {
+        if (!attachment.requiresAuthDownload && attachment.publicDownloadUrl?.trim()) {
+          triggerDownloadByURL(attachment.publicDownloadUrl, attachment.fileName);
+          setStatusMessage(`附件下载已开始：${attachment.fileName}`);
+          return;
+        }
+
+        const accessLink = await dataGateway.document.createAttachmentAccessLink({
+          docId: targetDocumentID,
+          attachmentId: attachment.attachmentId,
+          purpose: "download"
+        });
+        if (attachment.requiresAuthDownload || accessLink.requiresAuth) {
+          const { blob, fileName } = await fetchAttachmentBlobWithAuth(accessLink.url);
+          triggerDownloadByBlob(blob, fileName ?? attachment.fileName);
+        } else {
+          triggerDownloadByURL(accessLink.url, attachment.fileName);
+        }
+        setStatusMessage(`附件下载已开始：${attachment.fileName}`);
+      } catch (error) {
+        console.error("[editor][attachment] 附件下载失败", {
+          docId: targetDocumentID,
+          attachmentId: attachment.attachmentId,
+          error
+        });
+        setStatusMessage(`附件下载失败：${formatError(error)}`);
+        toast.error(`附件下载失败：${formatError(error)}`);
+      } finally {
+        setPendingAttachmentAction((previousAction) => {
+          if (previousAction?.attachmentId !== attachment.attachmentId) {
+            return previousAction;
+          }
+          return null;
+        });
+      }
+    },
+    [dataGateway]
+  );
+
+  const handlePreviewDocumentAttachment = useCallback(
+    async (attachment: DocumentAttachment): Promise<void> => {
+      const targetDocumentID = activeDocIDRef.current?.trim() ?? "";
+      if (!targetDocumentID) {
+        setStatusMessage("当前未打开文档，无法预览附件");
+        toast.error("当前未打开文档，无法预览附件");
+        return;
+      }
+
+      setPendingAttachmentAction({
+        attachmentId: attachment.attachmentId,
+        action: "preview"
+      });
+      try {
+        const accessLink = await dataGateway.document.createAttachmentAccessLink({
+          docId: targetDocumentID,
+          attachmentId: attachment.attachmentId,
+          purpose: "preview"
+        });
+        if (attachment.requiresAuthDownload || accessLink.requiresAuth) {
+          const { blob } = await fetchAttachmentBlobWithAuth(accessLink.url);
+          triggerPreviewByBlob(blob);
+        } else {
+          window.open(resolveAttachmentAccessURL(accessLink.url), "_blank", "noopener,noreferrer");
+        }
+      } catch (error) {
+        console.error("[editor][attachment] 附件预览失败", {
+          docId: targetDocumentID,
+          attachmentId: attachment.attachmentId,
+          error
+        });
+        setStatusMessage(`附件预览失败：${formatError(error)}`);
+        toast.error(`附件预览失败：${formatError(error)}`);
+      } finally {
+        setPendingAttachmentAction((previousAction) => {
+          if (previousAction?.attachmentId !== attachment.attachmentId) {
+            return previousAction;
+          }
+          return null;
+        });
+      }
+    },
+    [dataGateway]
   );
 
   // 登录后加载后台图床配置：由管理后台统一维护。
@@ -2598,6 +2960,28 @@ export default function App() {
             </div>
           </div>
           <div className="header-actions">
+            <DocumentAttachmentPopover
+              attachments={documentAttachments}
+              disabled={!activeDocId}
+              loading={isAttachmentListLoading}
+              uploading={isAttachmentUploading}
+              pendingAction={pendingAttachmentAction}
+              onUploadFiles={(files) => {
+                void handleUploadDocumentAttachments(files);
+              }}
+              onRefresh={() => {
+                void reloadDocumentAttachments();
+              }}
+              onDownload={(attachment) => {
+                void handleDownloadDocumentAttachment(attachment);
+              }}
+              onPreview={(attachment) => {
+                void handlePreviewDocumentAttachment(attachment);
+              }}
+              onDelete={(attachment) => {
+                void handleDeleteDocumentAttachment(attachment);
+              }}
+            />
             {/* 目录菜单：展示标题结构并支持快速跳转。 */}
             {hasTocMarker ? (
               <TocMenu

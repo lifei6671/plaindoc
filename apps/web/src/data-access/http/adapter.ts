@@ -36,6 +36,8 @@ import {
   type CreateSpaceInput,
   type DataGateway,
   type Document,
+  type DocumentAttachment,
+  type DocumentAttachmentAccessLink,
   type DocumentGateway,
   type DocumentRevision,
   type ImageHostingGateway,
@@ -718,6 +720,88 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     },
     async listRevisions(docId: string) {
       return request<DocumentRevision[]>(`/docs/${docId}/revisions`);
+    },
+    async listAttachments(docId: string) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      const payload = await request<{ items: DocumentAttachment[] }>(`/docs/${encodeURIComponent(documentID)}/attachments`);
+      if (!Array.isArray(payload.items)) {
+        return [];
+      }
+      return payload.items.map((item) => ({
+        ...item,
+        publicDownloadUrl:
+          typeof item.publicDownloadUrl === "string" && item.publicDownloadUrl.trim()
+            ? resolveBackendPublicUrl(item.publicDownloadUrl, options.baseUrl)
+            : item.publicDownloadUrl
+      }));
+    },
+    async uploadAttachment(input: { docId: string; file: File }) {
+      const documentID = input.docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      if (!input.file) {
+        throw new Error("附件文件不能为空");
+      }
+      const formData = new FormData();
+      formData.append("file", input.file);
+      return request<DocumentAttachment>(`/docs/${encodeURIComponent(documentID)}/attachments`, {
+        method: "POST",
+        body: formData
+      });
+    },
+    async deleteAttachment(input: { docId: string; attachmentId: string; physicalDelete?: boolean }) {
+      const documentID = input.docId.trim();
+      const attachmentID = input.attachmentId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      if (!attachmentID) {
+        throw new Error("附件 ID 不能为空");
+      }
+      const query = new URLSearchParams();
+      if (input.physicalDelete === true) {
+        query.set("physicalDelete", "true");
+      }
+      const queryText = query.toString();
+      const path =
+        `/docs/${encodeURIComponent(documentID)}/attachments/${encodeURIComponent(attachmentID)}` +
+        (queryText ? `?${queryText}` : "");
+      await request<void>(path, {
+        method: "DELETE"
+      });
+    },
+    async createAttachmentAccessLink(input: {
+      docId: string;
+      attachmentId: string;
+      purpose?: "download" | "preview";
+    }) {
+      const documentID = input.docId.trim();
+      const attachmentID = input.attachmentId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      if (!attachmentID) {
+        throw new Error("附件 ID 不能为空");
+      }
+      const query = new URLSearchParams();
+      if (input.purpose === "preview" || input.purpose === "download") {
+        query.set("purpose", input.purpose);
+      }
+      const queryText = query.toString();
+      const path =
+        `/docs/${encodeURIComponent(documentID)}/attachments/${encodeURIComponent(attachmentID)}/access-link` +
+        (queryText ? `?${queryText}` : "");
+      const accessLink = await request<DocumentAttachmentAccessLink>(path, {
+        method: "POST"
+      });
+      return {
+        ...accessLink,
+        url: resolveBackendPublicUrl(accessLink.url ?? "", options.baseUrl)
+      };
     },
     async setDocumentTheme(docId: string, themeId: string) {
       return request<Document>(`/docs/${docId}/theme`, {

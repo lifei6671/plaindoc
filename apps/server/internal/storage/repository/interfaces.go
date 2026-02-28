@@ -448,6 +448,14 @@ type DocumentRepository interface {
 	UpdateWithVersion(ctx context.Context, document *models.Document, baseVersion int) (bool, error)
 }
 
+// DocumentAttachmentRepository 文档附件仓储接口。
+type DocumentAttachmentRepository interface {
+	Create(ctx context.Context, attachment *models.DocumentAttachment) error
+	ListByDocumentID(ctx context.Context, documentID string, includeDeleted bool) ([]models.DocumentAttachment, error)
+	GetByAttachmentID(ctx context.Context, attachmentID string) (*models.DocumentAttachment, error)
+	SoftDelete(ctx context.Context, attachmentID string, deletedAt time.Time) (bool, error)
+}
+
 // RevisionRepository 文档修订仓储最小接口。
 type RevisionRepository interface {
 	Create(ctx context.Context, revision *models.DocumentRevision) error

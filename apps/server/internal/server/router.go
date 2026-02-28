@@ -107,6 +107,7 @@ func newRouter(
 	spaceRepo := repository.NewGormSpaceRepository(db)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
 	documentRepo := repository.NewGormDocumentRepository(db)
+	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	themeRepo := repository.NewGormThemeRepository(db)
 	systemConfigRepo := repository.NewGormSystemConfigRepository(db)
 	auditLogRepo := repository.NewGormAuditLogRepository(db)
@@ -145,6 +146,7 @@ func newRouter(
 	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
+	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
 
 	// ---- SSR 页面与静态资源路由（不走 /api）----
 	// 模板静态资源（CSS/字体/图片）统一挂在 /assets。
@@ -280,9 +282,11 @@ func newRouter(
 		accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache)
 		workspaceHandler := handler.NewWorkspaceHandler(
 			workspaceRepo,
+			documentAttachmentRepo,
 			authService,
 			visibilityService,
 			imageHostingService,
+			documentAttachmentTokenService,
 			readerRenderCache,
 		)
 
@@ -312,8 +316,21 @@ func newRouter(
 		api.POST("/docs/:docId/remote-images/localize", workspaceHandler.LocalizeDocumentRemoteImages)
 		// 获取文档历史修订列表。
 		api.GET("/docs/:docId/revisions", workspaceHandler.ListRevisions)
+		// 文档附件列表。
+		api.GET("/docs/:docId/attachments", workspaceHandler.ListDocumentAttachments)
+		// 上传文档附件（当前仅支持本地存储 provider）。
+		api.POST("/docs/:docId/attachments", workspaceHandler.UploadDocumentAttachment)
+		// 删除文档附件（支持可选物理删除本地文件）。
+		api.DELETE("/docs/:docId/attachments/:attachmentId", workspaceHandler.DeleteDocumentAttachment)
+		// 创建文档附件访问链接（下载/预览）。
+		api.POST(
+			"/docs/:docId/attachments/:attachmentId/access-link",
+			workspaceHandler.CreateDocumentAttachmentAccessLink,
+		)
 		// 更新文档可见性。
 		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
+		// 使用签名链接下载或预览文档附件。
+		api.GET("/attachment-downloads/:token", workspaceHandler.ServeDocumentAttachmentByToken)
 
 		// ---- 后台治理 API 依赖装配 ----
 		adminHandler := handler.NewAdminHandler(adminAccessService, userRepo)
