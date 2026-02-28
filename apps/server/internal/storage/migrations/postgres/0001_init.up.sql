@@ -128,6 +128,98 @@ CREATE TABLE IF NOT EXISTS document_permissions (
 	UNIQUE(document_id, user_id)
 );
 
+COMMENT ON TABLE users IS '用户主表：存储账号基础信息';
+COMMENT ON COLUMN users.id IS '主键ID';
+COMMENT ON COLUMN users.user_id IS '用户业务ID（ULID）';
+COMMENT ON COLUMN users.email IS '用户邮箱（全局唯一）';
+COMMENT ON COLUMN users.password_hash IS '密码哈希（bcrypt）';
+COMMENT ON COLUMN users.name IS '用户显示名称';
+COMMENT ON COLUMN users.created_at IS '创建时间';
+COMMENT ON COLUMN users.updated_at IS '更新时间';
+
+COMMENT ON TABLE spaces IS '知识空间表：协作内容顶层容器';
+COMMENT ON COLUMN spaces.id IS '主键ID';
+COMMENT ON COLUMN spaces.space_id IS '空间业务ID（ULID）';
+COMMENT ON COLUMN spaces.name IS '空间名称';
+COMMENT ON COLUMN spaces.owner_user_id IS '空间所有者用户ID';
+COMMENT ON COLUMN spaces.created_at IS '创建时间';
+COMMENT ON COLUMN spaces.updated_at IS '更新时间';
+
+COMMENT ON TABLE space_members IS '空间成员关系表：定义用户在空间中的协作角色';
+COMMENT ON COLUMN space_members.id IS '主键ID';
+COMMENT ON COLUMN space_members.space_id IS '空间业务ID';
+COMMENT ON COLUMN space_members.user_id IS '用户业务ID';
+COMMENT ON COLUMN space_members.role IS '空间角色：owner/collaborator/reader';
+COMMENT ON COLUMN space_members.created_at IS '创建时间';
+COMMENT ON COLUMN space_members.updated_at IS '更新时间';
+
+COMMENT ON TABLE nodes IS '目录树节点表：空间内目录与文档节点';
+COMMENT ON COLUMN nodes.id IS '主键ID';
+COMMENT ON COLUMN nodes.node_id IS '节点业务ID（ULID）';
+COMMENT ON COLUMN nodes.space_id IS '所属空间ID';
+COMMENT ON COLUMN nodes.parent_node_id IS '父节点ID，空表示根节点';
+COMMENT ON COLUMN nodes.type IS '节点类型：folder/doc';
+COMMENT ON COLUMN nodes.title IS '节点标题';
+COMMENT ON COLUMN nodes.sort IS '同级排序值';
+COMMENT ON COLUMN nodes.created_at IS '创建时间';
+COMMENT ON COLUMN nodes.updated_at IS '更新时间';
+
+COMMENT ON TABLE themes IS '文档主题表：存储主题样式与代码高亮配置';
+COMMENT ON COLUMN themes.id IS '主键ID';
+COMMENT ON COLUMN themes.theme_id IS '主题业务ID';
+COMMENT ON COLUMN themes.name IS '主题名称';
+COMMENT ON COLUMN themes.description IS '主题描述';
+COMMENT ON COLUMN themes.variables_json IS 'CSS 变量JSON';
+COMMENT ON COLUMN themes.syntax_theme IS '代码高亮主题：one-light/one-dark';
+COMMENT ON COLUMN themes.code_block_style_json IS '代码块容器样式JSON';
+COMMENT ON COLUMN themes.code_block_code_style_json IS '代码块代码样式JSON';
+COMMENT ON COLUMN themes.inline_code_style_json IS '行内代码样式JSON';
+COMMENT ON COLUMN themes.custom_css IS '自定义CSS';
+COMMENT ON COLUMN themes.is_builtin IS '是否内置主题';
+COMMENT ON COLUMN themes.created_at IS '创建时间';
+COMMENT ON COLUMN themes.updated_at IS '更新时间';
+
+COMMENT ON TABLE documents IS '文档主表：节点对应的正文';
+COMMENT ON COLUMN documents.id IS '主键ID';
+COMMENT ON COLUMN documents.document_id IS '文档业务ID（ULID）';
+COMMENT ON COLUMN documents.node_id IS '关联节点ID（唯一）';
+COMMENT ON COLUMN documents.theme_id IS '主题ID';
+COMMENT ON COLUMN documents.title IS '文档标题';
+COMMENT ON COLUMN documents.content_md IS 'Markdown 正文';
+COMMENT ON COLUMN documents.version IS '文档版本号（乐观锁）';
+COMMENT ON COLUMN documents.updated_by_user_id IS '最后更新人用户ID';
+COMMENT ON COLUMN documents.created_at IS '创建时间';
+COMMENT ON COLUMN documents.updated_at IS '更新时间';
+
+COMMENT ON TABLE document_revisions IS '文档修订历史表：保存版本快照与来源';
+COMMENT ON COLUMN document_revisions.id IS '主键ID';
+COMMENT ON COLUMN document_revisions.document_revision_id IS '修订业务ID（ULID）';
+COMMENT ON COLUMN document_revisions.document_id IS '文档业务ID';
+COMMENT ON COLUMN document_revisions.version IS '修订版本号';
+COMMENT ON COLUMN document_revisions.content_md IS '该版本 Markdown 内容';
+COMMENT ON COLUMN document_revisions.base_version IS '保存时基准版本号';
+COMMENT ON COLUMN document_revisions.editor_user_id IS '编辑人用户ID';
+COMMENT ON COLUMN document_revisions.source IS '修订来源：local/remote';
+COMMENT ON COLUMN document_revisions.created_at IS '创建时间';
+
+COMMENT ON TABLE node_permissions IS '节点权限表：节点级 ACL 授权关系';
+COMMENT ON COLUMN node_permissions.id IS '主键ID';
+COMMENT ON COLUMN node_permissions.node_id IS '节点业务ID';
+COMMENT ON COLUMN node_permissions.user_id IS '被授权用户ID';
+COMMENT ON COLUMN node_permissions.role IS '授权角色：owner/collaborator/reader';
+COMMENT ON COLUMN node_permissions.granted_by_user_id IS '授权人用户ID';
+COMMENT ON COLUMN node_permissions.created_at IS '创建时间';
+COMMENT ON COLUMN node_permissions.updated_at IS '更新时间';
+
+COMMENT ON TABLE document_permissions IS '文档权限表：文档级 ACL 授权关系';
+COMMENT ON COLUMN document_permissions.id IS '主键ID';
+COMMENT ON COLUMN document_permissions.document_id IS '文档业务ID';
+COMMENT ON COLUMN document_permissions.user_id IS '被授权用户ID';
+COMMENT ON COLUMN document_permissions.role IS '授权角色：owner/collaborator/reader';
+COMMENT ON COLUMN document_permissions.granted_by_user_id IS '授权人用户ID';
+COMMENT ON COLUMN document_permissions.created_at IS '创建时间';
+COMMENT ON COLUMN document_permissions.updated_at IS '更新时间';
+
 CREATE INDEX IF NOT EXISTS idx_spaces_owner_user_id ON spaces(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_spaces_updated_at ON spaces(updated_at);
 

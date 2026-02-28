@@ -16,6 +16,21 @@ CREATE TABLE auth_captcha_challenges (
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE auth_captcha_challenges IS '认证验证码挑战表：记录题目、有效期和消费状态';
+COMMENT ON COLUMN auth_captcha_challenges.id IS '主键ID';
+COMMENT ON COLUMN auth_captcha_challenges.captcha_id IS '验证码挑战ID（回传前端）';
+COMMENT ON COLUMN auth_captcha_challenges.scene IS '验证码适用场景：login/register';
+COMMENT ON COLUMN auth_captcha_challenges.subject_hash IS '风险主体哈希值（HMAC-SHA256）';
+COMMENT ON COLUMN auth_captcha_challenges.level IS '验证码字符数量（位数），历史回滚语义为 1..3';
+COMMENT ON COLUMN auth_captcha_challenges.answer_hash IS '验证码答案哈希值';
+COMMENT ON COLUMN auth_captcha_challenges.answer_salt IS '验证码答案哈希盐';
+COMMENT ON COLUMN auth_captcha_challenges.issued_ip_hash IS '发放验证码时的请求IP哈希值';
+COMMENT ON COLUMN auth_captcha_challenges.expires_at IS '验证码过期时间';
+COMMENT ON COLUMN auth_captcha_challenges.consumed_at IS '验证码消费时间；为空表示未消费';
+COMMENT ON COLUMN auth_captcha_challenges.failed_verify_count IS '该挑战下验证码校验失败次数';
+COMMENT ON COLUMN auth_captcha_challenges.created_at IS '创建时间';
+COMMENT ON COLUMN auth_captcha_challenges.updated_at IS '更新时间';
+
 INSERT INTO auth_captcha_challenges (
 	id,
 	captcha_id,
