@@ -1,0 +1,6 @@
+ALTER TABLE schema_migrations COMMENT = '数据库迁移记录表：记录已执行的迁移版本';
+
+ALTER TABLE schema_migrations
+	MODIFY COLUMN version BIGINT NOT NULL COMMENT '迁移版本号（主键）',
+	MODIFY COLUMN name VARCHAR(255) NOT NULL COMMENT '迁移名称',
+	MODIFY COLUMN applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '迁移执行时间';
