@@ -1,8 +1,9 @@
-import { LoaderCircle, RefreshCw, Search } from "lucide-react";
+import { Copy, LoaderCircle, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { showToast } from "../../components/ui/toast";
 import {
@@ -158,7 +159,6 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
   const [toTime, setToTime] = useState("");
 
   const [page, setPage] = useState(1);
-  const [expandedAuditID, setExpandedAuditID] = useState<number | null>(null);
 
   const [auditsState, setAuditsState] = useState<AdminAuditsState>(() => emptyAuditsState());
   const [loading, setLoading] = useState(false);
@@ -194,15 +194,6 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
   useEffect(() => {
     void loadAudits();
   }, [loadAudits]);
-
-  useEffect(() => {
-    if (!expandedAuditID) {
-      return;
-    }
-    if (!auditsState.items.some((item) => item.id === expandedAuditID)) {
-      setExpandedAuditID(null);
-    }
-  }, [auditsState.items, expandedAuditID]);
 
   const totalPages = useMemo(() => {
     const total = auditsState.pagination.total;
@@ -258,9 +249,40 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
     setToInput("");
     setToTime("");
 
-    setExpandedAuditID(null);
     setPage(1);
   }, []);
+
+  const handleCopyAuditDetail = useCallback(
+    async (value: string) => {
+      const detailText = value.trim();
+      if (!detailText) {
+        openToast("详情内容为空", "info");
+        return;
+      }
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(detailText);
+        } else {
+          const input = document.createElement("input");
+          input.value = detailText;
+          input.setAttribute("readonly", "true");
+          input.style.position = "absolute";
+          input.style.left = "-9999px";
+          document.body.appendChild(input);
+          input.select();
+          const copied = document.execCommand("copy");
+          document.body.removeChild(input);
+          if (!copied) {
+            throw new Error("复制失败");
+          }
+        }
+        openToast("审计详情已复制", "success");
+      } catch (error) {
+        openToast(`复制失败：${formatError(error)}`);
+      }
+    },
+    [openToast]
+  );
 
   return (
     <section aria-label="审计日志查询">
@@ -397,7 +419,7 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
                     </tr>
                   ) : (
                     auditsState.items.map((item) => {
-                      const isExpanded = expandedAuditID === item.id;
+                      const detailText = JSON.stringify(item.detail ?? {}, null, 2);
                       return (
                         <tr key={item.id} className="border-b border-slate-100 align-top text-slate-700">
                           <td className="px-3 py-3">
@@ -439,19 +461,33 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
                             </code>
                           </td>
                           <td className="px-3 py-3">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setExpandedAuditID(isExpanded ? null : item.id)}
-                            >
-                              {isExpanded ? "收起" : "查看"}
-                            </Button>
-                            {isExpanded ? (
-                              <pre className="mt-2 max-h-44 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-relaxed text-slate-700">
-                                {JSON.stringify(item.detail ?? {}, null, 2)}
-                              </pre>
-                            ) : null}
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button type="button" size="sm" variant="outline">
+                                  查看
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent side="left" align="start" className="w-[min(80vw,34rem)] p-0">
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                                  <span className="text-xs font-semibold tracking-wide text-slate-600">审计详情</span>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs text-slate-600 hover:text-slate-900"
+                                    onClick={() => void handleCopyAuditDetail(detailText)}
+                                    aria-label="复制审计详情"
+                                    title="复制审计详情"
+                                  >
+                                    <Copy size={13} />
+                                    <span>复制</span>
+                                  </Button>
+                                </div>
+                                <pre className="max-h-72 overflow-auto px-3 py-2 text-xs leading-relaxed text-slate-700">
+                                  {detailText}
+                                </pre>
+                              </PopoverContent>
+                            </Popover>
                           </td>
                         </tr>
                       );
