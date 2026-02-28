@@ -30,7 +30,7 @@ type authCaptchaChallengeRow struct {
 	UpdatedAtRaw      string  `gorm:"column:updated_at"`
 }
 
-// NewGormAuthCaptchaChallengeRepository 创建基于 GORM 的验证码挑战仓储实现。
+// NewGormAuthCaptchaChallengeRepository 创建基于 GORM 的验证码会话仓储实现。
 func NewGormAuthCaptchaChallengeRepository(db *gorm.DB) AuthCaptchaChallengeRepository {
 	return &gormAuthCaptchaChallengeRepository{db: db}
 }

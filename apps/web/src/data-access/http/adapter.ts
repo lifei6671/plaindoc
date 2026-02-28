@@ -1,33 +1,34 @@
+import { AUTH_UNAUTHORIZED_EVENT, type AuthUnauthorizedEventDetail } from "../auth-events";
 import {
   type AdminAuditListInput,
   type AdminAuditListResult,
-  type AdminGateway,
-  type AdminSystemConfig,
-  type AdminTheme,
   type AdminDocument,
   type AdminDocumentListInput,
   type AdminDocumentListResult,
+  type AdminGateway,
   type AdminIdentity,
   type AdminProfile,
+  type AdminRole,
   type AdminSpace,
   type AdminSpaceCategory,
-  type AdminSpaceMember,
   type AdminSpaceCover,
   type AdminSpaceListInput,
   type AdminSpaceListResult,
-  type AdminRole,
+  type AdminSpaceMember,
+  type AdminSystemConfig,
+  type AdminTheme,
   type AdminUser,
   type AdminUserListInput,
   type AdminUserListResult,
-  type AuthLoginInput,
-  type AuthRegisterInput,
   type AuthCaptchaChallenge,
   type AuthCaptchaRefreshInput,
+  type AuthGateway,
+  type AuthLoginInput,
   type AuthLoginMode,
   type AuthLoginOptions,
   type AuthLoginProviderOption,
+  type AuthRegisterInput,
   type AuthSession,
-  type AuthGateway,
   ConflictError,
   type CreateNodeInput,
   type CreateNodeResult,
@@ -46,11 +47,10 @@ import {
   type Theme,
   type ThemeGateway,
   type TreeNode,
-  type UploadLocalImageResult,
   type UpdateNodeInput,
+  type UploadLocalImageResult,
   type WorkspaceGateway
 } from "../types";
-import { AUTH_UNAUTHORIZED_EVENT, type AuthUnauthorizedEventDetail } from "../auth-events";
 import { createIndexedDbUserConfigGateway } from "../user-config/indexeddb-gateway";
 
 interface HttpAdapterOptions {
@@ -189,7 +189,7 @@ function normalizeAuthLoginOptions(value: unknown): AuthLoginOptions {
 
 function normalizeAuthCaptchaChallenge(value: unknown): AuthCaptchaChallenge {
   if (!value || typeof value !== "object") {
-    throw new Error("验证码挑战数据格式不正确");
+    throw new Error("验证码会话数据格式不正确");
   }
   const record = value as Record<string, unknown>;
   const captchaId = typeof record.captchaId === "string" ? record.captchaId.trim() : "";
@@ -198,7 +198,7 @@ function normalizeAuthCaptchaChallenge(value: unknown): AuthCaptchaChallenge {
   const level = Number(record.level);
   const expiresInSeconds = Number(record.expiresInSeconds);
   if (!captchaId || !captchaImageDataUrl || !Number.isFinite(level) || !Number.isFinite(expiresInSeconds)) {
-    throw new Error("验证码挑战数据不完整");
+    throw new Error("验证码会话数据不完整");
   }
   return {
     captchaId,
@@ -685,8 +685,8 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
       const imageURLs = Array.isArray(input.imageUrls)
         ? input.imageUrls
-            .map((item) => (typeof item === "string" ? item.trim() : ""))
-            .filter((item) => item.length > 0)
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter((item) => item.length > 0)
         : [];
       if (!imageURLs.length) {
         return { localizedUrls: {} };
@@ -1442,7 +1442,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig[]>("/admin/system-configs");
     },
     async upsertSystemConfig(input: {
-      configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap";
+      configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap" | "data-retention";
       value: Record<string, unknown>;
       expectedVersion?: number;
     }) {

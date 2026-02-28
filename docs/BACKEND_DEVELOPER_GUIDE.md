@@ -226,7 +226,7 @@
    - `1009` `CAPTCHA_INVALID`
    - `1010` `AUTH_TEMPORARILY_LOCKED`
 3. 错误 `data` 字段：
-   - 验证码挑战：`captchaId`、`captchaImageDataUrl`、`level`、`expiresInSeconds`
+   - 验证码会话：`captchaId`、`captchaImageDataUrl`、`level`、`expiresInSeconds`
    - 其中 `level` 为验证码字符数量（位数），例如 `4/5/6`
    - 封禁反馈：`lockedUntil`、`retryAfterSeconds`
 
@@ -265,7 +265,7 @@
    - 主用途：按 `scene + subject_type + subject_hash` 维护风险窗口状态。
    - 关键列：`attempt_count`、`failed_count`、`captcha_fail_count`、`lock_until`、`window_started_at`。
 2. `auth_captcha_challenges`
-   - 主用途：管理验证码挑战生命周期与一次性消费。
+   - 主用途：管理验证码会话生命周期与一次性消费。
    - 关键列：`captcha_id`、`scene`、`subject_hash`、`level`、`answer_hash`、`answer_salt`、`expires_at`、`consumed_at`、`issued_ip_hash`。
 
 ### 6.2 工作区与文档协作

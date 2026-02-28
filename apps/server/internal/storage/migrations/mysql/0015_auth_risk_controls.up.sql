@@ -21,7 +21,7 @@ CREATE INDEX idx_auth_risk_states_updated_at ON auth_risk_states(updated_at);
 
 CREATE TABLE IF NOT EXISTS auth_captcha_challenges (
 	id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-	captcha_id VARCHAR(32) NOT NULL UNIQUE COMMENT '验证码挑战ID（回传前端）',
+	captcha_id VARCHAR(32) NOT NULL UNIQUE COMMENT '验证码验证ID（回传前端）',
 	scene VARCHAR(32) NOT NULL COMMENT '验证码适用场景：login/register',
 	subject_hash VARCHAR(128) NOT NULL COMMENT '风险主体哈希值（HMAC-SHA256）',
 	level INT NOT NULL DEFAULT 4 COMMENT '验证码字符数量（位数），例如 4/5/6',

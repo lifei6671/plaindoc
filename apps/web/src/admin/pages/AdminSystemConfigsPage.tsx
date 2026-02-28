@@ -1,4 +1,5 @@
 import {
+  Database,
   Home,
   ImageIcon,
   Keyboard,
@@ -17,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { showToast } from "../../components/ui/toast";
 import { type AdminSystemConfig, type DataGateway } from "../../data-access";
-import { AdminPageCard, AdminToolbarActions } from "../components/AdminPageLayout";
 import { formatError } from "../../editor/status-utils";
 import {
   cloneImageHostingConfig,
@@ -29,8 +29,9 @@ import {
   type ImageHostingProvider,
   type LocalImageHostingConfig
 } from "../../settings/image-hosting";
+import { AdminPageCard, AdminToolbarActions } from "../components/AdminPageLayout";
 
-type SystemConfigKey = "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap";
+type SystemConfigKey = "site" | "editor" | "security" | "data-retention" | "auth" | "image-hosting" | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
 type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
@@ -48,6 +49,16 @@ interface EditorSystemConfigValue {
 interface SecuritySystemConfigValue {
   accessTokenTTLMinutes: number;
   refreshTokenTTLMinutes: number;
+}
+
+interface DataRetentionSystemConfigValue {
+  enabled: boolean;
+  scheduleMinutes: number;
+  cleanupBatchSize: number;
+  auditLogRetentionDays: number;
+  authCaptchaRetentionHours: number;
+  authRiskStateRetentionDays: number;
+  userSessionRetentionDays: number;
 }
 
 interface AuthProviderLdapConfig {
@@ -124,6 +135,12 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     icon: Lock
   },
   {
+    key: "data-retention",
+    label: "数据清理",
+    description: "审计与临时数据保留策略",
+    icon: Database
+  },
+  {
     key: "auth",
     label: "认证设置",
     description: "登录模式与 LDAP",
@@ -160,17 +177,17 @@ const SITEMAP_GENERATION_MODE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  {
-    value: "all_public",
-    label: "全部公开文档",
-    description: "纳入所有公开且有内容的文档"
-  },
-  {
-    value: "updated_within_days",
-    label: "最近更新文档",
-    description: "仅纳入最近 N 天更新的公开文档"
-  }
-];
+    {
+      value: "all_public",
+      label: "全部公开文档",
+      description: "纳入所有公开且有内容的文档"
+    },
+    {
+      value: "updated_within_days",
+      label: "最近更新文档",
+      description: "仅纳入最近 N 天更新的公开文档"
+    }
+  ];
 
 const AUTH_LOGIN_MODE_OPTIONS: Array<{ value: AuthLoginMode; label: string }> = [
   { value: "local_only", label: "仅本地账号（local_only）" },
@@ -193,6 +210,16 @@ const EDITOR_TEMPLATE: EditorSystemConfigValue = {
 const SECURITY_TEMPLATE: SecuritySystemConfigValue = {
   accessTokenTTLMinutes: 120,
   refreshTokenTTLMinutes: 10080
+};
+
+const DATA_RETENTION_TEMPLATE: DataRetentionSystemConfigValue = {
+  enabled: true,
+  scheduleMinutes: 60,
+  cleanupBatchSize: 500,
+  auditLogRetentionDays: 180,
+  authCaptchaRetentionHours: 72,
+  authRiskStateRetentionDays: 30,
+  userSessionRetentionDays: 30
 };
 
 const AUTH_PROVIDER_TEMPLATE: AuthProviderConfig = {
@@ -320,6 +347,40 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
   return {
     accessTokenTTLMinutes: parseInteger(payload.accessTokenTTLMinutes, SECURITY_TEMPLATE.accessTokenTTLMinutes),
     refreshTokenTTLMinutes: parseInteger(payload.refreshTokenTTLMinutes, SECURITY_TEMPLATE.refreshTokenTTLMinutes)
+  };
+}
+
+function parseDataRetentionConfig(value: unknown): DataRetentionSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return { ...DATA_RETENTION_TEMPLATE };
+  }
+  return {
+    enabled: typeof payload.enabled === "boolean" ? payload.enabled : DATA_RETENTION_TEMPLATE.enabled,
+    scheduleMinutes: Math.min(
+      24 * 60,
+      Math.max(5, parseInteger(payload.scheduleMinutes, DATA_RETENTION_TEMPLATE.scheduleMinutes))
+    ),
+    cleanupBatchSize: Math.min(
+      20000,
+      Math.max(100, parseInteger(payload.cleanupBatchSize, DATA_RETENTION_TEMPLATE.cleanupBatchSize))
+    ),
+    auditLogRetentionDays: Math.min(
+      3650,
+      Math.max(1, parseInteger(payload.auditLogRetentionDays, DATA_RETENTION_TEMPLATE.auditLogRetentionDays))
+    ),
+    authCaptchaRetentionHours: Math.min(
+      24 * 365,
+      Math.max(1, parseInteger(payload.authCaptchaRetentionHours, DATA_RETENTION_TEMPLATE.authCaptchaRetentionHours))
+    ),
+    authRiskStateRetentionDays: Math.min(
+      3650,
+      Math.max(1, parseInteger(payload.authRiskStateRetentionDays, DATA_RETENTION_TEMPLATE.authRiskStateRetentionDays))
+    ),
+    userSessionRetentionDays: Math.min(
+      3650,
+      Math.max(1, parseInteger(payload.userSessionRetentionDays, DATA_RETENTION_TEMPLATE.userSessionRetentionDays))
+    )
   };
 }
 
@@ -463,6 +524,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [siteDraft, setSiteDraft] = useState<SiteSystemConfigValue>({ ...SITE_TEMPLATE });
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
+  const [dataRetentionDraft, setDataRetentionDraft] = useState<DataRetentionSystemConfigValue>({
+    ...DATA_RETENTION_TEMPLATE
+  });
   const [authDraft, setAuthDraft] = useState<AuthSystemConfigValue>(cloneAuthConfig(AUTH_TEMPLATE));
   const [sitemapDraft, setSitemapDraft] = useState<SitemapSystemConfigValue>({ ...SITEMAP_TEMPLATE });
   const [imageHostingDraft, setImageHostingDraft] = useState<ImageHostingConfig>(
@@ -473,6 +537,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     site: false,
     editor: false,
     security: false,
+    "data-retention": false,
     auth: false,
     sitemap: false,
     "image-hosting": false
@@ -535,6 +600,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     if (!dirtyKeys.security) {
       setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
     }
+    if (!dirtyKeys["data-retention"]) {
+      setDataRetentionDraft(parseDataRetentionConfig(findConfigValue("data-retention")));
+    }
     if (!dirtyKeys.auth) {
       const parsedConfig = parseAuthConfig(findConfigValue("auth"));
       setAuthDraft(parsedConfig);
@@ -580,6 +648,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setSecurityDraft({ ...SECURITY_TEMPLATE });
         markDirty("security");
         return;
+      case "data-retention":
+        setDataRetentionDraft({ ...DATA_RETENTION_TEMPLATE });
+        markDirty("data-retention");
+        return;
       case "auth":
         setAuthDraft(cloneAuthConfig(AUTH_TEMPLATE));
         setSelectedAuthProviderID(AUTH_TEMPLATE.defaultProviderId);
@@ -612,6 +684,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       case "security":
         setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
         clearDirty("security");
+        return;
+      case "data-retention":
+        setDataRetentionDraft(parseDataRetentionConfig(findConfigValue("data-retention")));
+        clearDirty("data-retention");
         return;
       case "auth": {
         const parsedConfig = parseAuthConfig(findConfigValue("auth"));
@@ -653,6 +729,16 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
           accessTokenTTLMinutes: securityDraft.accessTokenTTLMinutes,
           refreshTokenTTLMinutes: securityDraft.refreshTokenTTLMinutes
         };
+      case "data-retention":
+        return {
+          enabled: dataRetentionDraft.enabled,
+          scheduleMinutes: dataRetentionDraft.scheduleMinutes,
+          cleanupBatchSize: dataRetentionDraft.cleanupBatchSize,
+          auditLogRetentionDays: dataRetentionDraft.auditLogRetentionDays,
+          authCaptchaRetentionHours: dataRetentionDraft.authCaptchaRetentionHours,
+          authRiskStateRetentionDays: dataRetentionDraft.authRiskStateRetentionDays,
+          userSessionRetentionDays: dataRetentionDraft.userSessionRetentionDays
+        };
       case "auth":
         return cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
       case "sitemap":
@@ -665,7 +751,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return {};
     }
-  }, [authDraft, editorDraft, imageHostingDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
+  }, [authDraft, dataRetentionDraft, editorDraft, imageHostingDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -772,495 +858,112 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
           <div className="grid min-h-[560px] gap-0 md:grid-cols-[240px_minmax(0,1fr)]">
             <aside className="hidden bg-transparent p-2 md:block">
-            <nav className="space-y-1" aria-label="配置分组">
-              {SYSTEM_CONFIG_TABS.map((tab) => {
-                const isActive = tab.key === selectedKey;
-                const TabIcon = tab.icon;
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    className={`w-full appearance-none rounded-lg border border-transparent px-3 py-2.5 text-left shadow-none outline-none transition focus-visible:ring-2 focus-visible:ring-sky-200 ${
-                      isActive
-                        ? "bg-slate-200 text-slate-900"
-                        : "text-slate-700 hover:bg-slate-200/70"
-                    }`}
-                    onClick={() => setSelectedKey(tab.key)}
-                    disabled={saving}
-                  >
-                    <p className="flex items-center gap-2.5 text-sm font-medium">
-                      <TabIcon size={16} />
-                      <span>{tab.label}</span>
-                    </p>
-                    <p className="mt-0.5 pl-[26px] text-xs text-slate-500">{tab.description}</p>
-                  </button>
-                );
-              })}
-            </nav>
-          </aside>
+              <nav className="space-y-1" aria-label="配置分组">
+                {SYSTEM_CONFIG_TABS.map((tab) => {
+                  const isActive = tab.key === selectedKey;
+                  const TabIcon = tab.icon;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      className={`w-full appearance-none rounded-lg border border-transparent px-3 py-2.5 text-left shadow-none outline-none transition focus-visible:ring-2 focus-visible:ring-sky-200 ${isActive
+                          ? "bg-slate-200 text-slate-900"
+                          : "text-slate-700 hover:bg-slate-200/70"
+                        }`}
+                      onClick={() => setSelectedKey(tab.key)}
+                      disabled={saving}
+                    >
+                      <p className="flex items-center gap-2.5 text-sm font-medium">
+                        <TabIcon size={16} />
+                        <span>{tab.label}</span>
+                      </p>
+                      <p className="mt-0.5 pl-[26px] text-xs text-slate-500">{tab.description}</p>
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
 
-          <main className="flex min-h-[560px] flex-col">
-            <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4">
-              <div>
-                <h3 className="text-base font-semibold text-slate-800">{selectedTab.label}</h3>
-              </div>
-              <AdminToolbarActions>
-                <Button type="button" variant="outline" disabled={loading || saving} onClick={handleResetTemplate}>
-                  模板填充
-                </Button>
-                <Button type="button" variant="outline" disabled={loading || saving} onClick={handleLoadCurrent}>
-                  载入线上值
-                </Button>
-                <Button type="button" variant="outline" disabled={loading || saving} onClick={() => void loadConfigs()}>
-                  <RefreshCw size={14} />
-                  <span>{loading ? "刷新中..." : "刷新"}</span>
-                </Button>
-                {selectedKey === "auth" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={loading || saving || testingLDAP}
-                    onClick={() => void handleTestLDAPConnection()}
-                  >
-                    <RefreshCw size={14} />
-                    <span>{testingLDAP ? "测试中..." : "测试 LDAP 连接"}</span>
+            <main className="flex min-h-[560px] flex-col">
+              <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-800">{selectedTab.label}</h3>
+                </div>
+                <AdminToolbarActions>
+                  <Button type="button" variant="outline" disabled={loading || saving} onClick={handleResetTemplate}>
+                    模板填充
                   </Button>
-                ) : null}
-                <Button type="button" disabled={loading || saving || !isSelectedDirty} onClick={() => void handleSave()}>
-                  <Save size={14} />
-                  <span>{saving ? "保存中..." : "保存配置"}</span>
-                </Button>
-              </AdminToolbarActions>
-            </header>
-
-            {loading ? (
-              <div className="mx-4 mt-4 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                <LoaderCircle size={15} className="animate-spin" />
-                <span>正在加载系统配置...</span>
-              </div>
-            ) : null}
-
-            <div className="mx-4 mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              配置键：<code>{selectedKey}</code>
-              {selectedConfig ? `，版本：v${selectedConfig.version}` : "，版本：未创建"}
-              {selectedConfig ? `，更新时间：${formatDateTime(selectedConfig.updatedAt)}` : ""}
-              {selectedConfig?.updatedByUserId ? `，更新人：${selectedConfig.updatedByUserId}` : ""}
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4">
-
-            {selectedKey === "site" ? (
-              <div className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
-                    <Checkbox
-                      checked={siteDraft.allowRegistration}
-                      onCheckedChange={(checked) => {
-                        setSiteDraft((previous) => ({
-                          ...previous,
-                          allowRegistration: checked === true
-                        }));
-                        markDirty("site");
-                      }}
-                      disabled={saving}
-                    />
-                    <div className="space-y-0.5">
-                      <span className="text-sm font-medium text-slate-700">允许新用户注册</span>
-                      <p className="text-xs text-slate-500">关闭后，前台注册接口会拒绝请求。</p>
-                    </div>
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">默认空间可见性</span>
-                    <Select
-                      value={siteDraft.defaultSpaceVisibility}
-                      onValueChange={(value) => {
-                        setSiteDraft((previous) => ({
-                          ...previous,
-                          defaultSpaceVisibility: value as SpaceVisibility
-                        }));
-                        markDirty("site");
-                      }}
-                      disabled={saving}
+                  <Button type="button" variant="outline" disabled={loading || saving} onClick={handleLoadCurrent}>
+                    载入线上值
+                  </Button>
+                  <Button type="button" variant="outline" disabled={loading || saving} onClick={() => void loadConfigs()}>
+                    <RefreshCw size={14} />
+                    <span>{loading ? "刷新中..." : "刷新"}</span>
+                  </Button>
+                  {selectedKey === "auth" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading || saving || testingLDAP}
+                      onClick={() => void handleTestLDAPConnection()}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SPACE_VISIBILITY_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
+                      <RefreshCw size={14} />
+                      <span>{testingLDAP ? "测试中..." : "测试 LDAP 连接"}</span>
+                    </Button>
+                  ) : null}
+                  <Button type="button" disabled={loading || saving || !isSelectedDirty} onClick={() => void handleSave()}>
+                    <Save size={14} />
+                    <span>{saving ? "保存中..." : "保存配置"}</span>
+                  </Button>
+                </AdminToolbarActions>
+              </header>
+
+              {loading ? (
+                <div className="mx-4 mt-4 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  <LoaderCircle size={15} className="animate-spin" />
+                  <span>正在加载系统配置...</span>
                 </div>
+              ) : null}
+
+              <div className="mx-4 mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                配置键：<code>{selectedKey}</code>
+                {selectedConfig ? `，版本：v${selectedConfig.version}` : "，版本：未创建"}
+                {selectedConfig ? `，更新时间：${formatDateTime(selectedConfig.updatedAt)}` : ""}
+                {selectedConfig?.updatedByUserId ? `，更新人：${selectedConfig.updatedByUserId}` : ""}
               </div>
-            ) : null}
 
-            {selectedKey === "editor" ? (
-              <div className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">自动保存间隔（秒）</span>
-                    <Input
-                      type="number"
-                      min={5}
-                      max={600}
-                      value={String(editorDraft.autosaveIntervalSeconds)}
-                      onChange={(event) => {
-                        setEditorDraft((previous) => ({
-                          ...previous,
-                          autosaveIntervalSeconds: normalizeIntegerInput(
-                            event.target.value,
-                            previous.autosaveIntervalSeconds
-                          )
-                        }));
-                        markDirty("editor");
-                      }}
-                      disabled={saving}
-                    />
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">文档最大体积（KB）</span>
-                    <Input
-                      type="number"
-                      min={64}
-                      max={4096}
-                      value={String(editorDraft.maxDocumentSizeKB)}
-                      onChange={(event) => {
-                        setEditorDraft((previous) => ({
-                          ...previous,
-                          maxDocumentSizeKB: normalizeIntegerInput(event.target.value, previous.maxDocumentSizeKB)
-                        }));
-                        markDirty("editor");
-                      }}
-                      disabled={saving}
-                    />
-                  </label>
-                </div>
-              </div>
-            ) : null}
+              <div className="flex-1 overflow-y-auto p-4">
 
-            {selectedKey === "security" ? (
-              <div className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">Access Token 时长（分钟）</span>
-                    <Input
-                      type="number"
-                      min={5}
-                      max={1440}
-                      value={String(securityDraft.accessTokenTTLMinutes)}
-                      onChange={(event) => {
-                        setSecurityDraft((previous) => ({
-                          ...previous,
-                          accessTokenTTLMinutes: normalizeIntegerInput(
-                            event.target.value,
-                            previous.accessTokenTTLMinutes
-                          )
-                        }));
-                        markDirty("security");
-                      }}
-                      disabled={saving}
-                    />
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">Refresh Token 时长（分钟）</span>
-                    <Input
-                      type="number"
-                      min={60}
-                      max={43200}
-                      value={String(securityDraft.refreshTokenTTLMinutes)}
-                      onChange={(event) => {
-                        setSecurityDraft((previous) => ({
-                          ...previous,
-                          refreshTokenTTLMinutes: normalizeIntegerInput(
-                            event.target.value,
-                            previous.refreshTokenTTLMinutes
-                          )
-                        }));
-                        markDirty("security");
-                      }}
-                      disabled={saving}
-                    />
-                  </label>
-                </div>
-              </div>
-            ) : null}
-
-            {selectedKey === "auth" ? (
-              <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">登录模式</span>
-                    <Select
-                      value={authDraft.loginMode}
-                      onValueChange={(value) => {
-                        setAuthDraft((previous) => ({
-                          ...previous,
-                          loginMode: value as AuthLoginMode
-                        }));
-                        markDirty("auth");
-                      }}
-                      disabled={saving}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {AUTH_LOGIN_MODE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">默认 Provider ID</span>
-                    <Input
-                      value={authDraft.defaultProviderId}
-                      onChange={(event) => {
-                        setAuthDraft((previous) => ({
-                          ...previous,
-                          defaultProviderId: parseString(event.target.value, previous.defaultProviderId)
-                        }));
-                        markDirty("auth");
-                      }}
-                      disabled={saving}
-                    />
-                  </label>
-                  <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
-                    <Checkbox
-                      checked={authDraft.allowUserRegister}
-                      onCheckedChange={(checked) => {
-                        setAuthDraft((previous) => ({
-                          ...previous,
-                          allowUserRegister: checked === true
-                        }));
-                        markDirty("auth");
-                      }}
-                      disabled={saving}
-                    />
-                    <div className="space-y-0.5">
-                      <span className="text-sm font-medium text-slate-700">允许用户注册</span>
-                      <p className="text-xs text-slate-500">`ldap_only` 场景建议关闭。</p>
-                    </div>
-                  </label>
-                  <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
-                    <Checkbox
-                      checked={authDraft.breakGlass.enabled}
-                      onCheckedChange={(checked) => {
-                        setAuthDraft((previous) => ({
-                          ...previous,
-                          breakGlass: {
-                            ...previous.breakGlass,
-                            enabled: checked === true
-                          }
-                        }));
-                        markDirty("auth");
-                      }}
-                      disabled={saving}
-                    />
-                    <div className="space-y-0.5">
-                      <span className="text-sm font-medium text-slate-700">启用 break-glass</span>
-                      <p className="text-xs text-slate-500">保留本地管理员应急登录能力。</p>
-                    </div>
-                  </label>
-                  <label className="space-y-1.5 sm:col-span-2">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">
-                      break-glass 本地管理员邮箱（逗号分隔）
-                    </span>
-                    <Input
-                      value={authDraft.breakGlass.localAdminEmails.join(",")}
-                      onChange={(event) => {
-                        const emails = event.target.value
-                          .split(",")
-                          .map((item) => item.trim())
-                          .filter((item) => item.length > 0);
-                        setAuthDraft((previous) => ({
-                          ...previous,
-                          breakGlass: {
-                            ...previous.breakGlass,
-                            localAdminEmails: emails
-                          }
-                        }));
-                        markDirty("auth");
-                      }}
-                      disabled={saving}
-                    />
-                  </label>
-                </div>
-
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">LDAP Provider</span>
-                      <Select
-                        value={selectedAuthProvider?.id ?? ""}
-                        onValueChange={(value) => setSelectedAuthProviderID(value)}
-                        disabled={saving || authDraft.providers.length === 0}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择 Provider" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {authDraft.providers.map((provider) => (
-                            <SelectItem key={provider.id} value={provider.id}>
-                              {provider.name}（{provider.id}）
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </label>
-                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-white px-3 py-3">
-                      <Checkbox
-                        checked={selectedAuthProvider?.enabled ?? false}
-                        onCheckedChange={(checked) => {
-                          if (!selectedAuthProvider) {
-                            return;
-                          }
-                          updateSelectedAuthProvider((provider) => ({
-                            ...provider,
-                            enabled: checked === true
-                          }));
-                        }}
-                        disabled={saving || !selectedAuthProvider}
-                      />
-                      <span className="text-sm font-medium text-slate-700">启用当前 Provider</span>
-                    </label>
-                  </div>
-
-                  {selectedAuthProvider ? (
-                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Provider ID</span>
-                        <Input
-                          value={selectedAuthProvider.id}
-                          onChange={(event) => {
-                            const nextProviderID = parseString(event.target.value, selectedAuthProvider.id);
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              id: nextProviderID
+                {selectedKey === "site" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                        <Checkbox
+                          checked={siteDraft.allowRegistration}
+                          onCheckedChange={(checked) => {
+                            setSiteDraft((previous) => ({
+                              ...previous,
+                              allowRegistration: checked === true
                             }));
-                            setSelectedAuthProviderID(nextProviderID);
+                            markDirty("site");
                           }}
                           disabled={saving}
                         />
+                        <div className="space-y-0.5">
+                          <span className="text-sm font-medium text-slate-700">允许新用户注册</span>
+                          <p className="text-xs text-slate-500">关闭后，前台注册接口会拒绝请求。</p>
+                        </div>
                       </label>
                       <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Provider 名称</span>
-                        <Input
-                          value={selectedAuthProvider.name}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              name: parseString(event.target.value, provider.name)
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">优先级</span>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={10000}
-                          value={String(selectedAuthProvider.priority)}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              priority: normalizeIntegerInput(event.target.value, provider.priority)
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">匹配邮箱域名（逗号分隔）</span>
-                        <Input
-                          value={selectedAuthProvider.matchRules.emailDomains.join(",")}
-                          onChange={(event) => {
-                            const emailDomains = event.target.value
-                              .split(",")
-                              .map((item) => item.trim())
-                              .filter((item) => item.length > 0);
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              matchRules: {
-                                ...provider.matchRules,
-                                emailDomains
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5 sm:col-span-2">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">用户名匹配正则</span>
-                        <Input
-                          value={selectedAuthProvider.matchRules.usernameRegex}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              matchRules: {
-                                ...provider.matchRules,
-                                usernameRegex: parseString(event.target.value, provider.matchRules.usernameRegex)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Host</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.host}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                host: parseString(event.target.value, provider.ldap.host)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Port</span>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={65535}
-                          value={String(selectedAuthProvider.ldap.port)}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                port: normalizeIntegerInput(event.target.value, provider.ldap.port)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">TLS 模式</span>
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">默认空间可见性</span>
                         <Select
-                          value={selectedAuthProvider.ldap.tlsMode}
+                          value={siteDraft.defaultSpaceVisibility}
                           onValueChange={(value) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                tlsMode: value === "starttls" ? "starttls" : "ldaps"
-                              }
+                            setSiteDraft((previous) => ({
+                              ...previous,
+                              defaultSpaceVisibility: value as SpaceVisibility
                             }));
+                            markDirty("site");
                           }}
                           disabled={saving}
                         >
@@ -1268,432 +971,952 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="ldaps">LDAPS</SelectItem>
-                            <SelectItem value="starttls">StartTLS</SelectItem>
+                            {SPACE_VISIBILITY_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "editor" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Base DN</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.baseDN}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                baseDN: parseString(event.target.value, provider.ldap.baseDN)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Bind DN</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.bindDN}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                bindDN: event.target.value.trim()
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Bind Password</span>
-                        <Input
-                          type="password"
-                          value={selectedAuthProvider.ldap.bindPasswordCiphertext}
-                          placeholder={AUTH_SECRET_MASK}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                bindPasswordCiphertext: event.target.value.trim()
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5 sm:col-span-2">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">User Filter</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.userFilter}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                userFilter: parseString(event.target.value, provider.ldap.userFilter)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">ID 属性</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.idAttribute}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                idAttribute: parseString(event.target.value, provider.ldap.idAttribute)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Email 属性</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.emailAttribute}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                emailAttribute: parseString(event.target.value, provider.ldap.emailAttribute)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Name 属性</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.nameAttribute}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                nameAttribute: parseString(event.target.value, provider.ldap.nameAttribute)
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">Group 属性</span>
-                        <Input
-                          value={selectedAuthProvider.ldap.groupAttribute}
-                          onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                groupAttribute: event.target.value.trim()
-                              }
-                            }));
-                          }}
-                          disabled={saving}
-                        />
-                      </label>
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">连接超时（ms）</span>
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">自动保存间隔（秒）</span>
                         <Input
                           type="number"
-                          min={100}
-                          max={30000}
-                          value={String(selectedAuthProvider.ldap.connectTimeoutMs)}
+                          min={5}
+                          max={600}
+                          value={String(editorDraft.autosaveIntervalSeconds)}
                           onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                connectTimeoutMs: normalizeIntegerInput(event.target.value, provider.ldap.connectTimeoutMs)
-                              }
+                            setEditorDraft((previous) => ({
+                              ...previous,
+                              autosaveIntervalSeconds: normalizeIntegerInput(
+                                event.target.value,
+                                previous.autosaveIntervalSeconds
+                              )
                             }));
+                            markDirty("editor");
                           }}
                           disabled={saving}
                         />
                       </label>
                       <label className="space-y-1.5">
-                        <span className="text-xs font-semibold tracking-wide text-slate-600">读取超时（ms）</span>
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">文档最大体积（KB）</span>
                         <Input
                           type="number"
-                          min={100}
-                          max={30000}
-                          value={String(selectedAuthProvider.ldap.readTimeoutMs)}
+                          min={64}
+                          max={4096}
+                          value={String(editorDraft.maxDocumentSizeKB)}
                           onChange={(event) => {
-                            updateSelectedAuthProvider((provider) => ({
-                              ...provider,
-                              ldap: {
-                                ...provider.ldap,
-                                readTimeoutMs: normalizeIntegerInput(event.target.value, provider.ldap.readTimeoutMs)
-                              }
+                            setEditorDraft((previous) => ({
+                              ...previous,
+                              maxDocumentSizeKB: normalizeIntegerInput(event.target.value, previous.maxDocumentSizeKB)
                             }));
+                            markDirty("editor");
                           }}
                           disabled={saving}
                         />
                       </label>
                     </div>
-                  ) : (
-                    <p className="mt-3 text-sm text-slate-500">当前没有可编辑的 LDAP Provider，请先在配置中补充 providers。</p>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {selectedKey === "sitemap" ? (
-              <div className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1.5 sm:col-span-2">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">生成规则</span>
-                    <Select
-                      value={sitemapDraft.generationMode}
-                      onValueChange={(value) => {
-                        setSitemapDraft((previous) => ({
-                          ...previous,
-                          generationMode: value as SitemapGenerationMode
-                        }));
-                        markDirty("sitemap");
-                      }}
-                      disabled={saving}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SITEMAP_GENERATION_MODE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-slate-500">
-                      {
-                        SITEMAP_GENERATION_MODE_OPTIONS.find((option) => option.value === sitemapDraft.generationMode)
-                          ?.description
-                      }
-                    </p>
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">最多纳入最近更新天数</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={3650}
-                      value={String(sitemapDraft.maxUpdatedWithinDays)}
-                      onChange={(event) => {
-                        setSitemapDraft((previous) => ({
-                          ...previous,
-                          maxUpdatedWithinDays: normalizeIntegerInput(event.target.value, previous.maxUpdatedWithinDays)
-                        }));
-                        markDirty("sitemap");
-                      }}
-                      disabled={saving}
-                    />
-                    <p className="text-xs text-slate-500">仅在“最近更新文档”规则下生效，范围 1-3650。</p>
-                  </label>
-                </div>
-              </div>
-            ) : null}
-
-            {selectedKey === "image-hosting" ? (
-              <div className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">默认图床</span>
-                    <Select
-                      value={imageHostingDraft.defaultProvider}
-                      onValueChange={(value) => {
-                        setImageHostingDraft((previousConfig) => ({
-                          ...previousConfig,
-                          defaultProvider: value as ImageHostingProvider
-                        }));
-                        markDirty("image-hosting");
-                      }}
-                      disabled={saving}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {IMAGE_HOSTING_PROVIDER_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                    当前默认图床：{
-                      IMAGE_HOSTING_PROVIDER_OPTIONS.find((option) => option.value === imageHostingDraft.defaultProvider)
-                        ?.label
-                    }
                   </div>
-                </div>
+                ) : null}
 
-                <Tabs
-                  className="mt-4"
-                  value={imageHostingProviderTab}
-                  onValueChange={(value) => setImageHostingProviderTab(value as ImageHostingProvider)}
-                >
-                  <p className="mb-2 text-xs font-semibold tracking-wide text-slate-600">图床配置项</p>
-                  <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto border-0 bg-transparent p-0">
-                    {IMAGE_HOSTING_PROVIDER_OPTIONS.map((option) => (
-                      <TabsTrigger
-                        key={option.value}
-                        value={option.value}
-                        disabled={saving}
-                        className="rounded-md border border-slate-200 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm hover:bg-slate-50 data-[state=active]:border-sky-300 data-[state=active]:bg-sky-50 data-[state=active]:text-sky-700"
-                      >
-                        {option.label}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
+                {selectedKey === "security" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Access Token 时长（分钟）</span>
+                        <Input
+                          type="number"
+                          min={5}
+                          max={1440}
+                          value={String(securityDraft.accessTokenTTLMinutes)}
+                          onChange={(event) => {
+                            setSecurityDraft((previous) => ({
+                              ...previous,
+                              accessTokenTTLMinutes: normalizeIntegerInput(
+                                event.target.value,
+                                previous.accessTokenTTLMinutes
+                              )
+                            }));
+                            markDirty("security");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Refresh Token 时长（分钟）</span>
+                        <Input
+                          type="number"
+                          min={60}
+                          max={43200}
+                          value={String(securityDraft.refreshTokenTTLMinutes)}
+                          onChange={(event) => {
+                            setSecurityDraft((previous) => ({
+                              ...previous,
+                              refreshTokenTTLMinutes: normalizeIntegerInput(
+                                event.target.value,
+                                previous.refreshTokenTTLMinutes
+                              )
+                            }));
+                            markDirty("security");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
 
-                  <TabsContent value="local" className="grid gap-4 sm:grid-cols-2">
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">上传接口地址</span>
-                      <Input
-                        placeholder="/api/uploads/images"
-                        value={imageHostingDraft.local.uploadEndpoint}
-                        onChange={(event) => setLocalField("uploadEndpoint", event.target.value)}
+                {selectedKey === "data-retention" ? (
+                  <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <Checkbox
+                        checked={dataRetentionDraft.enabled}
+                        onCheckedChange={(checked) => {
+                          setDataRetentionDraft((previous) => ({
+                            ...previous,
+                            enabled: checked === true
+                          }));
+                          markDirty("data-retention");
+                        }}
                         disabled={saving}
                       />
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium text-slate-700">启用自动清理</span>
+                        <p className="text-xs text-slate-500">关闭后不执行任何自动删除，历史数据将持续累积。</p>
+                      </div>
                     </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问前缀</span>
-                      <Input
-                        placeholder="/uploads"
-                        value={imageHostingDraft.local.publicBaseUrl}
-                        onChange={(event) => setLocalField("publicBaseUrl", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                  </TabsContent>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">执行间隔（分钟）</span>
+                        <Input
+                          type="number"
+                          min={5}
+                          max={1440}
+                          value={String(dataRetentionDraft.scheduleMinutes)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              scheduleMinutes: normalizeIntegerInput(event.target.value, previous.scheduleMinutes)
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">单轮批次大小</span>
+                        <Input
+                          type="number"
+                          min={100}
+                          max={20000}
+                          value={String(dataRetentionDraft.cleanupBatchSize)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              cleanupBatchSize: normalizeIntegerInput(event.target.value, previous.cleanupBatchSize)
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">审计日志保留天数</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={3650}
+                          value={String(dataRetentionDraft.auditLogRetentionDays)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              auditLogRetentionDays: normalizeIntegerInput(event.target.value, previous.auditLogRetentionDays)
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">验证码会话保留小时</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={8760}
+                          value={String(dataRetentionDraft.authCaptchaRetentionHours)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              authCaptchaRetentionHours: normalizeIntegerInput(
+                                event.target.value,
+                                previous.authCaptchaRetentionHours
+                              )
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">风控状态保留天数</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={3650}
+                          value={String(dataRetentionDraft.authRiskStateRetentionDays)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              authRiskStateRetentionDays: normalizeIntegerInput(
+                                event.target.value,
+                                previous.authRiskStateRetentionDays
+                              )
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">会话保留天数</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={3650}
+                          value={String(dataRetentionDraft.userSessionRetentionDays)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              userSessionRetentionDays: normalizeIntegerInput(
+                                event.target.value,
+                                previous.userSessionRetentionDays
+                              )
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                    </div>
+                    <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      清理范围：`audit_logs`、`auth_captcha_challenges`、`auth_risk_states`、`user_sessions`。
+                    </p>
+                  </div>
+                ) : null}
 
-                  <TabsContent value="cloudflare-r2" className="grid gap-4 sm:grid-cols-2">
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Account ID</span>
-                      <Input
-                        placeholder="4d2a1c..."
-                        value={imageHostingDraft.cloudflareR2.accountId}
-                        onChange={(event) => setCloudflareField("accountId", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Bucket</span>
-                      <Input
-                        placeholder="plaindoc-assets"
-                        value={imageHostingDraft.cloudflareR2.bucket}
-                        onChange={(event) => setCloudflareField("bucket", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Access Key ID</span>
-                      <Input
-                        placeholder="R2XXXX..."
-                        value={imageHostingDraft.cloudflareR2.accessKeyId}
-                        onChange={(event) => setCloudflareField("accessKeyId", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Secret Access Key</span>
-                      <Input
-                        type="password"
-                        placeholder="输入 Secret Access Key"
-                        value={imageHostingDraft.cloudflareR2.secretAccessKey}
-                        onChange={(event) => setCloudflareField("secretAccessKey", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5 sm:col-span-2">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问域名</span>
-                      <Input
-                        placeholder="https://img.example.com"
-                        value={imageHostingDraft.cloudflareR2.publicBaseUrl}
-                        onChange={(event) => setCloudflareField("publicBaseUrl", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                  </TabsContent>
+                {selectedKey === "auth" ? (
+                  <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">登录模式</span>
+                        <Select
+                          value={authDraft.loginMode}
+                          onValueChange={(value) => {
+                            setAuthDraft((previous) => ({
+                              ...previous,
+                              loginMode: value as AuthLoginMode
+                            }));
+                            markDirty("auth");
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {AUTH_LOGIN_MODE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">默认 Provider ID</span>
+                        <Input
+                          value={authDraft.defaultProviderId}
+                          onChange={(event) => {
+                            setAuthDraft((previous) => ({
+                              ...previous,
+                              defaultProviderId: parseString(event.target.value, previous.defaultProviderId)
+                            }));
+                            markDirty("auth");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                        <Checkbox
+                          checked={authDraft.allowUserRegister}
+                          onCheckedChange={(checked) => {
+                            setAuthDraft((previous) => ({
+                              ...previous,
+                              allowUserRegister: checked === true
+                            }));
+                            markDirty("auth");
+                          }}
+                          disabled={saving}
+                        />
+                        <div className="space-y-0.5">
+                          <span className="text-sm font-medium text-slate-700">允许用户注册</span>
+                          <p className="text-xs text-slate-500">`ldap_only` 场景建议关闭。</p>
+                        </div>
+                      </label>
+                      <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                        <Checkbox
+                          checked={authDraft.breakGlass.enabled}
+                          onCheckedChange={(checked) => {
+                            setAuthDraft((previous) => ({
+                              ...previous,
+                              breakGlass: {
+                                ...previous.breakGlass,
+                                enabled: checked === true
+                              }
+                            }));
+                            markDirty("auth");
+                          }}
+                          disabled={saving}
+                        />
+                        <div className="space-y-0.5">
+                          <span className="text-sm font-medium text-slate-700">启用 break-glass</span>
+                          <p className="text-xs text-slate-500">保留本地管理员应急登录能力。</p>
+                        </div>
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">
+                          break-glass 本地管理员邮箱（逗号分隔）
+                        </span>
+                        <Input
+                          value={authDraft.breakGlass.localAdminEmails.join(",")}
+                          onChange={(event) => {
+                            const emails = event.target.value
+                              .split(",")
+                              .map((item) => item.trim())
+                              .filter((item) => item.length > 0);
+                            setAuthDraft((previous) => ({
+                              ...previous,
+                              breakGlass: {
+                                ...previous.breakGlass,
+                                localAdminEmails: emails
+                              }
+                            }));
+                            markDirty("auth");
+                          }}
+                          disabled={saving}
+                        />
+                      </label>
+                    </div>
 
-                  <TabsContent value="aliyun-oss" className="grid gap-4 sm:grid-cols-2">
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Region（可选）</span>
-                      <Input
-                        placeholder="oss-cn-hangzhou"
-                        value={imageHostingDraft.aliyunOss.region}
-                        onChange={(event) => setAliyunField("region", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Bucket</span>
-                      <Input
-                        placeholder="plaindoc-assets"
-                        value={imageHostingDraft.aliyunOss.bucket}
-                        onChange={(event) => setAliyunField("bucket", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Endpoint（可选）</span>
-                      <Input
-                        placeholder="https://oss-cn-hangzhou.aliyuncs.com"
-                        value={imageHostingDraft.aliyunOss.endpoint}
-                        onChange={(event) => setAliyunField("endpoint", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Access Key ID</span>
-                      <Input
-                        placeholder="LTAI..."
-                        value={imageHostingDraft.aliyunOss.accessKeyId}
-                        onChange={(event) => setAliyunField("accessKeyId", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">Access Key Secret</span>
-                      <Input
-                        type="password"
-                        placeholder="输入 Access Key Secret"
-                        value={imageHostingDraft.aliyunOss.accessKeySecret}
-                        onChange={(event) => setAliyunField("accessKeySecret", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                    <label className="space-y-1.5 sm:col-span-2">
-                      <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问域名</span>
-                      <Input
-                        placeholder="https://img.example.com"
-                        value={imageHostingDraft.aliyunOss.publicBaseUrl}
-                        onChange={(event) => setAliyunField("publicBaseUrl", event.target.value)}
-                        disabled={saving}
-                      />
-                    </label>
-                  </TabsContent>
-                </Tabs>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">LDAP Provider</span>
+                          <Select
+                            value={selectedAuthProvider?.id ?? ""}
+                            onValueChange={(value) => setSelectedAuthProviderID(value)}
+                            disabled={saving || authDraft.providers.length === 0}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择 Provider" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {authDraft.providers.map((provider) => (
+                                <SelectItem key={provider.id} value={provider.id}>
+                                  {provider.name}（{provider.id}）
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </label>
+                        <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-white px-3 py-3">
+                          <Checkbox
+                            checked={selectedAuthProvider?.enabled ?? false}
+                            onCheckedChange={(checked) => {
+                              if (!selectedAuthProvider) {
+                                return;
+                              }
+                              updateSelectedAuthProvider((provider) => ({
+                                ...provider,
+                                enabled: checked === true
+                              }));
+                            }}
+                            disabled={saving || !selectedAuthProvider}
+                          />
+                          <span className="text-sm font-medium text-slate-700">启用当前 Provider</span>
+                        </label>
+                      </div>
+
+                      {selectedAuthProvider ? (
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Provider ID</span>
+                            <Input
+                              value={selectedAuthProvider.id}
+                              onChange={(event) => {
+                                const nextProviderID = parseString(event.target.value, selectedAuthProvider.id);
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  id: nextProviderID
+                                }));
+                                setSelectedAuthProviderID(nextProviderID);
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Provider 名称</span>
+                            <Input
+                              value={selectedAuthProvider.name}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  name: parseString(event.target.value, provider.name)
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">优先级</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={10000}
+                              value={String(selectedAuthProvider.priority)}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  priority: normalizeIntegerInput(event.target.value, provider.priority)
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">匹配邮箱域名（逗号分隔）</span>
+                            <Input
+                              value={selectedAuthProvider.matchRules.emailDomains.join(",")}
+                              onChange={(event) => {
+                                const emailDomains = event.target.value
+                                  .split(",")
+                                  .map((item) => item.trim())
+                                  .filter((item) => item.length > 0);
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  matchRules: {
+                                    ...provider.matchRules,
+                                    emailDomains
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5 sm:col-span-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">用户名匹配正则</span>
+                            <Input
+                              value={selectedAuthProvider.matchRules.usernameRegex}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  matchRules: {
+                                    ...provider.matchRules,
+                                    usernameRegex: parseString(event.target.value, provider.matchRules.usernameRegex)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Host</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.host}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    host: parseString(event.target.value, provider.ldap.host)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Port</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={65535}
+                              value={String(selectedAuthProvider.ldap.port)}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    port: normalizeIntegerInput(event.target.value, provider.ldap.port)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">TLS 模式</span>
+                            <Select
+                              value={selectedAuthProvider.ldap.tlsMode}
+                              onValueChange={(value) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    tlsMode: value === "starttls" ? "starttls" : "ldaps"
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="ldaps">LDAPS</SelectItem>
+                                <SelectItem value="starttls">StartTLS</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Base DN</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.baseDN}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    baseDN: parseString(event.target.value, provider.ldap.baseDN)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Bind DN</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.bindDN}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    bindDN: event.target.value.trim()
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Bind Password</span>
+                            <Input
+                              type="password"
+                              value={selectedAuthProvider.ldap.bindPasswordCiphertext}
+                              placeholder={AUTH_SECRET_MASK}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    bindPasswordCiphertext: event.target.value.trim()
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5 sm:col-span-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">User Filter</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.userFilter}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    userFilter: parseString(event.target.value, provider.ldap.userFilter)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">ID 属性</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.idAttribute}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    idAttribute: parseString(event.target.value, provider.ldap.idAttribute)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Email 属性</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.emailAttribute}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    emailAttribute: parseString(event.target.value, provider.ldap.emailAttribute)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Name 属性</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.nameAttribute}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    nameAttribute: parseString(event.target.value, provider.ldap.nameAttribute)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">Group 属性</span>
+                            <Input
+                              value={selectedAuthProvider.ldap.groupAttribute}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    groupAttribute: event.target.value.trim()
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">连接超时（ms）</span>
+                            <Input
+                              type="number"
+                              min={100}
+                              max={30000}
+                              value={String(selectedAuthProvider.ldap.connectTimeoutMs)}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    connectTimeoutMs: normalizeIntegerInput(event.target.value, provider.ldap.connectTimeoutMs)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">读取超时（ms）</span>
+                            <Input
+                              type="number"
+                              min={100}
+                              max={30000}
+                              value={String(selectedAuthProvider.ldap.readTimeoutMs)}
+                              onChange={(event) => {
+                                updateSelectedAuthProvider((provider) => ({
+                                  ...provider,
+                                  ldap: {
+                                    ...provider.ldap,
+                                    readTimeoutMs: normalizeIntegerInput(event.target.value, provider.ldap.readTimeoutMs)
+                                  }
+                                }));
+                              }}
+                              disabled={saving}
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-500">当前没有可编辑的 LDAP Provider，请先在配置中补充 providers。</p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "sitemap" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">生成规则</span>
+                        <Select
+                          value={sitemapDraft.generationMode}
+                          onValueChange={(value) => {
+                            setSitemapDraft((previous) => ({
+                              ...previous,
+                              generationMode: value as SitemapGenerationMode
+                            }));
+                            markDirty("sitemap");
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SITEMAP_GENERATION_MODE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-slate-500">
+                          {
+                            SITEMAP_GENERATION_MODE_OPTIONS.find((option) => option.value === sitemapDraft.generationMode)
+                              ?.description
+                          }
+                        </p>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">最多纳入最近更新天数</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={3650}
+                          value={String(sitemapDraft.maxUpdatedWithinDays)}
+                          onChange={(event) => {
+                            setSitemapDraft((previous) => ({
+                              ...previous,
+                              maxUpdatedWithinDays: normalizeIntegerInput(event.target.value, previous.maxUpdatedWithinDays)
+                            }));
+                            markDirty("sitemap");
+                          }}
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">仅在“最近更新文档”规则下生效，范围 1-3650。</p>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "image-hosting" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">默认图床</span>
+                        <Select
+                          value={imageHostingDraft.defaultProvider}
+                          onValueChange={(value) => {
+                            setImageHostingDraft((previousConfig) => ({
+                              ...previousConfig,
+                              defaultProvider: value as ImageHostingProvider
+                            }));
+                            markDirty("image-hosting");
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {IMAGE_HOSTING_PROVIDER_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </label>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                        当前默认图床：{
+                          IMAGE_HOSTING_PROVIDER_OPTIONS.find((option) => option.value === imageHostingDraft.defaultProvider)
+                            ?.label
+                        }
+                      </div>
+                    </div>
+
+                    <Tabs
+                      className="mt-4"
+                      value={imageHostingProviderTab}
+                      onValueChange={(value) => setImageHostingProviderTab(value as ImageHostingProvider)}
+                    >
+                      <p className="mb-2 text-xs font-semibold tracking-wide text-slate-600">图床配置项</p>
+                      <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto border-0 bg-transparent p-0">
+                        {IMAGE_HOSTING_PROVIDER_OPTIONS.map((option) => (
+                          <TabsTrigger
+                            key={option.value}
+                            value={option.value}
+                            disabled={saving}
+                            className="rounded-md border border-slate-200 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm hover:bg-slate-50 data-[state=active]:border-sky-300 data-[state=active]:bg-sky-50 data-[state=active]:text-sky-700"
+                          >
+                            {option.label}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+
+                      <TabsContent value="local" className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传接口地址</span>
+                          <Input
+                            placeholder="/api/uploads/images"
+                            value={imageHostingDraft.local.uploadEndpoint}
+                            onChange={(event) => setLocalField("uploadEndpoint", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问前缀</span>
+                          <Input
+                            placeholder="/uploads"
+                            value={imageHostingDraft.local.publicBaseUrl}
+                            onChange={(event) => setLocalField("publicBaseUrl", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                      </TabsContent>
+
+                      <TabsContent value="cloudflare-r2" className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Account ID</span>
+                          <Input
+                            placeholder="4d2a1c..."
+                            value={imageHostingDraft.cloudflareR2.accountId}
+                            onChange={(event) => setCloudflareField("accountId", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Bucket</span>
+                          <Input
+                            placeholder="plaindoc-assets"
+                            value={imageHostingDraft.cloudflareR2.bucket}
+                            onChange={(event) => setCloudflareField("bucket", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Access Key ID</span>
+                          <Input
+                            placeholder="R2XXXX..."
+                            value={imageHostingDraft.cloudflareR2.accessKeyId}
+                            onChange={(event) => setCloudflareField("accessKeyId", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Secret Access Key</span>
+                          <Input
+                            type="password"
+                            placeholder="输入 Secret Access Key"
+                            value={imageHostingDraft.cloudflareR2.secretAccessKey}
+                            onChange={(event) => setCloudflareField("secretAccessKey", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问域名</span>
+                          <Input
+                            placeholder="https://img.example.com"
+                            value={imageHostingDraft.cloudflareR2.publicBaseUrl}
+                            onChange={(event) => setCloudflareField("publicBaseUrl", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                      </TabsContent>
+
+                      <TabsContent value="aliyun-oss" className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Region（可选）</span>
+                          <Input
+                            placeholder="oss-cn-hangzhou"
+                            value={imageHostingDraft.aliyunOss.region}
+                            onChange={(event) => setAliyunField("region", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Bucket</span>
+                          <Input
+                            placeholder="plaindoc-assets"
+                            value={imageHostingDraft.aliyunOss.bucket}
+                            onChange={(event) => setAliyunField("bucket", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Endpoint（可选）</span>
+                          <Input
+                            placeholder="https://oss-cn-hangzhou.aliyuncs.com"
+                            value={imageHostingDraft.aliyunOss.endpoint}
+                            onChange={(event) => setAliyunField("endpoint", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Access Key ID</span>
+                          <Input
+                            placeholder="LTAI..."
+                            value={imageHostingDraft.aliyunOss.accessKeyId}
+                            onChange={(event) => setAliyunField("accessKeyId", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">Access Key Secret</span>
+                          <Input
+                            type="password"
+                            placeholder="输入 Access Key Secret"
+                            value={imageHostingDraft.aliyunOss.accessKeySecret}
+                            onChange={(event) => setAliyunField("accessKeySecret", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">公网访问域名</span>
+                          <Input
+                            placeholder="https://img.example.com"
+                            value={imageHostingDraft.aliyunOss.publicBaseUrl}
+                            onChange={(event) => setAliyunField("publicBaseUrl", event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                      </TabsContent>
+                    </Tabs>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-            </div>
-          </main>
+            </main>
+          </div>
         </div>
-      </div>
       </AdminPageCard>
     </section>
   );

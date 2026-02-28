@@ -2076,6 +2076,73 @@ func TestRouter_AdminSystemConfig_SitemapConfigValidation(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSystemConfig_DataRetentionConfigValidation(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-data-retention-platform-admin@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	validReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/admin/system-configs/data-retention",
+		bytes.NewReader([]byte(`{"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":180,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30}}`)),
+	)
+	validReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	validReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		validReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"data-retention",
+	)
+	validRec := serve(validReq)
+	if validRec.Code != http.StatusOK {
+		t.Fatalf("expected upsert data-retention config status 200, got %d body=%s", validRec.Code, validRec.Body.String())
+	}
+	validPayload := decodeJSONResultData[struct {
+		ConfigKey string `json:"configKey"`
+		Version   int    `json:"version"`
+	}](t, validRec.Body.Bytes())
+	if validPayload.ConfigKey != "data-retention" || validPayload.Version != 1 {
+		t.Fatalf("unexpected data-retention config payload: %+v", validPayload)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/admin/system-configs/data-retention",
+		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":0,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30}}`)),
+	)
+	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		invalidReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"data-retention",
+	)
+	invalidRec := serve(invalidReq)
+	if invalidRec.Code != http.StatusOK {
+		t.Fatalf("expected invalid data-retention config status 400, got %d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidConfigValue) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeInvalidConfigValue),
+			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
+			invalidRec.Body.String(),
+		)
+	}
+}
+
 func TestRouter_AdminSystemConfig_AuthConfigValidationAndSecretMasking(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

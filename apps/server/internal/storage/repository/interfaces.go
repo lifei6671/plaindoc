@@ -100,7 +100,7 @@ type AuthRiskStateRepository interface {
 	Update(ctx context.Context, state *models.AuthRiskState) error
 }
 
-// AuthCaptchaChallengeRepository 认证验证码挑战仓储接口。
+// AuthCaptchaChallengeRepository 认证验证码会话仓储接口。
 type AuthCaptchaChallengeRepository interface {
 	GetByCaptchaID(ctx context.Context, captchaID string) (*models.AuthCaptchaChallenge, error)
 	Create(ctx context.Context, challenge *models.AuthCaptchaChallenge) error

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,9 +19,11 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server"
+	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/pool"
 	"github.com/lifei6671/plaindoc/apps/server/internal/ssr/worker"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 )
 
 func main() {
@@ -108,6 +111,12 @@ func main() {
 		}
 		logger.Info("database migrations applied")
 	}
+
+	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
+	dataRetentionCleanupService := service.NewDataRetentionCleanupService(database.ORM, systemConfigRepo)
+	dataRetentionCleanupCtx, cancelDataRetentionCleanup := context.WithCancel(context.Background())
+	defer cancelDataRetentionCleanup()
+	go runDataRetentionCleanupLoop(dataRetentionCleanupCtx, logger, dataRetentionCleanupService)
 
 	router := server.NewRouterWithSSR(cfg, logger, database.ORM, ssrDispatcher)
 	httpServer := &http.Server{
@@ -280,4 +289,60 @@ func parseDotEnvValue(value string) (string, error) {
 		return unquoted, nil
 	}
 	return trimmed, nil
+}
+
+func runDataRetentionCleanupLoop(
+	ctx context.Context,
+	logger *slog.Logger,
+	cleanupService *service.DataRetentionCleanupService,
+) {
+	if cleanupService == nil {
+		return
+	}
+
+	nextInterval := cleanupService.ResolveNextRunInterval(ctx)
+	if nextInterval <= 0 {
+		nextInterval = 60 * time.Minute
+	}
+
+	for {
+		result, err := cleanupService.RunOnce(ctx)
+		if err != nil {
+			nextInterval = service.ResolveCleanupRetryInterval()
+			if logger != nil {
+				logger.Error(
+					"data retention cleanup failed",
+					logit.Error("error", err),
+					slog.Duration("next_run_in", nextInterval),
+				)
+			}
+		} else {
+			nextInterval = cleanupService.ResolveNextRunInterval(ctx)
+			if nextInterval <= 0 {
+				nextInterval = 60 * time.Minute
+			}
+			if logger != nil {
+				logger.Info(
+					"data retention cleanup finished",
+					slog.Bool("enabled", result.Policy.Enabled),
+					slog.Int("schedule_minutes", result.Policy.ScheduleMinutes),
+					slog.Int("cleanup_batch_size", result.Policy.CleanupBatchSize),
+					slog.Int64("deleted_audit_logs", result.DeletedAuditLogs),
+					slog.Int64("deleted_auth_captcha_challenges", result.DeletedAuthCaptchaChallenges),
+					slog.Int64("deleted_auth_risk_states", result.DeletedAuthRiskStates),
+					slog.Int64("deleted_user_sessions", result.DeletedUserSessions),
+					slog.Duration("duration", result.FinishedAt.Sub(result.StartedAt)),
+					slog.Duration("next_run_in", nextInterval),
+				)
+			}
+		}
+
+		waitTimer := time.NewTimer(nextInterval)
+		select {
+		case <-ctx.Done():
+			waitTimer.Stop()
+			return
+		case <-waitTimer.C:
+		}
+	}
 }

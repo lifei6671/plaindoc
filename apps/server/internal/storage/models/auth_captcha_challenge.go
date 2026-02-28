@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// AuthCaptchaChallenge 对应 auth_captcha_challenges 表，记录验证码挑战与消费状态。
+// AuthCaptchaChallenge 对应 auth_captcha_challenges 表，记录验证码生成基本信息与验证状态。
 type AuthCaptchaChallenge struct {
 	ID                int64      `gorm:"column:id;primaryKey;autoIncrement"`
 	CaptchaID         string     `gorm:"column:captcha_id"`

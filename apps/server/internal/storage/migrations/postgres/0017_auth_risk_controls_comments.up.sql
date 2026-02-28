@@ -11,9 +11,9 @@ COMMENT ON COLUMN auth_risk_states.lock_until IS '临时封禁截止时间；为
 COMMENT ON COLUMN auth_risk_states.created_at IS '记录创建时间';
 COMMENT ON COLUMN auth_risk_states.updated_at IS '记录更新时间';
 
-COMMENT ON TABLE auth_captcha_challenges IS '认证验证码挑战表：记录验证码题目、有效期和一次性消费状态';
+COMMENT ON TABLE auth_captcha_challenges IS '认证验证码会话表：记录验证码题目、有效期和一次性消费状态';
 COMMENT ON COLUMN auth_captcha_challenges.id IS '主键ID';
-COMMENT ON COLUMN auth_captcha_challenges.captcha_id IS '验证码挑战ID（回传前端）';
+COMMENT ON COLUMN auth_captcha_challenges.captcha_id IS '验证码会话ID（回传前端）';
 COMMENT ON COLUMN auth_captcha_challenges.scene IS '验证码适用场景：login/register';
 COMMENT ON COLUMN auth_captcha_challenges.subject_hash IS '风险主体哈希值（HMAC-SHA256）';
 COMMENT ON COLUMN auth_captcha_challenges.level IS '验证码字符数量（位数），例如 4/5/6';
@@ -22,6 +22,6 @@ COMMENT ON COLUMN auth_captcha_challenges.answer_salt IS '验证码答案哈希�
 COMMENT ON COLUMN auth_captcha_challenges.issued_ip_hash IS '发放验证码时的请求IP哈希值';
 COMMENT ON COLUMN auth_captcha_challenges.expires_at IS '验证码过期时间';
 COMMENT ON COLUMN auth_captcha_challenges.consumed_at IS '验证码消费时间；为空表示未消费';
-COMMENT ON COLUMN auth_captcha_challenges.failed_verify_count IS '该挑战下验证码校验失败次数';
+COMMENT ON COLUMN auth_captcha_challenges.failed_verify_count IS '该会话下验证码校验失败次数';
 COMMENT ON COLUMN auth_captcha_challenges.created_at IS '记录创建时间';
 COMMENT ON COLUMN auth_captcha_challenges.updated_at IS '记录更新时间';

@@ -240,7 +240,7 @@ func newRouter(
 		api.POST("/auth/register", authHandler.Register)
 		// 用户登录，签发 access/refresh token。
 		api.POST("/auth/login", authHandler.Login)
-		// 刷新验证码图片（登录/注册风控挑战）。
+		// 刷新验证码图片（登录/注册风控验证）。
 		api.POST("/auth/captcha/refresh", authHandler.RefreshCaptcha)
 		// refresh token 续签并执行轮换策略。
 		api.POST("/auth/refresh", authHandler.Refresh)

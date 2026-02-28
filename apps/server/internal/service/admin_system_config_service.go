@@ -22,14 +22,29 @@ var systemConfigValidators = map[string]func(map[string]any) error{
 	"editor":                        validateEditorConfig,
 	"security":                      validateSecurityConfig,
 	SystemConfigKeyAuth:             validateAuthConfig,
+	SystemConfigKeyDataRetention:    validateDataRetentionConfig,
 	"image-hosting":                 validateImageHostingConfig,
 	SitemapConfigKey:                validateSitemapConfig,
 	HomepageAnonymousCacheConfigKey: validateHomepageAnonymousCacheConfig,
 }
 
 const (
-	SystemConfigKeyAuth  = "auth"
-	authConfigSecretMask = "********"
+	SystemConfigKeyAuth          = "auth"
+	SystemConfigKeyDataRetention = "data-retention"
+	authConfigSecretMask         = "********"
+
+	minDataRetentionScheduleMinutes = 5
+	maxDataRetentionScheduleMinutes = 24 * 60
+	minDataRetentionBatchSize       = 100
+	maxDataRetentionBatchSize       = 20_000
+	minAuditLogRetentionDays        = 1
+	maxAuditLogRetentionDays        = 3650
+	minAuthCaptchaRetentionHours    = 1
+	maxAuthCaptchaRetentionHours    = 24 * 365
+	minAuthRiskStateRetentionDays   = 1
+	maxAuthRiskStateRetentionDays   = 3650
+	minUserSessionRetentionDays     = 1
+	maxUserSessionRetentionDays     = 3650
 )
 
 // AdminSystemConfigRecord 后台系统配置记录。
@@ -481,6 +496,98 @@ func validateSecurityConfig(payload map[string]any) error {
 		return fmt.Errorf("refreshTokenTTLMinutes must be between 60 and 43200")
 	}
 
+	return nil
+}
+
+func validateDataRetentionConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"enabled":                    {},
+		"scheduleMinutes":            {},
+		"cleanupBatchSize":           {},
+		"auditLogRetentionDays":      {},
+		"authCaptchaRetentionHours":  {},
+		"authRiskStateRetentionDays": {},
+		"userSessionRetentionDays":   {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+
+	if _, err := getRequiredBool(payload, "enabled"); err != nil {
+		return err
+	}
+
+	scheduleMinutes, err := getRequiredInt(payload, "scheduleMinutes")
+	if err != nil {
+		return err
+	}
+	if scheduleMinutes < minDataRetentionScheduleMinutes || scheduleMinutes > maxDataRetentionScheduleMinutes {
+		return fmt.Errorf(
+			"scheduleMinutes must be between %d and %d",
+			minDataRetentionScheduleMinutes,
+			maxDataRetentionScheduleMinutes,
+		)
+	}
+
+	cleanupBatchSize, err := getRequiredInt(payload, "cleanupBatchSize")
+	if err != nil {
+		return err
+	}
+	if cleanupBatchSize < minDataRetentionBatchSize || cleanupBatchSize > maxDataRetentionBatchSize {
+		return fmt.Errorf(
+			"cleanupBatchSize must be between %d and %d",
+			minDataRetentionBatchSize,
+			maxDataRetentionBatchSize,
+		)
+	}
+
+	auditLogRetentionDays, err := getRequiredInt(payload, "auditLogRetentionDays")
+	if err != nil {
+		return err
+	}
+	if auditLogRetentionDays < minAuditLogRetentionDays || auditLogRetentionDays > maxAuditLogRetentionDays {
+		return fmt.Errorf(
+			"auditLogRetentionDays must be between %d and %d",
+			minAuditLogRetentionDays,
+			maxAuditLogRetentionDays,
+		)
+	}
+
+	authCaptchaRetentionHours, err := getRequiredInt(payload, "authCaptchaRetentionHours")
+	if err != nil {
+		return err
+	}
+	if authCaptchaRetentionHours < minAuthCaptchaRetentionHours || authCaptchaRetentionHours > maxAuthCaptchaRetentionHours {
+		return fmt.Errorf(
+			"authCaptchaRetentionHours must be between %d and %d",
+			minAuthCaptchaRetentionHours,
+			maxAuthCaptchaRetentionHours,
+		)
+	}
+
+	authRiskStateRetentionDays, err := getRequiredInt(payload, "authRiskStateRetentionDays")
+	if err != nil {
+		return err
+	}
+	if authRiskStateRetentionDays < minAuthRiskStateRetentionDays || authRiskStateRetentionDays > maxAuthRiskStateRetentionDays {
+		return fmt.Errorf(
+			"authRiskStateRetentionDays must be between %d and %d",
+			minAuthRiskStateRetentionDays,
+			maxAuthRiskStateRetentionDays,
+		)
+	}
+
+	userSessionRetentionDays, err := getRequiredInt(payload, "userSessionRetentionDays")
+	if err != nil {
+		return err
+	}
+	if userSessionRetentionDays < minUserSessionRetentionDays || userSessionRetentionDays > maxUserSessionRetentionDays {
+		return fmt.Errorf(
+			"userSessionRetentionDays must be between %d and %d",
+			minUserSessionRetentionDays,
+			maxUserSessionRetentionDays,
+		)
+	}
 	return nil
 }
 

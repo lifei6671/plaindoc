@@ -344,7 +344,7 @@ func (h *authHandler) Login(c *gin.Context) {
 	})
 }
 
-// RefreshCaptcha 刷新登录/注册验证码挑战图片。
+// RefreshCaptcha 刷新登录/注册验证码验证图片。
 func (h *authHandler) RefreshCaptcha(c *gin.Context) {
 	if h == nil || h.authRiskControlService == nil {
 		response.InternalError(c)

@@ -545,7 +545,7 @@ export interface AdminGateway {
   deleteTheme(themeId: string): Promise<void>;
   listSystemConfigs(): Promise<AdminSystemConfig[]>;
   upsertSystemConfig(input: {
-    configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap";
+    configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap" | "data-retention";
     value: Record<string, unknown>;
     expectedVersion?: number;
   }): Promise<AdminSystemConfig>;

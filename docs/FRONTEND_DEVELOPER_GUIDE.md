@@ -216,7 +216,7 @@
 1. `apps/web/src/components/AuthPanel.tsx`
    - 登录/注册共用验证码展示与提交
 2. `apps/web/src/components/AdminAuthPanel.tsx`
-   - 后台登录同样支持验证码挑战
+   - 后台登录同样支持验证码会话
 3. `apps/web/src/admin/AdminApp.tsx`
    - 透传 `authChallenge` 到后台登录面板
 
@@ -226,9 +226,9 @@
    - 展示后端返回的 `captchaImageDataUrl`
    - 下一次提交必须附带 `captchaId + captchaAnswer`
 2. 收到 `1010` 时：
-   - 清空验证码挑战
+   - 清空验证码会话
    - 展示封禁提示（优先使用 `retryAfterSeconds`/`lockedUntil`）
-3. 登录成功、登出或会话切换时必须清空 `authChallenge`，防止复用旧挑战。
+3. 登录成功、登出或会话切换时必须清空 `authChallenge`，防止复用旧会话。
 
 ---
 
