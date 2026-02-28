@@ -34,6 +34,27 @@ type testAdminLDAPConnectionRequest struct {
 	ProviderID string `json:"providerId"`
 }
 
+type dataRetentionCleanupPolicyResponse struct {
+	Enabled                    bool `json:"enabled"`
+	ScheduleMinutes            int  `json:"scheduleMinutes"`
+	CleanupBatchSize           int  `json:"cleanupBatchSize"`
+	AuditLogRetentionDays      int  `json:"auditLogRetentionDays"`
+	AuthCaptchaRetentionHours  int  `json:"authCaptchaRetentionHours"`
+	AuthRiskStateRetentionDays int  `json:"authRiskStateRetentionDays"`
+	UserSessionRetentionDays   int  `json:"userSessionRetentionDays"`
+}
+
+type runDataRetentionCleanupResponse struct {
+	Policy                       dataRetentionCleanupPolicyResponse `json:"policy"`
+	StartedAt                    time.Time                          `json:"startedAt"`
+	FinishedAt                   time.Time                          `json:"finishedAt"`
+	DeletedAuditLogs             int64                              `json:"deletedAuditLogs"`
+	DeletedAuthCaptchaChallenges int64                              `json:"deletedAuthCaptchaChallenges"`
+	DeletedAuthRiskStates        int64                              `json:"deletedAuthRiskStates"`
+	DeletedUserSessions          int64                              `json:"deletedUserSessions"`
+	TotalDeleted                 int64                              `json:"totalDeleted"`
+}
+
 // NewAdminSystemConfigHandler 创建后台系统配置处理器。
 func NewAdminSystemConfigHandler(
 	adminSystemConfigService *service.AdminSystemConfigService,
@@ -141,6 +162,41 @@ func (h *adminSystemConfigHandler) TestLDAPConnection(c *gin.Context) {
 	response.JSON(c, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// RunDataRetentionCleanup 手动触发一次 data-retention 清理。
+func (h *adminSystemConfigHandler) RunDataRetentionCleanup(c *gin.Context) {
+	if h == nil || h.adminSystemConfigService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
+		return
+	}
+
+	configKey := strings.TrimSpace(c.Param("key"))
+	if configKey == "" {
+		response.AdminSystemConfigErrConfigKeyRequired.Write(c)
+		return
+	}
+
+	result, err := h.adminSystemConfigService.RunDataRetentionCleanup(
+		c.Request.Context(),
+		service.RunDataRetentionCleanupInput{
+			ActorUserID: actorUserID,
+			RequestID:   response.RequestIDFromContext(c),
+			ConfigKey:   configKey,
+		},
+	)
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapRunDataRetentionCleanupResponse(result))
+}
+
 func mapAdminSystemConfigResponse(value service.AdminSystemConfigRecord) adminSystemConfigResponse {
 	return adminSystemConfigResponse{
 		ConfigKey:       value.ConfigKey,
@@ -149,5 +205,33 @@ func mapAdminSystemConfigResponse(value service.AdminSystemConfigRecord) adminSy
 		UpdatedByUserID: value.UpdatedByUserID,
 		CreatedAt:       value.CreatedAt,
 		UpdatedAt:       value.UpdatedAt,
+	}
+}
+
+func mapRunDataRetentionCleanupResponse(
+	value service.DataRetentionCleanupResult,
+) runDataRetentionCleanupResponse {
+	totalDeleted := value.DeletedAuditLogs +
+		value.DeletedAuthCaptchaChallenges +
+		value.DeletedAuthRiskStates +
+		value.DeletedUserSessions
+
+	return runDataRetentionCleanupResponse{
+		Policy: dataRetentionCleanupPolicyResponse{
+			Enabled:                    value.Policy.Enabled,
+			ScheduleMinutes:            value.Policy.ScheduleMinutes,
+			CleanupBatchSize:           value.Policy.CleanupBatchSize,
+			AuditLogRetentionDays:      value.Policy.AuditLogRetentionDays,
+			AuthCaptchaRetentionHours:  value.Policy.AuthCaptchaRetentionHours,
+			AuthRiskStateRetentionDays: value.Policy.AuthRiskStateRetentionDays,
+			UserSessionRetentionDays:   value.Policy.UserSessionRetentionDays,
+		},
+		StartedAt:                    value.StartedAt,
+		FinishedAt:                   value.FinishedAt,
+		DeletedAuditLogs:             value.DeletedAuditLogs,
+		DeletedAuthCaptchaChallenges: value.DeletedAuthCaptchaChallenges,
+		DeletedAuthRiskStates:        value.DeletedAuthRiskStates,
+		DeletedUserSessions:          value.DeletedUserSessions,
+		TotalDeleted:                 totalDeleted,
 	}
 }

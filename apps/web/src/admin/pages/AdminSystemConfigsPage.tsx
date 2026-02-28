@@ -545,6 +545,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingLDAP, setTestingLDAP] = useState(false);
+  const [runningCleanup, setRunningCleanup] = useState(false);
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -852,6 +853,29 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     }
   }, [authDraft, dataGateway.admin, openToast, selectedAuthProvider]);
 
+  const handleRunDataRetentionCleanup = useCallback(async () => {
+    if (dirtyKeys["data-retention"]) {
+      openToast("请先保存当前数据清理配置，再执行立即清理", "info");
+      return;
+    }
+    setRunningCleanup(true);
+    try {
+      const result = await dataGateway.admin.runDataRetentionCleanup();
+      if (result.totalDeleted > 0) {
+        openToast(
+          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}）`,
+          "success"
+        );
+      } else {
+        openToast("清理完成：当前没有超过保留时长的数据", "info");
+      }
+    } catch (error) {
+      openToast(`立即清理失败：${formatError(error)}`);
+    } finally {
+      setRunningCleanup(false);
+    }
+  }, [dataGateway.admin, dirtyKeys, openToast]);
+
   return (
     <section aria-label="系统配置管理">
       <AdminPageCard>
@@ -909,6 +933,17 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                     >
                       <RefreshCw size={14} />
                       <span>{testingLDAP ? "测试中..." : "测试 LDAP 连接"}</span>
+                    </Button>
+                  ) : null}
+                  {selectedKey === "data-retention" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading || saving || runningCleanup}
+                      onClick={() => void handleRunDataRetentionCleanup()}
+                    >
+                      <RefreshCw size={14} />
+                      <span>{runningCleanup ? "清理中..." : "立即清理"}</span>
                     </Button>
                   ) : null}
                   <Button type="button" disabled={loading || saving || !isSelectedDirty} onClick={() => void handleSave()}>

@@ -76,6 +76,20 @@ func NewDataRetentionCleanupService(
 func (s *DataRetentionCleanupService) RunOnce(
 	ctx context.Context,
 ) (DataRetentionCleanupResult, error) {
+	return s.runOnce(ctx, false)
+}
+
+// RunOnceForced 按当前策略执行一次数据清理（忽略 enabled 开关）。
+func (s *DataRetentionCleanupService) RunOnceForced(
+	ctx context.Context,
+) (DataRetentionCleanupResult, error) {
+	return s.runOnce(ctx, true)
+}
+
+func (s *DataRetentionCleanupService) runOnce(
+	ctx context.Context,
+	force bool,
+) (DataRetentionCleanupResult, error) {
 	startedAt := time.Now().UTC()
 	result := DataRetentionCleanupResult{
 		Policy:    s.ResolvePolicy(ctx),
@@ -88,7 +102,7 @@ func (s *DataRetentionCleanupService) RunOnce(
 	if s == nil || s.db == nil {
 		return result, errors.New("data retention cleanup service db is nil")
 	}
-	if !result.Policy.Enabled {
+	if !result.Policy.Enabled && !force {
 		return result, nil
 	}
 

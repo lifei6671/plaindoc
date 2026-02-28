@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/captchastore"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"github.com/mojocn/base64Captcha"
@@ -100,6 +101,7 @@ type AuthRiskControlService struct {
 	policyService *AuthRiskPolicyService
 	stateRepo     repository.AuthRiskStateRepository
 	captchaRepo   repository.AuthCaptchaChallengeRepository
+	captchaStore  captchastore.Store
 	hashSecret    []byte
 	now           func() time.Time
 }
@@ -110,6 +112,7 @@ func NewAuthRiskControlService(
 	stateRepo repository.AuthRiskStateRepository,
 	captchaRepo repository.AuthCaptchaChallengeRepository,
 	hashSecret string,
+	captchaStore captchastore.Store,
 ) *AuthRiskControlService {
 	normalizedHashSecret := strings.TrimSpace(hashSecret)
 	if normalizedHashSecret == "" {
@@ -120,6 +123,7 @@ func NewAuthRiskControlService(
 		policyService: policyService,
 		stateRepo:     stateRepo,
 		captchaRepo:   captchaRepo,
+		captchaStore:  captchaStore,
 		hashSecret:    []byte(normalizedHashSecret),
 		now: func() time.Time {
 			return time.Now().UTC()
@@ -496,6 +500,23 @@ func (s *AuthRiskControlService) validateChallenge(
 		return false, nil
 	}
 
+	if verified, decided, verifyErr := s.verifyChallengeFromStore(ctx, captchaID, captchaAnswer); verifyErr != nil {
+		return false, verifyErr
+	} else if decided {
+		if verified {
+			challenge.ConsumedAt = &now
+			challenge.UpdatedAt = now
+			if err := s.captchaRepo.Update(ctx, challenge); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		if err := s.bumpChallengeFailedCount(ctx, challenge, now); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
 	expectedHash := s.hashCaptchaAnswer(captchaAnswer, challenge.AnswerSalt)
 	if subtle.ConstantTimeCompare([]byte(expectedHash), []byte(challenge.AnswerHash)) != 1 {
 		if err := s.bumpChallengeFailedCount(ctx, challenge, now); err != nil {
@@ -510,6 +531,33 @@ func (s *AuthRiskControlService) validateChallenge(
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *AuthRiskControlService) verifyChallengeFromStore(
+	ctx context.Context,
+	captchaID string,
+	captchaAnswer string,
+) (verified bool, decided bool, err error) {
+	if s == nil || s.captchaStore == nil {
+		return false, false, nil
+	}
+	result, getErr := s.captchaStore.GetWithContext(ctx, captchastore.GetInput{
+		ID:    captchaID,
+		Clear: false,
+	})
+	if getErr != nil {
+		return false, false, getErr
+	}
+	if !result.Found {
+		return false, false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(result.Value), strings.TrimSpace(captchaAnswer)) {
+		return false, true, nil
+	}
+	if deleteErr := s.captchaStore.DeleteWithContext(ctx, captchaID); deleteErr != nil {
+		return false, true, deleteErr
+	}
+	return true, true, nil
 }
 
 func (s *AuthRiskControlService) bumpChallengeFailedCount(
@@ -568,6 +616,23 @@ func (s *AuthRiskControlService) issueChallenge(
 	}
 	if err := s.captchaRepo.Create(ctx, challenge); err != nil {
 		return nil, err
+	}
+	if s.captchaStore != nil {
+		storeTTL := time.Duration(policy.CaptchaTTLSeconds) * time.Second
+		if storeTTL <= 0 {
+			storeTTL = captchastore.DefaultTTL
+		}
+		if err := s.captchaStore.SetWithContext(ctx, captchastore.SetInput{
+			ID:    captchaID,
+			Value: captchaCode,
+			TTL:   storeTTL,
+			Metadata: map[string]string{
+				"scene": string(scene),
+				"level": fmt.Sprintf("%d", captchaLength),
+			},
+		}); err != nil {
+			// 中文注释：Store 失败时回退到现有哈希校验链路，避免影响登录/注册主流程。
+		}
 	}
 
 	return &AuthCaptchaChallenge{
@@ -815,11 +880,19 @@ func randomHexString(size int) (string, error) {
 }
 
 func generateDigitCaptchaChallenge(riskLevel int) (answer string, imageDataURL string, length int, err error) {
-	length, maxSkew, dotCount := resolveDigitCaptchaConfig(riskLevel)
+	length, _, dotCount := resolveDigitCaptchaConfig(riskLevel)
 	width := 42*length + 20
 	height := 60
 
-	driver := base64Captcha.NewDriverDigit(height, width, length, maxSkew, dotCount)
+	var driverString base64Captcha.DriverString
+	driverString.Source = "1234567890QWERTYUPLKJHGFDSAZXCVBNMqwertyupkjhgfdsazxcvbnm"
+	driverString.Width = width
+	driverString.Height = height
+	driverString.NoiseCount = dotCount
+	driverString.Length = length
+	driverString.Fonts = []string{"RitaSmith.ttf", "actionj.ttf", "chromohv.ttf"}
+	driver := driverString.ConvertFonts()
+
 	_, question, captchaAnswer := driver.GenerateIdQuestionAnswer()
 	item, drawErr := driver.DrawCaptcha(question)
 	if drawErr != nil {
@@ -840,7 +913,7 @@ func generateDigitCaptchaChallenge(riskLevel int) (answer string, imageDataURL s
 func resolveDigitCaptchaConfig(riskLevel int) (length int, maxSkew float64, dotCount int) {
 	switch riskLevel {
 	case 1:
-		return 6, 0.7, 120
+		return 4, 0.7, 120
 	case 2:
 		return 8, 0.8, 140
 	default:

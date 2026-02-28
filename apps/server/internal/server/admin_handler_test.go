@@ -2143,6 +2143,328 @@ func TestRouter_AdminSystemConfig_DataRetentionConfigValidation(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSystemConfig_RunDataRetentionCleanup(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-data-retention-cleanup-platform-admin@example.com")
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "config-data-retention-cleanup-space-admin@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -45)
+	recentTime := now.AddDate(0, 0, -2)
+
+	if err := database.ORM.Table("users").Create(map[string]any{
+		"user_id":       "01hretentionmanualuser0000000001",
+		"email":         "retention-manual-user@example.com",
+		"password_hash": "hashed-password",
+		"name":          "Retention Manual User",
+		"created_at":    oldTime,
+		"updated_at":    oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed retention user failed: %v", err)
+	}
+	if err := database.ORM.Table("user_identities").Create(map[string]any{
+		"user_id":       "01hretentionmanualuser0000000001",
+		"provider_type": "local",
+		"provider_id":   "local",
+		"external_id":   "retention-manual-user@example.com",
+		"login_name":    "retention-manual-user@example.com",
+		"created_at":    oldTime,
+		"updated_at":    oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed retention user identity failed: %v", err)
+	}
+
+	if err := database.ORM.Table("audit_logs").Create([]map[string]any{
+		{
+			"actor_user_id": nil,
+			"module":        "system_config",
+			"action":        "update",
+			"target_type":   "system_config",
+			"target_id":     "manual-cleanup-audit-old",
+			"summary":       "manual cleanup old audit",
+			"detail_json":   "{}",
+			"request_id":    "req-manual-cleanup-audit-old",
+			"created_at":    oldTime,
+		},
+		{
+			"actor_user_id": nil,
+			"module":        "system_config",
+			"action":        "update",
+			"target_type":   "system_config",
+			"target_id":     "manual-cleanup-audit-new",
+			"summary":       "manual cleanup new audit",
+			"detail_json":   "{}",
+			"request_id":    "req-manual-cleanup-audit-new",
+			"created_at":    recentTime,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed audit logs failed: %v", err)
+	}
+
+	if err := database.ORM.Table("auth_captcha_challenges").Create([]map[string]any{
+		{
+			"captcha_id":          "manual-cleanup-captcha-old",
+			"scene":               "login",
+			"subject_hash":        "manual-cleanup-subject-old",
+			"level":               6,
+			"answer_hash":         "answer-hash-old",
+			"answer_salt":         "answer-salt-old",
+			"issued_ip_hash":      "issued-ip-hash-old",
+			"expires_at":          now.Add(-96 * time.Hour),
+			"consumed_at":         nil,
+			"failed_verify_count": 0,
+			"created_at":          oldTime,
+			"updated_at":          oldTime,
+		},
+		{
+			"captcha_id":          "manual-cleanup-captcha-new",
+			"scene":               "login",
+			"subject_hash":        "manual-cleanup-subject-new",
+			"level":               6,
+			"answer_hash":         "answer-hash-new",
+			"answer_salt":         "answer-salt-new",
+			"issued_ip_hash":      "issued-ip-hash-new",
+			"expires_at":          now.Add(24 * time.Hour),
+			"consumed_at":         nil,
+			"failed_verify_count": 0,
+			"created_at":          recentTime,
+			"updated_at":          recentTime,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed auth captcha challenges failed: %v", err)
+	}
+
+	if err := database.ORM.Table("auth_risk_states").Create([]map[string]any{
+		{
+			"scene":                "login",
+			"subject_type":         "ip",
+			"subject_hash":         "manual-cleanup-risk-old",
+			"window_started_at":    oldTime,
+			"attempt_count":        1,
+			"failed_count":         1,
+			"captcha_failed_count": 0,
+			"lock_until":           nil,
+			"created_at":           oldTime,
+			"updated_at":           oldTime,
+		},
+		{
+			"scene":                "login",
+			"subject_type":         "ip",
+			"subject_hash":         "manual-cleanup-risk-new",
+			"window_started_at":    recentTime,
+			"attempt_count":        1,
+			"failed_count":         1,
+			"captcha_failed_count": 0,
+			"lock_until":           nil,
+			"created_at":           recentTime,
+			"updated_at":           recentTime,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed auth risk states failed: %v", err)
+	}
+
+	if err := database.ORM.Table("user_sessions").Create([]map[string]any{
+		{
+			"session_id":             "manual-cleanup-session-old",
+			"user_id":                "01hretentionmanualuser0000000001",
+			"refresh_token_hash":     "manual-refresh-hash-old",
+			"expires_at":             now.AddDate(0, 0, -40),
+			"revoked_at":             now.AddDate(0, 0, -35),
+			"replaced_by_session_id": nil,
+			"created_at":             oldTime,
+			"updated_at":             oldTime,
+		},
+		{
+			"session_id":             "manual-cleanup-session-new",
+			"user_id":                "01hretentionmanualuser0000000001",
+			"refresh_token_hash":     "manual-refresh-hash-new",
+			"expires_at":             now.AddDate(0, 0, 7),
+			"revoked_at":             nil,
+			"replaced_by_session_id": nil,
+			"created_at":             recentTime,
+			"updated_at":             recentTime,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed user sessions failed: %v", err)
+	}
+
+	retentionConfigJSON, err := json.Marshal(map[string]any{
+		"enabled":                    false,
+		"scheduleMinutes":            30,
+		"cleanupBatchSize":           500,
+		"auditLogRetentionDays":      30,
+		"authCaptchaRetentionHours":  72,
+		"authRiskStateRetentionDays": 30,
+		"userSessionRetentionDays":   30,
+	})
+	if err != nil {
+		t.Fatalf("marshal retention config failed: %v", err)
+	}
+	if err := database.ORM.Table("system_configs").Where("config_key = ?", "data-retention").Delete(nil).Error; err != nil {
+		t.Fatalf("clear data-retention config failed: %v", err)
+	}
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "data-retention",
+		"config_value_json":  string(retentionConfigJSON),
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("seed data-retention config failed: %v", err)
+	}
+
+	spaceAdminRunReq := httptest.NewRequest(http.MethodPost, "/api/admin/system-configs/data-retention/cleanup/run", nil)
+	spaceAdminRunReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminRunRec := serve(spaceAdminRunReq)
+	if spaceAdminRunRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin run data-retention cleanup status 403, got %d body=%s",
+			spaceAdminRunRec.Code,
+			spaceAdminRunRec.Body.String(),
+		)
+	}
+
+	noTokenRunReq := httptest.NewRequest(http.MethodPost, "/api/admin/system-configs/data-retention/cleanup/run", nil)
+	noTokenRunReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	noTokenRunRec := serve(noTokenRunReq)
+	if noTokenRunRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected run data-retention cleanup without operation token status 200, got %d body=%s",
+			noTokenRunRec.Code,
+			noTokenRunRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, noTokenRunRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenRequired) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeOperationTokenRequired),
+			decodeJSONResultCode(t, noTokenRunRec.Body.Bytes()),
+			noTokenRunRec.Body.String(),
+		)
+	}
+
+	runReq := httptest.NewRequest(http.MethodPost, "/api/admin/system-configs/data-retention/cleanup/run", nil)
+	runReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		runReq,
+		platformAdminToken,
+		"system_config.cleanup",
+		"system_config",
+		"data-retention",
+	)
+	runRec := serve(runReq)
+	if runRec.Code != http.StatusOK {
+		t.Fatalf("expected run data-retention cleanup status 200, got %d body=%s", runRec.Code, runRec.Body.String())
+	}
+	runPayload := decodeJSONResultData[struct {
+		DeletedAuditLogs             int64 `json:"deletedAuditLogs"`
+		DeletedAuthCaptchaChallenges int64 `json:"deletedAuthCaptchaChallenges"`
+		DeletedAuthRiskStates        int64 `json:"deletedAuthRiskStates"`
+		DeletedUserSessions          int64 `json:"deletedUserSessions"`
+		TotalDeleted                 int64 `json:"totalDeleted"`
+	}](t, runRec.Body.Bytes())
+	if runPayload.DeletedAuditLogs != 1 {
+		t.Fatalf("expected deleted audit logs 1, got %d", runPayload.DeletedAuditLogs)
+	}
+	if runPayload.DeletedAuthCaptchaChallenges != 1 {
+		t.Fatalf("expected deleted auth captcha challenges 1, got %d", runPayload.DeletedAuthCaptchaChallenges)
+	}
+	if runPayload.DeletedAuthRiskStates != 1 {
+		t.Fatalf("expected deleted auth risk states 1, got %d", runPayload.DeletedAuthRiskStates)
+	}
+	if runPayload.DeletedUserSessions != 1 {
+		t.Fatalf("expected deleted user sessions 1, got %d", runPayload.DeletedUserSessions)
+	}
+	if runPayload.TotalDeleted != 4 {
+		t.Fatalf("expected total deleted 4, got %d", runPayload.TotalDeleted)
+	}
+
+	var oldAuditCount int64
+	if err := database.ORM.Table("audit_logs").Where("target_id = ?", "manual-cleanup-audit-old").Count(&oldAuditCount).Error; err != nil {
+		t.Fatalf("count old audit log failed: %v", err)
+	}
+	if oldAuditCount != 0 {
+		t.Fatalf("expected old audit log deleted, got count=%d", oldAuditCount)
+	}
+	var newAuditCount int64
+	if err := database.ORM.Table("audit_logs").Where("target_id = ?", "manual-cleanup-audit-new").Count(&newAuditCount).Error; err != nil {
+		t.Fatalf("count new audit log failed: %v", err)
+	}
+	if newAuditCount != 1 {
+		t.Fatalf("expected new audit log kept, got count=%d", newAuditCount)
+	}
+
+	var oldCaptchaCount int64
+	if err := database.ORM.Table("auth_captcha_challenges").Where("captcha_id = ?", "manual-cleanup-captcha-old").Count(&oldCaptchaCount).Error; err != nil {
+		t.Fatalf("count old captcha challenge failed: %v", err)
+	}
+	if oldCaptchaCount != 0 {
+		t.Fatalf("expected old captcha challenge deleted, got count=%d", oldCaptchaCount)
+	}
+	var newCaptchaCount int64
+	if err := database.ORM.Table("auth_captcha_challenges").Where("captcha_id = ?", "manual-cleanup-captcha-new").Count(&newCaptchaCount).Error; err != nil {
+		t.Fatalf("count new captcha challenge failed: %v", err)
+	}
+	if newCaptchaCount != 1 {
+		t.Fatalf("expected new captcha challenge kept, got count=%d", newCaptchaCount)
+	}
+
+	var oldRiskCount int64
+	if err := database.ORM.Table("auth_risk_states").Where("subject_hash = ?", "manual-cleanup-risk-old").Count(&oldRiskCount).Error; err != nil {
+		t.Fatalf("count old auth risk state failed: %v", err)
+	}
+	if oldRiskCount != 0 {
+		t.Fatalf("expected old auth risk state deleted, got count=%d", oldRiskCount)
+	}
+	var newRiskCount int64
+	if err := database.ORM.Table("auth_risk_states").Where("subject_hash = ?", "manual-cleanup-risk-new").Count(&newRiskCount).Error; err != nil {
+		t.Fatalf("count new auth risk state failed: %v", err)
+	}
+	if newRiskCount != 1 {
+		t.Fatalf("expected new auth risk state kept, got count=%d", newRiskCount)
+	}
+
+	var oldSessionCount int64
+	if err := database.ORM.Table("user_sessions").Where("session_id = ?", "manual-cleanup-session-old").Count(&oldSessionCount).Error; err != nil {
+		t.Fatalf("count old user session failed: %v", err)
+	}
+	if oldSessionCount != 0 {
+		t.Fatalf("expected old user session deleted, got count=%d", oldSessionCount)
+	}
+	var newSessionCount int64
+	if err := database.ORM.Table("user_sessions").Where("session_id = ?", "manual-cleanup-session-new").Count(&newSessionCount).Error; err != nil {
+		t.Fatalf("count new user session failed: %v", err)
+	}
+	if newSessionCount != 1 {
+		t.Fatalf("expected new user session kept, got count=%d", newSessionCount)
+	}
+
+	var cleanupAuditCount int64
+	if err := database.ORM.Table("audit_logs").
+		Where(
+			"module = ? AND action = ? AND target_type = ? AND target_id = ?",
+			"system_config",
+			"update",
+			"system_config",
+			"data-retention",
+		).
+		Count(&cleanupAuditCount).Error; err != nil {
+		t.Fatalf("count cleanup audit logs failed: %v", err)
+	}
+	if cleanupAuditCount == 0 {
+		t.Fatalf("expected at least one cleanup audit log, got %d", cleanupAuditCount)
+	}
+}
+
 func TestRouter_AdminSystemConfig_AuthConfigValidationAndSecretMasking(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

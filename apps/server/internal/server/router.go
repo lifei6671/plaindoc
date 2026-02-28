@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/captchastore"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
@@ -185,11 +186,30 @@ func newRouter(
 		// 注册策略独立成服务，便于从系统配置动态控制开放注册。
 		authRegistrationPolicyService := service.NewAuthRegistrationPolicyService(systemConfigRepo)
 		authRiskPolicyService := service.NewAuthRiskPolicyService(systemConfigRepo)
+		var authCaptchaStore captchastore.Store
+		authCaptchaDatabaseBackend, captchaBackendErr := captchastore.NewDatabaseBackend(
+			repository.NewGormCaptchaStoreRepository(db),
+		)
+		if captchaBackendErr != nil {
+			if logger != nil {
+				logger.Error("auth captcha database backend initialization failed", slog.String("error", captchaBackendErr.Error()))
+			}
+		} else {
+			initializedStore, storeErr := captchastore.New(authCaptchaDatabaseBackend)
+			if storeErr != nil {
+				if logger != nil {
+					logger.Error("auth captcha store initialization failed", slog.String("error", storeErr.Error()))
+				}
+			} else {
+				authCaptchaStore = initializedStore
+			}
+		}
 		authRiskControlService := service.NewAuthRiskControlService(
 			authRiskPolicyService,
 			authRiskStateRepo,
 			authCaptchaChallengeRepo,
 			cfg.JWT.Secret,
+			authCaptchaStore,
 		)
 		authProviders := []service.AuthLoginProvider{
 			service.NewLocalAuthLoginProvider(authService),
@@ -321,7 +341,13 @@ func newRouter(
 		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
 		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
 		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
-		adminSystemConfigService := service.NewAdminSystemConfigService(systemConfigRepo, adminAccessService, adminAuditService)
+		dataRetentionCleanupService := service.NewDataRetentionCleanupService(db, systemConfigRepo)
+		adminSystemConfigService := service.NewAdminSystemConfigService(
+			systemConfigRepo,
+			adminAccessService,
+			adminAuditService,
+			dataRetentionCleanupService,
+		)
 		adminSystemConfigHandler := handler.NewAdminSystemConfigHandler(adminSystemConfigService)
 
 		// 后台路由统一挂载在 /api/admin。
@@ -568,6 +594,19 @@ func newRouter(
 					},
 				),
 				adminSystemConfigHandler.UpsertConfig,
+			)
+			adminAPI.POST(
+				"/system-configs/:key/cleanup/run",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "system_config.cleanup",
+						TargetType:    "system_config",
+						TargetIDParam: "key",
+					},
+				),
+				adminSystemConfigHandler.RunDataRetentionCleanup,
 			)
 			adminAPI.POST(
 				"/system-configs/auth/providers/ldap/test",

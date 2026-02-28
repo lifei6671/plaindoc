@@ -268,3 +268,87 @@ func TestDataRetentionCleanupService_RunOnce(t *testing.T) {
 		t.Fatalf("expected new user session kept, got count=%d", newSessionCount)
 	}
 }
+
+func TestDataRetentionCleanupService_RunOnceForced(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-data-retention-cleanup-forced?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -45)
+
+	if err := database.ORM.WithContext(ctx).Table("audit_logs").Create(map[string]any{
+		"actor_user_id": nil,
+		"module":        "system_config",
+		"action":        "update",
+		"target_type":   "system_config",
+		"target_id":     "forced-cleanup-old-audit",
+		"summary":       "forced cleanup old audit",
+		"detail_json":   "{}",
+		"request_id":    "req-forced-cleanup-old-audit",
+		"created_at":    oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed audit logs failed: %v", err)
+	}
+
+	retentionConfigJSON, err := json.Marshal(map[string]any{
+		"enabled":                    false,
+		"scheduleMinutes":            30,
+		"cleanupBatchSize":           200,
+		"auditLogRetentionDays":      30,
+		"authCaptchaRetentionHours":  72,
+		"authRiskStateRetentionDays": 30,
+		"userSessionRetentionDays":   30,
+	})
+	if err != nil {
+		t.Fatalf("marshal retention config failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("system_configs").Create(map[string]any{
+		"config_key":         SystemConfigKeyDataRetention,
+		"config_value_json":  string(retentionConfigJSON),
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("seed system config failed: %v", err)
+	}
+
+	cleanupService := NewDataRetentionCleanupService(database.ORM, repository.NewGormSystemConfigRepository(database.ORM))
+
+	normalResult, err := cleanupService.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("run data retention cleanup failed: %v", err)
+	}
+	if normalResult.DeletedAuditLogs != 0 {
+		t.Fatalf("expected normal run delete 0 rows when disabled, got %d", normalResult.DeletedAuditLogs)
+	}
+
+	forcedResult, err := cleanupService.RunOnceForced(ctx)
+	if err != nil {
+		t.Fatalf("run forced data retention cleanup failed: %v", err)
+	}
+	if forcedResult.DeletedAuditLogs != 1 {
+		t.Fatalf("expected forced run delete 1 row, got %d", forcedResult.DeletedAuditLogs)
+	}
+
+	var oldAuditCount int64
+	if err := database.ORM.WithContext(ctx).Table("audit_logs").Where("target_id = ?", "forced-cleanup-old-audit").Count(&oldAuditCount).Error; err != nil {
+		t.Fatalf("count old audit logs failed: %v", err)
+	}
+	if oldAuditCount != 0 {
+		t.Fatalf("expected old audit log deleted by forced cleanup, got count=%d", oldAuditCount)
+	}
+}

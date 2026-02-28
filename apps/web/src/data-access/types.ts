@@ -409,6 +409,27 @@ export interface AdminSystemConfig {
   updatedAt: string;
 }
 
+export interface AdminDataRetentionCleanupPolicy {
+  enabled: boolean;
+  scheduleMinutes: number;
+  cleanupBatchSize: number;
+  auditLogRetentionDays: number;
+  authCaptchaRetentionHours: number;
+  authRiskStateRetentionDays: number;
+  userSessionRetentionDays: number;
+}
+
+export interface AdminDataRetentionCleanupResult {
+  policy: AdminDataRetentionCleanupPolicy;
+  startedAt: string;
+  finishedAt: string;
+  deletedAuditLogs: number;
+  deletedAuthCaptchaChallenges: number;
+  deletedAuthRiskStates: number;
+  deletedUserSessions: number;
+  totalDeleted: number;
+}
+
 export type AdminAuditModule = "user" | "space" | "document" | "theme" | "system_config";
 export type AdminAuditAction = "create" | "update" | "delete";
 
@@ -549,6 +570,7 @@ export interface AdminGateway {
     value: Record<string, unknown>;
     expectedVersion?: number;
   }): Promise<AdminSystemConfig>;
+  runDataRetentionCleanup(): Promise<AdminDataRetentionCleanupResult>;
   testAuthLDAPConnection(input: {
     value: Record<string, unknown>;
     providerId?: string;

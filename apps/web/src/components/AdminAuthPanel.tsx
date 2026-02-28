@@ -1,12 +1,12 @@
 import { LoaderCircle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ADMIN_BRAND_LOGO_SRC } from "../admin/brand";
 import type { AuthCaptchaChallenge, AuthCaptchaRefreshInput } from "../data-access";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
-import { Badge } from "./ui/badge";
 
 const CAPTCHA_REFRESH_DEBOUNCE_MS = 800;
 
@@ -161,7 +161,7 @@ export function AdminAuthPanel({
                   <img
                     src={authChallenge.captchaImageDataUrl}
                     alt="验证码（点击刷新）"
-                    className="h-14 w-full rounded border border-slate-200 bg-white object-contain"
+                    className="h-14 w-full rounded border border-slate-200 object-contain"
                   />
                 </button>
                 <p className="text-[11px] text-slate-500">

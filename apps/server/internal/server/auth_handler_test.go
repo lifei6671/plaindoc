@@ -656,3 +656,92 @@ func TestRouter_AuthCaptchaRefresh(t *testing.T) {
 		t.Fatalf("expected refreshed captcha id to change, got same value %s", refreshedChallenge.CaptchaID)
 	}
 }
+
+func TestRouter_AuthCaptchaStoreLifecycle(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	registerBody := []byte(`{"email":"captcha-store@example.com","password":"123456","name":"Captcha Store"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	for index := 0; index < 3; index += 1 {
+		loginBody := []byte(`{"email":"captcha-store@example.com","password":"wrong-password"}`)
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginRec := serve(loginReq)
+		if loginRec.Code != http.StatusForbidden {
+			t.Fatalf("expected invalid credentials status 403, got %d body=%s", loginRec.Code, loginRec.Body.String())
+		}
+	}
+
+	captchaRequiredReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"captcha-store@example.com","password":"wrong-password"}`)),
+	)
+	captchaRequiredReq.Header.Set("Content-Type", "application/json")
+	captchaRequiredRec := serve(captchaRequiredReq)
+	if captchaRequiredRec.Code != http.StatusOK {
+		t.Fatalf("expected captcha required status 200, got %d body=%s", captchaRequiredRec.Code, captchaRequiredRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, captchaRequiredRec.Body.Bytes()); code != response.ResolveErrorCode(response.CodeCaptchaRequired) {
+		t.Fatalf("expected captcha required code %d, got %d", response.ResolveErrorCode(response.CodeCaptchaRequired), code)
+	}
+	initialChallenge := decodeJSONResultData[struct {
+		CaptchaID string `json:"captchaId"`
+	}](t, captchaRequiredRec.Body.Bytes())
+	if strings.TrimSpace(initialChallenge.CaptchaID) == "" {
+		t.Fatalf("expected captcha id, got %+v", initialChallenge)
+	}
+
+	var storeRow struct {
+		CaptchaID string `gorm:"column:captcha_id"`
+		Answer    string `gorm:"column:answer_hash"`
+	}
+	if err := database.ORM.WithContext(context.Background()).
+		Table("auth_captcha_challenges").
+		Select("captcha_id", "answer_hash").
+		Where("scene = ?", "store").
+		Order("id DESC").
+		Take(&storeRow).Error; err != nil {
+		t.Fatalf("load captcha store row failed: %v", err)
+	}
+	if strings.TrimSpace(storeRow.CaptchaID) == "" || strings.TrimSpace(storeRow.Answer) == "" {
+		t.Fatalf("expected non-empty captcha store row, got %+v", storeRow)
+	}
+
+	validCaptchaButWrongPasswordBody := []byte(
+		`{"email":"captcha-store@example.com","password":"wrong-password","captchaId":"` + initialChallenge.CaptchaID + `","captchaAnswer":"` + storeRow.Answer + `"}`,
+	)
+	validCaptchaButWrongPasswordReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader(validCaptchaButWrongPasswordBody),
+	)
+	validCaptchaButWrongPasswordReq.Header.Set("Content-Type", "application/json")
+	validCaptchaButWrongPasswordRec := serve(validCaptchaButWrongPasswordReq)
+	if validCaptchaButWrongPasswordRec.Code != http.StatusForbidden {
+		t.Fatalf("expected invalid credentials status 403, got %d body=%s", validCaptchaButWrongPasswordRec.Code, validCaptchaButWrongPasswordRec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, validCaptchaButWrongPasswordRec.Body.Bytes()); code == response.ResolveErrorCode(response.CodeCaptchaInvalid) {
+		t.Fatalf("expected non-captcha-invalid response, got code=%d", code)
+	}
+
+	var storeCount int64
+	if err := database.ORM.WithContext(context.Background()).
+		Table("auth_captcha_challenges").
+		Where("scene = ?", "store").
+		Count(&storeCount).Error; err != nil {
+		t.Fatalf("count captcha store rows failed: %v", err)
+	}
+	if storeCount != 0 {
+		t.Fatalf("expected captcha store rows to be consumed and deleted, got %d", storeCount)
+	}
+}

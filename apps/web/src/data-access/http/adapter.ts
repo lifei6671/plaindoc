@@ -1,5 +1,6 @@
 import { AUTH_UNAUTHORIZED_EVENT, type AuthUnauthorizedEventDetail } from "../auth-events";
 import {
+  type AdminDataRetentionCleanupResult,
   type AdminAuditListInput,
   type AdminAuditListResult,
   type AdminDocument,
@@ -1470,6 +1471,17 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         method: "PUT",
         headers: buildAdminOperationTokenHeaders(operationToken),
         body: JSON.stringify(payload)
+      });
+    },
+    async runDataRetentionCleanup() {
+      const operationToken = await issueAdminOperationToken({
+        operation: "system_config.cleanup",
+        targetType: "system_config",
+        targetId: "data-retention"
+      });
+      return request<AdminDataRetentionCleanupResult>("/admin/system-configs/data-retention/cleanup/run", {
+        method: "POST",
+        headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
     async testAuthLDAPConnection(input: { value: Record<string, unknown>; providerId?: string }) {

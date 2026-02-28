@@ -73,11 +73,19 @@ type TestAdminSystemConfigLDAPConnectionInput struct {
 	ProviderID  string
 }
 
+// RunDataRetentionCleanupInput 后台手动执行一次数据清理参数。
+type RunDataRetentionCleanupInput struct {
+	ActorUserID string
+	RequestID   string
+	ConfigKey   string
+}
+
 // AdminSystemConfigService 封装后台系统配置读写。
 type AdminSystemConfigService struct {
-	systemConfigRepo   repository.SystemConfigRepository
-	adminAccessService *AdminAccessService
-	adminAuditService  *AdminAuditService
+	systemConfigRepo            repository.SystemConfigRepository
+	adminAccessService          *AdminAccessService
+	adminAuditService           *AdminAuditService
+	dataRetentionCleanupService *DataRetentionCleanupService
 }
 
 // NewAdminSystemConfigService 创建后台系统配置服务。
@@ -85,11 +93,13 @@ func NewAdminSystemConfigService(
 	systemConfigRepo repository.SystemConfigRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
+	dataRetentionCleanupService *DataRetentionCleanupService,
 ) *AdminSystemConfigService {
 	return &AdminSystemConfigService{
-		systemConfigRepo:   systemConfigRepo,
-		adminAccessService: adminAccessService,
-		adminAuditService:  adminAuditService,
+		systemConfigRepo:            systemConfigRepo,
+		adminAccessService:          adminAccessService,
+		adminAuditService:           adminAuditService,
+		dataRetentionCleanupService: dataRetentionCleanupService,
 	}
 }
 
@@ -326,6 +336,40 @@ func (s *AdminSystemConfigService) TestLDAPConnection(
 	return nil
 }
 
+// RunDataRetentionCleanup 手动执行一次数据清理。
+func (s *AdminSystemConfigService) RunDataRetentionCleanup(
+	ctx context.Context,
+	input RunDataRetentionCleanupInput,
+) (result DataRetentionCleanupResult, err error) {
+	defer func() {
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
+	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil || s.dataRetentionCleanupService == nil {
+		return DataRetentionCleanupResult{}, errors.New("admin system config service dependencies are nil")
+	}
+	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
+		return DataRetentionCleanupResult{}, err
+	}
+
+	configKey := strings.ToLower(strings.TrimSpace(input.ConfigKey))
+	if configKey == "" {
+		return DataRetentionCleanupResult{}, errcode.ErrAdminSystemConfigInvalidKey
+	}
+	if configKey != SystemConfigKeyDataRetention {
+		return DataRetentionCleanupResult{}, errcode.ErrAdminSystemConfigInvalidKey
+	}
+
+	result, err = s.dataRetentionCleanupService.RunOnceForced(ctx)
+	if err != nil {
+		return DataRetentionCleanupResult{}, err
+	}
+	if err := s.recordDataRetentionCleanupAudit(ctx, strings.TrimSpace(input.RequestID), result); err != nil {
+		return DataRetentionCleanupResult{}, err
+	}
+	return result, nil
+}
+
 func (s *AdminSystemConfigService) ensurePlatformAdmin(ctx context.Context, actorUserID string) error {
 	userID := strings.TrimSpace(actorUserID)
 	if userID == "" {
@@ -390,6 +434,50 @@ func (s *AdminSystemConfigService) recordSystemConfigAudit(
 		TargetID:   record.ConfigKey,
 		Summary:    summaryPrefix + record.ConfigKey,
 		Detail:     detail,
+	})
+}
+
+func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
+	ctx context.Context,
+	requestID string,
+	result DataRetentionCleanupResult,
+) error {
+	if s == nil || s.adminAuditService == nil {
+		return nil
+	}
+
+	totalDeleted := result.DeletedAuditLogs +
+		result.DeletedAuthCaptchaChallenges +
+		result.DeletedAuthRiskStates +
+		result.DeletedUserSessions
+
+	detail := map[string]any{
+		"policy": map[string]any{
+			"enabled":                    result.Policy.Enabled,
+			"scheduleMinutes":            result.Policy.ScheduleMinutes,
+			"cleanupBatchSize":           result.Policy.CleanupBatchSize,
+			"auditLogRetentionDays":      result.Policy.AuditLogRetentionDays,
+			"authCaptchaRetentionHours":  result.Policy.AuthCaptchaRetentionHours,
+			"authRiskStateRetentionDays": result.Policy.AuthRiskStateRetentionDays,
+			"userSessionRetentionDays":   result.Policy.UserSessionRetentionDays,
+		},
+		"startedAt":                    result.StartedAt,
+		"finishedAt":                   result.FinishedAt,
+		"deletedAuditLogs":             result.DeletedAuditLogs,
+		"deletedAuthCaptchaChallenges": result.DeletedAuthCaptchaChallenges,
+		"deletedAuthRiskStates":        result.DeletedAuthRiskStates,
+		"deletedUserSessions":          result.DeletedUserSessions,
+		"totalDeleted":                 totalDeleted,
+	}
+
+	return s.adminAuditService.Record(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSystemConfig,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "system_config",
+		TargetID:   SystemConfigKeyDataRetention,
+		Summary:    "system config cleanup run: " + SystemConfigKeyDataRetention,
+		Detail:     detail,
+		RequestID:  requestID,
 	})
 }
 
