@@ -1404,12 +1404,41 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	insertAdminTestSpace(t, database, spaceIDA, "Doc Space A", ownerUserID, "member")
 	insertAdminTestSpace(t, database, spaceIDB, "Doc Space B", ownerUserID, "public")
 
+	nodeIDA := "01h1admindocnode000000000001"
+	nodeIDB := "01h1admindocnode000000000002"
 	docIDA := "01h1admindocument000000000001"
 	docIDB := "01h1admindocument000000000002"
-	insertAdminTestDocument(t, database, spaceIDA, "01h1admindocnode000000000001", docIDA, "Scoped Doc A", "public")
-	insertAdminTestDocument(t, database, spaceIDB, "01h1admindocnode000000000002", docIDB, "Unscoped Doc B", "authenticated")
+	insertAdminTestDocument(t, database, spaceIDA, nodeIDA, docIDA, "Scoped Doc A", "public")
+	insertAdminTestDocument(t, database, spaceIDB, nodeIDB, docIDB, "Unscoped Doc B", "authenticated")
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("document_revisions").Create(map[string]any{
+		"document_revision_id": "01h1admindocrevision0000000002",
+		"document_id":          docIDB,
+		"version":              1,
+		"content_md":           "# Unscoped Doc B",
+		"base_version":         1,
+		"source":               "local",
+		"created_at":           now,
+	}).Error; err != nil {
+		t.Fatalf("insert admin test document revision failed: %v", err)
+	}
+	if err := database.ORM.Table("document_image_assets").Create(map[string]any{
+		"image_asset_id":     "01h1admindocimageasset00000002",
+		"document_id":        docIDB,
+		"space_id":           spaceIDB,
+		"storage_provider":   "local",
+		"object_key":         "images/" + spaceIDB + "/" + docIDB + "/image.png",
+		"object_url":         "/api/uploads/images/" + spaceIDB + "/" + docIDB + "/image.png",
+		"status":             "active",
+		"last_referenced_at": now,
+		"pending_cleanup_at": nil,
+		"deleted_at":         nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert admin test document image asset failed: %v", err)
+	}
 	if err := database.ORM.Table("space_admin_scopes").Create(map[string]any{
 		"user_id":    spaceAdminUserID,
 		"space_id":   spaceIDA,
@@ -1543,18 +1572,44 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 		t.Fatalf("expected platform admin delete document status 200, got %d body=%s", platformDeleteRec.Code, platformDeleteRec.Body.String())
 	}
 
-	var deletedDocument struct {
-		Status    string     `gorm:"column:status"`
-		DeletedAt *time.Time `gorm:"column:deleted_at"`
-	}
+	var deletedDocumentCount int64
 	if err := database.ORM.Table("documents").
-		Select("status", "deleted_at").
 		Where("document_id = ?", docIDB).
-		Scan(&deletedDocument).Error; err != nil {
-		t.Fatalf("query deleted document failed: %v", err)
+		Count(&deletedDocumentCount).Error; err != nil {
+		t.Fatalf("query deleted document count failed: %v", err)
 	}
-	if deletedDocument.Status != "deleted" || deletedDocument.DeletedAt == nil {
-		t.Fatalf("expected deleted document status=deleted and deleted_at set, got %+v", deletedDocument)
+	if deletedDocumentCount != 0 {
+		t.Fatalf("expected deleted document removed from documents table, count=%d", deletedDocumentCount)
+	}
+
+	var deletedNodeCount int64
+	if err := database.ORM.Table("nodes").
+		Where("node_id = ?", nodeIDB).
+		Count(&deletedNodeCount).Error; err != nil {
+		t.Fatalf("query deleted node count failed: %v", err)
+	}
+	if deletedNodeCount != 0 {
+		t.Fatalf("expected deleted document node removed from nodes table, count=%d", deletedNodeCount)
+	}
+
+	var deletedRevisionCount int64
+	if err := database.ORM.Table("document_revisions").
+		Where("document_id = ?", docIDB).
+		Count(&deletedRevisionCount).Error; err != nil {
+		t.Fatalf("query deleted document revision count failed: %v", err)
+	}
+	if deletedRevisionCount != 0 {
+		t.Fatalf("expected deleted document revisions removed, count=%d", deletedRevisionCount)
+	}
+
+	var deletedImageAssetCount int64
+	if err := database.ORM.Table("document_image_assets").
+		Where("document_id = ?", docIDB).
+		Count(&deletedImageAssetCount).Error; err != nil {
+		t.Fatalf("query deleted document image asset count failed: %v", err)
+	}
+	if deletedImageAssetCount != 0 {
+		t.Fatalf("expected deleted document image assets removed, count=%d", deletedImageAssetCount)
 	}
 
 	platformDefaultListReq := httptest.NewRequest(http.MethodGet, "/api/admin/documents?page=1&pageSize=50", nil)
@@ -1573,8 +1628,8 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	if platformDeletedListRec.Code != http.StatusOK {
 		t.Fatalf("expected platform admin deleted list status 200, got %d body=%s", platformDeletedListRec.Code, platformDeletedListRec.Body.String())
 	}
-	if !strings.Contains(platformDeletedListRec.Body.String(), docIDB) {
-		t.Fatalf("expected deleted document visible in deleted list, body=%s", platformDeletedListRec.Body.String())
+	if strings.Contains(platformDeletedListRec.Body.String(), docIDB) {
+		t.Fatalf("expected hard-deleted document hidden from deleted list, body=%s", platformDeletedListRec.Body.String())
 	}
 
 	var documentBanAuditCount int64

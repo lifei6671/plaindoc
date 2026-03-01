@@ -1,7 +1,5 @@
 # PlainDoc
 
-
-
 一套面向中小团队的轻量级文档管理系统。  
 如果你熟悉 MinDoc，PlainDoc 的目标很直接：保留文档系统的核心价值，同时带来更现代的编辑体验和更省心的工程化部署。
 
@@ -13,13 +11,24 @@
 - 空间阅读页 SSR（对 SEO 友好）
 - 后台管理（用户、空间、文档、主题、系统配置、审计）
 
-![](./docs/screenshot-1771921927147.png)
+| 页面       | 截图                                           |
+|----------|----------------------------------------------|
+| 后台概览页    | ![](./docs/images/admin_index.png)           |
+| 后台个人信息页  | ![](./docs/images/admin_profile.png)         |
+| 后台用户管理页面 | ![](./docs/images/admin_users.png)           |
+| 空间管理     | ![](./docs/images/admin_spaces.png)          |
+| 新建空间     | ![](./docs/images/admin_spaces_new.png)      |
+| 空间分类     | ![](./docs/images/admin_spaces_category.png) |
+| 空间成员     | ![](./docs/images/admin_spaces_member.png)   |
+| 文档管理     | ![](./docs/images/admin_documents.png)       |
+| 附件管理     | ![](./docs/images/admin_attachments.png)     |
+| 图片管理     | ![](./docs/images/admin_images.png)          |
+| 主题管理     | ![](./docs/images/admin_themes.png)          |
+| 审计日志     | ![](./docs/images/admin_audits.png)          |
+| 文档编辑  | ![](./docs/images/admin_editor.png)|
+|首页|![](./docs/images/home_index.png)|
+|文档阅读| ![](./docs/images/home_reader.png)|
 
-![](./docs/screenshot-1771855761950.png)
-
-![](./docs/screenshot-1771855798856.png)
-
-![](./docs/screenshot-1771855823209.png)
 
 ---
 

@@ -30,11 +30,15 @@ import (
 )
 
 const (
-	defaultLocalImageStorageRoot = "uploads/local"
+	defaultLocalImageStorageRoot = "uploads"
+	legacyLocalImageStorageRoot  = "uploads/local"
 	maxUploadImageSizeBytes      = 20 << 20
 )
 
-var errUploadedImageTooLarge = errors.New("uploaded image file is too large")
+var (
+	errUploadedImageTooLarge      = errors.New("uploaded image file is too large")
+	errLocalImagePathOutOfRootDir = errors.New("local image path is out of root dir")
+)
 
 type imageHostingHandler struct {
 	authService         *service.AuthService
@@ -394,37 +398,56 @@ func (h *imageHostingHandler) ServeLocalImage(c *gin.Context) {
 	if localRootDir == "" {
 		localRootDir = defaultLocalImageStorageRoot
 	}
-
-	targetPath := filepath.Join(localRootDir, filepath.FromSlash(cleanPath))
-	targetAbsPath, err := filepath.Abs(targetPath)
+	targetAbsPath, err := resolveLocalImageAbsolutePath(localRootDir, cleanPath)
 	if err != nil {
+		if errors.Is(err, errLocalImagePathOutOfRootDir) {
+			response.ImageHostingInvalidFilePath(c)
+			return
+		}
 		setRequestErrmsg(c, err, "解析图片目标路径失败")
 		response.InternalError(c)
-		return
-	}
-	rootAbsPath, err := filepath.Abs(localRootDir)
-	if err != nil {
-		setRequestErrmsg(c, err, "解析图片根路径失败")
-		response.InternalError(c)
-		return
-	}
-	// 二次校验目标路径必须位于根目录下，阻断路径逃逸。
-	if !isPathWithinRoot(rootAbsPath, targetAbsPath) {
-		response.ImageHostingInvalidFilePath(c)
 		return
 	}
 
 	fileInfo, err := os.Stat(targetAbsPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if !errors.Is(err, os.ErrNotExist) {
+			setRequestErrmsg(c, err, "读取图片文件信息失败")
+			response.InternalError(c)
+			return
+		}
+
+		// 兼容历史落盘目录 uploads/local/*（旧版默认目录）。
+		// 新版默认目录为 uploads/*。
+		legacyRootDir := strings.TrimSpace(legacyLocalImageStorageRoot)
+		if filepath.Clean(localRootDir) != filepath.Clean(legacyRootDir) {
+			legacyAbsPath, legacyResolveErr := resolveLocalImageAbsolutePath(legacyRootDir, cleanPath)
+			if legacyResolveErr != nil {
+				if errors.Is(legacyResolveErr, errLocalImagePathOutOfRootDir) {
+					response.ImageHostingInvalidFilePath(c)
+					return
+				}
+				setRequestErrmsg(c, legacyResolveErr, "解析历史图片目标路径失败")
+				response.InternalError(c)
+				return
+			}
+
+			legacyFileInfo, legacyStatErr := os.Stat(legacyAbsPath)
+			if legacyStatErr == nil && !legacyFileInfo.IsDir() {
+				targetAbsPath = legacyAbsPath
+			} else if legacyStatErr != nil && !errors.Is(legacyStatErr, os.ErrNotExist) {
+				setRequestErrmsg(c, legacyStatErr, "读取历史图片文件信息失败")
+				response.InternalError(c)
+				return
+			} else {
+				response.ImageHostingFileNotFound(c)
+				return
+			}
+		} else {
 			response.ImageHostingFileNotFound(c)
 			return
 		}
-		setRequestErrmsg(c, err, "读取图片文件信息失败")
-		response.InternalError(c)
-		return
-	}
-	if fileInfo.IsDir() {
+	} else if fileInfo.IsDir() {
 		response.ImageHostingFileNotFound(c)
 		return
 	}
@@ -963,4 +986,20 @@ func isPathWithinRoot(rootAbsPath string, targetAbsPath string) bool {
 	}
 	prefix := rootAbsPath + string(filepath.Separator)
 	return strings.HasPrefix(targetAbsPath, prefix)
+}
+
+func resolveLocalImageAbsolutePath(rootDir string, cleanPath string) (string, error) {
+	targetPath := filepath.Join(rootDir, filepath.FromSlash(cleanPath))
+	targetAbsPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", err
+	}
+	rootAbsPath, err := filepath.Abs(rootDir)
+	if err != nil {
+		return "", err
+	}
+	if !isPathWithinRoot(rootAbsPath, targetAbsPath) {
+		return "", errLocalImagePathOutOfRootDir
+	}
+	return targetAbsPath, nil
 }

@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PlainDoc - 轻量但完整的团队文档平台</title>
+    <meta
+      name="description"
+      content="PlainDoc 是面向中小团队的轻量级文档管理系统，提供编辑、阅读、权限治理、附件下载鉴权、后台审计与一体化部署能力。"
+    />
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --text: #111827;
+        --muted: #5b6474;
+        --line: #dde3ee;
+        --brand: #0f4bb8;
+        --brand-soft: #e9f0ff;
+        --ok: #0d7a4d;
+        --radius: 14px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Noto Sans SC", "PingFang SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+        background: linear-gradient(180deg, #f7f9fc 0%, #f3f6fb 100%);
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      .wrap {
+        width: min(1120px, calc(100vw - 32px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(8px);
+        background: rgba(245, 247, 251, 0.86);
+        border-bottom: 1px solid rgba(221, 227, 238, 0.8);
+      }
+
+      .topbar-inner {
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .logo {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .logo small {
+        color: var(--muted);
+        font-weight: 500;
+        margin-left: 8px;
+      }
+
+      .nav {
+        display: flex;
+        gap: 16px;
+      }
+
+      .nav a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 14px;
+      }
+
+      .hero {
+        padding: 72px 0 44px;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 24px;
+      }
+
+      .hero-main h1 {
+        margin: 0 0 16px;
+        font-size: clamp(28px, 4vw, 46px);
+        line-height: 1.2;
+      }
+
+      .hero-main p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 62ch;
+      }
+
+      .tag-row {
+        margin-top: 18px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid var(--line);
+        background: #fff;
+      }
+
+      .hero-actions {
+        margin-top: 22px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .btn {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-weight: 600;
+        font-size: 14px;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .btn-primary {
+        background: var(--brand);
+        color: #fff;
+      }
+
+      .btn-ghost {
+        border-color: var(--line);
+        background: #fff;
+        color: var(--text);
+      }
+
+      .hero-card {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: var(--radius);
+        padding: 20px;
+      }
+
+      .hero-card h3 {
+        margin: 0 0 12px;
+        font-size: 16px;
+      }
+
+      .kpis {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .kpi {
+        border: 1px solid var(--line);
+        background: #fafcff;
+        border-radius: 10px;
+        padding: 12px;
+      }
+
+      .kpi b {
+        display: block;
+        font-size: 18px;
+      }
+
+      .kpi span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      section {
+        margin-top: 18px;
+      }
+
+      .section-title {
+        margin: 0 0 12px;
+        font-size: 24px;
+      }
+
+      .section-sub {
+        margin: 0 0 18px;
+        color: var(--muted);
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .feature {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 16px;
+      }
+
+      .feature h4 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .feature p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .arch {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: var(--radius);
+        padding: 16px;
+      }
+
+      .arch-list {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .arch-list li {
+        margin: 8px 0;
+      }
+
+      .screen-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .screen-grid-dense {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .screen-group-title {
+        margin: 20px 0 10px;
+        font-size: 16px;
+      }
+
+      .shot {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        background: #fff;
+      }
+
+      .shot img {
+        width: 100%;
+        display: block;
+      }
+
+      .shot figcaption {
+        padding: 10px 12px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .highlight {
+        border: 1px solid #c7dbff;
+        background: var(--brand-soft);
+        border-radius: 12px;
+        padding: 14px 16px;
+        color: #173268;
+      }
+
+      .highlight b {
+        color: #0f2c65;
+      }
+
+      .cta {
+        margin: 28px 0 42px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 14px;
+        padding: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .cta p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .foot {
+        border-top: 1px solid var(--line);
+        padding: 16px 0 30px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .ok {
+        color: var(--ok);
+        font-weight: 600;
+      }
+
+      @media (max-width: 920px) {
+        .hero-grid,
+        .grid-3,
+        .screen-grid,
+        .screen-grid-dense {
+          grid-template-columns: 1fr;
+        }
+
+        .nav {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap topbar-inner">
+        <div class="logo">PlainDoc <small>轻量但完整的团队文档平台</small></div>
+        <nav class="nav" aria-label="页面导航">
+          <a href="#features">核心能力</a>
+          <a href="#architecture">技术架构</a>
+          <a href="#screenshots">产品界面</a>
+          <a href="#deploy">部署方式</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="hero">
+        <div class="hero-grid">
+          <div class="hero-main">
+            <h1>让团队文档真正可长期运行，而不只是“能编辑 Markdown”</h1>
+            <p>
+              PlainDoc 面向中小团队，覆盖文档的编辑、阅读、权限、附件、安全与后台治理全链路。
+              你可以用一套系统同时解决“内容生产”和“长期可运营”的问题。
+            </p>
+            <div class="tag-row">
+              <span class="tag">Go + Gin + GORM</span>
+              <span class="tag">React + Vite + CodeMirror</span>
+              <span class="tag">首页/阅读双 SSR</span>
+              <span class="tag">权限与审计内置</span>
+            </div>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="https://github.com/lifei6671/plaindoc/blob/master/README.md" target="_blank">查看项目总览</a>
+              <a class="btn btn-ghost" href="https://github.com/lifei6671/plaindoc/blob/master/docs/BACKEND_DEVELOPER_GUIDE.md" target="_blank">查看后端指南</a>
+              <a class="btn btn-ghost" href="https://github.com/lifei6671/plaindoc/blob/master/docs/FRONTEND_DEVELOPER_GUIDE.md" target="_blank">查看前端指南</a>
+            </div>
+          </div>
+
+          <aside class="hero-card" aria-label="项目速览">
+            <h3>项目速览</h3>
+            <div class="kpis">
+              <div class="kpi">
+                <b>双 SSR</b>
+                <span>首页模板 + 阅读页 Worker</span>
+              </div>
+              <div class="kpi">
+                <b>多数据库</b>
+                <span>SQLite / MySQL / PostgreSQL</span>
+              </div>
+              <div class="kpi">
+                <b>附件鉴权</b>
+                <span>公开直链 / 私有签名 / Token 下载</span>
+              </div>
+              <div class="kpi">
+                <b>后台治理</b>
+                <span>用户、空间、文档、主题、审计、系统配置</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="features">
+        <h2 class="section-title">核心能力</h2>
+        <p class="section-sub">围绕“可协作、可分享、可治理、可持续”四个目标设计。</p>
+        <div class="grid-3">
+          <article class="feature">
+            <h4>编辑与协作工作台</h4>
+            <p>左侧文档树 + 中间编辑 + 右侧预览，支持版本冲突检测与修订记录。</p>
+          </article>
+          <article class="feature">
+            <h4>阅读与分享体验</h4>
+            <p>独立阅读页 ` /r/:spaceId/:docId `，对 SEO 更友好，适合知识门户场景。</p>
+          </article>
+          <article class="feature">
+            <h4>权限模型清晰</h4>
+            <p>`owner / collaborator / reader` + 可见性控制，覆盖团队内部协作边界。</p>
+          </article>
+          <article class="feature">
+            <h4>附件与图片体系</h4>
+            <p>附件下载鉴权、预览分流、私有存储签名链接、后台资源管理与自动清理。</p>
+          </article>
+          <article class="feature">
+            <h4>安全与风控</h4>
+            <p>登录/注册验证码分级、临时封禁、后台高风险操作令牌、统一错误码体系。</p>
+          </article>
+          <article class="feature">
+            <h4>可观测与治理</h4>
+            <p>后台内置审计日志、系统配置、数据清理策略，便于长期运营维护。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2 class="section-title">技术架构</h2>
+        <p class="section-sub">保持单体部署体验，同时保留 SSR 能力与工程化边界。</p>
+        <div class="arch">
+          <ol class="arch-list">
+            <li><b>后端主服务：</b>Go 提供 API、权限校验、后台管理、静态资源与渲染调度。</li>
+            <li><b>前端应用：</b>React + TypeScript，统一通过后端 API 网关交互。</li>
+            <li><b>阅读页 SSR：</b>Go 调度 Node SSR Worker 子进程，不强制拆分独立 SSR 服务。</li>
+            <li><b>存储与下载：</b>支持本地与对象存储，按文档权限返回公开直链或临时签名。</li>
+          </ol>
+        </div>
+        <p class="highlight">
+          <b>关键设计：</b>让“部署复杂度”与“产品能力”解耦。默认可单容器运行，后续再按规模平滑扩展。
+        </p>
+      </section>
+
+      <section id="screenshots">
+        <h2 class="section-title">精选界面</h2>
+        <div class="screen-grid-dense">
+          <figure class="shot">
+            <img src="./images/admin_index.png" alt="后台概览页截图" />
+            <figcaption>后台概览页</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_profile.png" alt="后台个人信息页截图" />
+            <figcaption>后台个人信息页</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_users.png" alt="后台用户管理页截图" />
+            <figcaption>后台用户管理页</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_spaces.png" alt="空间管理页截图" />
+            <figcaption>空间管理</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_spaces_new.png" alt="新建空间页截图" />
+            <figcaption>新建空间</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_spaces_category.png" alt="空间分类页截图" />
+            <figcaption>空间分类</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_spaces_member.png" alt="空间成员页截图" />
+            <figcaption>空间成员</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_documents.png" alt="文档管理页截图" />
+            <figcaption>文档管理</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_attachments.png" alt="附件管理页截图" />
+            <figcaption>附件管理</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_images.png" alt="图片管理页截图" />
+            <figcaption>图片管理</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_themes.png" alt="主题管理页截图" />
+            <figcaption>主题管理</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_audits.png" alt="审计日志页截图" />
+            <figcaption>审计日志</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/admin_editor.png" alt="文档编辑工作台截图" />
+            <figcaption>文档编辑</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/home_index.png" alt="首页截图" />
+            <figcaption>首页</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="./images/home_reader.png" alt="文档阅读页截图" />
+            <figcaption>文档阅读</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="deploy">
+        <h2 class="section-title">部署方式</h2>
+        <p class="section-sub">开发与生产路径一致，适合团队快速落地。</p>
+        <div class="grid-3">
+          <article class="feature">
+            <h4>Docker Compose（推荐）</h4>
+            <p><span class="ok">开箱即用</span>，可直接启动完整服务链路与持久化卷。</p>
+          </article>
+          <article class="feature">
+            <h4>本地开发模式</h4>
+            <p>后端 Go + 前端 Vite 分开运行，便于联调与快速迭代。</p>
+          </article>
+          <article class="feature">
+            <h4>Release 产物部署</h4>
+            <p>支持服务端二进制与前端构建产物分发，适配裸机与云主机。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div>
+          <h3 style="margin: 0 0 6px">如果你想要一套能真正运营起来的团队文档系统</h3>
+          <p>从 README 的快速部署开始，10 分钟内你就能看到完整的 PlainDoc 运行效果。</p>
+        </div>
+        <div class="hero-actions" style="margin-top: 0">
+          <a class="btn btn-primary" href="../README.md">开始部署</a>
+          <a class="btn btn-ghost" href="./DOCUMENT_ATTACHMENT_API.md">查看附件能力</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap foot">
+      PlainDoc · Lightweight Documentation Platform for Teams · Updated for 2026-03-01
+    </footer>
+  </body>
+</html>

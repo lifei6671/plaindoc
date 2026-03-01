@@ -28,7 +28,7 @@ const (
 	defaultDocumentImageAssetCleanupGracePeriod = 24 * time.Hour
 	defaultDocumentImageAssetCleanupBatchSize   = 500
 	maxDocumentImageAssetCleanupBatchSize       = 5000
-	defaultDocumentImageAssetLocalRootDir       = "uploads/local"
+	defaultDocumentImageAssetLocalRootDir       = "uploads"
 )
 
 var (

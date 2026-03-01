@@ -165,7 +165,7 @@ func (h *adminDocumentHandler) UpdateStatus(c *gin.Context) {
 	response.JSON(c, http.StatusOK, mapAdminDocumentResponse(payload))
 }
 
-// DeleteDocument 软删除文档。
+// DeleteDocument 删除文档并触发关联数据清理。
 func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 	if h == nil || h.adminDocumentService == nil {
 		response.InternalError(c)

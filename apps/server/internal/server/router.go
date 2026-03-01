@@ -370,6 +370,7 @@ func newRouter(
 		adminDocumentService := service.NewAdminDocumentService(
 			documentRepo,
 			userRepo,
+			workspaceRepo,
 			adminAccessService,
 			adminAuditService,
 			documentAttachmentCleanupService,

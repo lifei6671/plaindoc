@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,34 @@ func TestRouter_ImageUploadSpacePermission(t *testing.T) {
 	readerRec := serve(readerReq)
 	if readerRec.Code != http.StatusForbidden {
 		t.Fatalf("expected reader upload status 403, got %d body=%s", readerRec.Code, readerRec.Body.String())
+	}
+}
+
+func TestRouter_ServeLocalImage_LegacyStorageFallback(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+	defer func() {
+		_ = os.RemoveAll("uploads")
+	}()
+
+	imageBytes := decodeTinyPNG(t)
+	legacyFilePath := filepath.Join("uploads", "local", "avatars", "legacy-avatar.png")
+	if err := os.MkdirAll(filepath.Dir(legacyFilePath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy avatar dir failed: %v", err)
+	}
+	if err := os.WriteFile(legacyFilePath, imageBytes, 0o644); err != nil {
+		t.Fatalf("write legacy avatar file failed: %v", err)
+	}
+
+	fetchReq := httptest.NewRequest(http.MethodGet, "/uploads/avatars/legacy-avatar.png", nil)
+	fetchRec := serve(fetchReq)
+	if fetchRec.Code != http.StatusOK {
+		t.Fatalf("expected serve legacy local image status 200, got %d body=%s", fetchRec.Code, fetchRec.Body.String())
+	}
+	if !strings.HasPrefix(fetchRec.Header().Get("Content-Type"), "image/") {
+		t.Fatalf("expected legacy local image content type, got %s", fetchRec.Header().Get("Content-Type"))
 	}
 }
 

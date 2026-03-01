@@ -517,6 +517,7 @@ type DocumentRepository interface {
 	UpdateVisibility(ctx context.Context, documentID string, visibility models.Visibility) (*models.Document, error)
 	UpdateStatus(ctx context.Context, params UpdateDocumentStatusParams) (bool, error)
 	SoftDelete(ctx context.Context, documentID string, deletedAt time.Time) (bool, error)
+	HardDelete(ctx context.Context, documentID string) (bool, error)
 	UpdateWithVersion(ctx context.Context, document *models.Document, baseVersion int) (bool, error)
 }
 

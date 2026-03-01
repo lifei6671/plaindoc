@@ -2,6 +2,7 @@ import { ChevronDown, ExternalLink, LoaderCircle, RefreshCw, Search, Trash2 } fr
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +21,13 @@ import {
 } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import { useAdminDialogs } from "../components/AdminDialogs";
-import { AdminPageCard, AdminPaginationFooter, AdminTableContainer, AdminToolbarActions } from "../components/AdminPageLayout";
+import {
+  AdminBulkActionBar,
+  AdminPageCard,
+  AdminPaginationFooter,
+  AdminTableContainer,
+  AdminToolbarActions
+} from "../components/AdminPageLayout";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -201,12 +208,14 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
   const [statusFilter, setStatusFilter] = useState<"" | "all" | "active" | "deleted">("");
   const [storageProviderFilter, setStorageProviderFilter] = useState<"" | "all" | "local" | "cloudflare-r2" | "aliyun-oss">("");
   const [page, setPage] = useState(1);
+  const [selectedAttachmentIDs, setSelectedAttachmentIDs] = useState<string[]>([]);
 
   const [attachmentsState, setAttachmentsState] = useState<AdminDocumentAttachmentsState>(() =>
     emptyDocumentAttachmentsState()
   );
   const [loading, setLoading] = useState(false);
   const [actioningAttachmentID, setActioningAttachmentID] = useState<string | null>(null);
+  const [batchActioning, setBatchActioning] = useState(false);
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -236,6 +245,24 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
   useEffect(() => {
     void loadAttachments();
   }, [loadAttachments]);
+
+  useEffect(() => {
+    setSelectedAttachmentIDs((previous) =>
+      previous.filter((attachmentID) => attachmentsState.items.some((item) => item.attachmentId === attachmentID))
+    );
+  }, [attachmentsState.items]);
+
+  const selectedAttachmentSet = useMemo(() => new Set(selectedAttachmentIDs), [selectedAttachmentIDs]);
+  const selectableAttachmentIDs = useMemo(
+    () => attachmentsState.items.map((item) => item.attachmentId),
+    [attachmentsState.items]
+  );
+  const allSelectableChecked = useMemo(
+    () =>
+      selectableAttachmentIDs.length > 0 &&
+      selectableAttachmentIDs.every((attachmentID) => selectedAttachmentSet.has(attachmentID)),
+    [selectableAttachmentIDs, selectedAttachmentSet]
+  );
 
   const totalPages = useMemo(() => {
     const total = attachmentsState.pagination.total;
@@ -342,6 +369,113 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
     [confirm, dataGateway.admin, loadAttachments, openToast, prompt]
   );
 
+  const handleToggleSelectAll = useCallback(
+    (checked: boolean) => {
+      setSelectedAttachmentIDs(checked ? selectableAttachmentIDs : []);
+    },
+    [selectableAttachmentIDs]
+  );
+
+  const handleToggleSelectOne = useCallback((attachmentID: string, checked: boolean) => {
+    setSelectedAttachmentIDs((previous) => {
+      if (checked) {
+        if (previous.includes(attachmentID)) {
+          return previous;
+        }
+        return [...previous, attachmentID];
+      }
+      return previous.filter((value) => value !== attachmentID);
+    });
+  }, []);
+
+  const handleBatchDelete = useCallback(async () => {
+    const selectedItems = attachmentsState.items.filter((item) => selectedAttachmentSet.has(item.attachmentId));
+    if (selectedItems.length === 0) {
+      openToast("请先选择需要删除的附件");
+      return;
+    }
+
+    const promptResult = await prompt({
+      title: `批量删除附件（${selectedItems.length} 项）`,
+      description:
+        "请选择删除方式。逻辑删除仅标记为删除并保留文件；物理删除会删除附件记录，并在无引用时删除物理文件（不可恢复）。",
+      confirmText: "继续",
+      tone: "danger",
+      fields: [
+        {
+          key: "physicalDelete",
+          label: "删除方式",
+          type: "select",
+          required: true,
+          defaultValue: "false",
+          options: [
+            { value: "false", label: "仅逻辑删除" },
+            { value: "true", label: "物理删除（不可恢复）" }
+          ]
+        }
+      ]
+    });
+    if (!promptResult) {
+      return;
+    }
+
+    const physicalDelete = (promptResult.physicalDelete ?? "false").trim() === "true";
+    if (physicalDelete) {
+      const confirmed = await confirm({
+        title: "确认批量物理删除",
+        description:
+          "物理删除后不可恢复。系统会按引用关系删除记录；若文件仍被其他文档引用，则不会删除物理文件。",
+        confirmText: "确认物理删除",
+        cancelText: "取消",
+        tone: "danger"
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setBatchActioning(true);
+    let successCount = 0;
+    const failures: string[] = [];
+    try {
+      for (const item of selectedItems) {
+        try {
+          let deleteResult = await dataGateway.admin.deleteDocumentAttachment({
+            attachmentId: item.attachmentId,
+            physicalDelete
+          });
+          if (physicalDelete && deleteResult.confirmationRequired) {
+            deleteResult = await dataGateway.admin.deleteDocumentAttachment({
+              attachmentId: item.attachmentId,
+              physicalDelete: true,
+              forcePhysicalDeleteOnShare: true
+            });
+          }
+          const toast = buildDeleteAttachmentToastMessage(deleteResult);
+          if (toast.variant === "info") {
+            failures.push(`${item.fileName || item.attachmentId}: ${toast.message}`);
+          } else {
+            successCount += 1;
+          }
+        } catch (error) {
+          failures.push(`${item.fileName || item.attachmentId}: ${formatError(error)}`);
+        }
+      }
+
+      await loadAttachments();
+      setSelectedAttachmentIDs([]);
+      if (failures.length > 0) {
+        openToast(`批量删除完成：成功 ${successCount}，异常 ${failures.length}。首个异常：${failures[0]}`, "info");
+      } else {
+        openToast(`批量删除成功：共 ${successCount} 条`, "success");
+      }
+    } finally {
+      setBatchActioning(false);
+    }
+  }, [attachmentsState.items, confirm, dataGateway.admin, loadAttachments, openToast, prompt, selectedAttachmentSet]);
+
+  const selectionDisabled = loading || batchActioning || actioningAttachmentID !== null;
+
   return (
     <AdminPageCard className="border border-slate-200 bg-white shadow-sm" contentClassName="space-y-4 px-5 pb-5 pt-4">
       <form className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(220px,1fr)_minmax(220px,1fr)_180px_190px_auto]" onSubmit={handleSearchSubmit}>
@@ -426,10 +560,41 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
         </AdminToolbarActions>
       </form>
 
+      <AdminBulkActionBar selectedCount={selectedAttachmentIDs.length}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="border-rose-200 bg-rose-50 text-rose-700 shadow-none hover:bg-rose-100"
+          disabled={selectionDisabled || selectedAttachmentIDs.length === 0}
+          onClick={() => void handleBatchDelete()}
+        >
+          批量删除
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="border-slate-300 bg-white text-slate-700 shadow-none hover:bg-slate-50"
+          disabled={selectionDisabled || selectedAttachmentIDs.length === 0}
+          onClick={() => setSelectedAttachmentIDs([])}
+        >
+          清空选择
+        </Button>
+      </AdminBulkActionBar>
+
       <AdminTableContainer>
         <table className="min-w-full table-fixed border-collapse text-sm">
           <thead className="bg-slate-50/80 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
+              <th className="w-10 px-3 py-2 font-semibold">
+                <Checkbox
+                  checked={allSelectableChecked}
+                  disabled={selectionDisabled || selectableAttachmentIDs.length === 0}
+                  onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
+                  aria-label="全选附件"
+                />
+              </th>
               <th className="w-[260px] px-3 py-2 font-semibold">附件</th>
               <th className="w-[300px] px-3 py-2 font-semibold">所属文档</th>
               <th className="w-[240px] px-3 py-2 font-semibold">所属空间</th>
@@ -443,16 +608,24 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
           <tbody className="divide-y divide-slate-100 text-slate-700">
             {attachmentsState.items.length === 0 ? (
               <tr>
-                <td className="px-3 py-9 text-center text-sm text-slate-500" colSpan={8}>
+                <td className="px-3 py-9 text-center text-sm text-slate-500" colSpan={9}>
                   {loading ? "正在加载附件..." : "暂无匹配的附件记录"}
                 </td>
               </tr>
             ) : (
               attachmentsState.items.map((attachment) => {
-                const actioning = actioningAttachmentID === attachment.attachmentId;
+                const actioning = actioningAttachmentID === attachment.attachmentId || batchActioning;
                 const isDeleted = attachment.status === "deleted";
                 return (
                   <tr key={attachment.attachmentId} className="align-top hover:bg-slate-50/60">
+                    <td className="px-3 py-2.5">
+                      <Checkbox
+                        checked={selectedAttachmentSet.has(attachment.attachmentId)}
+                        disabled={selectionDisabled}
+                        onCheckedChange={(checked) => handleToggleSelectOne(attachment.attachmentId, checked === true)}
+                        aria-label={`选择附件 ${attachment.fileName || attachment.attachmentId}`}
+                      />
+                    </td>
                     <td className="px-3 py-2.5">
                       <div className="space-y-1">
                         <p className="line-clamp-2 break-all font-medium text-slate-900">{attachment.fileName || attachment.attachmentId}</p>

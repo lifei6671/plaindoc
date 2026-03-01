@@ -457,6 +457,51 @@ func (r *gormDocumentRepository) SoftDelete(ctx context.Context, documentID stri
 	return tx.RowsAffected > 0, nil
 }
 
+func (r *gormDocumentRepository) HardDelete(ctx context.Context, documentID string) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("document repository db is nil")
+	}
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return false, nil
+	}
+
+	var documentDeleted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Table("document_revisions").
+			Where("document_id = ?", normalizedDocumentID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("document_permissions").
+			Where("document_id = ?", normalizedDocumentID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("document_image_assets").
+			Where("document_id = ?", normalizedDocumentID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("document_attachments").
+			Where("document_id = ?", normalizedDocumentID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+
+		deleteDocumentTx := tx.Where("document_id = ?", normalizedDocumentID).Delete(&models.Document{})
+		if deleteDocumentTx.Error != nil {
+			return deleteDocumentTx.Error
+		}
+		documentDeleted = deleteDocumentTx.RowsAffected > 0
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return documentDeleted, nil
+}
+
 func (r *gormDocumentRepository) UpdateWithVersion(
 	ctx context.Context,
 	document *models.Document,

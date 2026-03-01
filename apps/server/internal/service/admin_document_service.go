@@ -89,6 +89,7 @@ type UpdateAdminDocumentStatusInput struct {
 type AdminDocumentService struct {
 	documentRepo                     repository.DocumentRepository
 	userRepo                         repository.UserRepository
+	workspaceRepo                    repository.WorkspaceRepository
 	adminAccessService               *AdminAccessService
 	adminAuditService                *AdminAuditService
 	documentAttachmentCleanupService *DocumentAttachmentCleanupService
@@ -98,6 +99,7 @@ type AdminDocumentService struct {
 func NewAdminDocumentService(
 	documentRepo repository.DocumentRepository,
 	userRepo repository.UserRepository,
+	workspaceRepo repository.WorkspaceRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
 	documentAttachmentCleanupService *DocumentAttachmentCleanupService,
@@ -105,6 +107,7 @@ func NewAdminDocumentService(
 	return &AdminDocumentService{
 		documentRepo:                     documentRepo,
 		userRepo:                         userRepo,
+		workspaceRepo:                    workspaceRepo,
 		adminAccessService:               adminAccessService,
 		adminAuditService:                adminAuditService,
 		documentAttachmentCleanupService: documentAttachmentCleanupService,
@@ -256,7 +259,7 @@ func (s *AdminDocumentService) UpdateStatus(
 	return record, nil
 }
 
-// DeleteDocument 软删除后台目标文档。
+// DeleteDocument 删除后台目标文档节点，并级联移除关联文档数据。
 func (s *AdminDocumentService) DeleteDocument(
 	ctx context.Context,
 	actorUserID string,
@@ -289,16 +292,34 @@ func (s *AdminDocumentService) DeleteDocument(
 		return err
 	}
 
-	if normalizeEntityStatus(accessInfo.Document.Status) == models.EntityStatusDeleted || accessInfo.Document.DeletedAt != nil {
-		return nil
+	now := time.Now().UTC()
+	nodeDeleted := false
+	if s.workspaceRepo != nil && strings.TrimSpace(accessInfo.Document.NodeID) != "" {
+		deleted, deleteErr := s.workspaceRepo.DeleteNode(
+			ctx,
+			strings.TrimSpace(accessInfo.Document.NodeID),
+			strings.TrimSpace(accessInfo.SpaceID),
+			now,
+		)
+		if deleteErr != nil {
+			return deleteErr
+		}
+		nodeDeleted = deleted
 	}
 
-	deleted, err := s.documentRepo.SoftDelete(ctx, targetDocumentID, time.Now().UTC())
-	if err != nil {
-		return err
+	documentDeleted, deleteErr := s.documentRepo.HardDelete(ctx, targetDocumentID)
+	if deleteErr != nil {
+		return deleteErr
 	}
-	if !deleted {
+	if !nodeDeleted && !documentDeleted {
 		return errcode.ErrAdminDocumentNotFound
+	}
+
+	deleteMode := "hard_document_only"
+	if nodeDeleted && !documentDeleted {
+		deleteMode = "hard_node_cascade"
+	} else if nodeDeleted && documentDeleted {
+		deleteMode = "hard_node_and_document"
 	}
 
 	var (
@@ -323,6 +344,8 @@ func (s *AdminDocumentService) DeleteDocument(
 		TargetID:   targetDocumentID,
 		Summary:    "document deleted: " + targetDocumentID,
 		Detail: map[string]any{
+			"nodeId":                    accessInfo.Document.NodeID,
+			"deleteMode":                deleteMode,
 			"spaceId":                   accessInfo.SpaceID,
 			"statusBefore":              accessInfo.Document.Status,
 			"statusAfter":               models.EntityStatusDeleted,

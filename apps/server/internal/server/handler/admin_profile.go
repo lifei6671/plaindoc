@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	defaultAdminProfileLocalImageRoot = "uploads/"
+	defaultAdminProfileLocalImageRoot = "uploads"
 	maxAdminProfileAvatarSizeBytes    = 10 << 20
 )
 

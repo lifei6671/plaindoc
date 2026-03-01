@@ -23,7 +23,7 @@ const (
 	defaultAdminDocumentAttachmentPage     = 1
 	defaultAdminDocumentAttachmentPageSize = 20
 	maxAdminDocumentAttachmentPageSize     = 100
-	defaultAdminLocalAttachmentRootDir     = "uploads/local"
+	defaultAdminLocalAttachmentRootDir     = "uploads"
 	defaultAdminDeleteRefPreviewLimit      = 10
 )
 

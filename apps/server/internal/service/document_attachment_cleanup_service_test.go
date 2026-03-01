@@ -256,7 +256,7 @@ func createAttachmentCleanupLocalFile(t *testing.T, objectKey string, content st
 	t.Helper()
 
 	normalizedObjectKey := strings.TrimSpace(strings.TrimPrefix(objectKey, "/"))
-	targetPath := filepath.Join("uploads", "local", filepath.FromSlash(normalizedObjectKey))
+	targetPath := filepath.Join("uploads", filepath.FromSlash(normalizedObjectKey))
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		t.Fatalf("mkdir local file path failed: %v", err)
 	}

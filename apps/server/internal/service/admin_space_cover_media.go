@@ -33,9 +33,9 @@ import (
 )
 
 const (
-	adminSpaceCoverStorageRootDir         = "uploads/local"
+	adminSpaceCoverStorageRootDir         = "uploads"
 	adminSpaceCoverObjectPrefix           = "space-covers"
-	adminSpaceCoverPublicPrefix           = "/api/uploads/local"
+	adminSpaceCoverPublicPrefix           = "/uploads"
 	adminSpaceCoverMaxUploadSizeBytes     = 10 << 20
 	adminSpaceCoverMaxImageDimension      = 12000
 	adminSpaceCoverMaxPixelCount          = 40_000_000

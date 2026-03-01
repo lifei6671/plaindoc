@@ -23,7 +23,7 @@ const (
 	defaultAdminDocumentImageAssetPage     = 1
 	defaultAdminDocumentImageAssetPageSize = 20
 	maxAdminDocumentImageAssetPageSize     = 100
-	defaultAdminLocalImageRootDir          = "uploads/local"
+	defaultAdminLocalImageRootDir          = "uploads"
 	defaultAdminImageDeleteRefPreviewLimit = 10
 )
 

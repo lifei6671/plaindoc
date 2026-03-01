@@ -250,6 +250,11 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 		).
 		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
 		Where("n.space_id = ?", strings.TrimSpace(spaceID)).
+		Where(
+			"(n.type <> ? OR (d.document_id IS NOT NULL AND d.deleted_at IS NULL AND d.status <> ?))",
+			models.NodeTypeDoc,
+			models.EntityStatusDeleted,
+		).
 		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
