@@ -162,6 +162,7 @@ type SpaceRepository interface {
 	IsMember(ctx context.Context, spaceID string, userID string) (bool, error)
 	TransferOwnership(ctx context.Context, spaceID string, fromUserID string, toUserID string, updatedAt time.Time) (bool, error)
 	SoftDelete(ctx context.Context, spaceID string, deletedAt time.Time) (bool, error)
+	HardDelete(ctx context.Context, spaceID string) (bool, error)
 	HasReaderAccess(ctx context.Context, spaceID string, userID string) (bool, error)
 	HasWriterAccess(ctx context.Context, spaceID string, userID string) (bool, error)
 }

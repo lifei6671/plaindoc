@@ -363,6 +363,7 @@ func newRouter(
 			userRepo,
 			adminRoleRepo,
 			spaceAdminScopeRepo,
+			systemConfigRepo,
 			adminAccessService,
 			adminAuditService,
 		)

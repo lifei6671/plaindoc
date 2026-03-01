@@ -82,6 +82,14 @@ function renderVisibilityLabel(value: Visibility): string {
   }
 }
 
+function normalizeSiteDefaultVisibility(value: unknown): Visibility {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "public" || normalized === "authenticated" || normalized === "member") {
+    return normalized;
+  }
+  return "member";
+}
+
 function renderStatusLabel(value: AdminSpace["status"]): string {
   switch (value) {
     case "active":
@@ -160,6 +168,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   const [actioningSpaceID, setActioningSpaceID] = useState<string | null>(null);
   const [batchActioning, setBatchActioning] = useState(false);
   const [updatingCategories, setUpdatingCategories] = useState(false);
+  const [createDefaultVisibility, setCreateDefaultVisibility] = useState<Visibility>("member");
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -213,6 +222,22 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
     }
   }, [dataGateway.admin, openToast]);
 
+  const loadCreateDefaultVisibility = useCallback(async () => {
+    try {
+      const configs = await dataGateway.admin.listSystemConfigs();
+      const siteConfig = configs.find((item) => item.configKey === "site");
+      const siteValue = siteConfig?.value;
+      const defaultVisibility =
+        siteValue && typeof siteValue === "object"
+          ? normalizeSiteDefaultVisibility((siteValue as Record<string, unknown>).defaultSpaceVisibility)
+          : "member";
+      setCreateDefaultVisibility(defaultVisibility);
+    } catch {
+      // space_admin 角色可能无系统配置读取权限，此处回退到默认成员可见并静默处理。
+      setCreateDefaultVisibility("member");
+    }
+  }, [dataGateway.admin]);
+
   useEffect(() => {
     void loadSpaces();
   }, [loadSpaces]);
@@ -220,6 +245,10 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   useEffect(() => {
     void loadSpaceCategories();
   }, [loadSpaceCategories]);
+
+  useEffect(() => {
+    void loadCreateDefaultVisibility();
+  }, [loadCreateDefaultVisibility]);
 
   useEffect(() => {
     setSelectedSpaceIDs((previous) =>
@@ -415,13 +444,26 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
 
   const handleDelete = useCallback(
     async (space: AdminSpace) => {
-      const confirmed = await confirm({
+      const expectedName = (space.name || "").trim() || space.spaceId.trim();
+      const promptResult = await prompt({
         title: `删除空间：${space.name}`,
-        description: "该操作为软删除，空间与文档将不可继续访问。",
+        description: `该操作会永久删除空间及其关联文档、图片和附件。请输入空间名称「${expectedName}」确认删除。`,
         confirmText: "确认删除",
-        tone: "danger"
+        tone: "danger",
+        fields: [
+          {
+            key: "spaceName",
+            label: "空间名称确认",
+            required: true,
+            placeholder: expectedName
+          }
+        ]
       });
-      if (!confirmed) {
+      if (!promptResult) {
+        return;
+      }
+      if ((promptResult.spaceName ?? "").trim() !== expectedName) {
+        openToast("空间名称不匹配，已取消删除");
         return;
       }
 
@@ -429,7 +471,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
         await dataGateway.admin.deleteSpace(space.spaceId);
       });
     },
-    [confirm, dataGateway.admin, runSpaceAction]
+    [dataGateway.admin, openToast, prompt, runSpaceAction]
   );
 
   const handleUpdateStatus = useCallback(
@@ -560,20 +602,41 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   }, [confirm, dataGateway.admin, runBatchSpaceAction]);
 
   const handleBatchDelete = useCallback(async () => {
-    const confirmed = await confirm({
-      title: "批量删除空间",
-      description: "该操作为软删除，确认后将删除所有选中空间。",
-      confirmText: "确认删除",
-      tone: "danger"
-    });
-    if (!confirmed) {
+    const targets = spacesState.items.filter((space) => selectedSpaceSet.has(space.spaceId) && space.status !== "deleted");
+    if (targets.length === 0) {
+      openToast("请先选择可操作的空间");
       return;
+    }
+
+    for (const target of targets) {
+      const expectedName = (target.name || "").trim() || target.spaceId.trim();
+      const promptResult = await prompt({
+        title: `删除空间：${target.name}`,
+        description: `批量删除前校验：请输入空间名称「${expectedName}」以继续。`,
+        confirmText: "确认删除",
+        tone: "danger",
+        fields: [
+          {
+            key: "spaceName",
+            label: "空间名称确认",
+            required: true,
+            placeholder: expectedName
+          }
+        ]
+      });
+      if (!promptResult) {
+        return;
+      }
+      if ((promptResult.spaceName ?? "").trim() !== expectedName) {
+        openToast(`空间「${target.name}」名称不匹配，已取消批量删除`);
+        return;
+      }
     }
 
     await runBatchSpaceAction("删除", (space) => space.status !== "deleted", async (space) => {
       await dataGateway.admin.deleteSpace(space.spaceId);
     });
-  }, [confirm, dataGateway.admin, runBatchSpaceAction]);
+  }, [dataGateway.admin, openToast, prompt, runBatchSpaceAction, selectedSpaceSet, spacesState.items]);
 
   const handleSpaceCreated = useCallback(async () => {
     setSelectedSpaceIDs([]);
@@ -663,6 +726,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
         open={createDialogOpen}
         dataGateway={dataGateway}
         categoryOptions={spaceCategories}
+        defaultVisibility={createDefaultVisibility}
         onOpenChange={setCreateDialogOpen}
         onCreated={handleSpaceCreated}
       />

@@ -913,18 +913,85 @@ func TestRouter_AdminSpaceUpdateDeleteAndScopeGuard(t *testing.T) {
 	spaceIDB := "01h1adminspacemeta000000000002"
 	insertAdminTestSpace(t, database, spaceIDA, "Space Meta A", ownerUserID, "member")
 	insertAdminTestSpace(t, database, spaceIDB, "Space Meta B", ownerUserID, "member")
+	spaceANodeID := "01h1adminspacemeta000000000n1"
 	spaceADocID := "01h1adminspacemeta000000000d1"
 	insertAdminTestDocument(
 		t,
 		database,
 		spaceIDA,
-		"01h1adminspacemeta000000000n1",
+		spaceANodeID,
 		spaceADocID,
 		"Space Meta A Doc",
 		"public",
 	)
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	spaceARevisionID := "01h1adminspacemeta000000000r1"
+	spaceAImageAssetID := "01h1adminspacemeta000000000i1"
+	spaceABlobID := "01h1adminspacemeta000000000b1"
+	spaceAAttachmentID := "01h1adminspacemeta000000000a1"
+	if err := database.ORM.Table("document_revisions").Create(map[string]any{
+		"document_revision_id": spaceARevisionID,
+		"document_id":          spaceADocID,
+		"version":              1,
+		"content_md":           "# Space Meta A Doc",
+		"base_version":         1,
+		"source":               "local",
+		"created_at":           now,
+	}).Error; err != nil {
+		t.Fatalf("insert space revision failed: %v", err)
+	}
+	if err := database.ORM.Table("document_image_assets").Create(map[string]any{
+		"image_asset_id":     spaceAImageAssetID,
+		"document_id":        spaceADocID,
+		"space_id":           spaceIDA,
+		"storage_provider":   "local",
+		"object_key":         "images/" + spaceIDA + "/" + spaceADocID + "/cover.png",
+		"object_url":         "/api/uploads/images/" + spaceIDA + "/" + spaceADocID + "/cover.png",
+		"status":             "active",
+		"last_referenced_at": now,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert space image asset failed: %v", err)
+	}
+	if err := database.ORM.Table("file_blobs").Create(map[string]any{
+		"blob_id":           spaceABlobID,
+		"storage_provider":  "local",
+		"object_key":        "attachments/" + spaceIDA + "/" + spaceADocID + "/spec.pdf",
+		"object_url":        "/api/uploads/attachments/" + spaceIDA + "/" + spaceADocID + "/spec.pdf",
+		"mime_type":         "application/pdf",
+		"size_bytes":        128,
+		"content_hash_algo": "sha256",
+		"content_hash":      "space-a-blob-hash",
+		"deleted_at":        nil,
+		"created_at":        now,
+		"updated_at":        now,
+	}).Error; err != nil {
+		t.Fatalf("insert space blob failed: %v", err)
+	}
+	if err := database.ORM.Table("document_attachments").Create(map[string]any{
+		"attachment_id":      spaceAAttachmentID,
+		"blob_id":            spaceABlobID,
+		"document_id":        spaceADocID,
+		"space_id":           spaceIDA,
+		"storage_provider":   "local",
+		"file_name":          "spec.pdf",
+		"object_key":         "attachments/" + spaceIDA + "/" + spaceADocID + "/spec.pdf",
+		"object_url":         "/api/uploads/attachments/" + spaceIDA + "/" + spaceADocID + "/spec.pdf",
+		"mime_type":          "application/pdf",
+		"size_bytes":         128,
+		"content_hash_algo":  "sha256",
+		"content_hash":       "space-a-blob-hash",
+		"preview_kind":       "pdf",
+		"status":             "active",
+		"deleted_at":         nil,
+		"created_by_user_id": ownerUserID,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert space attachment failed: %v", err)
+	}
 	if err := database.ORM.Table("space_admin_scopes").Create(map[string]any{
 		"user_id":    spaceAdminUserID,
 		"space_id":   spaceIDA,
@@ -1017,45 +1084,89 @@ func TestRouter_AdminSpaceUpdateDeleteAndScopeGuard(t *testing.T) {
 		t.Fatalf("expected scoped admin delete unscoped space status 403, got %d body=%s", deleteDeniedRec.Code, deleteDeniedRec.Body.String())
 	}
 
-	var deletedSpace struct {
-		Status    string     `gorm:"column:status"`
-		DeletedAt *time.Time `gorm:"column:deleted_at"`
-	}
+	var deletedSpaceCount int64
 	if err := database.ORM.Table("spaces").
-		Select("status", "deleted_at").
 		Where("space_id = ?", spaceIDA).
-		Scan(&deletedSpace).Error; err != nil {
-		t.Fatalf("query deleted space status failed: %v", err)
+		Count(&deletedSpaceCount).Error; err != nil {
+		t.Fatalf("query deleted space count failed: %v", err)
 	}
-	if deletedSpace.Status != "deleted" || deletedSpace.DeletedAt == nil {
-		t.Fatalf("expected deleted space status=deleted and deleted_at set, got %+v", deletedSpace)
+	if deletedSpaceCount != 0 {
+		t.Fatalf("expected deleted space removed from spaces table, count=%d", deletedSpaceCount)
 	}
-	var deletedSpaceDoc struct {
-		Status    string     `gorm:"column:status"`
-		DeletedAt *time.Time `gorm:"column:deleted_at"`
+	var deletedSpaceNodeCount int64
+	if err := database.ORM.Table("nodes").
+		Where("node_id = ?", spaceANodeID).
+		Count(&deletedSpaceNodeCount).Error; err != nil {
+		t.Fatalf("query deleted space node count failed: %v", err)
 	}
+	if deletedSpaceNodeCount != 0 {
+		t.Fatalf("expected deleted space node removed from nodes table, count=%d", deletedSpaceNodeCount)
+	}
+	var deletedSpaceDocCount int64
 	if err := database.ORM.Table("documents").
-		Select("status", "deleted_at").
 		Where("document_id = ?", spaceADocID).
-		Scan(&deletedSpaceDoc).Error; err != nil {
-		t.Fatalf("query deleted space cascade document status failed: %v", err)
+		Count(&deletedSpaceDocCount).Error; err != nil {
+		t.Fatalf("query deleted space document count failed: %v", err)
 	}
-	if deletedSpaceDoc.Status != "deleted" || deletedSpaceDoc.DeletedAt == nil {
-		t.Fatalf("expected deleted space document status=deleted and deleted_at set, got %+v", deletedSpaceDoc)
+	if deletedSpaceDocCount != 0 {
+		t.Fatalf("expected deleted space document removed from documents table, count=%d", deletedSpaceDocCount)
+	}
+	var deletedRevisionCount int64
+	if err := database.ORM.Table("document_revisions").
+		Where("document_id = ?", spaceADocID).
+		Count(&deletedRevisionCount).Error; err != nil {
+		t.Fatalf("query deleted space revision count failed: %v", err)
+	}
+	if deletedRevisionCount != 0 {
+		t.Fatalf("expected deleted space revisions removed, count=%d", deletedRevisionCount)
+	}
+	var deletedAttachmentCount int64
+	if err := database.ORM.Table("document_attachments").
+		Where("space_id = ?", spaceIDA).
+		Count(&deletedAttachmentCount).Error; err != nil {
+		t.Fatalf("query deleted space attachment count failed: %v", err)
+	}
+	if deletedAttachmentCount != 0 {
+		t.Fatalf("expected deleted space attachments removed, count=%d", deletedAttachmentCount)
+	}
+	var deletedImageAssetCount int64
+	if err := database.ORM.Table("document_image_assets").
+		Where("space_id = ?", spaceIDA).
+		Count(&deletedImageAssetCount).Error; err != nil {
+		t.Fatalf("query deleted space image asset count failed: %v", err)
+	}
+	if deletedImageAssetCount != 0 {
+		t.Fatalf("expected deleted space image assets removed, count=%d", deletedImageAssetCount)
 	}
 
 	readDeletedSpaceReq := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceIDA, nil)
 	readDeletedSpaceRec := serve(readDeletedSpaceReq)
-	if readDeletedSpaceRec.Code != http.StatusForbidden {
-		t.Fatalf("expected reading deleted space status 403, got %d body=%s", readDeletedSpaceRec.Code, readDeletedSpaceRec.Body.String())
+	if readDeletedSpaceRec.Code != http.StatusOK {
+		t.Fatalf("expected reading deleted space http status 200, got %d body=%s", readDeletedSpaceRec.Code, readDeletedSpaceRec.Body.String())
+	}
+	if decodeJSONResultCode(t, readDeletedSpaceRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeSpaceNotFound) {
+		t.Fatalf(
+			"expected reading deleted space error code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeSpaceNotFound),
+			decodeJSONResultCode(t, readDeletedSpaceRec.Body.Bytes()),
+			readDeletedSpaceRec.Body.String(),
+		)
 	}
 
 	readDeletedSpaceDocReq := httptest.NewRequest(http.MethodGet, "/api/docs/"+spaceADocID, nil)
 	readDeletedSpaceDocRec := serve(readDeletedSpaceDocReq)
-	if readDeletedSpaceDocRec.Code != http.StatusForbidden {
+	if readDeletedSpaceDocRec.Code != http.StatusOK {
 		t.Fatalf(
-			"expected reading document in deleted space status 403, got %d body=%s",
+			"expected reading document in deleted space http status 200, got %d body=%s",
 			readDeletedSpaceDocRec.Code,
+			readDeletedSpaceDocRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, readDeletedSpaceDocRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeDocumentNotFound) {
+		t.Fatalf(
+			"expected reading deleted document error code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeDocumentNotFound),
+			decodeJSONResultCode(t, readDeletedSpaceDocRec.Body.Bytes()),
 			readDeletedSpaceDocRec.Body.String(),
 		)
 	}

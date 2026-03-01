@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -257,6 +258,7 @@ type AdminSpaceService struct {
 	userRepo           repository.UserRepository
 	adminRoleRepo      repository.AdminRoleRepository
 	spaceScopeRepo     repository.SpaceAdminScopeRepository
+	systemConfigRepo   repository.SystemConfigRepository
 	adminAccessService *AdminAccessService
 	adminAuditService  *AdminAuditService
 }
@@ -268,6 +270,7 @@ func NewAdminSpaceService(
 	userRepo repository.UserRepository,
 	adminRoleRepo repository.AdminRoleRepository,
 	spaceScopeRepo repository.SpaceAdminScopeRepository,
+	systemConfigRepo repository.SystemConfigRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
 ) *AdminSpaceService {
@@ -277,6 +280,7 @@ func NewAdminSpaceService(
 		userRepo:           userRepo,
 		adminRoleRepo:      adminRoleRepo,
 		spaceScopeRepo:     spaceScopeRepo,
+		systemConfigRepo:   systemConfigRepo,
 		adminAccessService: adminAccessService,
 		adminAuditService:  adminAuditService,
 	}
@@ -982,7 +986,10 @@ func (s *AdminSpaceService) CreateSpace(
 		if strings.TrimSpace(string(visibility)) != "" {
 			return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidVisibility
 		}
-		visibility = models.VisibilityMember
+		visibility, err = s.resolveDefaultSpaceVisibility(ctx)
+		if err != nil {
+			return AdminSpaceRecord{}, err
+		}
 	}
 
 	var (
@@ -1094,6 +1101,39 @@ func (s *AdminSpaceService) CreateSpace(
 	}
 
 	return record, nil
+}
+
+type adminSpaceSiteConfigPolicy struct {
+	DefaultSpaceVisibility string `json:"defaultSpaceVisibility"`
+}
+
+func (s *AdminSpaceService) resolveDefaultSpaceVisibility(ctx context.Context) (models.Visibility, error) {
+	defaultVisibility := models.VisibilityMember
+	if s == nil || s.systemConfigRepo == nil {
+		return defaultVisibility, nil
+	}
+
+	config, err := s.systemConfigRepo.GetByConfigKey(ctx, "site")
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return defaultVisibility, nil
+		}
+		return defaultVisibility, err
+	}
+	if config == nil || strings.TrimSpace(config.ConfigValueJSON) == "" {
+		return defaultVisibility, nil
+	}
+
+	var policy adminSpaceSiteConfigPolicy
+	if err := json.Unmarshal([]byte(config.ConfigValueJSON), &policy); err != nil {
+		return defaultVisibility, nil
+	}
+
+	visibility := models.Visibility(strings.ToLower(strings.TrimSpace(policy.DefaultSpaceVisibility)))
+	if !models.IsValidVisibility(visibility) {
+		return defaultVisibility, nil
+	}
+	return visibility, nil
 }
 
 func normalizeAdminSpaceID(rawSpaceID string) (spaceID string, hasCustom bool, err error) {
@@ -1689,7 +1729,7 @@ func (s *AdminSpaceService) UpdateStatus(
 	return record, nil
 }
 
-// DeleteSpace 软删除后台目标空间。
+// DeleteSpace 事务硬删除后台目标空间及其关联资源记录。
 func (s *AdminSpaceService) DeleteSpace(
 	ctx context.Context,
 	actorUserID string,
@@ -1723,11 +1763,8 @@ func (s *AdminSpaceService) DeleteSpace(
 		}
 		return err
 	}
-	if normalizeEntityStatus(snapshot.Status) == models.EntityStatusDeleted || snapshot.DeletedAt != nil {
-		return nil
-	}
 
-	deleted, err := s.spaceRepo.SoftDelete(ctx, targetSpaceID, time.Now().UTC())
+	deleted, err := s.spaceRepo.HardDelete(ctx, targetSpaceID)
 	if err != nil {
 		return err
 	}

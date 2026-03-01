@@ -1133,6 +1133,84 @@ func (r *gormSpaceRepository) SoftDelete(ctx context.Context, spaceID string, de
 	return true, nil
 }
 
+func (r *gormSpaceRepository) HardDelete(ctx context.Context, spaceID string) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID == "" {
+		return false, nil
+	}
+
+	var spaceDeleted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		nodeIDsQuery := tx.Table("nodes").
+			Select("node_id").
+			Where("space_id = ?", normalizedSpaceID)
+		documentIDsQuery := tx.Table("documents AS d").
+			Select("d.document_id").
+			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+			Where("n.space_id = ?", normalizedSpaceID)
+
+		if err := tx.Table("document_revisions").
+			Where("document_id IN (?)", documentIDsQuery).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("document_permissions").
+			Where("document_id IN (?)", documentIDsQuery).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("document_image_assets").
+			Where("space_id = ?", normalizedSpaceID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("document_attachments").
+			Where("space_id = ?", normalizedSpaceID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("documents").
+			Where("node_id IN (?)", nodeIDsQuery).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("node_permissions").
+			Where("node_id IN (?)", nodeIDsQuery).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("nodes").
+			Where("space_id = ?", normalizedSpaceID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("space_members").
+			Where("space_id = ?", normalizedSpaceID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("space_admin_scopes").
+			Where("space_id = ?", normalizedSpaceID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
+
+		deleteSpaceTx := tx.Where("space_id = ?", normalizedSpaceID).Delete(&models.Space{})
+		if deleteSpaceTx.Error != nil {
+			return deleteSpaceTx.Error
+		}
+		spaceDeleted = deleteSpaceTx.RowsAffected > 0
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return spaceDeleted, nil
+}
+
 func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID string, userID string) (bool, error) {
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("space repository db is nil")

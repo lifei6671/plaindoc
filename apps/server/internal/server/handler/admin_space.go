@@ -744,7 +744,7 @@ func (h *adminSpaceHandler) UpdateStatus(c *gin.Context) {
 	response.JSON(c, http.StatusOK, mapAdminSpaceResponse(payload))
 }
 
-// DeleteSpace 软删除空间。
+// DeleteSpace 删除空间及关联资源。
 func (h *adminSpaceHandler) DeleteSpace(c *gin.Context) {
 	if h == nil || h.adminSpaceService == nil {
 		response.InternalError(c)

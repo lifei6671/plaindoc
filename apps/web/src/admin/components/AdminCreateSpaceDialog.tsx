@@ -59,6 +59,7 @@ interface AdminCreateSpaceDialogProps {
   open: boolean;
   dataGateway: DataGateway;
   categoryOptions: AdminSpaceCategory[];
+  defaultVisibility?: Visibility;
   onOpenChange: (open: boolean) => void;
   onCreated: () => Promise<void> | void;
 }
@@ -423,12 +424,20 @@ async function exportCroppedWebP(
   };
 }
 
-export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onOpenChange, onCreated }: AdminCreateSpaceDialogProps) {
+export function AdminCreateSpaceDialog({
+  open,
+  dataGateway,
+  categoryOptions,
+  defaultVisibility,
+  onOpenChange,
+  onCreated
+}: AdminCreateSpaceDialogProps) {
   // 管理后台新建空间弹窗：负责表单、封面本地预览与创建提交流程。
+  const resolvedDefaultVisibility = normalizeVisibility(defaultVisibility ?? "member");
   const [spaceID, setSpaceID] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<Visibility>("member");
+  const [visibility, setVisibility] = useState<Visibility>(resolvedDefaultVisibility);
   const [categoryID, setCategoryID] = useState("");
   const [coverMode, setCoverMode] = useState<"user_upload" | "system_generated">("user_upload");
 
@@ -467,6 +476,13 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
       document.body.style.overflow = previousOverflow;
     };
   }, [creatingSpace, onOpenChange, open, uploadingCover]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setVisibility(resolvedDefaultVisibility);
+  }, [open, resolvedDefaultVisibility]);
 
   useEffect(() => {
     return () => {
@@ -519,7 +535,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
     setSpaceID("");
     setName("");
     setDescription("");
-    setVisibility("member");
+    setVisibility(resolvedDefaultVisibility);
     setCategoryID(defaultCategoryID);
     setCoverMode("user_upload");
     setZoom(1);
@@ -536,7 +552,7 @@ export function AdminCreateSpaceDialog({ open, dataGateway, categoryOptions, onO
       }
       return null;
     });
-  }, [defaultCategoryID]);
+  }, [defaultCategoryID, resolvedDefaultVisibility]);
 
   const closeDialog = useCallback(() => {
     if (uploadingCover || creatingSpace) {
