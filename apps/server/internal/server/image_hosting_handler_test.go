@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -54,6 +55,40 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	}
 	if _, exists := configPayload["aliyunOss"]; exists {
 		t.Fatalf("unexpected aliyunOss config in client response: %+v", configPayload["aliyunOss"])
+	}
+	defaultProvider, _ := configPayload["defaultProvider"].(string)
+	if defaultProvider != "local" {
+		t.Fatalf("expected default provider local, got %s", defaultProvider)
+	}
+	objectKeyEndpoint, _ := configPayload["objectKeyEndpoint"].(string)
+	if objectKeyEndpoint != "/api/uploads/images/object-key" {
+		t.Fatalf("expected object key endpoint /api/uploads/images/object-key, got %s", objectKeyEndpoint)
+	}
+
+	issuePayload := map[string]any{
+		"provider":    "cloudflare-r2",
+		"spaceId":     spaceID,
+		"docId":       "01kz8j1x8s0c9n6f2m4b7v3q5s",
+		"fileName":    "demo-image.png",
+		"contentType": "image/png",
+	}
+	issueBody, _ := json.Marshal(issuePayload)
+	issueReq := httptest.NewRequest(http.MethodPost, "/api/uploads/images/object-key", bytes.NewReader(issueBody))
+	issueReq.Header.Set("Authorization", "Bearer "+accessToken)
+	issueReq.Header.Set("Content-Type", "application/json")
+	issueRec := serve(issueReq)
+	if issueRec.Code != http.StatusOK {
+		t.Fatalf("expected issue image object key status 200, got %d body=%s", issueRec.Code, issueRec.Body.String())
+	}
+	issuedPayload := decodeJSONResultData[struct {
+		Provider string `json:"provider"`
+		Key      string `json:"key"`
+	}](t, issueRec.Body.Bytes())
+	if issuedPayload.Provider != "cloudflare-r2" {
+		t.Fatalf("expected issued provider cloudflare-r2, got %s", issuedPayload.Provider)
+	}
+	if !strings.HasPrefix(issuedPayload.Key, "images/") || !strings.Contains(issuedPayload.Key, "/"+spaceID+"/") {
+		t.Fatalf("expected issued key contain images prefix and space id, got %s", issuedPayload.Key)
 	}
 
 	imageBytes := decodeTinyPNG(t)
@@ -126,14 +161,6 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 		t.Fatalf("unexpected aliyunOss config leak after insert: %+v", configAfterInsertPayload["aliyunOss"])
 	}
 
-	disabledUploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo.png", imageBytes, map[string]string{
-		"spaceId": spaceID,
-	})
-	disabledUploadReq.Header.Set("Authorization", "Bearer "+accessToken)
-	disabledUploadRec := serve(disabledUploadReq)
-	if disabledUploadRec.Code != http.StatusOK {
-		t.Fatalf("expected upload disabled status 400, got %d body=%s", disabledUploadRec.Code, disabledUploadRec.Body.String())
-	}
 }
 
 func TestRouter_ImageUploadSpacePermission(t *testing.T) {

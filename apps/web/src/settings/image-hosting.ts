@@ -6,6 +6,7 @@ export interface CloudflareR2Config {
   secretAccessKey: string;
   bucket: string;
   publicBaseUrl: string;
+  uploadPathTemplate: string;
 }
 
 export interface AliyunOssConfig {
@@ -15,11 +16,13 @@ export interface AliyunOssConfig {
   bucket: string;
   endpoint: string;
   publicBaseUrl: string;
+  uploadPathTemplate: string;
 }
 
 export interface LocalImageHostingConfig {
   uploadEndpoint: string;
   publicBaseUrl: string;
+  uploadPathTemplate: string;
 }
 
 export interface ImageHostingConfig {
@@ -37,7 +40,8 @@ export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
     accessKeyId: "",
     secretAccessKey: "",
     bucket: "",
-    publicBaseUrl: ""
+    publicBaseUrl: "",
+    uploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
   },
   aliyunOss: {
     region: "",
@@ -45,11 +49,13 @@ export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
     accessKeySecret: "",
     bucket: "",
     endpoint: "",
-    publicBaseUrl: ""
+    publicBaseUrl: "",
+    uploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
   },
   local: {
     uploadEndpoint: "/api/uploads/images",
-    publicBaseUrl: "/uploads"
+    publicBaseUrl: "/uploads",
+    uploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
   }
 };
 
@@ -112,7 +118,10 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
       accessKeyId: readString(cloudflareR2, "accessKeyId"),
       secretAccessKey: readString(cloudflareR2, "secretAccessKey"),
       bucket: readString(cloudflareR2, "bucket"),
-      publicBaseUrl: readString(cloudflareR2, "publicBaseUrl")
+      publicBaseUrl: readString(cloudflareR2, "publicBaseUrl"),
+      uploadPathTemplate:
+        readString(cloudflareR2, "uploadPathTemplate") ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.cloudflareR2.uploadPathTemplate
     },
     aliyunOss: {
       region: readString(aliyunOss, "region"),
@@ -120,13 +129,17 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
       accessKeySecret: readString(aliyunOss, "accessKeySecret"),
       bucket: readString(aliyunOss, "bucket"),
       endpoint: readString(aliyunOss, "endpoint"),
-      publicBaseUrl: readString(aliyunOss, "publicBaseUrl")
+      publicBaseUrl: readString(aliyunOss, "publicBaseUrl"),
+      uploadPathTemplate:
+        readString(aliyunOss, "uploadPathTemplate") || DEFAULT_IMAGE_HOSTING_CONFIG.aliyunOss.uploadPathTemplate
     },
     local: {
       uploadEndpoint:
         readString(local, "uploadEndpoint") || DEFAULT_IMAGE_HOSTING_CONFIG.local.uploadEndpoint,
       publicBaseUrl:
-        readString(local, "publicBaseUrl") || DEFAULT_IMAGE_HOSTING_CONFIG.local.publicBaseUrl
+        readString(local, "publicBaseUrl") || DEFAULT_IMAGE_HOSTING_CONFIG.local.publicBaseUrl,
+      uploadPathTemplate:
+        readString(local, "uploadPathTemplate") || DEFAULT_IMAGE_HOSTING_CONFIG.local.uploadPathTemplate
     }
   };
 }

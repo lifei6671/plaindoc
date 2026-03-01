@@ -694,15 +694,29 @@ export interface UploadLocalImageResult {
   url: string;
 }
 
+export interface IssueImageObjectKeyResult {
+  provider: "cloudflare-r2" | "aliyun-oss" | "local";
+  key: string;
+}
+
 export interface ImageHostingGateway {
   // 获取当前生效的图床配置（由后端系统配置统一管理）。
   getConfig(): Promise<Record<string, unknown>>;
+  // 由后端统一分配图片对象 key（所有 provider 文件名均由后端生成）。
+  issueObjectKey(input: {
+    provider?: "cloudflare-r2" | "aliyun-oss" | "local";
+    spaceId: string;
+    docId?: string | null;
+    fileName?: string;
+    contentType?: string;
+  }): Promise<IssueImageObjectKeyResult>;
   // 上传到本地图片存储（由后端接收 multipart/form-data 文件）。
   uploadLocalImage(
     file: File,
     uploadEndpoint?: string,
     options?: {
       spaceId?: string | null;
+      docId?: string | null;
     }
   ): Promise<UploadLocalImageResult>;
 }

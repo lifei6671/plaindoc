@@ -285,6 +285,8 @@ func newRouter(
 
 		// 读取图床配置（用于前端展示上传能力与限制）。
 		api.GET("/image-hosting", imageHostingHandler.GetConfig)
+		// 由后端分配图片对象 key（所有存储 provider 统一由后端生成文件名）。
+		api.POST("/uploads/images/object-key", imageHostingHandler.IssueImageObjectKey)
 		// 统一图片上传入口（按配置决定走本地或外部托管）。
 		api.POST("/uploads/images", imageHostingHandler.UploadImage)
 		// 本地图片回源访问（当配置使用本地存储时生效）。

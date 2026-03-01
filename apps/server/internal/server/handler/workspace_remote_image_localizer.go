@@ -73,7 +73,13 @@ func (h *workspaceHandler) localizeRemoteImageURLs(
 		if h.shouldSkipRemoteImageLocalize(documentID, remoteImageURL) {
 			continue
 		}
-		localURL, err := h.downloadAndPersistRemoteImage(ctx, remoteImageURL, config.Local.PublicBaseURL)
+		localURL, err := h.downloadAndPersistRemoteImage(
+			ctx,
+			remoteImageURL,
+			config.Local.PublicBaseURL,
+			config.UploadPathTemplate(service.ImageHostingProviderLocal),
+			documentID,
+		)
 		if err != nil {
 			h.recordRemoteImageLocalizeFailure(documentID, remoteImageURL)
 			continue
@@ -88,13 +94,23 @@ func (h *workspaceHandler) downloadAndPersistRemoteImage(
 	ctx context.Context,
 	remoteImageURL string,
 	localPublicBaseURL string,
+	uploadPathTemplate string,
+	documentID string,
 ) (string, error) {
 	content, contentType, sourceFileName, err := h.fetchRemoteImageWithRetry(ctx, remoteImageURL)
 	if err != nil {
 		return "", err
 	}
 
-	objectKey, err := buildImageObjectKey(sourceFileName, contentType, time.Now().UTC())
+	objectKey, err := buildImageObjectKey(
+		sourceFileName,
+		contentType,
+		"",
+		documentID,
+		"",
+		time.Now().UTC(),
+		uploadPathTemplate,
+	)
 	if err != nil {
 		return "", err
 	}

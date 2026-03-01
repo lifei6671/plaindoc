@@ -18,6 +18,12 @@ interface UploadContext {
 interface UploadImageToDefaultHostingOptions {
   // 本地上传回调：由 DataGateway 注入，避免该模块直接依赖具体数据驱动实现。
   uploadLocalImage?: (file: File) => Promise<{ key: string; url: string }>;
+  // 对象 key 由后端统一分配，确保文件名规则不在前端散落。
+  issueObjectKey?: (input: {
+    provider: ImageHostingProvider;
+    fileName: string;
+    contentType: string;
+  }) => Promise<{ key: string }>;
 }
 
 // 入口函数：按“默认图床”路由到对应上传实现。
@@ -31,7 +37,18 @@ export async function uploadImageToDefaultHosting(
       throw new Error("仅支持上传图片类型文件");
     }
 
-    const objectKey = buildObjectKey(file);
+    if (!options.issueObjectKey) {
+      throw new Error("未配置对象 key 分配能力，请检查后端接口接入");
+    }
+    const keyPayload = await options.issueObjectKey({
+      provider: config.defaultProvider,
+      fileName: file.name || "image",
+      contentType: file.type || "application/octet-stream"
+    });
+    const objectKey = keyPayload.key?.trim();
+    if (!objectKey) {
+      throw new Error("后端返回的对象 key 为空");
+    }
     const context: UploadContext = {
       config,
       file,
@@ -180,35 +197,6 @@ async function uploadToAliyunOss(context: UploadContext): Promise<UploadImageRes
     });
     throw error;
   }
-}
-
-// 生成对象 key：按日期分层，避免单目录对象过多。
-function buildObjectKey(file: File): string {
-  const date = new Date();
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const random = Math.random().toString(36).slice(2, 10);
-  const extension = resolveFileExtension(file);
-  return `plaindoc/${yyyy}/${mm}/${dd}/${Date.now()}-${random}.${extension}`;
-}
-
-function resolveFileExtension(file: File): string {
-  const nameMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
-  if (nameMatch && nameMatch[1]) {
-    return nameMatch[1].toLowerCase();
-  }
-
-  const mimeToExtension: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/gif": "gif",
-    "image/webp": "webp",
-    "image/svg+xml": "svg",
-    "image/bmp": "bmp",
-    "image/tiff": "tif"
-  };
-  return mimeToExtension[file.type] ?? "png";
 }
 
 function encodeObjectKey(objectKey: string): string {

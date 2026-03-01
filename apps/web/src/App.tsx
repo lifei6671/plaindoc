@@ -1452,7 +1452,10 @@ export default function App() {
             const uploadedImage = await dataGateway.imageHosting.uploadLocalImage(
               imageFile,
               imageHostingConfigRef.current.local.uploadEndpoint,
-              { spaceId: spaceID }
+              {
+                spaceId: spaceID,
+                docId: activeDocIDRef.current
+              }
             );
             successMarkdownLines.push(buildImageMarkdownLine(imageFile, uploadedImage.url, index));
           } catch (error) {
@@ -1541,7 +1544,10 @@ export default function App() {
             const uploadedImage = await dataGateway.imageHosting.uploadLocalImage(
               remoteImageFile,
               imageHostingConfigRef.current.local.uploadEndpoint,
-              { spaceId: spaceID }
+              {
+                spaceId: spaceID,
+                docId: activeDocIDRef.current
+              }
             );
             imageURLMapping.set(remoteImageURL, uploadedImage.url);
           } catch (error) {

@@ -43,6 +43,7 @@ import {
   type DocumentAttachmentAccessLink,
   type DocumentGateway,
   type DocumentRevision,
+  type IssueImageObjectKeyResult,
   type ImageHostingGateway,
   type LocalizeRemoteImagesInput,
   type LocalizeRemoteImagesResult,
@@ -1685,16 +1686,57 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     async getConfig() {
       return request<Record<string, unknown>>("/image-hosting");
     },
+    async issueObjectKey(input: {
+      provider?: "cloudflare-r2" | "aliyun-oss" | "local";
+      spaceId: string;
+      docId?: string | null;
+      fileName?: string;
+      contentType?: string;
+    }) {
+      const spaceID = input.spaceId.trim();
+      if (!spaceID) {
+        throw new Error("spaceId 不能为空");
+      }
+      const payload: {
+        provider?: "cloudflare-r2" | "aliyun-oss" | "local";
+        spaceId: string;
+        docId?: string;
+        fileName?: string;
+        contentType?: string;
+      } = {
+        spaceId: spaceID
+      };
+      if (input.provider) {
+        payload.provider = input.provider;
+      }
+      if (typeof input.docId === "string" && input.docId.trim()) {
+        payload.docId = input.docId.trim();
+      }
+      if (typeof input.fileName === "string" && input.fileName.trim()) {
+        payload.fileName = input.fileName.trim();
+      }
+      if (typeof input.contentType === "string" && input.contentType.trim()) {
+        payload.contentType = input.contentType.trim();
+      }
+      return request<IssueImageObjectKeyResult>("/uploads/images/object-key", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    },
     async uploadLocalImage(
       file: File,
       uploadEndpoint?: string,
-      uploadOptions?: { spaceId?: string | null }
+      uploadOptions?: { spaceId?: string | null; docId?: string | null }
     ) {
       const formData = new FormData();
       formData.append("file", file);
       const spaceID = typeof uploadOptions?.spaceId === "string" ? uploadOptions.spaceId.trim() : "";
       if (spaceID) {
         formData.append("spaceId", spaceID);
+      }
+      const documentID = typeof uploadOptions?.docId === "string" ? uploadOptions.docId.trim() : "";
+      if (documentID) {
+        formData.append("docId", documentID);
       }
       const uploaded = await request<UploadLocalImageResult>(
         normalizeUploadEndpoint(uploadEndpoint, options.baseUrl),

@@ -172,6 +172,11 @@ const IMAGE_HOSTING_PROVIDER_OPTIONS: Array<{ value: ImageHostingProvider; label
   { value: "aliyun-oss", label: "阿里云 OSS" }
 ];
 
+const IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER =
+  "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}";
+const IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT =
+  "可用变量：{spaceId} {docId} {yyyy} {mm} {dd} {hh} {assetId} {origName} {ext} {uploaderId}；必须包含 {assetId}。";
+
 const SITEMAP_GENERATION_MODE_OPTIONS: Array<{
   value: SitemapGenerationMode;
   label: string;
@@ -1891,6 +1896,16 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             disabled={saving}
                           />
                         </label>
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传路径模板</span>
+                          <Input
+                            placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.local.uploadPathTemplate}
+                            onChange={(event) => setLocalField("uploadPathTemplate", event.target.value)}
+                            disabled={saving}
+                          />
+                          <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
+                        </label>
                       </TabsContent>
 
                       <TabsContent value="cloudflare-r2" className="grid gap-4 sm:grid-cols-2">
@@ -1939,6 +1954,16 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             onChange={(event) => setCloudflareField("publicBaseUrl", event.target.value)}
                             disabled={saving}
                           />
+                        </label>
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传路径模板</span>
+                          <Input
+                            placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.cloudflareR2.uploadPathTemplate}
+                            onChange={(event) => setCloudflareField("uploadPathTemplate", event.target.value)}
+                            disabled={saving}
+                          />
+                          <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
                         </label>
                       </TabsContent>
 
@@ -1997,6 +2022,16 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             onChange={(event) => setAliyunField("publicBaseUrl", event.target.value)}
                             disabled={saving}
                           />
+                        </label>
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传路径模板</span>
+                          <Input
+                            placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.aliyunOss.uploadPathTemplate}
+                            onChange={(event) => setAliyunField("uploadPathTemplate", event.target.value)}
+                            disabled={saving}
+                          />
+                          <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
                         </label>
                       </TabsContent>
                     </Tabs>

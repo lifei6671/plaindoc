@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1173,6 +1174,7 @@ func validateImageHostingConfig(payload map[string]any) error {
 		"accessKeyId":         {},
 		"secretAccessKey":     {},
 		"publicBaseUrl":       {},
+		"uploadPathTemplate":  {},
 		"downloadStrategy":    {},
 		"signedUrlTtlSeconds": {},
 	}); err != nil {
@@ -1197,6 +1199,17 @@ func validateImageHostingConfig(payload map[string]any) error {
 	cloudflarePublicBaseURL, err := getRequiredStringAllowEmpty(cloudflareR2, "publicBaseUrl")
 	if err != nil {
 		return err
+	}
+	cloudflareUploadPathTemplate := DefaultImageHostingUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(cloudflareR2, "uploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		cloudflareUploadPathTemplate = value
+	}
+	if validateErr := ValidateImageHostingUploadPathTemplate(
+		NormalizeImageHostingUploadPathTemplate(cloudflareUploadPathTemplate),
+	); validateErr != nil {
+		return fmt.Errorf("cloudflareR2.uploadPathTemplate %w", validateErr)
 	}
 	cloudflareDownloadStrategy := ImageHostingDownloadStrategyPublic
 	if strategy, hasStrategy, strategyErr := getOptionalString(cloudflareR2, "downloadStrategy"); strategyErr != nil {
@@ -1236,6 +1249,7 @@ func validateImageHostingConfig(payload map[string]any) error {
 		"accessKeyId":         {},
 		"accessKeySecret":     {},
 		"publicBaseUrl":       {},
+		"uploadPathTemplate":  {},
 		"downloadStrategy":    {},
 		"signedUrlTtlSeconds": {},
 	}); err != nil {
@@ -1264,6 +1278,17 @@ func validateImageHostingConfig(payload map[string]any) error {
 	aliyunPublicBaseURL, err := getRequiredStringAllowEmpty(aliyunOSS, "publicBaseUrl")
 	if err != nil {
 		return err
+	}
+	aliyunUploadPathTemplate := DefaultImageHostingUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(aliyunOSS, "uploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		aliyunUploadPathTemplate = value
+	}
+	if validateErr := ValidateImageHostingUploadPathTemplate(
+		NormalizeImageHostingUploadPathTemplate(aliyunUploadPathTemplate),
+	); validateErr != nil {
+		return fmt.Errorf("aliyunOss.uploadPathTemplate %w", validateErr)
 	}
 	aliyunDownloadStrategy := ImageHostingDownloadStrategyPublic
 	if strategy, hasStrategy, strategyErr := getOptionalString(aliyunOSS, "downloadStrategy"); strategyErr != nil {
@@ -1297,8 +1322,9 @@ func validateImageHostingConfig(payload map[string]any) error {
 		return err
 	}
 	if err := validateNoUnknownKeys(local, map[string]struct{}{
-		"uploadEndpoint": {},
-		"publicBaseUrl":  {},
+		"uploadEndpoint":     {},
+		"publicBaseUrl":      {},
+		"uploadPathTemplate": {},
 	}); err != nil {
 		return fmt.Errorf("local %w", err)
 	}
@@ -1309,6 +1335,17 @@ func validateImageHostingConfig(payload map[string]any) error {
 	localPublicBaseURL, err := getRequiredString(local, "publicBaseUrl")
 	if err != nil {
 		return err
+	}
+	localUploadPathTemplate := DefaultImageHostingUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(local, "uploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		localUploadPathTemplate = value
+	}
+	if validateErr := ValidateImageHostingUploadPathTemplate(
+		NormalizeImageHostingUploadPathTemplate(localUploadPathTemplate),
+	); validateErr != nil {
+		return fmt.Errorf("local.uploadPathTemplate %w", validateErr)
 	}
 
 	switch defaultProvider {
@@ -1615,13 +1652,15 @@ func cloneMapAny(value map[string]any) (map[string]any, error) {
 }
 
 func validateNoUnknownKeys(payload map[string]any, allowed map[string]struct{}) error {
-	if len(payload) != len(allowed) {
-		return fmt.Errorf("unexpected config keys")
-	}
+	unexpectedKeys := make([]string, 0, 2)
 	for key := range payload {
 		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("unknown config key %q", key)
+			unexpectedKeys = append(unexpectedKeys, key)
 		}
+	}
+	if len(unexpectedKeys) > 0 {
+		slices.Sort(unexpectedKeys)
+		return fmt.Errorf("unexpected config keys: %s", strings.Join(unexpectedKeys, ", "))
 	}
 	return nil
 }
