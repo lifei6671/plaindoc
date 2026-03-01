@@ -301,6 +301,46 @@ input[type="reset"]:not(:disabled) {
   color: #475569;
 }
 
+.attachment-menu__dropzone {
+  margin: 0 10px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+  color: #1e3a8a;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.attachment-menu__dropzone:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.attachment-menu__dropzone:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.attachment-menu__dropzone--active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.attachment-menu__dropzone--disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .attachment-menu__body {
   max-height: min(520px, 65vh);
   overflow: auto;

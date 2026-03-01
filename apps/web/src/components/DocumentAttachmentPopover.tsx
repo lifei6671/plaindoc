@@ -9,7 +9,7 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, type ChangeEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { DocumentAttachment } from "../data-access";
 import {
   Tooltip,
@@ -71,10 +71,13 @@ export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover
   onDelete
 }: DocumentAttachmentPopoverProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
   const hasAttachments = attachments.length > 0;
+  const [isDragActive, setIsDragActive] = useState(false);
 
   useEffect(() => {
     if (!open) {
+      resetDragState();
       return;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -117,6 +120,64 @@ export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover
       return;
     }
     onUploadFiles(selectedFiles);
+  };
+
+  const resetDragState = () => {
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+  };
+
+  const canAcceptDrop = (): boolean => {
+    return !disabled && !uploading && open;
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
+    if (!canAcceptDrop()) {
+      return;
+    }
+    const hasFile = Array.from(event.dataTransfer?.types ?? []).includes("Files");
+    if (!hasFile) {
+      return;
+    }
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!canAcceptDrop()) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!isDragActive) {
+      setIsDragActive(true);
+    }
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (!canAcceptDrop()) {
+      return;
+    }
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDropFiles = (event: DragEvent<HTMLElement>) => {
+    if (!canAcceptDrop()) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
+    resetDragState();
+    if (!droppedFiles.length) {
+      return;
+    }
+    onUploadFiles(droppedFiles);
   };
 
   const isAttachmentActionBusy = (attachmentID: string): boolean => {
@@ -187,6 +248,26 @@ export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover
                   <X size={14} />
                 </button>
               </div>
+            </div>
+            <div
+              className={`attachment-menu__dropzone${isDragActive ? " attachment-menu__dropzone--active" : ""}${!canAcceptDrop() ? " attachment-menu__dropzone--disabled" : ""}`}
+              role="button"
+              tabIndex={0}
+              aria-label="拖拽文件到此处上传"
+              onClick={triggerUploadPicker}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  triggerUploadPicker();
+                }
+              }}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDropFiles}
+            >
+              <Upload size={15} />
+              <span>{uploading ? "正在上传附件..." : "拖拽文件到此处上传，或点击选择文件"}</span>
             </div>
 
             <div className="attachment-menu__body">
