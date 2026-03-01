@@ -267,12 +267,75 @@
       .shot img {
         width: 100%;
         display: block;
+        cursor: zoom-in;
+        transition: transform 0.16s ease;
+      }
+
+      .shot:hover img {
+        transform: scale(1.01);
       }
 
       .shot figcaption {
         padding: 10px 12px;
         font-size: 13px;
         color: var(--muted);
+      }
+
+      .lightbox-open {
+        overflow: hidden;
+      }
+
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(15, 23, 42, 0.84);
+      }
+
+      .lightbox.is-open {
+        display: flex;
+      }
+
+      .lightbox-dialog {
+        position: relative;
+        width: min(1180px, calc(100vw - 48px));
+        max-height: calc(100vh - 48px);
+      }
+
+      .lightbox-image {
+        width: 100%;
+        max-height: calc(100vh - 120px);
+        object-fit: contain;
+        display: block;
+        border-radius: 12px;
+        background: #0f172a;
+        box-shadow: 0 20px 44px rgba(2, 6, 23, 0.48);
+      }
+
+      .lightbox-caption {
+        margin: 10px 0 0;
+        text-align: center;
+        color: #d7e2ff;
+        font-size: 13px;
+      }
+
+      .lightbox-close {
+        position: absolute;
+        top: -12px;
+        right: -12px;
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.92);
+        color: #fff;
+        font-size: 24px;
+        line-height: 1;
+        cursor: pointer;
       }
 
       .highlight {
@@ -323,6 +386,19 @@
         .screen-grid,
         .screen-grid-dense {
           grid-template-columns: 1fr;
+        }
+
+        .lightbox {
+          padding: 12px;
+        }
+
+        .lightbox-dialog {
+          width: calc(100vw - 24px);
+          max-height: calc(100vh - 24px);
+        }
+
+        .lightbox-image {
+          max-height: calc(100vh - 84px);
         }
 
         .nav {
@@ -441,63 +517,63 @@
         <h2 class="section-title">精选界面</h2>
         <div class="screen-grid-dense">
           <figure class="shot">
-            <img src="./images/admin_index.png" alt="后台概览页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_index.png" alt="后台概览页截图" />
             <figcaption>后台概览页</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_profile.png" alt="后台个人信息页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_profile.png" alt="后台个人信息页截图" />
             <figcaption>后台个人信息页</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_users.png" alt="后台用户管理页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_users.png" alt="后台用户管理页截图" />
             <figcaption>后台用户管理页</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_spaces.png" alt="空间管理页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_spaces.png" alt="空间管理页截图" />
             <figcaption>空间管理</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_spaces_new.png" alt="新建空间页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_spaces_new.png" alt="新建空间页截图" />
             <figcaption>新建空间</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_spaces_category.png" alt="空间分类页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_spaces_category.png" alt="空间分类页截图" />
             <figcaption>空间分类</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_spaces_member.png" alt="空间成员页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_spaces_member.png" alt="空间成员页截图" />
             <figcaption>空间成员</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_documents.png" alt="文档管理页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_documents.png" alt="文档管理页截图" />
             <figcaption>文档管理</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_attachments.png" alt="附件管理页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_attachments.png" alt="附件管理页截图" />
             <figcaption>附件管理</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_images.png" alt="图片管理页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_images.png" alt="图片管理页截图" />
             <figcaption>图片管理</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_themes.png" alt="主题管理页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_themes.png" alt="主题管理页截图" />
             <figcaption>主题管理</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_audits.png" alt="审计日志页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_audits.png" alt="审计日志页截图" />
             <figcaption>审计日志</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/admin_editor.png" alt="文档编辑工作台截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/admin_editor.png" alt="文档编辑工作台截图" />
             <figcaption>文档编辑</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/home_index.png" alt="首页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/home_index.png" alt="首页截图" />
             <figcaption>首页</figcaption>
           </figure>
           <figure class="shot">
-            <img src="./images/home_reader.png" alt="文档阅读页截图" />
+            <img src="https://pic-cdn.iminho.me/plaindoc/home_reader.png" alt="文档阅读页截图" />
             <figcaption>文档阅读</figcaption>
           </figure>
         </div>
@@ -528,14 +604,113 @@
           <p>从 README 的快速部署开始，10 分钟内你就能看到完整的 PlainDoc 运行效果。</p>
         </div>
         <div class="hero-actions" style="margin-top: 0">
-          <a class="btn btn-primary" href="../README.md">开始部署</a>
-          <a class="btn btn-ghost" href="./DOCUMENT_ATTACHMENT_API.md">查看附件能力</a>
+          <a class="btn btn-primary" href="https://github.com/lifei6671/plaindoc/blob/master/README.md#4-运行方式" target="_blank">开始部署</a>
+          <a class="btn btn-ghost" href="https://github.com/lifei6671/plaindoc/blob/master/docs/DOCUMENT_ATTACHMENT_API.md" target="_blank">查看附件能力</a>
         </div>
       </section>
     </main>
 
+    <div class="lightbox" id="screenshot-lightbox" aria-hidden="true">
+      <div class="lightbox-dialog" role="dialog" aria-modal="true" aria-label="截图预览">
+        <button type="button" class="lightbox-close" id="screenshot-lightbox-close" aria-label="关闭预览">×</button>
+        <img class="lightbox-image" id="screenshot-lightbox-image" alt="" />
+        <p class="lightbox-caption" id="screenshot-lightbox-caption"></p>
+      </div>
+    </div>
+
     <footer class="wrap foot">
       PlainDoc · Lightweight Documentation Platform for Teams · Updated for 2026-03-01
+      <p><a href="http://beian.miit.gov.cn" target="_blank">鲁ICP备16044091号-1</a></p>
     </footer>
+    <script>
+      (() => {
+        const lightbox = document.getElementById("screenshot-lightbox");
+        const lightboxImage = document.getElementById("screenshot-lightbox-image");
+        const lightboxCaption = document.getElementById("screenshot-lightbox-caption");
+        const closeButton = document.getElementById("screenshot-lightbox-close");
+        if (!(lightbox instanceof HTMLElement) || !(lightboxImage instanceof HTMLImageElement) || !(lightboxCaption instanceof HTMLElement) || !(closeButton instanceof HTMLButtonElement)) {
+          return;
+        }
+
+        let lastActiveElement = null;
+
+        const openLightbox = (imageNode) => {
+          if (!(imageNode instanceof HTMLImageElement)) {
+            return;
+          }
+          const source = imageNode.getAttribute("src") || "";
+          if (!source) {
+            return;
+          }
+
+          const figure = imageNode.closest("figure");
+          const captionNode = figure ? figure.querySelector("figcaption") : null;
+          const captionText = captionNode ? captionNode.textContent || "" : imageNode.getAttribute("alt") || "";
+
+          lastActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          lightboxImage.src = source;
+          lightboxImage.alt = imageNode.getAttribute("alt") || "";
+          lightboxCaption.textContent = captionText.trim();
+
+          lightbox.classList.add("is-open");
+          lightbox.setAttribute("aria-hidden", "false");
+          document.body.classList.add("lightbox-open");
+          closeButton.focus();
+        };
+
+        const closeLightbox = () => {
+          if (!lightbox.classList.contains("is-open")) {
+            return;
+          }
+          lightbox.classList.remove("is-open");
+          lightbox.setAttribute("aria-hidden", "true");
+          document.body.classList.remove("lightbox-open");
+          lightboxImage.removeAttribute("src");
+          lightboxCaption.textContent = "";
+          if (lastActiveElement instanceof HTMLElement) {
+            lastActiveElement.focus();
+          }
+          lastActiveElement = null;
+        };
+
+        document.querySelectorAll(".shot img").forEach((imageNode) => {
+          if (!(imageNode instanceof HTMLElement)) {
+            return;
+          }
+          imageNode.setAttribute("tabindex", "0");
+        });
+
+        document.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return;
+          }
+
+          if (target instanceof HTMLImageElement && target.closest(".shot")) {
+            openLightbox(target);
+            return;
+          }
+          if (target === lightbox || target === closeButton) {
+            closeLightbox();
+          }
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeLightbox();
+            return;
+          }
+          if (event.key !== "Enter" && event.key !== " ") {
+            return;
+          }
+          const target = event.target;
+          if (!(target instanceof HTMLImageElement) || !target.closest(".shot")) {
+            return;
+          }
+          event.preventDefault();
+          openLightbox(target);
+        });
+      })();
+    </script>
   </body>
 </html>
