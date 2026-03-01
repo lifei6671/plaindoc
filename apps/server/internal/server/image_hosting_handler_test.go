@@ -15,7 +15,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
-const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X7uQAAAAASUVORK5CYII="
+const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAEElEQVR4nGL6z8AACAAA//8DCQECWLbVUAAAAABJRU5ErkJggg=="
 
 func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)

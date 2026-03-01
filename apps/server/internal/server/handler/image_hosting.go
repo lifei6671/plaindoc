@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -32,6 +33,8 @@ const (
 	defaultLocalImageStorageRoot = "uploads/local"
 	maxUploadImageSizeBytes      = 20 << 20
 )
+
+var errUploadedImageTooLarge = errors.New("uploaded image file is too large")
 
 type imageHostingHandler struct {
 	authService         *service.AuthService
@@ -151,6 +154,9 @@ func (h *imageHostingHandler) IssueImageObjectKey(c *gin.Context) {
 	if contentType == "" {
 		contentType = "image/png"
 	}
+	if normalizeImageProcessingMode(config.ImageProcessing.Mode) == service.ImageHostingImageProcessingModeToWebP {
+		contentType = "image/webp"
+	}
 
 	objectKey, err := buildImageObjectKey(
 		requestPayload.FileName,
@@ -245,22 +251,41 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	// 读取文件头探测 MIME，防止仅凭扩展名绕过校验。
-	contentType, err := detectUploadedFileContentType(fileHeader)
+	originalContent, err := readUploadedFileContent(fileHeader, maxUploadImageSizeBytes)
 	if err != nil {
-		setRequestErrmsg(c, err, "检测图片内容类型失败")
+		if errors.Is(err, errUploadedImageTooLarge) {
+			response.ImageHostingUploadFileTooLarge(c)
+			return
+		}
+		setRequestErrmsg(c, err, "读取上传图片内容失败")
 		response.ImageHostingUploadFileUnreadable(c)
 		return
 	}
+	contentType := strings.TrimSpace(http.DetectContentType(firstBytes(originalContent, 512)))
 	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
 		response.ImageHostingUploadFileNotImage(c)
+		return
+	}
+	processedImage, err := processUploadedImageForStorage(originalContent, contentType, config)
+	if err != nil {
+		setRequestErrmsg(c, err, "处理上传图片失败")
+		response.ImageHostingUploadFileUnreadable(c)
+		return
+	}
+	if len(processedImage.Content) == 0 {
+		setRequestErrmsgText(c, "处理后的图片内容为空")
+		response.ImageHostingUploadFileUnreadable(c)
+		return
+	}
+	if int64(len(processedImage.Content)) > maxUploadImageSizeBytes {
+		response.ImageHostingUploadFileTooLarge(c)
 		return
 	}
 
 	// 生成按日期分层的对象 key，降低单目录文件数并便于管理。
 	objectKey, err := buildImageObjectKey(
 		fileHeader.Filename,
-		contentType,
+		processedImage.ContentType,
 		spaceID,
 		documentID,
 		actorUserID,
@@ -287,7 +312,7 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 			response.InternalError(c)
 			return
 		}
-		if err := c.SaveUploadedFile(fileHeader, targetPath); err != nil {
+		if err := os.WriteFile(targetPath, processedImage.Content, 0o644); err != nil {
 			setRequestErrmsg(c, err, "保存图片文件失败")
 			response.InternalError(c)
 			return
@@ -296,8 +321,8 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 	case service.ImageHostingProviderCloudflareR2:
 		uploadedURL, uploadErr := uploadImageToCloudflareR2(
 			c.Request.Context(),
-			fileHeader,
-			contentType,
+			processedImage.Content,
+			processedImage.ContentType,
 			objectKey,
 			config,
 		)
@@ -309,8 +334,8 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 		accessURL = uploadedURL
 	case service.ImageHostingProviderAliyunOSS:
 		uploadedURL, uploadErr := uploadImageToAliyunOSS(
-			fileHeader,
-			contentType,
+			processedImage.Content,
+			processedImage.ContentType,
 			objectKey,
 			config,
 		)
@@ -425,20 +450,29 @@ func (h *imageHostingHandler) requireAuthenticatedUser(c *gin.Context) (string, 
 	return session.User.ID, true
 }
 
-func detectUploadedFileContentType(fileHeader *multipart.FileHeader) (string, error) {
+func readUploadedFileContent(fileHeader *multipart.FileHeader, maxSize int64) ([]byte, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer file.Close()
 
-	// 仅需读取前 512 字节即可做内容类型探测。
-	buffer := make([]byte, 512)
-	readCount, readErr := file.Read(buffer)
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return "", readErr
+	limitedReader := io.LimitReader(file, maxSize+1)
+	content, readErr := io.ReadAll(limitedReader)
+	if readErr != nil {
+		return nil, readErr
 	}
-	return strings.TrimSpace(http.DetectContentType(buffer[:readCount])), nil
+	if int64(len(content)) > maxSize {
+		return nil, errUploadedImageTooLarge
+	}
+	return content, nil
+}
+
+func firstBytes(input []byte, limit int) []byte {
+	if len(input) <= limit {
+		return input
+	}
+	return input[:limit]
 }
 
 func readIssueImageObjectKeyRequest(c *gin.Context) issueImageObjectKeyRequest {
@@ -549,16 +583,7 @@ func buildImageObjectKey(
 }
 
 func resolveFileExtension(fileName string, contentType string) string {
-	// 优先使用上传文件名中的扩展名，但必须通过安全字符校验。
-	extension := strings.TrimSpace(strings.ToLower(path.Ext(fileName)))
-	if extension != "" {
-		extension = strings.TrimPrefix(extension, ".")
-		if isSafeFileExtension(extension) {
-			return extension
-		}
-	}
-
-	// 再尝试通过 MIME 类型推导扩展名。
+	// 优先通过 MIME 类型推导扩展名，确保扩展名与实际内容一致。
 	extensions, err := mime.ExtensionsByType(contentType)
 	if err == nil {
 		for _, item := range extensions {
@@ -566,6 +591,15 @@ func resolveFileExtension(fileName string, contentType string) string {
 			if isSafeFileExtension(candidate) {
 				return candidate
 			}
+		}
+	}
+
+	// 再回退到上传文件名中的扩展名，但必须通过安全字符校验。
+	extension := strings.TrimSpace(strings.ToLower(path.Ext(fileName)))
+	if extension != "" {
+		extension = strings.TrimPrefix(extension, ".")
+		if isSafeFileExtension(extension) {
+			return extension
 		}
 	}
 
@@ -647,7 +681,7 @@ func sanitizePathSegment(rawValue string, fallback string) string {
 
 func uploadImageToCloudflareR2(
 	ctx context.Context,
-	fileHeader *multipart.FileHeader,
+	content []byte,
 	contentType string,
 	objectKey string,
 	config service.ImageHostingConfig,
@@ -666,12 +700,6 @@ func uploadImageToCloudflareR2(
 	if endpoint == "" {
 		return "", errors.New("cloudflare r2 endpoint is empty")
 	}
-
-	file, err := fileHeader.Open()
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
 
 	awsConfig := aws.Config{
 		Region: "auto",
@@ -696,7 +724,7 @@ func uploadImageToCloudflareR2(
 	_, putErr := client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(bucket),
 		Key:         aws.String(objectKey),
-		Body:        file,
+		Body:        bytes.NewReader(content),
 		ContentType: aws.String(contentType),
 	})
 	if putErr != nil {
@@ -763,7 +791,7 @@ func deleteImageFromCloudflareR2(
 }
 
 func uploadImageToAliyunOSS(
-	fileHeader *multipart.FileHeader,
+	content []byte,
 	contentType string,
 	objectKey string,
 	config service.ImageHostingConfig,
@@ -789,13 +817,7 @@ func uploadImageToAliyunOSS(
 		return "", err
 	}
 
-	file, err := fileHeader.Open()
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	if putErr := bucketClient.PutObject(objectKey, file, oss.ContentType(contentType)); putErr != nil {
+	if putErr := bucketClient.PutObject(objectKey, bytes.NewReader(content), oss.ContentType(contentType)); putErr != nil {
 		return "", putErr
 	}
 

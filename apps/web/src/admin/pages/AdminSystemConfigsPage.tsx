@@ -27,6 +27,8 @@ import {
   type AliyunOssConfig,
   type CloudflareR2Config,
   type ImageHostingConfig,
+  type ImageHostingImageProcessingMode,
+  type ImageHostingImageQualityPreset,
   type ImageHostingProvider,
   type LocalImageHostingConfig
 } from "../../settings/image-hosting";
@@ -179,6 +181,55 @@ const IMAGE_HOSTING_PROVIDER_OPTIONS: Array<{ value: ImageHostingProvider; label
   { value: "cloudflare-r2", label: "Cloudflare R2" },
   { value: "aliyun-oss", label: "阿里云 OSS" }
 ];
+
+const IMAGE_HOSTING_IMAGE_PROCESSING_MODE_OPTIONS: Array<{
+  value: ImageHostingImageProcessingMode;
+  label: string;
+  description: string;
+}> = [
+    {
+      value: "same_format",
+      label: "原格式压缩",
+      description: "尽量保持输入格式，仅对可重编码格式执行压缩。"
+    },
+    {
+      value: "to_webp",
+      label: "转为 WebP",
+      description: "统一转为 WebP，再按质量档位压缩。"
+    }
+  ];
+
+const IMAGE_HOSTING_IMAGE_QUALITY_PRESET_OPTIONS: Array<{
+  value: ImageHostingImageQualityPreset;
+  label: string;
+  description: string;
+}> = [
+    {
+      value: "original",
+      label: "原图",
+      description: "保持原始质量（原格式模式下会透传，不重编码）。"
+    },
+    {
+      value: "high",
+      label: "高清",
+      description: "高质量压缩，优先保证视觉效果。"
+    },
+    {
+      value: "standard",
+      label: "标准",
+      description: "默认档位，在质量和体积间平衡。"
+    },
+    {
+      value: "saver",
+      label: "省流",
+      description: "更激进压缩，优先减小体积。"
+    }
+  ];
+
+const IMAGE_HOSTING_IMAGE_MAX_WIDTH_MIN = 256;
+const IMAGE_HOSTING_IMAGE_MAX_WIDTH_MAX = 20000;
+const IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MIN = 256;
+const IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MAX = 20000;
 
 const IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER =
   "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}";
@@ -978,6 +1029,67 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       local: {
         ...previousConfig.local,
         [field]: parseString(value, "")
+      }
+    }));
+    markDirty("image-hosting");
+  }, [markDirty]);
+
+  const setImageProcessingMode = useCallback((mode: ImageHostingImageProcessingMode) => {
+    setImageHostingDraft((previousConfig) => ({
+      ...previousConfig,
+      imageProcessing: {
+        ...previousConfig.imageProcessing,
+        mode
+      }
+    }));
+    markDirty("image-hosting");
+  }, [markDirty]);
+
+  const setImageQualityPreset = useCallback((qualityPreset: ImageHostingImageQualityPreset) => {
+    setImageHostingDraft((previousConfig) => ({
+      ...previousConfig,
+      imageProcessing: {
+        ...previousConfig.imageProcessing,
+        qualityPreset
+      }
+    }));
+    markDirty("image-hosting");
+  }, [markDirty]);
+
+  const setImageProcessingMaxWidth = useCallback((rawValue: string) => {
+    setImageHostingDraft((previousConfig) => {
+      const parsed = normalizeIntegerInput(rawValue, previousConfig.imageProcessing.maxWidth);
+      return {
+        ...previousConfig,
+        imageProcessing: {
+          ...previousConfig.imageProcessing,
+          maxWidth: Math.min(IMAGE_HOSTING_IMAGE_MAX_WIDTH_MAX, Math.max(IMAGE_HOSTING_IMAGE_MAX_WIDTH_MIN, parsed))
+        }
+      };
+    });
+    markDirty("image-hosting");
+  }, [markDirty]);
+
+  const setImageProcessingMaxHeight = useCallback((rawValue: string) => {
+    setImageHostingDraft((previousConfig) => {
+      const parsed = normalizeIntegerInput(rawValue, previousConfig.imageProcessing.maxHeight);
+      return {
+        ...previousConfig,
+        imageProcessing: {
+          ...previousConfig.imageProcessing,
+          maxHeight: Math.min(IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MAX, Math.max(IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MIN, parsed))
+        }
+      };
+    });
+    markDirty("image-hosting");
+  }, [markDirty]);
+
+  const setImageProcessingSkipAnimated = useCallback((skipAnimated: boolean) => {
+    setImageHostingDraft((previousConfig) => ({
+      ...previousConfig,
+      imageProcessing: {
+        ...previousConfig.imageProcessing,
+        skipAnimated
       }
     }));
     markDirty("image-hosting");
@@ -2081,6 +2193,110 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             ?.label
                         }
                       </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3 rounded-md border border-slate-200 bg-slate-50/60 p-3">
+                      <p className="text-xs font-semibold tracking-wide text-slate-700">图片压缩</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">压缩模式</span>
+                          <Select
+                            value={imageHostingDraft.imageProcessing.mode}
+                            onValueChange={(value) => {
+                              setImageProcessingMode(value as ImageHostingImageProcessingMode);
+                            }}
+                            disabled={saving}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {IMAGE_HOSTING_IMAGE_PROCESSING_MODE_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-slate-500">
+                            {
+                              IMAGE_HOSTING_IMAGE_PROCESSING_MODE_OPTIONS.find(
+                                (option) => option.value === imageHostingDraft.imageProcessing.mode
+                              )?.description
+                            }
+                          </p>
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">质量档位</span>
+                          <Select
+                            value={imageHostingDraft.imageProcessing.qualityPreset}
+                            onValueChange={(value) => {
+                              setImageQualityPreset(value as ImageHostingImageQualityPreset);
+                            }}
+                            disabled={saving}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {IMAGE_HOSTING_IMAGE_QUALITY_PRESET_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-slate-500">
+                            {
+                              IMAGE_HOSTING_IMAGE_QUALITY_PRESET_OPTIONS.find(
+                                (option) => option.value === imageHostingDraft.imageProcessing.qualityPreset
+                              )?.description
+                            }
+                          </p>
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">最大宽度（px）</span>
+                          <Input
+                            type="number"
+                            min={IMAGE_HOSTING_IMAGE_MAX_WIDTH_MIN}
+                            max={IMAGE_HOSTING_IMAGE_MAX_WIDTH_MAX}
+                            value={String(imageHostingDraft.imageProcessing.maxWidth)}
+                            onChange={(event) => setImageProcessingMaxWidth(event.target.value)}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">最大高度（px）</span>
+                          <Input
+                            type="number"
+                            min={IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MIN}
+                            max={IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MAX}
+                            value={String(imageHostingDraft.imageProcessing.maxHeight)}
+                            onChange={(event) => setImageProcessingMaxHeight(event.target.value)}
+                            disabled={saving}
+                          />
+                          <p className="text-xs text-slate-500">
+                            分别限制单张图片的宽度和高度，范围 {IMAGE_HOSTING_IMAGE_MAX_WIDTH_MIN.toLocaleString("en-US")} -{" "}
+                            {IMAGE_HOSTING_IMAGE_MAX_WIDTH_MAX.toLocaleString("en-US")} 像素。
+                          </p>
+                        </label>
+                        <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2.5">
+                          <Checkbox
+                            checked={imageHostingDraft.imageProcessing.skipAnimated}
+                            onCheckedChange={(checked) => {
+                              setImageProcessingSkipAnimated(checked === true);
+                            }}
+                            disabled={saving}
+                          />
+                          <div className="space-y-0.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">跳过动图压缩</span>
+                            <p className="text-[11px] text-slate-500">启用后，GIF/WebP 动图将直接透传，避免动画丢失。</p>
+                          </div>
+                        </label>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        作用说明：该宽高限制用于拦截超大图片，降低服务器在解码和压缩阶段的内存/CPU 峰值。若上传图片宽或高超过阈值，系统会直接拒绝上传并提示错误，不会自动缩放图片。
+                      </p>
                     </div>
 
                     <Tabs

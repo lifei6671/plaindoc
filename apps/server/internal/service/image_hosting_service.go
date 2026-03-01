@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,22 @@ const (
 	ImageHostingProviderAliyunOSS    ImageHostingProvider = "aliyun-oss"
 )
 
+type ImageHostingImageProcessingMode string
+
+const (
+	ImageHostingImageProcessingModeToWebP     ImageHostingImageProcessingMode = "to_webp"
+	ImageHostingImageProcessingModeSameFormat ImageHostingImageProcessingMode = "same_format"
+)
+
+type ImageHostingImageQualityPreset string
+
+const (
+	ImageHostingImageQualityPresetOriginal ImageHostingImageQualityPreset = "original"
+	ImageHostingImageQualityPresetHigh     ImageHostingImageQualityPreset = "high"
+	ImageHostingImageQualityPresetStandard ImageHostingImageQualityPreset = "standard"
+	ImageHostingImageQualityPresetSaver    ImageHostingImageQualityPreset = "saver"
+)
+
 type ImageHostingDownloadStrategy string
 
 const (
@@ -31,7 +48,26 @@ const (
 	defaultImageHostingSignedURLTTLSeconds = 24 * 60 * 60
 	minImageHostingSignedURLTTLSeconds     = 60
 	maxImageHostingSignedURLTTLSeconds     = 7 * 24 * 60 * 60
+
+	defaultImageHostingImageMaxWidth  = 8000
+	defaultImageHostingImageMaxHeight = 5000
+	minImageHostingImageMaxWidth      = 256
+	maxImageHostingImageMaxWidth      = 20000
+	minImageHostingImageMaxHeight     = 256
+	maxImageHostingImageMaxHeight     = 20000
+
+	legacyDefaultImageHostingImageMaxPixels = 40_000_000
+	legacyMinImageHostingImageMaxPixels     = 1_000_000
+	legacyMaxImageHostingImageMaxPixels     = 100_000_000
 )
+
+type ImageHostingImageProcessingConfig struct {
+	Mode          ImageHostingImageProcessingMode `json:"mode"`
+	QualityPreset ImageHostingImageQualityPreset  `json:"qualityPreset"`
+	MaxWidth      int                             `json:"maxWidth"`
+	MaxHeight     int                             `json:"maxHeight"`
+	SkipAnimated  bool                            `json:"skipAnimated"`
+}
 
 // CloudflareR2ImageHostingConfig Cloudflare R2 图床配置。
 type CloudflareR2ImageHostingConfig struct {
@@ -67,10 +103,11 @@ type LocalImageHostingConfig struct {
 
 // ImageHostingConfig 图床系统配置。
 type ImageHostingConfig struct {
-	DefaultProvider ImageHostingProvider           `json:"defaultProvider"`
-	CloudflareR2    CloudflareR2ImageHostingConfig `json:"cloudflareR2"`
-	AliyunOSS       AliyunOSSImageHostingConfig    `json:"aliyunOss"`
-	Local           LocalImageHostingConfig        `json:"local"`
+	DefaultProvider ImageHostingProvider              `json:"defaultProvider"`
+	CloudflareR2    CloudflareR2ImageHostingConfig    `json:"cloudflareR2"`
+	AliyunOSS       AliyunOSSImageHostingConfig       `json:"aliyunOss"`
+	Local           LocalImageHostingConfig           `json:"local"`
+	ImageProcessing ImageHostingImageProcessingConfig `json:"imageProcessing"`
 }
 
 // ImageHostingService 统一读取图床系统配置。
@@ -114,6 +151,13 @@ func DefaultImageHostingConfig() ImageHostingConfig {
 			UploadEndpoint:     "/api/uploads/images",
 			PublicBaseURL:      "/uploads",
 			UploadPathTemplate: DefaultImageHostingUploadPathTemplate,
+		},
+		ImageProcessing: ImageHostingImageProcessingConfig{
+			Mode:          ImageHostingImageProcessingModeSameFormat,
+			QualityPreset: ImageHostingImageQualityPresetStandard,
+			MaxWidth:      defaultImageHostingImageMaxWidth,
+			MaxHeight:     defaultImageHostingImageMaxHeight,
+			SkipAnimated:  true,
 		},
 	}
 }
@@ -180,6 +224,53 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 		)
 	}
 
+	if imageProcessing, ok := readObject(value, "imageProcessing"); ok {
+		if mode := normalizeImageHostingImageProcessingMode(readString(imageProcessing, "mode")); mode != "" {
+			config.ImageProcessing.Mode = mode
+		}
+		if preset := normalizeImageHostingImageQualityPreset(readString(imageProcessing, "qualityPreset")); preset != "" {
+			config.ImageProcessing.QualityPreset = preset
+		}
+		maxWidth := config.ImageProcessing.MaxWidth
+		maxHeight := config.ImageProcessing.MaxHeight
+		hasMaxWidth := false
+		hasMaxHeight := false
+		if _, exists := imageProcessing["maxWidth"]; exists {
+			maxWidth = normalizeImageHostingImageMaxWidth(
+				readInt(imageProcessing, "maxWidth", config.ImageProcessing.MaxWidth),
+			)
+			hasMaxWidth = true
+		}
+		if _, exists := imageProcessing["maxHeight"]; exists {
+			maxHeight = normalizeImageHostingImageMaxHeight(
+				readInt(imageProcessing, "maxHeight", config.ImageProcessing.MaxHeight),
+			)
+			hasMaxHeight = true
+		}
+		// 兼容历史字段 maxPixels：若宽高有缺失，则按平方根近似还原边长。
+		if (!hasMaxWidth || !hasMaxHeight) && imageProcessing["maxPixels"] != nil {
+			legacyMaxPixels := normalizeLegacyImageHostingImageMaxPixels(
+				readInt(imageProcessing, "maxPixels", legacyDefaultImageHostingImageMaxPixels),
+			)
+			derivedDimension := normalizeImageHostingImageMaxWidth(
+				int(math.Sqrt(float64(legacyMaxPixels))),
+			)
+			if !hasMaxWidth {
+				maxWidth = derivedDimension
+			}
+			if !hasMaxHeight {
+				maxHeight = normalizeImageHostingImageMaxHeight(derivedDimension)
+			}
+		}
+		config.ImageProcessing.MaxWidth = maxWidth
+		config.ImageProcessing.MaxHeight = maxHeight
+		config.ImageProcessing.SkipAnimated = readBool(
+			imageProcessing,
+			"skipAnimated",
+			config.ImageProcessing.SkipAnimated,
+		)
+	}
+
 	return config
 }
 
@@ -235,6 +326,53 @@ func normalizeImageHostingProvider(rawValue string) ImageHostingProvider {
 	default:
 		return ""
 	}
+}
+
+func normalizeImageHostingImageProcessingMode(rawValue string) ImageHostingImageProcessingMode {
+	switch strings.ToLower(strings.TrimSpace(rawValue)) {
+	case string(ImageHostingImageProcessingModeToWebP):
+		return ImageHostingImageProcessingModeToWebP
+	case string(ImageHostingImageProcessingModeSameFormat):
+		return ImageHostingImageProcessingModeSameFormat
+	default:
+		return ""
+	}
+}
+
+func normalizeImageHostingImageQualityPreset(rawValue string) ImageHostingImageQualityPreset {
+	switch strings.ToLower(strings.TrimSpace(rawValue)) {
+	case string(ImageHostingImageQualityPresetOriginal):
+		return ImageHostingImageQualityPresetOriginal
+	case string(ImageHostingImageQualityPresetHigh):
+		return ImageHostingImageQualityPresetHigh
+	case string(ImageHostingImageQualityPresetStandard):
+		return ImageHostingImageQualityPresetStandard
+	case string(ImageHostingImageQualityPresetSaver):
+		return ImageHostingImageQualityPresetSaver
+	default:
+		return ""
+	}
+}
+
+func normalizeImageHostingImageMaxWidth(rawValue int) int {
+	if rawValue < minImageHostingImageMaxWidth || rawValue > maxImageHostingImageMaxWidth {
+		return defaultImageHostingImageMaxWidth
+	}
+	return rawValue
+}
+
+func normalizeImageHostingImageMaxHeight(rawValue int) int {
+	if rawValue < minImageHostingImageMaxHeight || rawValue > maxImageHostingImageMaxHeight {
+		return defaultImageHostingImageMaxHeight
+	}
+	return rawValue
+}
+
+func normalizeLegacyImageHostingImageMaxPixels(rawValue int) int {
+	if rawValue < legacyMinImageHostingImageMaxPixels || rawValue > legacyMaxImageHostingImageMaxPixels {
+		return legacyDefaultImageHostingImageMaxPixels
+	}
+	return rawValue
 }
 
 func normalizeImageHostingDownloadStrategy(rawValue string) ImageHostingDownloadStrategy {
@@ -348,4 +486,16 @@ func readInt(payload map[string]any, key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func readBool(payload map[string]any, key string, fallback bool) bool {
+	rawValue, ok := payload[key]
+	if !ok {
+		return fallback
+	}
+	value, ok := rawValue.(bool)
+	if !ok {
+		return fallback
+	}
+	return value
 }

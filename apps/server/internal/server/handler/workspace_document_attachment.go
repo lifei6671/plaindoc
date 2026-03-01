@@ -990,6 +990,28 @@ func computeUploadedFileSHA256(fileHeader *multipart.FileHeader) (string, error)
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+func detectUploadedFileContentType(fileHeader *multipart.FileHeader) (string, error) {
+	if fileHeader == nil {
+		return "", errors.New("file header is nil")
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 512)
+	readBytes, readErr := io.ReadFull(file, buffer)
+	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) && !errors.Is(readErr, io.EOF) {
+		return "", readErr
+	}
+	detected := strings.TrimSpace(http.DetectContentType(buffer[:readBytes]))
+	if detected == "" {
+		detected = "application/octet-stream"
+	}
+	return detected, nil
+}
+
 func (h *workspaceHandler) uploadDocumentAttachmentToProvider(
 	c *gin.Context,
 	fileHeader *multipart.FileHeader,
@@ -1002,6 +1024,14 @@ func (h *workspaceHandler) uploadDocumentAttachmentToProvider(
 		return "", "", errors.New("attachment upload context is invalid")
 	}
 
+	fileContent, readErr := readUploadedFileContent(fileHeader, maxWorkspaceAttachmentSizeBytes)
+	if readErr != nil {
+		return "", "", readErr
+	}
+	if len(fileContent) == 0 {
+		return "", "", errors.New("attachment content is empty")
+	}
+
 	switch provider {
 	case service.ImageHostingProviderLocal:
 		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(objectKey)
@@ -1012,14 +1042,14 @@ func (h *workspaceHandler) uploadDocumentAttachmentToProvider(
 		if mkdirErr := os.MkdirAll(targetDir, 0o755); mkdirErr != nil {
 			return "", "", mkdirErr
 		}
-		if saveErr := c.SaveUploadedFile(fileHeader, targetPath); saveErr != nil {
+		if saveErr := os.WriteFile(targetPath, fileContent, 0o644); saveErr != nil {
 			return "", "", saveErr
 		}
 		return resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"), targetPath, nil
 	case service.ImageHostingProviderCloudflareR2:
 		uploadedURL, uploadErr := uploadImageToCloudflareR2(
 			c.Request.Context(),
-			fileHeader,
+			fileContent,
 			contentType,
 			objectKey,
 			config,
@@ -1027,7 +1057,7 @@ func (h *workspaceHandler) uploadDocumentAttachmentToProvider(
 		return uploadedURL, "", uploadErr
 	case service.ImageHostingProviderAliyunOSS:
 		uploadedURL, uploadErr := uploadImageToAliyunOSS(
-			fileHeader,
+			fileContent,
 			contentType,
 			objectKey,
 			config,

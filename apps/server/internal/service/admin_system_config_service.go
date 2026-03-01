@@ -1174,6 +1174,7 @@ func validateImageHostingConfig(payload map[string]any) error {
 		"cloudflareR2":    {},
 		"aliyunOss":       {},
 		"local":           {},
+		"imageProcessing": {},
 	}
 	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
 		return err
@@ -1189,6 +1190,92 @@ func validateImageHostingConfig(payload map[string]any) error {
 		string(ImageHostingProviderAliyunOSS):
 	default:
 		return fmt.Errorf("defaultProvider must be local/cloudflare-r2/aliyun-oss")
+	}
+
+	if rawImageProcessing, exists := payload["imageProcessing"]; exists {
+		imageProcessing, ok := rawImageProcessing.(map[string]any)
+		if !ok || imageProcessing == nil {
+			return fmt.Errorf("imageProcessing must be object")
+		}
+		if err := validateNoUnknownKeys(imageProcessing, map[string]struct{}{
+			"mode":          {},
+			"qualityPreset": {},
+			"maxWidth":      {},
+			"maxHeight":     {},
+			"maxPixels":     {}, // 兼容历史字段，建议改用 maxWidth/maxHeight。
+			"skipAnimated":  {},
+		}); err != nil {
+			return fmt.Errorf("imageProcessing %w", err)
+		}
+		if mode, hasMode, modeErr := getOptionalString(imageProcessing, "mode"); modeErr != nil {
+			return modeErr
+		} else if hasMode {
+			if normalizeImageHostingImageProcessingMode(mode) == "" {
+				return fmt.Errorf("imageProcessing.mode must be to_webp/same_format")
+			}
+		}
+		if qualityPreset, hasQualityPreset, qualityPresetErr := getOptionalString(imageProcessing, "qualityPreset"); qualityPresetErr != nil {
+			return qualityPresetErr
+		} else if hasQualityPreset {
+			if normalizeImageHostingImageQualityPreset(qualityPreset) == "" {
+				return fmt.Errorf("imageProcessing.qualityPreset must be original/high/standard/saver")
+			}
+		}
+		imageMaxWidth, imageMaxWidthErr := getOptionalInt(
+			imageProcessing,
+			"maxWidth",
+			defaultImageHostingImageMaxWidth,
+		)
+		if imageMaxWidthErr != nil {
+			return imageMaxWidthErr
+		}
+		if imageMaxWidth < minImageHostingImageMaxWidth || imageMaxWidth > maxImageHostingImageMaxWidth {
+			return fmt.Errorf(
+				"imageProcessing.maxWidth must be between %d and %d",
+				minImageHostingImageMaxWidth,
+				maxImageHostingImageMaxWidth,
+			)
+		}
+
+		imageMaxHeight, imageMaxHeightErr := getOptionalInt(
+			imageProcessing,
+			"maxHeight",
+			defaultImageHostingImageMaxHeight,
+		)
+		if imageMaxHeightErr != nil {
+			return imageMaxHeightErr
+		}
+		if imageMaxHeight < minImageHostingImageMaxHeight || imageMaxHeight > maxImageHostingImageMaxHeight {
+			return fmt.Errorf(
+				"imageProcessing.maxHeight must be between %d and %d",
+				minImageHostingImageMaxHeight,
+				maxImageHostingImageMaxHeight,
+			)
+		}
+
+		if rawLegacyMaxPixels, hasLegacyMaxPixels := imageProcessing["maxPixels"]; hasLegacyMaxPixels && rawLegacyMaxPixels != nil {
+			legacyMaxPixels, legacyMaxPixelsErr := getOptionalInt(
+				imageProcessing,
+				"maxPixels",
+				legacyDefaultImageHostingImageMaxPixels,
+			)
+			if legacyMaxPixelsErr != nil {
+				return legacyMaxPixelsErr
+			}
+			if legacyMaxPixels < legacyMinImageHostingImageMaxPixels || legacyMaxPixels > legacyMaxImageHostingImageMaxPixels {
+				return fmt.Errorf(
+					"imageProcessing.maxPixels must be between %d and %d",
+					legacyMinImageHostingImageMaxPixels,
+					legacyMaxImageHostingImageMaxPixels,
+				)
+			}
+		}
+
+		if rawSkipAnimated, hasSkipAnimated := imageProcessing["skipAnimated"]; hasSkipAnimated {
+			if _, ok := rawSkipAnimated.(bool); !ok {
+				return fmt.Errorf("imageProcessing.skipAnimated must be boolean")
+			}
+		}
 	}
 
 	cloudflareR2, err := getRequiredObject(payload, "cloudflareR2")
