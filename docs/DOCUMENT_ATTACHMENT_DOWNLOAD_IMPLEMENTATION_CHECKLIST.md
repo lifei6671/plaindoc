@@ -14,6 +14,12 @@
 
 ## 任务清单
 
+- [x] 附件物理文件实体表 `file_blobs`（按 `storage_provider + hash + size` 去重）
+- [x] 附件表增加 `blob_id / content_hash_algo / content_hash` 字段
+- [x] 上传链路增加 SHA-256 计算与秒传（命中哈希仅新增引用，不重复上传）
+- [x] 物理删除改为“先删附件记录，再按引用判断是否删 `file_blobs` 与物理文件”
+- [x] 后台物理删除增加共享引用提醒（可二次确认后继续仅删当前引用）
+
 - [x] 新增附件数据模型 `document_attachments`（含 `preview_kind` 扩展字段）
 - [x] 新增 MySQL/PostgreSQL/SQLite 迁移脚本（`0020_document_attachments`）
 - [x] 新增附件仓储接口与 GORM 实现（创建/查询/软删除）

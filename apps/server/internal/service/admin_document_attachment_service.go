@@ -20,6 +20,7 @@ const (
 	defaultAdminDocumentAttachmentPageSize = 20
 	maxAdminDocumentAttachmentPageSize     = 100
 	defaultAdminLocalAttachmentRootDir     = "uploads/local"
+	defaultAdminDeleteRefPreviewLimit      = 10
 )
 
 // AdminDocumentAttachmentStatusFilter 管理后台文档附件状态过滤条件。
@@ -88,10 +89,37 @@ type ListAdminDocumentAttachmentsResult struct {
 
 // DeleteAdminDocumentAttachmentInput 后台文档附件删除参数。
 type DeleteAdminDocumentAttachmentInput struct {
-	ActorUserID    string
-	AttachmentID   string
-	PhysicalDelete bool
-	RequestID      string
+	ActorUserID                string
+	AttachmentID               string
+	PhysicalDelete             bool
+	ForcePhysicalDeleteOnShare bool
+	RequestID                  string
+}
+
+// DeleteAdminDocumentAttachmentReference 表示共享文件被哪些附件引用。
+type DeleteAdminDocumentAttachmentReference struct {
+	AttachmentID  string
+	DocumentID    string
+	DocumentTitle string
+	SpaceID       string
+	SpaceName     string
+	FileName      string
+}
+
+// DeleteAdminDocumentAttachmentResult 描述后台删除附件执行结果。
+type DeleteAdminDocumentAttachmentResult struct {
+	AttachmentID            string
+	DocumentID              string
+	SpaceID                 string
+	PhysicalDeleteRequested bool
+	PhysicalDeleteExecuted  bool
+	SoftDeleted             bool
+	HardDeleted             bool
+	SharedReferenceCount    int64
+	SharedReferences        []DeleteAdminDocumentAttachmentReference
+	ConfirmationRequired    bool
+	ConfirmationReason      string
+	PhysicalDeleteError     string
 }
 
 // AdminDocumentAttachmentService 封装文档附件后台治理业务。
@@ -183,7 +211,7 @@ func (s *AdminDocumentAttachmentService) ListAttachments(
 func (s *AdminDocumentAttachmentService) DeleteAttachment(
 	ctx context.Context,
 	input DeleteAdminDocumentAttachmentInput,
-) (err error) {
+) (result DeleteAdminDocumentAttachmentResult, err error) {
 	defer func() {
 		err = errcode.MapAdminDocumentAttachmentError(err)
 	}()
@@ -191,32 +219,39 @@ func (s *AdminDocumentAttachmentService) DeleteAttachment(
 	_ = input.RequestID
 
 	if s == nil || s.documentAttachmentRepo == nil || s.adminAccessService == nil {
-		return errors.New("admin document attachment service dependencies are nil")
+		return DeleteAdminDocumentAttachmentResult{}, errors.New("admin document attachment service dependencies are nil")
 	}
 
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	if actorUserID == "" {
-		return errcode.ErrAdminForbidden
+		return DeleteAdminDocumentAttachmentResult{}, errcode.ErrAdminForbidden
 	}
 	attachmentID := strings.TrimSpace(input.AttachmentID)
 	if attachmentID == "" {
-		return errcode.ErrAdminDocumentAttachmentInvalidAttachmentID
+		return DeleteAdminDocumentAttachmentResult{}, errcode.ErrAdminDocumentAttachmentInvalidAttachmentID
 	}
 
 	attachment, err := s.documentAttachmentRepo.GetByAttachmentID(ctx, attachmentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errcode.ErrAdminDocumentAttachmentNotFound
+			return DeleteAdminDocumentAttachmentResult{}, errcode.ErrAdminDocumentAttachmentNotFound
 		}
-		return err
+		return DeleteAdminDocumentAttachmentResult{}, err
 	}
 
 	canManage, err := s.adminAccessService.CanManageSpace(ctx, actorUserID, strings.TrimSpace(attachment.SpaceID))
 	if err != nil {
-		return err
+		return DeleteAdminDocumentAttachmentResult{}, err
 	}
 	if !canManage {
-		return errcode.ErrAdminForbidden
+		return DeleteAdminDocumentAttachmentResult{}, errcode.ErrAdminForbidden
+	}
+
+	result = DeleteAdminDocumentAttachmentResult{
+		AttachmentID:            attachmentID,
+		DocumentID:              strings.TrimSpace(attachment.DocumentID),
+		SpaceID:                 strings.TrimSpace(attachment.SpaceID),
+		PhysicalDeleteRequested: input.PhysicalDelete,
 	}
 
 	beforeStatus := attachment.Status
@@ -227,28 +262,82 @@ func (s *AdminDocumentAttachmentService) DeleteAttachment(
 
 	physicalDeleteExecuted := false
 	if input.PhysicalDelete {
-		if deleteErr := s.tryPhysicalDeleteAttachment(attachment); deleteErr != nil {
-			return deleteErr
+		if strings.ToLower(strings.TrimSpace(attachment.StorageProvider)) != string(ImageHostingProviderLocal) {
+			return DeleteAdminDocumentAttachmentResult{}, errors.New("physical delete only supports local attachment storage")
 		}
+
+		blobID := strings.TrimSpace(attachment.BlobID)
+		if blobID == "" {
+			return DeleteAdminDocumentAttachmentResult{}, errors.New("attachment blob id is empty")
+		}
+
+		activeRefCount, countErr := s.documentAttachmentRepo.CountActiveReferencesByBlobID(ctx, blobID)
+		if countErr != nil {
+			return DeleteAdminDocumentAttachmentResult{}, countErr
+		}
+		result.SharedReferenceCount = activeRefCount
+		if activeRefCount > 1 {
+			references, referenceErr := s.documentAttachmentRepo.ListActiveReferencesByBlobID(ctx, blobID, defaultAdminDeleteRefPreviewLimit)
+			if referenceErr != nil {
+				return DeleteAdminDocumentAttachmentResult{}, referenceErr
+			}
+			result.SharedReferences = mapDeleteAdminDocumentAttachmentReferences(references)
+			if !input.ForcePhysicalDeleteOnShare {
+				result.ConfirmationRequired = true
+				result.ConfirmationReason = "当前文件被多个文档引用，确认后仅删除当前附件记录，不会删除物理文件。"
+				return result, nil
+			}
+		}
+
 		hardDeleted, hardDeleteErr := s.documentAttachmentRepo.HardDelete(ctx, attachmentID)
 		if hardDeleteErr != nil {
-			return hardDeleteErr
+			return DeleteAdminDocumentAttachmentResult{}, hardDeleteErr
 		}
 		if !hardDeleted {
-			return errcode.ErrAdminDocumentAttachmentNotFound
+			return DeleteAdminDocumentAttachmentResult{}, errcode.ErrAdminDocumentAttachmentNotFound
 		}
-		physicalDeleteExecuted = true
+		result.HardDeleted = true
+
+		blob, getBlobErr := s.documentAttachmentRepo.GetBlobByBlobID(ctx, blobID)
+		if getBlobErr != nil && !errors.Is(getBlobErr, gorm.ErrRecordNotFound) {
+			return DeleteAdminDocumentAttachmentResult{}, getBlobErr
+		}
+
+		blobDeleted, deleteBlobErr := s.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(ctx, blobID)
+		if deleteBlobErr != nil {
+			return DeleteAdminDocumentAttachmentResult{}, deleteBlobErr
+		}
+		if blobDeleted && blob != nil {
+			deletePhysicalErr := s.tryPhysicalDeleteBlob(blob)
+			if deletePhysicalErr != nil {
+				result.PhysicalDeleteError = deletePhysicalErr.Error()
+			} else {
+				physicalDeleteExecuted = true
+			}
+		} else if blob == nil {
+			result.PhysicalDeleteError = "文件实体不存在，跳过物理文件删除"
+		} else {
+			result.PhysicalDeleteError = "文件仍存在引用，未执行物理文件删除"
+		}
+
+		remainingRefCount, remainingCountErr := s.documentAttachmentRepo.CountActiveReferencesByBlobID(ctx, blobID)
+		if remainingCountErr != nil {
+			return DeleteAdminDocumentAttachmentResult{}, remainingCountErr
+		}
+		result.SharedReferenceCount = remainingRefCount
 		afterStatus = "hard_deleted"
 	} else if beforeStatus != models.EntityStatusDeleted {
 		deleted, deleteErr := s.documentAttachmentRepo.SoftDelete(ctx, attachmentID, time.Now().UTC())
 		if deleteErr != nil {
-			return deleteErr
+			return DeleteAdminDocumentAttachmentResult{}, deleteErr
 		}
 		if !deleted {
-			return errcode.ErrAdminDocumentAttachmentNotFound
+			return DeleteAdminDocumentAttachmentResult{}, errcode.ErrAdminDocumentAttachmentNotFound
 		}
+		result.SoftDeleted = true
 		afterStatus = models.EntityStatusDeleted
 	}
+	result.PhysicalDeleteExecuted = physicalDeleteExecuted
 
 	if err := s.recordAttachmentAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleDocument,
@@ -265,12 +354,15 @@ func (s *AdminDocumentAttachmentService) DeleteAttachment(
 			"statusAfter":            afterStatus,
 			"physicalDelete":         input.PhysicalDelete,
 			"physicalDeleteExecuted": physicalDeleteExecuted,
+			"physicalDeleteError":    strings.TrimSpace(result.PhysicalDeleteError),
+			"sharedReferenceCount":   result.SharedReferenceCount,
+			"confirmationRequired":   result.ConfirmationRequired,
 		},
 	}); err != nil {
-		return err
+		return DeleteAdminDocumentAttachmentResult{}, err
 	}
 
-	return nil
+	return result, nil
 }
 
 func (s *AdminDocumentAttachmentService) resolveScopeRestriction(ctx context.Context, actorUserID string) (bool, error) {
@@ -292,17 +384,17 @@ func (s *AdminDocumentAttachmentService) resolveScopeRestriction(ctx context.Con
 	return true, nil
 }
 
-func (s *AdminDocumentAttachmentService) tryPhysicalDeleteAttachment(
-	attachment *models.DocumentAttachment,
+func (s *AdminDocumentAttachmentService) tryPhysicalDeleteBlob(
+	blob *models.DocumentAttachmentBlob,
 ) error {
-	if attachment == nil {
+	if blob == nil {
 		return nil
 	}
-	if strings.ToLower(strings.TrimSpace(attachment.StorageProvider)) != string(ImageHostingProviderLocal) {
+	if strings.ToLower(strings.TrimSpace(blob.StorageProvider)) != string(ImageHostingProviderLocal) {
 		return errors.New("physical delete only supports local attachment storage")
 	}
 
-	targetPath, err := s.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
+	targetPath, err := s.resolveLocalAttachmentTargetPath(blob.ObjectKey)
 	if err != nil {
 		return err
 	}
@@ -360,6 +452,27 @@ func (s *AdminDocumentAttachmentService) recordAttachmentAudit(ctx context.Conte
 		return nil
 	}
 	return s.adminAuditService.Record(ctx, input)
+}
+
+func mapDeleteAdminDocumentAttachmentReferences(
+	records []repository.DocumentAttachmentReferenceRecord,
+) []DeleteAdminDocumentAttachmentReference {
+	if len(records) == 0 {
+		return []DeleteAdminDocumentAttachmentReference{}
+	}
+
+	items := make([]DeleteAdminDocumentAttachmentReference, 0, len(records))
+	for _, record := range records {
+		items = append(items, DeleteAdminDocumentAttachmentReference{
+			AttachmentID:  strings.TrimSpace(record.AttachmentID),
+			DocumentID:    strings.TrimSpace(record.DocumentID),
+			DocumentTitle: strings.TrimSpace(record.DocumentTitle),
+			SpaceID:       strings.TrimSpace(record.SpaceID),
+			SpaceName:     strings.TrimSpace(record.SpaceName),
+			FileName:      strings.TrimSpace(record.FileName),
+		})
+	}
+	return items
 }
 
 func resolveAdminDocumentAttachmentStatuses(

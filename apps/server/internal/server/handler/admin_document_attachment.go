@@ -51,6 +51,30 @@ type adminDocumentAttachmentListResponse struct {
 	Pagination adminDocumentAttachmentPageResponse `json:"pagination"`
 }
 
+type adminDocumentAttachmentDeleteReferenceResponse struct {
+	AttachmentID  string `json:"attachmentId"`
+	DocumentID    string `json:"documentId"`
+	DocumentTitle string `json:"documentTitle"`
+	SpaceID       string `json:"spaceId"`
+	SpaceName     string `json:"spaceName"`
+	FileName      string `json:"fileName"`
+}
+
+type adminDocumentAttachmentDeleteResponse struct {
+	AttachmentID            string                                           `json:"attachmentId"`
+	DocumentID              string                                           `json:"documentId"`
+	SpaceID                 string                                           `json:"spaceId"`
+	PhysicalDeleteRequested bool                                             `json:"physicalDeleteRequested"`
+	PhysicalDeleteExecuted  bool                                             `json:"physicalDeleteExecuted"`
+	SoftDeleted             bool                                             `json:"softDeleted"`
+	HardDeleted             bool                                             `json:"hardDeleted"`
+	SharedReferenceCount    int64                                            `json:"sharedReferenceCount"`
+	SharedReferences        []adminDocumentAttachmentDeleteReferenceResponse `json:"sharedReferences"`
+	ConfirmationRequired    bool                                             `json:"confirmationRequired"`
+	ConfirmationReason      string                                           `json:"confirmationReason"`
+	PhysicalDeleteError     string                                           `json:"physicalDeleteError"`
+}
+
 // NewAdminDocumentAttachmentHandler 创建后台文档附件管理处理器。
 func NewAdminDocumentAttachmentHandler(
 	adminDocumentAttachmentService *service.AdminDocumentAttachmentService,
@@ -146,18 +170,20 @@ func (h *adminDocumentAttachmentHandler) DeleteAttachment(c *gin.Context) {
 		return
 	}
 
-	if err := h.adminDocumentAttachmentService.DeleteAttachment(c.Request.Context(), service.DeleteAdminDocumentAttachmentInput{
-		ActorUserID:    actorUserID,
-		AttachmentID:   attachmentID,
-		PhysicalDelete: parseBoolLikeValue(c.Query("physicalDelete")),
-		RequestID:      response.RequestIDFromContext(c),
-	}); err != nil {
+	result, err := h.adminDocumentAttachmentService.DeleteAttachment(c.Request.Context(), service.DeleteAdminDocumentAttachmentInput{
+		ActorUserID:                actorUserID,
+		AttachmentID:               attachmentID,
+		PhysicalDelete:             parseBoolLikeValue(c.Query("physicalDelete")),
+		ForcePhysicalDeleteOnShare: parseBoolLikeValue(c.Query("forcePhysicalDeleteOnShare")),
+		RequestID:                  response.RequestIDFromContext(c),
+	})
+	if err != nil {
 		setRequestErrmsg(c, err, "删除后台文档附件失败")
 		response.FromError(c, err)
 		return
 	}
 
-	response.JSON(c, http.StatusOK, struct{}{})
+	response.JSON(c, http.StatusOK, mapAdminDocumentAttachmentDeleteResponse(result))
 }
 
 func mapAdminDocumentAttachmentResponse(value service.AdminDocumentAttachmentRecord) adminDocumentAttachmentResponse {
@@ -183,5 +209,36 @@ func mapAdminDocumentAttachmentResponse(value service.AdminDocumentAttachmentRec
 		DeletedAt:        value.DeletedAt,
 		CreatedAt:        value.CreatedAt,
 		UpdatedAt:        value.UpdatedAt,
+	}
+}
+
+func mapAdminDocumentAttachmentDeleteResponse(
+	value service.DeleteAdminDocumentAttachmentResult,
+) adminDocumentAttachmentDeleteResponse {
+	items := make([]adminDocumentAttachmentDeleteReferenceResponse, 0, len(value.SharedReferences))
+	for _, reference := range value.SharedReferences {
+		items = append(items, adminDocumentAttachmentDeleteReferenceResponse{
+			AttachmentID:  strings.TrimSpace(reference.AttachmentID),
+			DocumentID:    strings.TrimSpace(reference.DocumentID),
+			DocumentTitle: strings.TrimSpace(reference.DocumentTitle),
+			SpaceID:       strings.TrimSpace(reference.SpaceID),
+			SpaceName:     strings.TrimSpace(reference.SpaceName),
+			FileName:      strings.TrimSpace(reference.FileName),
+		})
+	}
+
+	return adminDocumentAttachmentDeleteResponse{
+		AttachmentID:            strings.TrimSpace(value.AttachmentID),
+		DocumentID:              strings.TrimSpace(value.DocumentID),
+		SpaceID:                 strings.TrimSpace(value.SpaceID),
+		PhysicalDeleteRequested: value.PhysicalDeleteRequested,
+		PhysicalDeleteExecuted:  value.PhysicalDeleteExecuted,
+		SoftDeleted:             value.SoftDeleted,
+		HardDeleted:             value.HardDeleted,
+		SharedReferenceCount:    value.SharedReferenceCount,
+		SharedReferences:        items,
+		ConfirmationRequired:    value.ConfirmationRequired,
+		ConfirmationReason:      strings.TrimSpace(value.ConfirmationReason),
+		PhysicalDeleteError:     strings.TrimSpace(value.PhysicalDeleteError),
 	}
 }

@@ -465,6 +465,30 @@ export interface AdminDocumentAttachmentListResult {
   };
 }
 
+export interface AdminDocumentAttachmentDeleteReference {
+  attachmentId: string;
+  documentId: string;
+  documentTitle: string;
+  spaceId: string;
+  spaceName: string;
+  fileName: string;
+}
+
+export interface AdminDocumentAttachmentDeleteResult {
+  attachmentId: string;
+  documentId: string;
+  spaceId: string;
+  physicalDeleteRequested: boolean;
+  physicalDeleteExecuted: boolean;
+  softDeleted: boolean;
+  hardDeleted: boolean;
+  sharedReferenceCount: number;
+  sharedReferences: AdminDocumentAttachmentDeleteReference[];
+  confirmationRequired: boolean;
+  confirmationReason: string;
+  physicalDeleteError: string;
+}
+
 export interface AdminTheme {
   themeId: string;
   name: string;
@@ -620,7 +644,11 @@ export interface AdminGateway {
   updateDocumentStatus(input: { documentId: string; status: "active" | "banned"; reason?: string }): Promise<AdminDocument>;
   deleteDocument(documentId: string): Promise<void>;
   listDocumentAttachments(input?: AdminDocumentAttachmentListInput): Promise<AdminDocumentAttachmentListResult>;
-  deleteDocumentAttachment(input: { attachmentId: string; physicalDelete?: boolean }): Promise<void>;
+  deleteDocumentAttachment(input: {
+    attachmentId: string;
+    physicalDelete?: boolean;
+    forcePhysicalDeleteOnShare?: boolean;
+  }): Promise<AdminDocumentAttachmentDeleteResult>;
   listThemes(): Promise<AdminTheme[]>;
   createTheme(input: {
     themeId: string;

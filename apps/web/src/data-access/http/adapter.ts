@@ -4,6 +4,7 @@ import {
   type AdminAuditListInput,
   type AdminAuditListResult,
   type AdminDocument,
+  type AdminDocumentAttachmentDeleteResult,
   type AdminDocumentAttachmentListInput,
   type AdminDocumentAttachmentListResult,
   type AdminDocumentListInput,
@@ -1465,7 +1466,11 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       const path = queryText ? `/admin/document-attachments?${queryText}` : "/admin/document-attachments";
       return request<AdminDocumentAttachmentListResult>(path);
     },
-    async deleteDocumentAttachment(input: { attachmentId: string; physicalDelete?: boolean }) {
+    async deleteDocumentAttachment(input: {
+      attachmentId: string;
+      physicalDelete?: boolean;
+      forcePhysicalDeleteOnShare?: boolean;
+    }) {
       const targetAttachmentID = input.attachmentId.trim();
       if (!targetAttachmentID) {
         throw new Error("附件 ID 不能为空");
@@ -1479,10 +1484,13 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (input.physicalDelete === true) {
         query.set("physicalDelete", "true");
       }
+      if (input.forcePhysicalDeleteOnShare === true) {
+        query.set("forcePhysicalDeleteOnShare", "true");
+      }
       const queryText = query.toString();
       const path =
         `/admin/document-attachments/${encodeURIComponent(targetAttachmentID)}` + (queryText ? `?${queryText}` : "");
-      await request<void>(path, {
+      return request<AdminDocumentAttachmentDeleteResult>(path, {
         method: "DELETE",
         headers: buildAdminOperationTokenHeaders(operationToken)
       });

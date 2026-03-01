@@ -444,6 +444,17 @@ type AdminDocumentAttachmentListRecord struct {
 	CreatedByEmail  string
 }
 
+// DocumentAttachmentReferenceRecord 表示同一物理文件的附件引用记录。
+type DocumentAttachmentReferenceRecord struct {
+	AttachmentID  string
+	DocumentID    string
+	DocumentTitle string
+	SpaceID       string
+	SpaceName     string
+	FileName      string
+	Status        models.EntityStatus
+}
+
 // UpdateDocumentStatusParams 管理后台文档状态更新参数。
 type UpdateDocumentStatusParams struct {
 	DocumentID   string
@@ -482,6 +493,18 @@ type DocumentAttachmentRepository interface {
 		ctx context.Context,
 		params ListAdminDocumentAttachmentsParams,
 	) ([]AdminDocumentAttachmentListRecord, int64, error)
+	FindBlobByHash(
+		ctx context.Context,
+		storageProvider string,
+		contentHashAlgo string,
+		contentHash string,
+		sizeBytes int64,
+	) (*models.DocumentAttachmentBlob, error)
+	GetBlobByBlobID(ctx context.Context, blobID string) (*models.DocumentAttachmentBlob, error)
+	CreateBlob(ctx context.Context, blob *models.DocumentAttachmentBlob) error
+	HardDeleteBlobIfUnreferenced(ctx context.Context, blobID string) (bool, error)
+	CountActiveReferencesByBlobID(ctx context.Context, blobID string) (int64, error)
+	ListActiveReferencesByBlobID(ctx context.Context, blobID string, limit int) ([]DocumentAttachmentReferenceRecord, error)
 	GetByAttachmentID(ctx context.Context, attachmentID string) (*models.DocumentAttachment, error)
 	SoftDelete(ctx context.Context, attachmentID string, deletedAt time.Time) (bool, error)
 	HardDelete(ctx context.Context, attachmentID string) (bool, error)

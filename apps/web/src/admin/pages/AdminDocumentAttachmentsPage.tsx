@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { showToast } from "../../components/ui/toast";
 import {
   type AdminDocumentAttachment,
+  type AdminDocumentAttachmentDeleteResult,
   type AdminDocumentAttachmentListResult,
   type DataGateway,
   type DocumentAttachmentPreviewKind
@@ -149,8 +150,47 @@ function openPathInNewTab(path: string): void {
   window.open(path, "_blank", "noopener,noreferrer");
 }
 
+function buildDeleteAttachmentToastMessage(result: AdminDocumentAttachmentDeleteResult): {
+  message: string;
+  variant: "success" | "info";
+} {
+  if (!result.physicalDeleteRequested) {
+    return {
+      message: "附件删除成功（逻辑删除）",
+      variant: "success"
+    };
+  }
+
+  if (result.physicalDeleteExecuted) {
+    return {
+      message: "附件删除成功（记录与物理文件均已删除）",
+      variant: "success"
+    };
+  }
+
+  const normalizedDeleteError = result.physicalDeleteError.trim();
+  if (normalizedDeleteError) {
+    return {
+      message: `已删除附件记录，但物理文件未删除：${normalizedDeleteError}`,
+      variant: "info"
+    };
+  }
+
+  if (result.sharedReferenceCount > 0) {
+    return {
+      message: `已删除附件记录；物理文件仍有 ${result.sharedReferenceCount} 个活跃引用，未执行物理删除。`,
+      variant: "info"
+    };
+  }
+
+  return {
+    message: "附件删除成功",
+    variant: "success"
+  };
+}
+
 export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttachmentsPageProps) {
-  const { prompt, dialogs } = useAdminDialogs();
+  const { confirm, prompt, dialogs } = useAdminDialogs();
 
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -255,11 +295,43 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
       const physicalDelete = (promptResult.physicalDelete ?? "false").trim() === "true";
       setActioningAttachmentID(attachment.attachmentId);
       try {
-        await dataGateway.admin.deleteDocumentAttachment({
+        let deleteResult = await dataGateway.admin.deleteDocumentAttachment({
           attachmentId: attachment.attachmentId,
           physicalDelete
         });
-        openToast("附件删除成功", "success");
+
+        if (physicalDelete && deleteResult.confirmationRequired) {
+          const sampleRefs = deleteResult.sharedReferences
+            .slice(0, 3)
+            .map((item) => item.documentTitle || item.documentId)
+            .filter((item) => item && item.trim());
+          const confirmationDescription = [
+            deleteResult.confirmationReason || "该物理文件仍被多个文档引用。",
+            `当前活跃引用数：${deleteResult.sharedReferenceCount}`,
+            sampleRefs.length > 0 ? `示例文档：${sampleRefs.join("、")}` : "",
+            "继续后仅删除当前附件记录，不会删除物理文件。"
+          ]
+            .filter((item) => item.trim())
+            .join("\n");
+          const confirmed = await confirm({
+            title: "检测到共享文件引用",
+            description: confirmationDescription,
+            confirmText: "继续删除当前记录",
+            cancelText: "取消",
+            tone: "warning"
+          });
+          if (!confirmed) {
+            return;
+          }
+          deleteResult = await dataGateway.admin.deleteDocumentAttachment({
+            attachmentId: attachment.attachmentId,
+            physicalDelete: true,
+            forcePhysicalDeleteOnShare: true
+          });
+        }
+
+        const toast = buildDeleteAttachmentToastMessage(deleteResult);
+        openToast(toast.message, toast.variant);
         await loadAttachments();
       } catch (error) {
         openToast(`删除附件失败：${formatError(error)}`);
@@ -267,7 +339,7 @@ export function AdminDocumentAttachmentsPage({ dataGateway }: AdminDocumentAttac
         setActioningAttachmentID(null);
       }
     },
-    [dataGateway.admin, loadAttachments, openToast, prompt]
+    [confirm, dataGateway.admin, loadAttachments, openToast, prompt]
   );
 
   return (

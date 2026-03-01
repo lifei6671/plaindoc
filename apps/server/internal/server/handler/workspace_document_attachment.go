@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -222,27 +226,108 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 		response.ImageHostingUploadFileUnreadable(c)
 		return
 	}
-	objectKey, err := buildDocumentAttachmentObjectKey(fileHeader.Filename, contentType, time.Now().UTC())
+
+	const contentHashAlgo = "sha256"
+	contentHash, err := computeUploadedFileSHA256(fileHeader)
 	if err != nil {
-		setRequestErrmsg(c, err, "生成对象存储键失败")
+		setRequestErrmsg(c, err, "计算上传文件哈希失败")
+		response.ImageHostingUploadFileUnreadable(c)
+		return
+	}
+
+	blob, err := h.documentAttachmentRepo.FindBlobByHash(
+		c.Request.Context(),
+		string(service.ImageHostingProviderLocal),
+		contentHashAlgo,
+		contentHash,
+		fileHeader.Size,
+	)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		setRequestErrmsg(c, err, "按哈希查询文件实体失败")
 		response.InternalError(c)
 		return
 	}
 
-	targetPath, err := h.resolveLocalAttachmentTargetPath(objectKey)
-	if err != nil {
-		setRequestErrmsg(c, err, "解析本地附件目标路径失败")
-		response.InternalError(c)
-		return
+	savedTargetPath := ""
+	createdBlobID := ""
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		objectKey, objectKeyErr := buildDocumentAttachmentObjectKey(fileHeader.Filename, contentType, time.Now().UTC())
+		if objectKeyErr != nil {
+			setRequestErrmsg(c, objectKeyErr, "生成对象存储键失败")
+			response.InternalError(c)
+			return
+		}
+
+		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(objectKey)
+		if pathErr != nil {
+			setRequestErrmsg(c, pathErr, "解析本地附件目标路径失败")
+			response.InternalError(c)
+			return
+		}
+		targetDir := filepath.Dir(targetPath)
+		if mkdirErr := os.MkdirAll(targetDir, 0o755); mkdirErr != nil {
+			setRequestErrmsg(c, mkdirErr, "创建本地附件目录失败")
+			response.InternalError(c)
+			return
+		}
+		if saveErr := c.SaveUploadedFile(fileHeader, targetPath); saveErr != nil {
+			setRequestErrmsg(c, saveErr, "保存上传文件失败")
+			response.InternalError(c)
+			return
+		}
+		savedTargetPath = targetPath
+
+		now := time.Now().UTC()
+		blobCandidate := &models.DocumentAttachmentBlob{
+			BlobID:          strings.ToLower(ulid.Make().String()),
+			StorageProvider: string(service.ImageHostingProviderLocal),
+			ObjectKey:       objectKey,
+			ObjectURL:       resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"),
+			MimeType:        strings.TrimSpace(contentType),
+			SizeBytes:       fileHeader.Size,
+			ContentHashAlgo: contentHashAlgo,
+			ContentHash:     contentHash,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if strings.TrimSpace(blobCandidate.MimeType) == "" {
+			blobCandidate.MimeType = "application/octet-stream"
+		}
+
+		createBlobErr := h.documentAttachmentRepo.CreateBlob(c.Request.Context(), blobCandidate)
+		if createBlobErr != nil {
+			if cleanupErr := os.Remove(savedTargetPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+				setRequestErrmsg(c, cleanupErr, "清理重复上传临时文件失败")
+			}
+			savedTargetPath = ""
+
+			if isLikelyUniqueConstraintError(createBlobErr) {
+				existingBlob, lookupErr := h.documentAttachmentRepo.FindBlobByHash(
+					c.Request.Context(),
+					string(service.ImageHostingProviderLocal),
+					contentHashAlgo,
+					contentHash,
+					fileHeader.Size,
+				)
+				if lookupErr != nil {
+					setRequestErrmsg(c, lookupErr, "回查去重文件实体失败")
+					response.InternalError(c)
+					return
+				}
+				blob = existingBlob
+			} else {
+				setRequestErrmsg(c, createBlobErr, "创建文件实体失败")
+				response.InternalError(c)
+				return
+			}
+		} else {
+			blob = blobCandidate
+			createdBlobID = blobCandidate.BlobID
+		}
 	}
-	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		setRequestErrmsg(c, err, "创建本地附件目录失败")
-		response.InternalError(c)
-		return
-	}
-	if err := c.SaveUploadedFile(fileHeader, targetPath); err != nil {
-		setRequestErrmsg(c, err, "保存上传文件失败")
+
+	if blob == nil {
+		setRequestErrmsgText(c, "文件实体创建失败")
 		response.InternalError(c)
 		return
 	}
@@ -251,14 +336,17 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 	createdBy := actorUserID
 	attachment := &models.DocumentAttachment{
 		AttachmentID:    strings.ToLower(ulid.Make().String()),
+		BlobID:          strings.TrimSpace(blob.BlobID),
 		DocumentID:      documentID,
 		SpaceID:         spaceID,
-		StorageProvider: string(service.ImageHostingProviderLocal),
+		StorageProvider: strings.TrimSpace(blob.StorageProvider),
 		FileName:        strings.TrimSpace(fileHeader.Filename),
-		ObjectKey:       objectKey,
-		ObjectURL:       resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"),
-		MimeType:        contentType,
-		SizeBytes:       fileHeader.Size,
+		ObjectKey:       strings.TrimSpace(blob.ObjectKey),
+		ObjectURL:       strings.TrimSpace(blob.ObjectURL),
+		MimeType:        strings.TrimSpace(blob.MimeType),
+		SizeBytes:       blob.SizeBytes,
+		ContentHashAlgo: strings.TrimSpace(blob.ContentHashAlgo),
+		ContentHash:     strings.TrimSpace(blob.ContentHash),
 		PreviewKind:     resolveDocumentAttachmentPreviewKind(contentType, fileHeader.Filename),
 		Status:          models.EntityStatusActive,
 		CreatedByUserID: &createdBy,
@@ -271,11 +359,33 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 	if strings.TrimSpace(attachment.MimeType) == "" {
 		attachment.MimeType = "application/octet-stream"
 	}
+	if strings.TrimSpace(attachment.StorageProvider) == "" {
+		attachment.StorageProvider = string(service.ImageHostingProviderLocal)
+	}
+	if strings.TrimSpace(attachment.ObjectURL) == "" {
+		attachment.ObjectURL = resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads")
+	}
+	if strings.TrimSpace(attachment.ContentHashAlgo) == "" {
+		attachment.ContentHashAlgo = contentHashAlgo
+	}
+	if strings.TrimSpace(attachment.ContentHash) == "" {
+		attachment.ContentHash = contentHash
+	}
 	if strings.TrimSpace(attachment.PreviewKind) == "" {
 		attachment.PreviewKind = documentAttachmentPreviewKindNone
 	}
 
 	if err := h.documentAttachmentRepo.Create(c.Request.Context(), attachment); err != nil {
+		if createdBlobID != "" {
+			hardDeletedBlob, cleanupErr := h.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(c.Request.Context(), createdBlobID)
+			if cleanupErr != nil {
+				setRequestErrmsg(c, cleanupErr, "回滚文件实体失败")
+			} else if hardDeletedBlob && savedTargetPath != "" {
+				if removeErr := os.Remove(savedTargetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					setRequestErrmsg(c, removeErr, "回滚上传文件失败")
+				}
+			}
+		}
 		setRequestErrmsg(c, err, "创建文档附件记录失败")
 		response.InternalError(c)
 		return
@@ -386,20 +496,14 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 		return
 	}
 
-	if strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
-		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
-		if pathErr != nil {
-			setRequestErrmsg(c, pathErr, "解析本地附件路径失败")
-			response.InternalError(c)
-			return
-		}
-		if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			setRequestErrmsg(c, removeErr, "物理删除本地附件文件失败")
-			response.InternalError(c)
-			return
-		}
-	} else {
+	if !strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
 		setRequestErrmsgText(c, "当前附件存储提供商暂不支持物理删除")
+		response.InternalError(c)
+		return
+	}
+	blobID := strings.TrimSpace(attachment.BlobID)
+	if blobID == "" {
+		setRequestErrmsgText(c, "附件缺少 blob_id，无法执行物理删除")
 		response.InternalError(c)
 		return
 	}
@@ -413,6 +517,30 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 	if !hardDeleted {
 		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
 		return
+	}
+
+	blobDeleted, blobDeleteErr := h.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(
+		c.Request.Context(),
+		blobID,
+	)
+	if blobDeleteErr != nil {
+		setRequestErrmsg(c, blobDeleteErr, "删除文件实体失败")
+		response.InternalError(c)
+		return
+	}
+
+	if blobDeleted {
+		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
+		if pathErr != nil {
+			setRequestErrmsg(c, pathErr, "解析本地附件路径失败")
+			response.InternalError(c)
+			return
+		}
+		if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			setRequestErrmsg(c, removeErr, "物理删除本地附件文件失败")
+			response.InternalError(c)
+			return
+		}
 	}
 
 	response.JSON(c, http.StatusOK, struct{}{})
@@ -827,6 +955,36 @@ func parseBoolLikeValue(raw string) bool {
 	default:
 		return false
 	}
+}
+
+func isLikelyUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "duplicated")
+}
+
+func computeUploadedFileSHA256(fileHeader *multipart.FileHeader) (string, error) {
+	if fileHeader == nil {
+		return "", errors.New("file header is nil")
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, copyErr := io.Copy(hash, file); copyErr != nil {
+		return "", copyErr
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func buildDocumentAttachmentObjectKey(fileName string, contentType string, now time.Time) (string, error) {

@@ -1,6 +1,25 @@
+CREATE TABLE IF NOT EXISTS file_blobs (
+	id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+	blob_id VARCHAR(26) NOT NULL COMMENT '文件实体业务ID（ULID）',
+	storage_provider VARCHAR(32) NOT NULL DEFAULT 'local' COMMENT '存储提供方：local/cloudflare-r2/aliyun-oss',
+	object_key VARCHAR(512) NOT NULL DEFAULT '' COMMENT '对象键',
+	object_url TEXT NOT NULL COMMENT '对象访问URL',
+	mime_type VARCHAR(128) NOT NULL DEFAULT 'application/octet-stream' COMMENT 'MIME 类型',
+	size_bytes BIGINT NOT NULL DEFAULT 0 COMMENT '文件字节数',
+	content_hash_algo VARCHAR(32) NOT NULL DEFAULT 'sha256' COMMENT '哈希算法',
+	content_hash VARCHAR(128) NOT NULL DEFAULT '' COMMENT '文件内容哈希值',
+	deleted_at DATETIME(3) NULL COMMENT '删除时间',
+	created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+	updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+	UNIQUE KEY uk_file_blobs_blob_id (blob_id),
+	UNIQUE KEY uk_file_blobs_hash (storage_provider, content_hash_algo, content_hash, size_bytes),
+	KEY idx_file_blobs_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件实体表：按内容去重后的物理文件元信息';
+
 CREATE TABLE IF NOT EXISTS document_attachments (
 	id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
 	attachment_id VARCHAR(26) NOT NULL COMMENT '附件业务ID（ULID）',
+	blob_id VARCHAR(26) NOT NULL COMMENT '文件实体ID',
 	document_id VARCHAR(26) NOT NULL COMMENT '文档业务ID',
 	space_id VARCHAR(26) NOT NULL COMMENT '所属空间ID',
 	storage_provider VARCHAR(32) NOT NULL DEFAULT 'local' COMMENT '存储提供方：local/cloudflare-r2/aliyun-oss',
@@ -9,6 +28,8 @@ CREATE TABLE IF NOT EXISTS document_attachments (
 	object_url TEXT NOT NULL COMMENT '对象访问URL',
 	mime_type VARCHAR(128) NOT NULL DEFAULT 'application/octet-stream' COMMENT 'MIME 类型',
 	size_bytes BIGINT NOT NULL DEFAULT 0 COMMENT '文件字节数',
+	content_hash_algo VARCHAR(32) NOT NULL DEFAULT 'sha256' COMMENT '哈希算法',
+	content_hash VARCHAR(128) NOT NULL DEFAULT '' COMMENT '文件内容哈希值',
 	preview_kind VARCHAR(32) NOT NULL DEFAULT 'none' COMMENT '在线预览类型扩展：none/image/pdf/office/text',
 	status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '附件状态：active/deleted',
 	deleted_at DATETIME(3) NULL COMMENT '逻辑删除时间',
@@ -16,11 +37,14 @@ CREATE TABLE IF NOT EXISTS document_attachments (
 	created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
 	updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
 	UNIQUE KEY uk_document_attachments_attachment_id (attachment_id),
+	KEY idx_document_attachments_blob_id (blob_id),
 	KEY idx_document_attachments_document_id (document_id),
 	KEY idx_document_attachments_space_id (space_id),
 	KEY idx_document_attachments_status (status),
+	KEY idx_document_attachments_hash (storage_provider, content_hash_algo, content_hash, size_bytes),
 	KEY idx_document_attachments_created_at (created_at),
+	CONSTRAINT fk_document_attachments_blob_id FOREIGN KEY (blob_id) REFERENCES file_blobs(blob_id) ON DELETE RESTRICT,
 	CONSTRAINT fk_document_attachments_document_id FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE,
 	CONSTRAINT fk_document_attachments_space_id FOREIGN KEY (space_id) REFERENCES spaces(space_id) ON DELETE CASCADE,
 	CONSTRAINT fk_document_attachments_created_by_user_id FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档附件表：记录文档关联文件与存储元信息';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档附件表：记录文档到文件实体的引用';

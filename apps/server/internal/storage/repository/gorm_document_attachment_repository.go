@@ -17,6 +17,7 @@ type gormDocumentAttachmentRepository struct {
 type documentAttachmentRow struct {
 	ID              int64   `gorm:"column:id"`
 	AttachmentID    string  `gorm:"column:attachment_id"`
+	BlobID          string  `gorm:"column:blob_id"`
 	DocumentID      string  `gorm:"column:document_id"`
 	SpaceID         string  `gorm:"column:space_id"`
 	StorageProvider string  `gorm:"column:storage_provider"`
@@ -25,10 +26,27 @@ type documentAttachmentRow struct {
 	ObjectURL       string  `gorm:"column:object_url"`
 	MimeType        string  `gorm:"column:mime_type"`
 	SizeBytes       int64   `gorm:"column:size_bytes"`
+	ContentHashAlgo string  `gorm:"column:content_hash_algo"`
+	ContentHash     string  `gorm:"column:content_hash"`
 	PreviewKind     string  `gorm:"column:preview_kind"`
 	Status          string  `gorm:"column:status"`
 	DeletedAtRaw    *string `gorm:"column:deleted_at"`
 	CreatedByUserID *string `gorm:"column:created_by_user_id"`
+	CreatedAtRaw    string  `gorm:"column:created_at"`
+	UpdatedAtRaw    string  `gorm:"column:updated_at"`
+}
+
+type documentAttachmentBlobRow struct {
+	ID              int64   `gorm:"column:id"`
+	BlobID          string  `gorm:"column:blob_id"`
+	StorageProvider string  `gorm:"column:storage_provider"`
+	ObjectKey       string  `gorm:"column:object_key"`
+	ObjectURL       string  `gorm:"column:object_url"`
+	MimeType        string  `gorm:"column:mime_type"`
+	SizeBytes       int64   `gorm:"column:size_bytes"`
+	ContentHashAlgo string  `gorm:"column:content_hash_algo"`
+	ContentHash     string  `gorm:"column:content_hash"`
+	DeletedAtRaw    *string `gorm:"column:deleted_at"`
 	CreatedAtRaw    string  `gorm:"column:created_at"`
 	UpdatedAtRaw    string  `gorm:"column:updated_at"`
 }
@@ -71,8 +89,8 @@ func (r *gormDocumentAttachmentRepository) ListByDocumentID(
 	query := r.db.WithContext(ctx).
 		Table("document_attachments").
 		Select(
-			"id, attachment_id, document_id, space_id, storage_provider, file_name, object_key, object_url, mime_type, "+
-				"size_bytes, preview_kind, status, deleted_at, created_by_user_id, created_at, updated_at",
+			"id, attachment_id, blob_id, document_id, space_id, storage_provider, file_name, object_key, object_url, mime_type, "+
+				"size_bytes, content_hash_algo, content_hash, preview_kind, status, deleted_at, created_by_user_id, created_at, updated_at",
 		).
 		Where("document_id = ?", normalizedDocumentID)
 	if !includeDeleted {
@@ -183,6 +201,7 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 	type adminDocumentAttachmentListRow struct {
 		ID              int64               `gorm:"column:id"`
 		AttachmentID    string              `gorm:"column:attachment_id"`
+		BlobID          string              `gorm:"column:blob_id"`
 		DocumentID      string              `gorm:"column:document_id"`
 		SpaceID         string              `gorm:"column:space_id"`
 		StorageProvider string              `gorm:"column:storage_provider"`
@@ -191,6 +210,8 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 		ObjectURL       string              `gorm:"column:object_url"`
 		MimeType        string              `gorm:"column:mime_type"`
 		SizeBytes       int64               `gorm:"column:size_bytes"`
+		ContentHashAlgo string              `gorm:"column:content_hash_algo"`
+		ContentHash     string              `gorm:"column:content_hash"`
 		PreviewKind     string              `gorm:"column:preview_kind"`
 		Status          models.EntityStatus `gorm:"column:status"`
 		DeletedAtRaw    *string             `gorm:"column:deleted_at"`
@@ -213,6 +234,7 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 		Select(
 			"da.id",
 			"da.attachment_id",
+			"da.blob_id",
 			"da.document_id",
 			"da.space_id",
 			"da.storage_provider",
@@ -221,6 +243,8 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 			"da.object_url",
 			"da.mime_type",
 			"da.size_bytes",
+			"da.content_hash_algo",
+			"da.content_hash",
 			"da.preview_kind",
 			"da.status",
 			"da.deleted_at",
@@ -248,6 +272,7 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 		attachment := models.DocumentAttachment{
 			ID:              row.ID,
 			AttachmentID:    strings.TrimSpace(row.AttachmentID),
+			BlobID:          strings.TrimSpace(row.BlobID),
 			DocumentID:      strings.TrimSpace(row.DocumentID),
 			SpaceID:         strings.TrimSpace(row.SpaceID),
 			StorageProvider: strings.TrimSpace(row.StorageProvider),
@@ -256,6 +281,8 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 			ObjectURL:       strings.TrimSpace(row.ObjectURL),
 			MimeType:        strings.TrimSpace(row.MimeType),
 			SizeBytes:       row.SizeBytes,
+			ContentHashAlgo: strings.TrimSpace(row.ContentHashAlgo),
+			ContentHash:     strings.TrimSpace(row.ContentHash),
 			PreviewKind:     strings.TrimSpace(row.PreviewKind),
 			Status:          row.Status,
 			DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
@@ -288,6 +315,208 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 	return result, total, nil
 }
 
+func (r *gormDocumentAttachmentRepository) FindBlobByHash(
+	ctx context.Context,
+	storageProvider string,
+	contentHashAlgo string,
+	contentHash string,
+	sizeBytes int64,
+) (*models.DocumentAttachmentBlob, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedStorageProvider := strings.ToLower(strings.TrimSpace(storageProvider))
+	normalizedHashAlgo := strings.ToLower(strings.TrimSpace(contentHashAlgo))
+	normalizedHash := strings.ToLower(strings.TrimSpace(contentHash))
+	if normalizedStorageProvider == "" || normalizedHashAlgo == "" || normalizedHash == "" || sizeBytes < 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	var row documentAttachmentBlobRow
+	if err := r.db.WithContext(ctx).
+		Table("file_blobs").
+		Select(
+			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
+				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+		).
+		Where(
+			"storage_provider = ? AND content_hash_algo = ? AND content_hash = ? AND size_bytes = ? AND deleted_at IS NULL",
+			normalizedStorageProvider,
+			normalizedHashAlgo,
+			normalizedHash,
+			sizeBytes,
+		).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	blob := mapDocumentAttachmentBlobRow(row)
+	return &blob, nil
+}
+
+func (r *gormDocumentAttachmentRepository) GetBlobByBlobID(
+	ctx context.Context,
+	blobID string,
+) (*models.DocumentAttachmentBlob, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedBlobID := strings.TrimSpace(blobID)
+	if normalizedBlobID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	var row documentAttachmentBlobRow
+	if err := r.db.WithContext(ctx).
+		Table("file_blobs").
+		Select(
+			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
+				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+		).
+		Where("blob_id = ?", normalizedBlobID).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	blob := mapDocumentAttachmentBlobRow(row)
+	return &blob, nil
+}
+
+func (r *gormDocumentAttachmentRepository) CreateBlob(
+	ctx context.Context,
+	blob *models.DocumentAttachmentBlob,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("document attachment repository db is nil")
+	}
+	if blob == nil {
+		return fmt.Errorf("document attachment blob is nil")
+	}
+	return r.db.WithContext(ctx).Create(blob).Error
+}
+
+func (r *gormDocumentAttachmentRepository) HardDeleteBlobIfUnreferenced(
+	ctx context.Context,
+	blobID string,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedBlobID := strings.TrimSpace(blobID)
+	if normalizedBlobID == "" {
+		return false, nil
+	}
+
+	deleteResult := r.db.WithContext(ctx).
+		Where(
+			"blob_id = ? AND NOT EXISTS (SELECT 1 FROM document_attachments WHERE blob_id = ?)",
+			normalizedBlobID,
+			normalizedBlobID,
+		).
+		Delete(&models.DocumentAttachmentBlob{})
+	if deleteResult.Error != nil {
+		return false, deleteResult.Error
+	}
+	return deleteResult.RowsAffected > 0, nil
+}
+
+func (r *gormDocumentAttachmentRepository) CountActiveReferencesByBlobID(
+	ctx context.Context,
+	blobID string,
+) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedBlobID := strings.TrimSpace(blobID)
+	if normalizedBlobID == "" {
+		return 0, nil
+	}
+
+	var total int64
+	if err := r.db.WithContext(ctx).
+		Table("document_attachments").
+		Where("blob_id = ? AND status = ? AND deleted_at IS NULL", normalizedBlobID, models.EntityStatusActive).
+		Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *gormDocumentAttachmentRepository) ListActiveReferencesByBlobID(
+	ctx context.Context,
+	blobID string,
+	limit int,
+) ([]DocumentAttachmentReferenceRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedBlobID := strings.TrimSpace(blobID)
+	if normalizedBlobID == "" {
+		return []DocumentAttachmentReferenceRecord{}, nil
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	type referenceRow struct {
+		AttachmentID  string              `gorm:"column:attachment_id"`
+		DocumentID    string              `gorm:"column:document_id"`
+		DocumentTitle string              `gorm:"column:document_title"`
+		SpaceID       string              `gorm:"column:space_id"`
+		SpaceName     string              `gorm:"column:space_name"`
+		FileName      string              `gorm:"column:file_name"`
+		Status        models.EntityStatus `gorm:"column:status"`
+	}
+
+	rows := make([]referenceRow, 0, limit)
+	if err := r.db.WithContext(ctx).
+		Table("document_attachments AS da").
+		Select(
+			"da.attachment_id",
+			"da.document_id",
+			"d.title AS document_title",
+			"da.space_id",
+			"s.name AS space_name",
+			"da.file_name",
+			"da.status",
+		).
+		Joins("JOIN documents AS d ON d.document_id = da.document_id").
+		Joins("JOIN spaces AS s ON s.space_id = da.space_id").
+		Where("da.blob_id = ? AND da.status = ? AND da.deleted_at IS NULL", normalizedBlobID, models.EntityStatusActive).
+		Order("da.created_at ASC, da.id ASC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]DocumentAttachmentReferenceRecord, 0, len(rows))
+	for _, row := range rows {
+		status := row.Status
+		if !models.IsValidEntityStatus(status) {
+			status = models.EntityStatusActive
+		}
+		result = append(result, DocumentAttachmentReferenceRecord{
+			AttachmentID:  strings.TrimSpace(row.AttachmentID),
+			DocumentID:    strings.TrimSpace(row.DocumentID),
+			DocumentTitle: strings.TrimSpace(row.DocumentTitle),
+			SpaceID:       strings.TrimSpace(row.SpaceID),
+			SpaceName:     strings.TrimSpace(row.SpaceName),
+			FileName:      strings.TrimSpace(row.FileName),
+			Status:        status,
+		})
+	}
+	return result, nil
+}
+
 func (r *gormDocumentAttachmentRepository) GetByAttachmentID(
 	ctx context.Context,
 	attachmentID string,
@@ -305,8 +534,8 @@ func (r *gormDocumentAttachmentRepository) GetByAttachmentID(
 	if err := r.db.WithContext(ctx).
 		Table("document_attachments").
 		Select(
-			"id, attachment_id, document_id, space_id, storage_provider, file_name, object_key, object_url, mime_type, "+
-				"size_bytes, preview_kind, status, deleted_at, created_by_user_id, created_at, updated_at",
+			"id, attachment_id, blob_id, document_id, space_id, storage_provider, file_name, object_key, object_url, mime_type, "+
+				"size_bytes, content_hash_algo, content_hash, preview_kind, status, deleted_at, created_by_user_id, created_at, updated_at",
 		).
 		Where("attachment_id = ?", normalizedAttachmentID).
 		Take(&row).Error; err != nil {
@@ -376,6 +605,7 @@ func mapDocumentAttachmentRow(row documentAttachmentRow) models.DocumentAttachme
 	return models.DocumentAttachment{
 		ID:              row.ID,
 		AttachmentID:    strings.TrimSpace(row.AttachmentID),
+		BlobID:          strings.TrimSpace(row.BlobID),
 		DocumentID:      strings.TrimSpace(row.DocumentID),
 		SpaceID:         strings.TrimSpace(row.SpaceID),
 		StorageProvider: strings.TrimSpace(row.StorageProvider),
@@ -384,10 +614,29 @@ func mapDocumentAttachmentRow(row documentAttachmentRow) models.DocumentAttachme
 		ObjectURL:       strings.TrimSpace(row.ObjectURL),
 		MimeType:        strings.TrimSpace(row.MimeType),
 		SizeBytes:       row.SizeBytes,
+		ContentHashAlgo: strings.TrimSpace(row.ContentHashAlgo),
+		ContentHash:     strings.TrimSpace(row.ContentHash),
 		PreviewKind:     strings.TrimSpace(row.PreviewKind),
 		Status:          models.EntityStatus(strings.TrimSpace(row.Status)),
 		DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
 		CreatedByUserID: row.CreatedByUserID,
+		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
+		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+	}
+}
+
+func mapDocumentAttachmentBlobRow(row documentAttachmentBlobRow) models.DocumentAttachmentBlob {
+	return models.DocumentAttachmentBlob{
+		ID:              row.ID,
+		BlobID:          strings.TrimSpace(row.BlobID),
+		StorageProvider: strings.TrimSpace(row.StorageProvider),
+		ObjectKey:       strings.TrimSpace(row.ObjectKey),
+		ObjectURL:       strings.TrimSpace(row.ObjectURL),
+		MimeType:        strings.TrimSpace(row.MimeType),
+		SizeBytes:       row.SizeBytes,
+		ContentHashAlgo: strings.TrimSpace(row.ContentHashAlgo),
+		ContentHash:     strings.TrimSpace(row.ContentHash),
+		DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
 		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
 		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
 	}
