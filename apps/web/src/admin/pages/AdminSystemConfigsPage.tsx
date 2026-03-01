@@ -10,13 +10,14 @@ import {
   Save,
   type LucideIcon
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { showToast } from "../../components/ui/toast";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
 import { type AdminSystemConfig, type DataGateway } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import {
@@ -35,6 +36,12 @@ type SystemConfigKey = "site" | "editor" | "security" | "data-retention" | "auth
 type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
 type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
+type DataRetentionCleanupTable =
+  | "audit_logs"
+  | "auth_captcha_challenges"
+  | "auth_risk_states"
+  | "user_sessions"
+  | "document_image_assets";
 
 interface SiteSystemConfigValue {
   allowRegistration: boolean;
@@ -55,6 +62,7 @@ interface DataRetentionSystemConfigValue {
   enabled: boolean;
   scheduleMinutes: number;
   cleanupBatchSize: number;
+  cleanupTables: DataRetentionCleanupTable[];
   auditLogRetentionDays: number;
   authCaptchaRetentionHours: number;
   authRiskStateRetentionDays: number;
@@ -175,7 +183,45 @@ const IMAGE_HOSTING_PROVIDER_OPTIONS: Array<{ value: ImageHostingProvider; label
 const IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER =
   "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}";
 const IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT =
-  "可用变量：{spaceId} {docId} {yyyy} {mm} {dd} {hh} {assetId} {origName} {ext} {uploaderId}；必须包含 {assetId}。";
+  "可用变量：{spaceId} {docId} {yyyy} {mm} {dd} {hh} {assetId} {origName} {ext} {uploaderId} {Rand:N}；其中 N 取值 4-10，且必须包含 {assetId}。";
+const IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS: Array<{
+  key: string;
+  label: string;
+  template: string;
+}> = [
+    {
+      key: "by-document",
+      label: "按文档归档",
+      template: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}_{origName}.{ext}"
+    },
+    {
+      key: "by-day",
+      label: "按年月日归档",
+      template: "images/{spaceId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+    },
+    {
+      key: "by-month",
+      label: "按年月归档",
+      template: "images/{spaceId}/{yyyy}/{mm}/{assetId}.{ext}"
+    }
+  ];
+const IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES: Array<{
+  token: string;
+  label: string;
+  description: string;
+}> = [
+  { token: "{spaceId}", label: "spaceId", description: "当前文档所属空间的 ID。" },
+  { token: "{docId}", label: "docId", description: "当前文档的 ID。" },
+  { token: "{yyyy}", label: "yyyy", description: "上传时间年份（四位，如 2026）。" },
+  { token: "{mm}", label: "mm", description: "上传时间月份（两位，如 03）。" },
+  { token: "{dd}", label: "dd", description: "上传时间日期（两位，如 01）。" },
+  { token: "{hh}", label: "hh", description: "上传时间小时（24 小时制，两位）。" },
+  { token: "{assetId}", label: "assetId", description: "后端生成的资源唯一 ID（必填，防冲突）。" },
+  { token: "{origName}", label: "origName", description: "原始文件名（已清理非法字符，不含扩展名）。" },
+  { token: "{ext}", label: "ext", description: "文件扩展名（不含点号，如 png/pdf）。" },
+  { token: "{uploaderId}", label: "uploaderId", description: "上传用户 ID。" },
+  { token: "{Rand:6}", label: "Rand:6", description: "随机字符串占位符。把 6 改成 4-10 可指定长度，如 {Rand:8}。" }
+];
 
 const SITEMAP_GENERATION_MODE_OPTIONS: Array<{
   value: SitemapGenerationMode;
@@ -222,11 +268,50 @@ const DATA_RETENTION_TEMPLATE: DataRetentionSystemConfigValue = {
   enabled: true,
   scheduleMinutes: 60,
   cleanupBatchSize: 500,
+  cleanupTables: [
+    "audit_logs",
+    "auth_captcha_challenges",
+    "auth_risk_states",
+    "user_sessions",
+    "document_image_assets"
+  ],
   auditLogRetentionDays: 180,
   authCaptchaRetentionHours: 72,
   authRiskStateRetentionDays: 30,
   userSessionRetentionDays: 30
 };
+
+const DATA_RETENTION_CLEANUP_TABLE_OPTIONS: Array<{
+  value: DataRetentionCleanupTable;
+  label: string;
+  description: string;
+}> = [
+    {
+      value: "audit_logs",
+      label: "audit_logs",
+      description: "系统审计日志"
+    },
+    {
+      value: "auth_captcha_challenges",
+      label: "auth_captcha_challenges",
+      description: "验证码会话历史"
+    },
+    {
+      value: "auth_risk_states",
+      label: "auth_risk_states",
+      description: "认证风控状态"
+    },
+    {
+      value: "user_sessions",
+      label: "user_sessions",
+      description: "用户登录会话"
+    },
+    {
+      value: "document_image_assets",
+      label: "document_image_assets",
+      description: "文档图片资源（pending_cleanup）"
+    }
+  ];
 
 const AUTH_PROVIDER_TEMPLATE: AuthProviderConfig = {
   id: "corp-ldap",
@@ -356,11 +441,33 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
   };
 }
 
+function cloneDataRetentionConfig(value: DataRetentionSystemConfigValue): DataRetentionSystemConfigValue {
+  return {
+    ...value,
+    cleanupTables: [...value.cleanupTables]
+  };
+}
+
 function parseDataRetentionConfig(value: unknown): DataRetentionSystemConfigValue {
   const payload = asRecord(value);
   if (!payload) {
-    return { ...DATA_RETENTION_TEMPLATE };
+    return cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE);
   }
+  const cleanupTablesRaw = Array.isArray(payload.cleanupTables) ? payload.cleanupTables : [];
+  const parsedCleanupTables = cleanupTablesRaw
+    .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
+    .filter((item): item is DataRetentionCleanupTable =>
+      item === "audit_logs" ||
+      item === "auth_captcha_challenges" ||
+      item === "auth_risk_states" ||
+      item === "user_sessions" ||
+      item === "document_image_assets"
+    );
+  const cleanupTables =
+    parsedCleanupTables.length > 0
+      ? Array.from(new Set(parsedCleanupTables))
+      : [...DATA_RETENTION_TEMPLATE.cleanupTables];
+
   return {
     enabled: typeof payload.enabled === "boolean" ? payload.enabled : DATA_RETENTION_TEMPLATE.enabled,
     scheduleMinutes: Math.min(
@@ -371,6 +478,7 @@ function parseDataRetentionConfig(value: unknown): DataRetentionSystemConfigValu
       20000,
       Math.max(100, parseInteger(payload.cleanupBatchSize, DATA_RETENTION_TEMPLATE.cleanupBatchSize))
     ),
+    cleanupTables,
     auditLogRetentionDays: Math.min(
       3650,
       Math.max(1, parseInteger(payload.auditLogRetentionDays, DATA_RETENTION_TEMPLATE.auditLogRetentionDays))
@@ -546,6 +654,38 @@ function normalizeIntegerInput(rawValue: string, fallbackValue: number): number 
   return Math.trunc(parsedValue);
 }
 
+function buildImageHostingTemplatePreview(template: string): string {
+  const normalizedTemplate = template.trim();
+  if (!normalizedTemplate) {
+    return "-";
+  }
+  const replacements: Record<string, string> = {
+    "{spaceId}": "space-demo",
+    "{docId}": "doc-demo",
+    "{yyyy}": "2026",
+    "{mm}": "03",
+    "{dd}": "01",
+    "{hh}": "14",
+    "{assetId}": "01HQ7GZ4M7P1ANR5TYA9D3K8CV",
+    "{origName}": "roadmap",
+    "{ext}": "png",
+    "{uploaderId}": "user-demo"
+  };
+  let output = normalizedTemplate;
+  Object.entries(replacements).forEach(([token, value]) => {
+    output = output.split(token).join(value);
+  });
+  output = output.replace(/\{rand:(4|5|6|7|8|9|10)\}/gi, (_, rawLength: string) => {
+    const length = Number.parseInt(rawLength, 10);
+    if (!Number.isFinite(length) || length < 4 || length > 10) {
+      return "Ab3D9k";
+    }
+    const seed = "aB3dE5fG7hI9JkLmN0pQ2rS4tU6vW8xYz1";
+    return seed.slice(0, length);
+  });
+  return output;
+}
+
 export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPageProps) {
   const [configs, setConfigs] = useState<AdminSystemConfig[]>([]);
   const [selectedKey, setSelectedKey] = useState<SystemConfigKey>("site");
@@ -556,7 +696,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
   const [dataRetentionDraft, setDataRetentionDraft] = useState<DataRetentionSystemConfigValue>({
-    ...DATA_RETENTION_TEMPLATE
+    ...cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE)
   });
   const [authDraft, setAuthDraft] = useState<AuthSystemConfigValue>(cloneAuthConfig(AUTH_TEMPLATE));
   const [sitemapDraft, setSitemapDraft] = useState<SitemapSystemConfigValue>({ ...SITEMAP_TEMPLATE });
@@ -577,6 +717,11 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [saving, setSaving] = useState(false);
   const [testingLDAP, setTestingLDAP] = useState(false);
   const [runningCleanup, setRunningCleanup] = useState(false);
+  const imageHostingTemplateInputRefs = useRef<Record<ImageHostingProvider, HTMLInputElement | null>>({
+    local: null,
+    "cloudflare-r2": null,
+    "aliyun-oss": null
+  });
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -681,7 +826,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         markDirty("security");
         return;
       case "data-retention":
-        setDataRetentionDraft({ ...DATA_RETENTION_TEMPLATE });
+        setDataRetentionDraft(cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE));
         markDirty("data-retention");
         return;
       case "auth":
@@ -766,6 +911,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
           enabled: dataRetentionDraft.enabled,
           scheduleMinutes: dataRetentionDraft.scheduleMinutes,
           cleanupBatchSize: dataRetentionDraft.cleanupBatchSize,
+          cleanupTables: [...dataRetentionDraft.cleanupTables],
           auditLogRetentionDays: dataRetentionDraft.auditLogRetentionDays,
           authCaptchaRetentionHours: dataRetentionDraft.authCaptchaRetentionHours,
           authRiskStateRetentionDays: dataRetentionDraft.authRiskStateRetentionDays,
@@ -837,6 +983,46 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     markDirty("image-hosting");
   }, [markDirty]);
 
+  const bindImageHostingTemplateInputRef = useCallback(
+    (provider: ImageHostingProvider) => (node: HTMLInputElement | null) => {
+      imageHostingTemplateInputRefs.current[provider] = node;
+    },
+    []
+  );
+
+  const insertImageHostingTemplateVariable = useCallback(
+    (
+      provider: ImageHostingProvider,
+      currentValue: string,
+      token: string,
+      onChange: (nextValue: string) => void
+    ) => {
+      const inputNode = imageHostingTemplateInputRefs.current[provider];
+      const normalizedCurrentValue = currentValue ?? "";
+      const insertFrom =
+        inputNode && document.activeElement === inputNode
+          ? inputNode.selectionStart ?? normalizedCurrentValue.length
+          : normalizedCurrentValue.length;
+      const insertTo =
+        inputNode && document.activeElement === inputNode
+          ? inputNode.selectionEnd ?? normalizedCurrentValue.length
+          : normalizedCurrentValue.length;
+      const nextValue =
+        normalizedCurrentValue.slice(0, insertFrom) + token + normalizedCurrentValue.slice(insertTo);
+      onChange(nextValue);
+      window.requestAnimationFrame(() => {
+        const nextCursor = insertFrom + token.length;
+        const latestInputNode = imageHostingTemplateInputRefs.current[provider];
+        if (!latestInputNode) {
+          return;
+        }
+        latestInputNode.focus();
+        latestInputNode.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    []
+  );
+
   const selectedAuthProvider = useMemo(() => {
     return authDraft.providers.find((provider) => provider.id === selectedAuthProviderID) ?? authDraft.providers[0] ?? null;
   }, [authDraft.providers, selectedAuthProviderID]);
@@ -894,7 +1080,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       const result = await dataGateway.admin.runDataRetentionCleanup();
       if (result.totalDeleted > 0) {
         openToast(
-          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}）`,
+          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、图片 ${result.deletedDocumentImageAssets}）`,
           "success"
         );
       } else {
@@ -1159,6 +1345,45 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                         <p className="text-xs text-slate-500">关闭后不执行任何自动删除，历史数据将持续累积。</p>
                       </div>
                     </label>
+                    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <p className="text-xs font-semibold tracking-wide text-slate-600">自动清理表（可多选）</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {DATA_RETENTION_CLEANUP_TABLE_OPTIONS.map((option) => {
+                          const checked = dataRetentionDraft.cleanupTables.includes(option.value);
+                          return (
+                            <label
+                              key={option.value}
+                              className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2"
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(nextChecked) => {
+                                  setDataRetentionDraft((previous) => {
+                                    const nextSet = new Set(previous.cleanupTables);
+                                    if (nextChecked === true) {
+                                      nextSet.add(option.value);
+                                    } else {
+                                      nextSet.delete(option.value);
+                                    }
+                                    const nextCleanupTables = Array.from(nextSet) as DataRetentionCleanupTable[];
+                                    return {
+                                      ...previous,
+                                      cleanupTables: nextCleanupTables
+                                    };
+                                  });
+                                  markDirty("data-retention");
+                                }}
+                                disabled={saving || (checked && dataRetentionDraft.cleanupTables.length <= 1)}
+                              />
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-medium text-slate-700">{option.label}</p>
+                                <p className="text-[11px] text-slate-500">{option.description}</p>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="space-y-1.5">
                         <span className="text-xs font-semibold tracking-wide text-slate-600">执行间隔（分钟）</span>
@@ -1273,7 +1498,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                       </label>
                     </div>
                     <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                      清理范围：`audit_logs`、`auth_captcha_challenges`、`auth_risk_states`、`user_sessions`。
+                      当前自动清理范围：{dataRetentionDraft.cleanupTables.map((item) => `\`${item}\``).join("、")}。
                     </p>
                   </div>
                 ) : null}
@@ -1896,16 +2121,71 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             disabled={saving}
                           />
                         </label>
-                        <label className="space-y-1.5 sm:col-span-2">
-                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传路径模板</span>
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">内置场景</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS.map((preset) => (
+                              <button
+                                key={`local-${preset.key}`}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs transition ${
+                                  imageHostingDraft.local.uploadPathTemplate.trim() === preset.template
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                                disabled={saving}
+                                onClick={() => setLocalField("uploadPathTemplate", preset.template)}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
                           <Input
+                            ref={bindImageHostingTemplateInputRef("local")}
                             placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
                             value={imageHostingDraft.local.uploadPathTemplate}
                             onChange={(event) => setLocalField("uploadPathTemplate", event.target.value)}
                             disabled={saving}
                           />
+                          <div className="flex flex-wrap gap-1.5">
+                            <TooltipProvider delayDuration={120}>
+                              {IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES.map((variable) => (
+                                <Tooltip key={`local-${variable.token}`}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                      disabled={saving}
+                                      onClick={() =>
+                                        insertImageHostingTemplateVariable(
+                                          "local",
+                                          imageHostingDraft.local.uploadPathTemplate,
+                                          variable.token,
+                                          (nextValue) => setLocalField("uploadPathTemplate", nextValue)
+                                        )
+                                      }
+                                    >
+                                      {variable.label}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-[280px] whitespace-pre-wrap break-words">
+                                    {variable.description}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                            </TooltipProvider>
+                          </div>
                           <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
-                        </label>
+                          <p className="text-xs text-slate-500">
+                            预览：{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
+                              {buildImageHostingTemplatePreview(imageHostingDraft.local.uploadPathTemplate)}
+                            </code>
+                          </p>
+                        </div>
                       </TabsContent>
 
                       <TabsContent value="cloudflare-r2" className="grid gap-4 sm:grid-cols-2">
@@ -1955,16 +2235,71 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             disabled={saving}
                           />
                         </label>
-                        <label className="space-y-1.5 sm:col-span-2">
-                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传路径模板</span>
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">内置场景</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS.map((preset) => (
+                              <button
+                                key={`cloudflare-r2-${preset.key}`}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs transition ${
+                                  imageHostingDraft.cloudflareR2.uploadPathTemplate.trim() === preset.template
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                                disabled={saving}
+                                onClick={() => setCloudflareField("uploadPathTemplate", preset.template)}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
                           <Input
+                            ref={bindImageHostingTemplateInputRef("cloudflare-r2")}
                             placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
                             value={imageHostingDraft.cloudflareR2.uploadPathTemplate}
                             onChange={(event) => setCloudflareField("uploadPathTemplate", event.target.value)}
                             disabled={saving}
                           />
+                          <div className="flex flex-wrap gap-1.5">
+                            <TooltipProvider delayDuration={120}>
+                              {IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES.map((variable) => (
+                                <Tooltip key={`cloudflare-r2-${variable.token}`}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                      disabled={saving}
+                                      onClick={() =>
+                                        insertImageHostingTemplateVariable(
+                                          "cloudflare-r2",
+                                          imageHostingDraft.cloudflareR2.uploadPathTemplate,
+                                          variable.token,
+                                          (nextValue) => setCloudflareField("uploadPathTemplate", nextValue)
+                                        )
+                                      }
+                                    >
+                                      {variable.label}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-[280px] whitespace-pre-wrap break-words">
+                                    {variable.description}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                            </TooltipProvider>
+                          </div>
                           <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
-                        </label>
+                          <p className="text-xs text-slate-500">
+                            预览：{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
+                              {buildImageHostingTemplatePreview(imageHostingDraft.cloudflareR2.uploadPathTemplate)}
+                            </code>
+                          </p>
+                        </div>
                       </TabsContent>
 
                       <TabsContent value="aliyun-oss" className="grid gap-4 sm:grid-cols-2">
@@ -2023,16 +2358,71 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             disabled={saving}
                           />
                         </label>
-                        <label className="space-y-1.5 sm:col-span-2">
-                          <span className="text-xs font-semibold tracking-wide text-slate-600">上传路径模板</span>
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">内置场景</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS.map((preset) => (
+                              <button
+                                key={`aliyun-oss-${preset.key}`}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs transition ${
+                                  imageHostingDraft.aliyunOss.uploadPathTemplate.trim() === preset.template
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                                disabled={saving}
+                                onClick={() => setAliyunField("uploadPathTemplate", preset.template)}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
                           <Input
+                            ref={bindImageHostingTemplateInputRef("aliyun-oss")}
                             placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
                             value={imageHostingDraft.aliyunOss.uploadPathTemplate}
                             onChange={(event) => setAliyunField("uploadPathTemplate", event.target.value)}
                             disabled={saving}
                           />
+                          <div className="flex flex-wrap gap-1.5">
+                            <TooltipProvider delayDuration={120}>
+                              {IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES.map((variable) => (
+                                <Tooltip key={`aliyun-oss-${variable.token}`}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                      disabled={saving}
+                                      onClick={() =>
+                                        insertImageHostingTemplateVariable(
+                                          "aliyun-oss",
+                                          imageHostingDraft.aliyunOss.uploadPathTemplate,
+                                          variable.token,
+                                          (nextValue) => setAliyunField("uploadPathTemplate", nextValue)
+                                        )
+                                      }
+                                    >
+                                      {variable.label}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-[280px] whitespace-pre-wrap break-words">
+                                    {variable.description}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                            </TooltipProvider>
+                          </div>
                           <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
-                        </label>
+                          <p className="text-xs text-slate-500">
+                            预览：{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
+                              {buildImageHostingTemplatePreview(imageHostingDraft.aliyunOss.uploadPathTemplate)}
+                            </code>
+                          </p>
+                        </div>
                       </TabsContent>
                     </Tabs>
                   </div>

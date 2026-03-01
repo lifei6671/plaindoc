@@ -489,6 +489,72 @@ export interface AdminDocumentAttachmentDeleteResult {
   physicalDeleteError: string;
 }
 
+export type AdminDocumentImageAssetStatusFilter = "all" | "active" | "pending_cleanup" | "deleted";
+export type AdminDocumentImageAssetStorageProviderFilter = "all" | "local" | "cloudflare-r2" | "aliyun-oss";
+
+export interface AdminDocumentImageAsset {
+  imageAssetId: string;
+  documentId: string;
+  documentTitle: string;
+  documentStatus: EntityStatus;
+  spaceId: string;
+  spaceName: string;
+  spaceOwnerUserId: string;
+  spaceOwnerName: string;
+  spaceOwnerEmail: string;
+  storageProvider: string;
+  objectKey: string;
+  objectUrl: string;
+  status: "active" | "pending_cleanup" | "deleted";
+  lastReferencedAt: string;
+  pendingCleanupAt: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminDocumentImageAssetListInput {
+  keyword?: string;
+  spaceId?: string;
+  documentId?: string;
+  status?: AdminDocumentImageAssetStatusFilter;
+  storageProvider?: AdminDocumentImageAssetStorageProviderFilter;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminDocumentImageAssetListResult {
+  items: AdminDocumentImageAsset[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
+export interface AdminDocumentImageAssetDeleteReference {
+  imageAssetId: string;
+  documentId: string;
+  documentTitle: string;
+  spaceId: string;
+  spaceName: string;
+}
+
+export interface AdminDocumentImageAssetDeleteResult {
+  imageAssetId: string;
+  documentId: string;
+  spaceId: string;
+  physicalDeleteRequested: boolean;
+  physicalDeleteExecuted: boolean;
+  softDeleted: boolean;
+  hardDeleted: boolean;
+  sharedReferenceCount: number;
+  sharedReferences: AdminDocumentImageAssetDeleteReference[];
+  confirmationRequired: boolean;
+  confirmationReason: string;
+  physicalDeleteError: string;
+}
+
 export interface AdminTheme {
   themeId: string;
   name: string;
@@ -518,6 +584,7 @@ export interface AdminDataRetentionCleanupPolicy {
   enabled: boolean;
   scheduleMinutes: number;
   cleanupBatchSize: number;
+  cleanupTables: string[];
   auditLogRetentionDays: number;
   authCaptchaRetentionHours: number;
   authRiskStateRetentionDays: number;
@@ -532,6 +599,7 @@ export interface AdminDataRetentionCleanupResult {
   deletedAuthCaptchaChallenges: number;
   deletedAuthRiskStates: number;
   deletedUserSessions: number;
+  deletedDocumentImageAssets: number;
   totalDeleted: number;
 }
 
@@ -649,6 +717,12 @@ export interface AdminGateway {
     physicalDelete?: boolean;
     forcePhysicalDeleteOnShare?: boolean;
   }): Promise<AdminDocumentAttachmentDeleteResult>;
+  listDocumentImages(input?: AdminDocumentImageAssetListInput): Promise<AdminDocumentImageAssetListResult>;
+  deleteDocumentImage(input: {
+    imageAssetId: string;
+    physicalDelete?: boolean;
+    forcePhysicalDeleteOnShare?: boolean;
+  }): Promise<AdminDocumentImageAssetDeleteResult>;
   listThemes(): Promise<AdminTheme[]>;
   createTheme(input: {
     themeId: string;

@@ -515,27 +515,20 @@ func buildImageObjectKey(
 ) (string, error) {
 	extension := sanitizePathSegment(resolveFileExtension(fileName, contentType), "png")
 	assetID := strings.ToLower(ulid.Make().String())
-	normalizedTemplate := service.NormalizeImageHostingUploadPathTemplate(uploadPathTemplate)
-
-	replaced := normalizedTemplate
-	replacements := map[string]string{
-		"{spaceId}":    sanitizePathSegment(spaceID, "space"),
-		"{docId}":      sanitizePathSegment(documentID, "doc"),
-		"{yyyy}":       fmt.Sprintf("%04d", now.Year()),
-		"{mm}":         fmt.Sprintf("%02d", int(now.Month())),
-		"{dd}":         fmt.Sprintf("%02d", now.Day()),
-		"{hh}":         fmt.Sprintf("%02d", now.Hour()),
-		"{assetId}":    sanitizePathSegment(assetID, "asset"),
-		"{origName}":   sanitizePathSegment(resolveOriginName(fileName), "file"),
-		"{ext}":        extension,
-		"{uploaderId}": sanitizePathSegment(uploaderUserID, "uploader"),
-	}
-	for placeholder, value := range replacements {
-		replaced = strings.ReplaceAll(replaced, placeholder, value)
-	}
-
-	if strings.Contains(replaced, "{") || strings.Contains(replaced, "}") {
-		return "", errors.New("unresolved placeholders in upload path template")
+	replaced, err := service.RenderImageHostingUploadPathTemplate(uploadPathTemplate, map[string]string{
+		"spaceId":    sanitizePathSegment(spaceID, "space"),
+		"docId":      sanitizePathSegment(documentID, "doc"),
+		"yyyy":       fmt.Sprintf("%04d", now.Year()),
+		"mm":         fmt.Sprintf("%02d", int(now.Month())),
+		"dd":         fmt.Sprintf("%02d", now.Day()),
+		"hh":         fmt.Sprintf("%02d", now.Hour()),
+		"assetId":    sanitizePathSegment(assetID, "asset"),
+		"origName":   sanitizePathSegment(resolveOriginName(fileName), "file"),
+		"ext":        extension,
+		"uploaderId": sanitizePathSegment(uploaderUserID, "uploader"),
+	})
+	if err != nil {
+		return "", err
 	}
 
 	normalizedObjectKey := strings.TrimSpace(strings.TrimPrefix(replaced, "/"))
@@ -717,6 +710,58 @@ func uploadImageToCloudflareR2(
 	return resolvedURL, nil
 }
 
+func deleteImageFromCloudflareR2(
+	ctx context.Context,
+	objectKey string,
+	config service.ImageHostingConfig,
+) error {
+	if ctx == nil {
+		return errors.New("request context is nil")
+	}
+	normalizedObjectKey := strings.TrimSpace(objectKey)
+	if normalizedObjectKey == "" {
+		return errors.New("cloudflare r2 object key is empty")
+	}
+	accountID := strings.TrimSpace(config.CloudflareR2.AccountID)
+	bucket := strings.TrimSpace(config.CloudflareR2.Bucket)
+	accessKeyID := strings.TrimSpace(config.CloudflareR2.AccessKeyID)
+	secretAccessKey := strings.TrimSpace(config.CloudflareR2.SecretAccessKey)
+	if accountID == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
+		return errors.New("cloudflare r2 config is incomplete")
+	}
+	endpoint := resolveCloudflareR2Endpoint(accountID)
+	if endpoint == "" {
+		return errors.New("cloudflare r2 endpoint is empty")
+	}
+
+	awsConfig := aws.Config{
+		Region: "auto",
+		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(
+			accessKeyID,
+			secretAccessKey,
+			"",
+		)),
+		EndpointResolverWithOptions: aws.EndpointResolverWithOptionsFunc(
+			func(service string, region string, options ...interface{}) (aws.Endpoint, error) {
+				return aws.Endpoint{
+					URL:               endpoint,
+					SigningRegion:     "auto",
+					HostnameImmutable: true,
+				}, nil
+			},
+		),
+	}
+	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
+		options.UsePathStyle = true
+	})
+
+	_, deleteErr := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(normalizedObjectKey),
+	})
+	return deleteErr
+}
+
 func uploadImageToAliyunOSS(
 	fileHeader *multipart.FileHeader,
 	contentType string,
@@ -760,6 +805,38 @@ func uploadImageToAliyunOSS(
 		resolvedURL = resolveObjectStoragePublicURL(baseURL, objectKey)
 	}
 	return resolvedURL, nil
+}
+
+func deleteImageFromAliyunOSS(
+	objectKey string,
+	config service.ImageHostingConfig,
+) error {
+	normalizedObjectKey := strings.TrimSpace(objectKey)
+	if normalizedObjectKey == "" {
+		return errors.New("aliyun oss object key is empty")
+	}
+
+	bucket := strings.TrimSpace(config.AliyunOSS.Bucket)
+	accessKeyID := strings.TrimSpace(config.AliyunOSS.AccessKeyID)
+	accessKeySecret := strings.TrimSpace(config.AliyunOSS.AccessKeySecret)
+	if bucket == "" || accessKeyID == "" || accessKeySecret == "" {
+		return errors.New("aliyun oss config is incomplete")
+	}
+
+	endpoint := resolveAliyunOSSEndpoint(config.AliyunOSS.Endpoint, config.AliyunOSS.Region)
+	if endpoint == "" {
+		return errors.New("aliyun oss endpoint is empty")
+	}
+
+	client, err := oss.New(endpoint, accessKeyID, accessKeySecret)
+	if err != nil {
+		return err
+	}
+	bucketClient, err := client.Bucket(bucket)
+	if err != nil {
+		return err
+	}
+	return bucketClient.DeleteObject(normalizedObjectKey)
 }
 
 func resolveCloudflareR2Endpoint(accountID string) string {

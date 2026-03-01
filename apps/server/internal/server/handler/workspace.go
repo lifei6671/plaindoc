@@ -27,6 +27,7 @@ const (
 type workspaceHandler struct {
 	workspaceRepo              repository.WorkspaceRepository
 	documentAttachmentRepo     repository.DocumentAttachmentRepository
+	documentImageAssetService  *service.DocumentImageAssetService
 	authService                *service.AuthService
 	visibilityService          *service.VisibilityService
 	imageHostingService        *service.ImageHostingService
@@ -148,6 +149,7 @@ type workspaceTreeNode struct {
 func NewWorkspaceHandler(
 	workspaceRepo repository.WorkspaceRepository,
 	documentAttachmentRepo repository.DocumentAttachmentRepository,
+	documentImageAssetService *service.DocumentImageAssetService,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
 	imageHostingService *service.ImageHostingService,
@@ -155,13 +157,14 @@ func NewWorkspaceHandler(
 	renderCache *rendercache.Cache,
 ) *workspaceHandler {
 	return &workspaceHandler{
-		workspaceRepo:          workspaceRepo,
-		documentAttachmentRepo: documentAttachmentRepo,
-		authService:            authService,
-		visibilityService:      visibilityService,
-		imageHostingService:    imageHostingService,
-		attachmentTokenService: attachmentTokenService,
-		localImageRootDir:      defaultLocalImageStorageRoot,
+		workspaceRepo:             workspaceRepo,
+		documentAttachmentRepo:    documentAttachmentRepo,
+		documentImageAssetService: documentImageAssetService,
+		authService:               authService,
+		visibilityService:         visibilityService,
+		imageHostingService:       imageHostingService,
+		attachmentTokenService:    attachmentTokenService,
+		localImageRootDir:         defaultLocalImageStorageRoot,
 		remoteImageHTTPClient: &http.Client{
 			Timeout: 12 * time.Second,
 		},
@@ -867,6 +870,20 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 	current.ContentMD = req.ContentMD
 	current.Version = nextVersion
 	current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
+
+	if h != nil && h.documentImageAssetService != nil {
+		if syncErr := h.documentImageAssetService.SyncDocumentImageAssets(
+			c.Request.Context(),
+			service.SyncDocumentImageAssetsInput{
+				DocumentID:   documentID,
+				SpaceID:      spaceID,
+				ContentMD:    req.ContentMD,
+				ReferencedAt: now,
+			},
+		); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "同步文档图片引用失败")
+		}
+	}
 
 	response.JSON(c, http.StatusOK, saveWorkspaceDocumentResponse{
 		Document: mapWorkspaceDocumentResponse(current),

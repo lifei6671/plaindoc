@@ -9,6 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
@@ -127,6 +131,7 @@ type AdminDocumentAttachmentService struct {
 	documentAttachmentRepo repository.DocumentAttachmentRepository
 	adminAccessService     *AdminAccessService
 	adminAuditService      *AdminAuditService
+	imageHostingService    *ImageHostingService
 	localAttachmentRootDir string
 }
 
@@ -135,11 +140,13 @@ func NewAdminDocumentAttachmentService(
 	documentAttachmentRepo repository.DocumentAttachmentRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
+	imageHostingService *ImageHostingService,
 ) *AdminDocumentAttachmentService {
 	return &AdminDocumentAttachmentService{
 		documentAttachmentRepo: documentAttachmentRepo,
 		adminAccessService:     adminAccessService,
 		adminAuditService:      adminAuditService,
+		imageHostingService:    imageHostingService,
 		localAttachmentRootDir: defaultAdminLocalAttachmentRootDir,
 	}
 }
@@ -262,10 +269,6 @@ func (s *AdminDocumentAttachmentService) DeleteAttachment(
 
 	physicalDeleteExecuted := false
 	if input.PhysicalDelete {
-		if strings.ToLower(strings.TrimSpace(attachment.StorageProvider)) != string(ImageHostingProviderLocal) {
-			return DeleteAdminDocumentAttachmentResult{}, errors.New("physical delete only supports local attachment storage")
-		}
-
 		blobID := strings.TrimSpace(attachment.BlobID)
 		if blobID == "" {
 			return DeleteAdminDocumentAttachmentResult{}, errors.New("attachment blob id is empty")
@@ -308,7 +311,7 @@ func (s *AdminDocumentAttachmentService) DeleteAttachment(
 			return DeleteAdminDocumentAttachmentResult{}, deleteBlobErr
 		}
 		if blobDeleted && blob != nil {
-			deletePhysicalErr := s.tryPhysicalDeleteBlob(blob)
+			deletePhysicalErr := s.tryPhysicalDeleteBlob(ctx, blob)
 			if deletePhysicalErr != nil {
 				result.PhysicalDeleteError = deletePhysicalErr.Error()
 			} else {
@@ -385,23 +388,152 @@ func (s *AdminDocumentAttachmentService) resolveScopeRestriction(ctx context.Con
 }
 
 func (s *AdminDocumentAttachmentService) tryPhysicalDeleteBlob(
+	ctx context.Context,
 	blob *models.DocumentAttachmentBlob,
 ) error {
 	if blob == nil {
 		return nil
 	}
-	if strings.ToLower(strings.TrimSpace(blob.StorageProvider)) != string(ImageHostingProviderLocal) {
-		return errors.New("physical delete only supports local attachment storage")
+	storageProvider := normalizeImageHostingProvider(blob.StorageProvider)
+	if storageProvider == "" {
+		storageProvider = ImageHostingProviderLocal
+	}
+	normalizedObjectKey := strings.TrimSpace(blob.ObjectKey)
+	if normalizedObjectKey == "" {
+		return errors.New("attachment object key is empty")
 	}
 
-	targetPath, err := s.resolveLocalAttachmentTargetPath(blob.ObjectKey)
+	switch storageProvider {
+	case ImageHostingProviderLocal:
+		targetPath, err := s.resolveLocalAttachmentTargetPath(normalizedObjectKey)
+		if err != nil {
+			return err
+		}
+		if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return removeErr
+		}
+		return nil
+	case ImageHostingProviderCloudflareR2:
+		config, configErr := s.loadImageHostingConfig(ctx)
+		if configErr != nil {
+			return configErr
+		}
+		return s.deleteBlobFromCloudflareR2(ctx, normalizedObjectKey, config)
+	case ImageHostingProviderAliyunOSS:
+		config, configErr := s.loadImageHostingConfig(ctx)
+		if configErr != nil {
+			return configErr
+		}
+		return s.deleteBlobFromAliyunOSS(normalizedObjectKey, config)
+	default:
+		return errors.New("unsupported attachment storage provider")
+	}
+}
+
+func (s *AdminDocumentAttachmentService) loadImageHostingConfig(ctx context.Context) (ImageHostingConfig, error) {
+	if s == nil || s.imageHostingService == nil {
+		return ImageHostingConfig{}, errors.New("image hosting service is nil")
+	}
+	return s.imageHostingService.GetConfig(ctx)
+}
+
+func (s *AdminDocumentAttachmentService) deleteBlobFromCloudflareR2(
+	ctx context.Context,
+	objectKey string,
+	config ImageHostingConfig,
+) error {
+	if ctx == nil {
+		return errors.New("request context is nil")
+	}
+	accountID := strings.TrimSpace(config.CloudflareR2.AccountID)
+	bucket := strings.TrimSpace(config.CloudflareR2.Bucket)
+	accessKeyID := strings.TrimSpace(config.CloudflareR2.AccessKeyID)
+	secretAccessKey := strings.TrimSpace(config.CloudflareR2.SecretAccessKey)
+	if accountID == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
+		return errors.New("cloudflare r2 config is incomplete")
+	}
+	endpoint := resolveImageHostingCloudflareR2Endpoint(accountID)
+	if endpoint == "" {
+		return errors.New("cloudflare r2 endpoint is empty")
+	}
+
+	awsConfig := aws.Config{
+		Region: "auto",
+		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(
+			accessKeyID,
+			secretAccessKey,
+			"",
+		)),
+		EndpointResolverWithOptions: aws.EndpointResolverWithOptionsFunc(
+			func(service string, region string, options ...interface{}) (aws.Endpoint, error) {
+				return aws.Endpoint{
+					URL:               endpoint,
+					SigningRegion:     "auto",
+					HostnameImmutable: true,
+				}, nil
+			},
+		),
+	}
+	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
+		options.UsePathStyle = true
+	})
+
+	_, deleteErr := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(strings.TrimSpace(objectKey)),
+	})
+	return deleteErr
+}
+
+func (s *AdminDocumentAttachmentService) deleteBlobFromAliyunOSS(
+	objectKey string,
+	config ImageHostingConfig,
+) error {
+	bucket := strings.TrimSpace(config.AliyunOSS.Bucket)
+	accessKeyID := strings.TrimSpace(config.AliyunOSS.AccessKeyID)
+	accessKeySecret := strings.TrimSpace(config.AliyunOSS.AccessKeySecret)
+	if bucket == "" || accessKeyID == "" || accessKeySecret == "" {
+		return errors.New("aliyun oss config is incomplete")
+	}
+	endpoint := resolveImageHostingAliyunOSSEndpoint(config.AliyunOSS.Endpoint, config.AliyunOSS.Region)
+	if endpoint == "" {
+		return errors.New("aliyun oss endpoint is empty")
+	}
+	client, err := oss.New(endpoint, accessKeyID, accessKeySecret)
 	if err != nil {
 		return err
 	}
-	if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return removeErr
+	bucketClient, err := client.Bucket(bucket)
+	if err != nil {
+		return err
 	}
-	return nil
+	return bucketClient.DeleteObject(strings.TrimSpace(objectKey))
+}
+
+func resolveImageHostingCloudflareR2Endpoint(accountID string) string {
+	normalizedAccountID := strings.TrimSpace(accountID)
+	if normalizedAccountID == "" {
+		return ""
+	}
+	if strings.HasPrefix(normalizedAccountID, "https://") || strings.HasPrefix(normalizedAccountID, "http://") {
+		return strings.TrimRight(normalizedAccountID, "/")
+	}
+	return "https://" + normalizedAccountID + ".r2.cloudflarestorage.com"
+}
+
+func resolveImageHostingAliyunOSSEndpoint(endpoint string, region string) string {
+	normalizedEndpoint := strings.TrimSpace(endpoint)
+	if normalizedEndpoint != "" {
+		if strings.HasPrefix(normalizedEndpoint, "https://") || strings.HasPrefix(normalizedEndpoint, "http://") {
+			return strings.TrimRight(normalizedEndpoint, "/")
+		}
+		return "https://" + strings.TrimRight(normalizedEndpoint, "/")
+	}
+	normalizedRegion := strings.TrimSpace(region)
+	if normalizedRegion == "" {
+		return ""
+	}
+	return "https://oss-" + normalizedRegion + ".aliyuncs.com"
 }
 
 func (s *AdminDocumentAttachmentService) resolveLocalAttachmentTargetPath(objectKey string) (string, error) {

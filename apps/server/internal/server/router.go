@@ -108,6 +108,7 @@ func newRouter(
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
 	documentRepo := repository.NewGormDocumentRepository(db)
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
+	documentImageAssetRepo := repository.NewGormDocumentImageAssetRepository(db)
 	themeRepo := repository.NewGormThemeRepository(db)
 	systemConfigRepo := repository.NewGormSystemConfigRepository(db)
 	auditLogRepo := repository.NewGormAuditLogRepository(db)
@@ -145,12 +146,14 @@ func newRouter(
 	)
 	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
+	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
 	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache)
 	workspaceHandler := handler.NewWorkspaceHandler(
 		workspaceRepo,
 		documentAttachmentRepo,
+		documentImageAssetService,
 		authService,
 		visibilityService,
 		imageHostingService,
@@ -321,7 +324,7 @@ func newRouter(
 		api.GET("/docs/:docId/revisions", workspaceHandler.ListRevisions)
 		// 文档附件列表。
 		api.GET("/docs/:docId/attachments", workspaceHandler.ListDocumentAttachments)
-		// 上传文档附件（当前仅支持本地存储 provider）。
+		// 上传文档附件（支持 local/cloudflare-r2/aliyun-oss provider）。
 		api.POST("/docs/:docId/attachments", workspaceHandler.UploadDocumentAttachment)
 		// 删除文档附件：
 		// physicalDelete=false => 逻辑删除；physicalDelete=true => 删除文件并硬删除记录。
@@ -364,8 +367,16 @@ func newRouter(
 			documentAttachmentRepo,
 			adminAccessService,
 			adminAuditService,
+			imageHostingService,
 		)
 		adminDocumentAttachmentHandler := handler.NewAdminDocumentAttachmentHandler(adminDocumentAttachmentService)
+		adminDocumentImageAssetService := service.NewAdminDocumentImageAssetService(
+			documentImageAssetRepo,
+			adminAccessService,
+			adminAuditService,
+			imageHostingService,
+		)
+		adminDocumentImageAssetHandler := handler.NewAdminDocumentImageAssetHandler(adminDocumentImageAssetService)
 		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
 		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
 		dataRetentionCleanupService := service.NewDataRetentionCleanupService(db, systemConfigRepo)
@@ -575,6 +586,19 @@ func newRouter(
 					},
 				),
 				adminDocumentAttachmentHandler.DeleteAttachment,
+			)
+			adminAPI.GET("/document-images", adminDocumentImageAssetHandler.ListImageAssets)
+			adminAPI.DELETE(
+				"/document-images/:imageAssetId",
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document_image.delete",
+						TargetType:    "document_image",
+						TargetIDParam: "imageAssetId",
+					},
+				),
+				adminDocumentImageAssetHandler.DeleteImageAsset,
 			)
 
 			// ---- 主题治理（仅平台管理员）----

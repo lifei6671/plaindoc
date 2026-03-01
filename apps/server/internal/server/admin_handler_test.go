@@ -2088,7 +2088,7 @@ func TestRouter_AdminSystemConfig_DataRetentionConfigValidation(t *testing.T) {
 	validReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/data-retention",
-		bytes.NewReader([]byte(`{"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":180,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30}}`)),
+		bytes.NewReader([]byte(`{"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":180,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30,"cleanupTables":["audit_logs","auth_captcha_challenges","auth_risk_states","user_sessions","document_image_assets"]}}`)),
 	)
 	validReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	validReq.Header.Set("Content-Type", "application/json")
@@ -2116,7 +2116,7 @@ func TestRouter_AdminSystemConfig_DataRetentionConfigValidation(t *testing.T) {
 	invalidReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/data-retention",
-		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":0,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30}}`)),
+		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":0,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30,"cleanupTables":["audit_logs","auth_captcha_challenges","auth_risk_states","user_sessions","document_image_assets"]}}`)),
 	)
 	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	invalidReq.Header.Set("Content-Type", "application/json")

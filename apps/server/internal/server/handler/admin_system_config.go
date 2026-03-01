@@ -35,13 +35,14 @@ type testAdminLDAPConnectionRequest struct {
 }
 
 type dataRetentionCleanupPolicyResponse struct {
-	Enabled                    bool `json:"enabled"`
-	ScheduleMinutes            int  `json:"scheduleMinutes"`
-	CleanupBatchSize           int  `json:"cleanupBatchSize"`
-	AuditLogRetentionDays      int  `json:"auditLogRetentionDays"`
-	AuthCaptchaRetentionHours  int  `json:"authCaptchaRetentionHours"`
-	AuthRiskStateRetentionDays int  `json:"authRiskStateRetentionDays"`
-	UserSessionRetentionDays   int  `json:"userSessionRetentionDays"`
+	Enabled                    bool     `json:"enabled"`
+	ScheduleMinutes            int      `json:"scheduleMinutes"`
+	CleanupBatchSize           int      `json:"cleanupBatchSize"`
+	CleanupTables              []string `json:"cleanupTables"`
+	AuditLogRetentionDays      int      `json:"auditLogRetentionDays"`
+	AuthCaptchaRetentionHours  int      `json:"authCaptchaRetentionHours"`
+	AuthRiskStateRetentionDays int      `json:"authRiskStateRetentionDays"`
+	UserSessionRetentionDays   int      `json:"userSessionRetentionDays"`
 }
 
 type runDataRetentionCleanupResponse struct {
@@ -52,6 +53,7 @@ type runDataRetentionCleanupResponse struct {
 	DeletedAuthCaptchaChallenges int64                              `json:"deletedAuthCaptchaChallenges"`
 	DeletedAuthRiskStates        int64                              `json:"deletedAuthRiskStates"`
 	DeletedUserSessions          int64                              `json:"deletedUserSessions"`
+	DeletedDocumentImageAssets   int64                              `json:"deletedDocumentImageAssets"`
 	TotalDeleted                 int64                              `json:"totalDeleted"`
 }
 
@@ -214,13 +216,15 @@ func mapRunDataRetentionCleanupResponse(
 	totalDeleted := value.DeletedAuditLogs +
 		value.DeletedAuthCaptchaChallenges +
 		value.DeletedAuthRiskStates +
-		value.DeletedUserSessions
+		value.DeletedUserSessions +
+		value.DeletedDocumentImageAssets
 
 	return runDataRetentionCleanupResponse{
 		Policy: dataRetentionCleanupPolicyResponse{
 			Enabled:                    value.Policy.Enabled,
 			ScheduleMinutes:            value.Policy.ScheduleMinutes,
 			CleanupBatchSize:           value.Policy.CleanupBatchSize,
+			CleanupTables:              append([]string(nil), value.Policy.CleanupTables...),
 			AuditLogRetentionDays:      value.Policy.AuditLogRetentionDays,
 			AuthCaptchaRetentionHours:  value.Policy.AuthCaptchaRetentionHours,
 			AuthRiskStateRetentionDays: value.Policy.AuthRiskStateRetentionDays,
@@ -232,6 +236,7 @@ func mapRunDataRetentionCleanupResponse(
 		DeletedAuthCaptchaChallenges: value.DeletedAuthCaptchaChallenges,
 		DeletedAuthRiskStates:        value.DeletedAuthRiskStates,
 		DeletedUserSessions:          value.DeletedUserSessions,
+		DeletedDocumentImageAssets:   value.DeletedDocumentImageAssets,
 		TotalDeleted:                 totalDeleted,
 	}
 }

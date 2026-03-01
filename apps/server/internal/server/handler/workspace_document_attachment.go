@@ -145,7 +145,7 @@ func (h *workspaceHandler) ListDocumentAttachments(c *gin.Context) {
 	})
 }
 
-// UploadDocumentAttachment 上传文档附件（当前支持 local provider）。
+// UploadDocumentAttachment 上传文档附件。
 func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 	actorUserID, ok := h.requireActorUserID(c)
 	if !ok {
@@ -214,10 +214,9 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
-	if config.DefaultProvider != service.ImageHostingProviderLocal {
-		setRequestErrmsgText(c, "当前图片托管服务提供商不支持上传文档附件")
-		response.ImageHostingProviderDisabled(c)
-		return
+	targetProvider := config.DefaultProvider
+	if targetProvider == "" {
+		targetProvider = service.ImageHostingProviderLocal
 	}
 
 	contentType, err := detectUploadedFileContentType(fileHeader)
@@ -237,7 +236,7 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 
 	blob, err := h.documentAttachmentRepo.FindBlobByHash(
 		c.Request.Context(),
-		string(service.ImageHostingProviderLocal),
+		string(targetProvider),
 		contentHashAlgo,
 		contentHash,
 		fileHeader.Size,
@@ -251,38 +250,42 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 	savedTargetPath := ""
 	createdBlobID := ""
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		objectKey, objectKeyErr := buildDocumentAttachmentObjectKey(fileHeader.Filename, contentType, time.Now().UTC())
+		objectKey, objectKeyErr := buildDocumentAttachmentObjectKey(
+			fileHeader.Filename,
+			contentType,
+			spaceID,
+			documentID,
+			actorUserID,
+			time.Now().UTC(),
+			config.UploadPathTemplate(targetProvider),
+		)
 		if objectKeyErr != nil {
 			setRequestErrmsg(c, objectKeyErr, "生成对象存储键失败")
 			response.InternalError(c)
 			return
 		}
 
-		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(objectKey)
-		if pathErr != nil {
-			setRequestErrmsg(c, pathErr, "解析本地附件目标路径失败")
+		uploadedObjectURL, uploadedLocalTargetPath, uploadErr := h.uploadDocumentAttachmentToProvider(
+			c,
+			fileHeader,
+			contentType,
+			objectKey,
+			targetProvider,
+			config,
+		)
+		if uploadErr != nil {
+			setRequestErrmsg(c, uploadErr, "上传附件到对象存储失败")
 			response.InternalError(c)
 			return
 		}
-		targetDir := filepath.Dir(targetPath)
-		if mkdirErr := os.MkdirAll(targetDir, 0o755); mkdirErr != nil {
-			setRequestErrmsg(c, mkdirErr, "创建本地附件目录失败")
-			response.InternalError(c)
-			return
-		}
-		if saveErr := c.SaveUploadedFile(fileHeader, targetPath); saveErr != nil {
-			setRequestErrmsg(c, saveErr, "保存上传文件失败")
-			response.InternalError(c)
-			return
-		}
-		savedTargetPath = targetPath
+		savedTargetPath = uploadedLocalTargetPath
 
 		now := time.Now().UTC()
 		blobCandidate := &models.DocumentAttachmentBlob{
 			BlobID:          strings.ToLower(ulid.Make().String()),
-			StorageProvider: string(service.ImageHostingProviderLocal),
+			StorageProvider: string(targetProvider),
 			ObjectKey:       objectKey,
-			ObjectURL:       resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"),
+			ObjectURL:       strings.TrimSpace(uploadedObjectURL),
 			MimeType:        strings.TrimSpace(contentType),
 			SizeBytes:       fileHeader.Size,
 			ContentHashAlgo: contentHashAlgo,
@@ -296,15 +299,17 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 
 		createBlobErr := h.documentAttachmentRepo.CreateBlob(c.Request.Context(), blobCandidate)
 		if createBlobErr != nil {
-			if cleanupErr := os.Remove(savedTargetPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
-				setRequestErrmsg(c, cleanupErr, "清理重复上传临时文件失败")
+			if savedTargetPath != "" {
+				if cleanupErr := os.Remove(savedTargetPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+					setRequestErrmsg(c, cleanupErr, "清理重复上传临时文件失败")
+				}
 			}
 			savedTargetPath = ""
 
 			if isLikelyUniqueConstraintError(createBlobErr) {
 				existingBlob, lookupErr := h.documentAttachmentRepo.FindBlobByHash(
 					c.Request.Context(),
-					string(service.ImageHostingProviderLocal),
+					string(targetProvider),
 					contentHashAlgo,
 					contentHash,
 					fileHeader.Size,
@@ -360,10 +365,19 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 		attachment.MimeType = "application/octet-stream"
 	}
 	if strings.TrimSpace(attachment.StorageProvider) == "" {
-		attachment.StorageProvider = string(service.ImageHostingProviderLocal)
+		attachment.StorageProvider = string(targetProvider)
 	}
 	if strings.TrimSpace(attachment.ObjectURL) == "" {
-		attachment.ObjectURL = resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads")
+		switch targetProvider {
+		case service.ImageHostingProviderLocal:
+			attachment.ObjectURL = resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads")
+		case service.ImageHostingProviderCloudflareR2:
+			attachment.ObjectURL = resolveObjectStoragePublicURL(config.CloudflareR2.PublicBaseURL, attachment.ObjectKey)
+		case service.ImageHostingProviderAliyunOSS:
+			attachment.ObjectURL = resolveObjectStoragePublicURL(config.AliyunOSS.PublicBaseURL, attachment.ObjectKey)
+		default:
+			attachment.ObjectURL = resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads")
+		}
 	}
 	if strings.TrimSpace(attachment.ContentHashAlgo) == "" {
 		attachment.ContentHashAlgo = contentHashAlgo
@@ -496,11 +510,6 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 		return
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
-		setRequestErrmsgText(c, "当前附件存储提供商暂不支持物理删除")
-		response.InternalError(c)
-		return
-	}
 	blobID := strings.TrimSpace(attachment.BlobID)
 	if blobID == "" {
 		setRequestErrmsgText(c, "附件缺少 blob_id，无法执行物理删除")
@@ -530,14 +539,8 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 	}
 
 	if blobDeleted {
-		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
-		if pathErr != nil {
-			setRequestErrmsg(c, pathErr, "解析本地附件路径失败")
-			response.InternalError(c)
-			return
-		}
-		if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			setRequestErrmsg(c, removeErr, "物理删除本地附件文件失败")
+		if deletePhysicalErr := h.deleteDocumentAttachmentPhysicalObject(c.Request.Context(), attachment); deletePhysicalErr != nil {
+			setRequestErrmsg(c, deletePhysicalErr, "物理删除附件文件失败")
 			response.InternalError(c)
 			return
 		}
@@ -987,21 +990,96 @@ func computeUploadedFileSHA256(fileHeader *multipart.FileHeader) (string, error)
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func buildDocumentAttachmentObjectKey(fileName string, contentType string, now time.Time) (string, error) {
-	extension := resolveDocumentAttachmentFileExtension(fileName, contentType)
-	randomSuffix, err := randomHex(4)
+func (h *workspaceHandler) uploadDocumentAttachmentToProvider(
+	c *gin.Context,
+	fileHeader *multipart.FileHeader,
+	contentType string,
+	objectKey string,
+	provider service.ImageHostingProvider,
+	config service.ImageHostingConfig,
+) (string, string, error) {
+	if c == nil || fileHeader == nil {
+		return "", "", errors.New("attachment upload context is invalid")
+	}
+
+	switch provider {
+	case service.ImageHostingProviderLocal:
+		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(objectKey)
+		if pathErr != nil {
+			return "", "", pathErr
+		}
+		targetDir := filepath.Dir(targetPath)
+		if mkdirErr := os.MkdirAll(targetDir, 0o755); mkdirErr != nil {
+			return "", "", mkdirErr
+		}
+		if saveErr := c.SaveUploadedFile(fileHeader, targetPath); saveErr != nil {
+			return "", "", saveErr
+		}
+		return resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"), targetPath, nil
+	case service.ImageHostingProviderCloudflareR2:
+		uploadedURL, uploadErr := uploadImageToCloudflareR2(
+			c.Request.Context(),
+			fileHeader,
+			contentType,
+			objectKey,
+			config,
+		)
+		return uploadedURL, "", uploadErr
+	case service.ImageHostingProviderAliyunOSS:
+		uploadedURL, uploadErr := uploadImageToAliyunOSS(
+			fileHeader,
+			contentType,
+			objectKey,
+			config,
+		)
+		return uploadedURL, "", uploadErr
+	default:
+		return "", "", errors.New("unsupported attachment storage provider")
+	}
+}
+
+func buildDocumentAttachmentObjectKey(
+	fileName string,
+	contentType string,
+	spaceID string,
+	documentID string,
+	uploaderUserID string,
+	now time.Time,
+	uploadPathTemplate string,
+) (string, error) {
+	extension := sanitizePathSegment(resolveDocumentAttachmentFileExtension(fileName, contentType), "bin")
+	assetID := strings.ToLower(ulid.Make().String())
+	replaced, err := service.RenderImageHostingUploadPathTemplate(uploadPathTemplate, map[string]string{
+		"spaceId":    sanitizePathSegment(spaceID, "space"),
+		"docId":      sanitizePathSegment(documentID, "doc"),
+		"yyyy":       fmt.Sprintf("%04d", now.Year()),
+		"mm":         fmt.Sprintf("%02d", int(now.Month())),
+		"dd":         fmt.Sprintf("%02d", now.Day()),
+		"hh":         fmt.Sprintf("%02d", now.Hour()),
+		"assetId":    sanitizePathSegment(assetID, "asset"),
+		"origName":   sanitizePathSegment(resolveOriginName(fileName), "file"),
+		"ext":        extension,
+		"uploaderId": sanitizePathSegment(uploaderUserID, "uploader"),
+	})
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(
-		"plaindoc-attachments/%04d/%02d/%02d/%d-%s.%s",
-		now.Year(),
-		int(now.Month()),
-		now.Day(),
-		now.UnixMilli(),
-		randomSuffix,
-		extension,
-	), nil
+
+	normalizedObjectKey := strings.TrimSpace(strings.TrimPrefix(replaced, "/"))
+	if normalizedObjectKey == "" {
+		return "", errors.New("attachment object key is empty")
+	}
+	cleanObjectKey := path.Clean(normalizedObjectKey)
+	if cleanObjectKey == "." || cleanObjectKey == "/" || strings.HasPrefix(cleanObjectKey, "../") {
+		return "", errors.New("attachment object key is invalid")
+	}
+	if !strings.HasPrefix(cleanObjectKey, "images/") {
+		return "", errors.New("attachment object key must start with images/")
+	}
+	if len(cleanObjectKey) > 512 {
+		return "", errors.New("attachment object key is too long")
+	}
+	return cleanObjectKey, nil
 }
 
 func resolveDocumentAttachmentFileExtension(fileName string, contentType string) string {
@@ -1066,6 +1144,52 @@ func isDocumentAttachmentPreviewSupported(previewKind string) bool {
 		normalizedPreviewKind == documentAttachmentPreviewKindPDF ||
 		normalizedPreviewKind == documentAttachmentPreviewKindOffice ||
 		normalizedPreviewKind == documentAttachmentPreviewKindText
+}
+
+func (h *workspaceHandler) deleteDocumentAttachmentPhysicalObject(
+	ctx context.Context,
+	attachment *models.DocumentAttachment,
+) error {
+	if attachment == nil {
+		return errors.New("attachment is nil")
+	}
+
+	storageProvider := service.ImageHostingProvider(
+		strings.ToLower(strings.TrimSpace(attachment.StorageProvider)),
+	)
+	if storageProvider == "" {
+		storageProvider = service.ImageHostingProviderLocal
+	}
+
+	switch storageProvider {
+	case service.ImageHostingProviderLocal:
+		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
+		if pathErr != nil {
+			return pathErr
+		}
+		if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return removeErr
+		}
+		return nil
+	case service.ImageHostingProviderCloudflareR2, service.ImageHostingProviderAliyunOSS:
+		if h == nil || h.imageHostingService == nil {
+			return errors.New("image hosting service is nil")
+		}
+		config, configErr := h.imageHostingService.GetConfig(ctx)
+		if configErr != nil {
+			return configErr
+		}
+		normalizedObjectKey := strings.TrimSpace(attachment.ObjectKey)
+		if normalizedObjectKey == "" {
+			return errors.New("attachment object key is empty")
+		}
+		if storageProvider == service.ImageHostingProviderCloudflareR2 {
+			return deleteImageFromCloudflareR2(ctx, normalizedObjectKey, config)
+		}
+		return deleteImageFromAliyunOSS(normalizedObjectKey, config)
+	default:
+		return errors.New("unsupported attachment storage provider")
+	}
 }
 
 func (h *workspaceHandler) resolveLocalAttachmentTargetPath(objectKey string) (string, error) {

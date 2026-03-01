@@ -327,10 +327,12 @@ func runDataRetentionCleanupLoop(
 					slog.Bool("enabled", result.Policy.Enabled),
 					slog.Int("schedule_minutes", result.Policy.ScheduleMinutes),
 					slog.Int("cleanup_batch_size", result.Policy.CleanupBatchSize),
+					slog.Any("cleanup_tables", result.Policy.CleanupTables),
 					slog.Int64("deleted_audit_logs", result.DeletedAuditLogs),
 					slog.Int64("deleted_auth_captcha_challenges", result.DeletedAuthCaptchaChallenges),
 					slog.Int64("deleted_auth_risk_states", result.DeletedAuthRiskStates),
 					slog.Int64("deleted_user_sessions", result.DeletedUserSessions),
+					slog.Int64("deleted_document_image_assets", result.DeletedDocumentImageAssets),
 					slog.Duration("duration", result.FinishedAt.Sub(result.StartedAt)),
 					slog.Duration("next_run_in", nextInterval),
 				)

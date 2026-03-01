@@ -352,3 +352,125 @@ func TestDataRetentionCleanupService_RunOnceForced(t *testing.T) {
 		t.Fatalf("expected old audit log deleted by forced cleanup, got count=%d", oldAuditCount)
 	}
 }
+
+func TestDataRetentionCleanupService_RunOnce_RespectsCleanupTables(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-data-retention-cleanup-selected-tables?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -45)
+
+	if err := database.ORM.WithContext(ctx).Table("users").Create(map[string]any{
+		"user_id":       "01hretentionuser000000000009",
+		"email":         "retention-selected@example.com",
+		"password_hash": "hashed-password",
+		"name":          "Retention Selected User",
+		"created_at":    oldTime,
+		"updated_at":    oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed user failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("user_identities").Create(map[string]any{
+		"user_id":       "01hretentionuser000000000009",
+		"provider_type": "local",
+		"provider_id":   "local",
+		"external_id":   "retention-selected@example.com",
+		"login_name":    "retention-selected@example.com",
+		"created_at":    oldTime,
+		"updated_at":    oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed user identity failed: %v", err)
+	}
+
+	if err := database.ORM.WithContext(ctx).Table("audit_logs").Create(map[string]any{
+		"actor_user_id": nil,
+		"module":        "system_config",
+		"action":        "update",
+		"target_type":   "system_config",
+		"target_id":     "selected-table-old-audit",
+		"summary":       "selected table old audit",
+		"detail_json":   "{}",
+		"request_id":    "req-selected-table-old-audit",
+		"created_at":    oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed audit logs failed: %v", err)
+	}
+
+	if err := database.ORM.WithContext(ctx).Table("user_sessions").Create(map[string]any{
+		"session_id":             "session-selected-old",
+		"user_id":                "01hretentionuser000000000009",
+		"refresh_token_hash":     "refresh-selected-old",
+		"expires_at":             now.AddDate(0, 0, -40),
+		"revoked_at":             now.AddDate(0, 0, -35),
+		"replaced_by_session_id": nil,
+		"created_at":             oldTime,
+		"updated_at":             oldTime,
+	}).Error; err != nil {
+		t.Fatalf("seed user sessions failed: %v", err)
+	}
+
+	retentionConfigJSON, err := json.Marshal(map[string]any{
+		"enabled":                    true,
+		"scheduleMinutes":            30,
+		"cleanupBatchSize":           200,
+		"cleanupTables":              []string{DataRetentionCleanupTableAuditLogs},
+		"auditLogRetentionDays":      30,
+		"authCaptchaRetentionHours":  72,
+		"authRiskStateRetentionDays": 30,
+		"userSessionRetentionDays":   30,
+	})
+	if err != nil {
+		t.Fatalf("marshal retention config failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("system_configs").Create(map[string]any{
+		"config_key":         SystemConfigKeyDataRetention,
+		"config_value_json":  string(retentionConfigJSON),
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("seed system config failed: %v", err)
+	}
+
+	cleanupService := NewDataRetentionCleanupService(database.ORM, repository.NewGormSystemConfigRepository(database.ORM))
+	result, err := cleanupService.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("run data retention cleanup failed: %v", err)
+	}
+	if result.DeletedAuditLogs != 1 {
+		t.Fatalf("expected deleted audit logs 1, got %d", result.DeletedAuditLogs)
+	}
+	if result.DeletedUserSessions != 0 {
+		t.Fatalf("expected deleted user sessions 0 when table not selected, got %d", result.DeletedUserSessions)
+	}
+
+	var oldAuditCount int64
+	if err := database.ORM.WithContext(ctx).Table("audit_logs").Where("target_id = ?", "selected-table-old-audit").Count(&oldAuditCount).Error; err != nil {
+		t.Fatalf("count old audit logs failed: %v", err)
+	}
+	if oldAuditCount != 0 {
+		t.Fatalf("expected old audit log deleted, got count=%d", oldAuditCount)
+	}
+
+	var oldSessionCount int64
+	if err := database.ORM.WithContext(ctx).Table("user_sessions").Where("session_id = ?", "session-selected-old").Count(&oldSessionCount).Error; err != nil {
+		t.Fatalf("count old user sessions failed: %v", err)
+	}
+	if oldSessionCount != 1 {
+		t.Fatalf("expected old user session kept when table not selected, got count=%d", oldSessionCount)
+	}
+}

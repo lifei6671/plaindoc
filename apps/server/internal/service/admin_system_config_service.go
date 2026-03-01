@@ -502,13 +502,15 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 	totalDeleted := result.DeletedAuditLogs +
 		result.DeletedAuthCaptchaChallenges +
 		result.DeletedAuthRiskStates +
-		result.DeletedUserSessions
+		result.DeletedUserSessions +
+		result.DeletedDocumentImageAssets
 
 	detail := map[string]any{
 		"policy": map[string]any{
 			"enabled":                    result.Policy.Enabled,
 			"scheduleMinutes":            result.Policy.ScheduleMinutes,
 			"cleanupBatchSize":           result.Policy.CleanupBatchSize,
+			"cleanupTables":              result.Policy.CleanupTables,
 			"auditLogRetentionDays":      result.Policy.AuditLogRetentionDays,
 			"authCaptchaRetentionHours":  result.Policy.AuthCaptchaRetentionHours,
 			"authRiskStateRetentionDays": result.Policy.AuthRiskStateRetentionDays,
@@ -520,6 +522,7 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 		"deletedAuthCaptchaChallenges": result.DeletedAuthCaptchaChallenges,
 		"deletedAuthRiskStates":        result.DeletedAuthRiskStates,
 		"deletedUserSessions":          result.DeletedUserSessions,
+		"deletedDocumentImageAssets":   result.DeletedDocumentImageAssets,
 		"totalDeleted":                 totalDeleted,
 	}
 
@@ -645,6 +648,7 @@ func validateDataRetentionConfig(payload map[string]any) error {
 		"enabled":                    {},
 		"scheduleMinutes":            {},
 		"cleanupBatchSize":           {},
+		"cleanupTables":              {},
 		"auditLogRetentionDays":      {},
 		"authCaptchaRetentionHours":  {},
 		"authRiskStateRetentionDays": {},
@@ -680,6 +684,29 @@ func validateDataRetentionConfig(payload map[string]any) error {
 			minDataRetentionBatchSize,
 			maxDataRetentionBatchSize,
 		)
+	}
+
+	cleanupTablesRaw, err := getRequiredArray(payload, "cleanupTables")
+	if err != nil {
+		return err
+	}
+	if len(cleanupTablesRaw) == 0 {
+		return fmt.Errorf("cleanupTables must contain at least one table")
+	}
+	cleanupTables := make([]string, 0, len(cleanupTablesRaw))
+	for index, rawTable := range cleanupTablesRaw {
+		tableName, err := getRequiredString(map[string]any{"value": rawTable}, "value")
+		if err != nil {
+			return fmt.Errorf("cleanupTables[%d] %w", index, err)
+		}
+		normalizedTable := strings.ToLower(strings.TrimSpace(tableName))
+		if !isSupportedDataRetentionCleanupTable(normalizedTable) {
+			return fmt.Errorf("cleanupTables[%d] unsupported table %q", index, tableName)
+		}
+		if slices.Contains(cleanupTables, normalizedTable) {
+			return fmt.Errorf("cleanupTables[%d] duplicated table %q", index, tableName)
+		}
+		cleanupTables = append(cleanupTables, normalizedTable)
 	}
 
 	auditLogRetentionDays, err := getRequiredInt(payload, "auditLogRetentionDays")

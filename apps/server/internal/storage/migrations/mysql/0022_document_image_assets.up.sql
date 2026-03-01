@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS document_image_assets (
+	id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+	image_asset_id VARCHAR(26) NOT NULL COMMENT '图片资源业务ID（ULID）',
+	document_id VARCHAR(26) NOT NULL COMMENT '文档业务ID',
+	space_id VARCHAR(26) NOT NULL COMMENT '所属空间ID',
+	storage_provider VARCHAR(32) NOT NULL DEFAULT 'local' COMMENT '存储提供方：local/cloudflare-r2/aliyun-oss',
+	object_key VARCHAR(512) NOT NULL DEFAULT '' COMMENT '对象键',
+	object_url TEXT NOT NULL COMMENT '对象访问URL',
+	status VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT '资源状态：active/pending_cleanup/deleted',
+	pending_cleanup_at DATETIME(3) NULL COMMENT '进入待清理状态时间',
+	deleted_at DATETIME(3) NULL COMMENT '删除时间',
+	last_referenced_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '最近被文档引用时间',
+	created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+	updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+	UNIQUE KEY uk_document_image_assets_image_asset_id (image_asset_id),
+	UNIQUE KEY uk_document_image_assets_doc_object (document_id, storage_provider, object_key),
+	KEY idx_document_image_assets_pending (status, pending_cleanup_at),
+	KEY idx_document_image_assets_object (storage_provider, object_key, status),
+	KEY idx_document_image_assets_space_id (space_id),
+	KEY idx_document_image_assets_created_at (created_at),
+	CONSTRAINT fk_document_image_assets_document_id FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE,
+	CONSTRAINT fk_document_image_assets_space_id FOREIGN KEY (space_id) REFERENCES spaces(space_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档图片资源追踪表：用于引用追踪与幽灵图片清理';

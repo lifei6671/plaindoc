@@ -7,6 +7,9 @@ import {
   type AdminDocumentAttachmentDeleteResult,
   type AdminDocumentAttachmentListInput,
   type AdminDocumentAttachmentListResult,
+  type AdminDocumentImageAssetDeleteResult,
+  type AdminDocumentImageAssetListInput,
+  type AdminDocumentImageAssetListResult,
   type AdminDocumentListInput,
   type AdminDocumentListResult,
   type AdminGateway,
@@ -1492,6 +1495,63 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       const path =
         `/admin/document-attachments/${encodeURIComponent(targetAttachmentID)}` + (queryText ? `?${queryText}` : "");
       return request<AdminDocumentAttachmentDeleteResult>(path, {
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async listDocumentImages(input: AdminDocumentImageAssetListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.spaceId === "string" && input.spaceId.trim()) {
+        query.set("spaceId", input.spaceId.trim());
+      }
+      if (typeof input.documentId === "string" && input.documentId.trim()) {
+        query.set("documentId", input.documentId.trim());
+      }
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status);
+      }
+      if (typeof input.storageProvider === "string" && input.storageProvider.trim()) {
+        query.set("storageProvider", input.storageProvider);
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+
+      const queryText = query.toString();
+      const path = queryText ? `/admin/document-images?${queryText}` : "/admin/document-images";
+      return request<AdminDocumentImageAssetListResult>(path);
+    },
+    async deleteDocumentImage(input: {
+      imageAssetId: string;
+      physicalDelete?: boolean;
+      forcePhysicalDeleteOnShare?: boolean;
+    }) {
+      const targetImageAssetID = input.imageAssetId.trim();
+      if (!targetImageAssetID) {
+        throw new Error("图片资源 ID 不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document_image.delete",
+        targetType: "document_image",
+        targetId: targetImageAssetID
+      });
+      const query = new URLSearchParams();
+      if (input.physicalDelete === true) {
+        query.set("physicalDelete", "true");
+      }
+      if (input.forcePhysicalDeleteOnShare === true) {
+        query.set("forcePhysicalDeleteOnShare", "true");
+      }
+      const queryText = query.toString();
+      const path =
+        `/admin/document-images/${encodeURIComponent(targetImageAssetID)}` + (queryText ? `?${queryText}` : "");
+      return request<AdminDocumentImageAssetDeleteResult>(path, {
         method: "DELETE",
         headers: buildAdminOperationTokenHeaders(operationToken)
       });

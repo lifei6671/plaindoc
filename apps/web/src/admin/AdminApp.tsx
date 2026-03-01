@@ -3,6 +3,7 @@ import {
   FileText,
   FolderKanban,
   History,
+  Image,
   LayoutDashboard,
   LoaderCircle,
   LogOut,
@@ -38,6 +39,7 @@ import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AdminSpacesPage } from "./pages/AdminSpacesPage";
 import { AdminDocumentsPage } from "./pages/AdminDocumentsPage";
 import { AdminDocumentAttachmentsPage } from "./pages/AdminDocumentAttachmentsPage";
+import { AdminDocumentImagesPage } from "./pages/AdminDocumentImagesPage";
 import { AdminThemesPage } from "./pages/AdminThemesPage";
 import { AdminSystemConfigsPage } from "./pages/AdminSystemConfigsPage";
 import { AdminAuditsPage } from "./pages/AdminAuditsPage";
@@ -50,6 +52,7 @@ type AdminMenuKey =
   | "spaces"
   | "documents"
   | "attachments"
+  | "images"
   | "themes"
   | "system"
   | "audits";
@@ -130,6 +133,13 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
       description: "检索与删除文档附件",
       path: "/admin/attachments",
       icon: Paperclip
+    },
+    {
+      key: "images",
+      label: "图片管理",
+      description: "检索与删除文档图片资源",
+      path: "/admin/images",
+      icon: Image
     }
   );
 
@@ -219,6 +229,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         title: "附件管理",
         description: "附件检索、删除与审计追踪。",
         todo: ["支持多条件搜索", "支持逻辑删除/物理删除", "记录附件治理审计日志"]
+      };
+    case "images":
+      return {
+        title: "图片管理",
+        description: "图片资源检索、删除与审计追踪。",
+        todo: ["支持多条件搜索", "支持逻辑删除/物理删除", "记录图片治理审计日志"]
       };
     case "themes":
       return {
@@ -324,7 +340,7 @@ const DASHBOARD_TODO: readonly DashboardTodo[] = [
 const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
   { label: "账号", keys: ["profile"] },
-  { label: "内容管理", keys: ["users", "spaces", "documents", "attachments"] },
+  { label: "内容管理", keys: ["users", "spaces", "documents", "attachments", "images"] },
   { label: "系统治理", keys: ["themes", "system", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
@@ -821,6 +837,8 @@ export function AdminApp({
                 <AdminDocumentsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "attachments" ? (
                 <AdminDocumentAttachmentsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "images" ? (
+                <AdminDocumentImagesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "themes" ? (
                 <AdminThemesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "system" ? (

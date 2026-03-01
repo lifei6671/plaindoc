@@ -1,9 +1,11 @@
 package service
 
 import (
+	"crypto/rand"
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -14,7 +16,8 @@ const (
 )
 
 var (
-	imageHostingUploadPathVariablePattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9]*)\}`)
+	imageHostingUploadPathVariablePattern = regexp.MustCompile(`\{([^{}]+)\}`)
+	imageHostingUploadPathRandPattern     = regexp.MustCompile(`(?i)^rand:(4|5|6|7|8|9|10)$`)
 )
 
 var imageHostingUploadPathVariables = map[string]struct{}{
@@ -29,6 +32,8 @@ var imageHostingUploadPathVariables = map[string]struct{}{
 	"ext":        {},
 	"uploaderId": {},
 }
+
+const imageHostingUploadPathRandomCharset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 // NormalizeImageHostingUploadPathTemplate 将模板归一化为非空可用值。
 func NormalizeImageHostingUploadPathTemplate(rawValue string) string {
@@ -73,7 +78,7 @@ func ValidateImageHostingUploadPathTemplate(rawValue string) error {
 			continue
 		}
 		variable := strings.TrimSpace(item[1])
-		if _, ok := imageHostingUploadPathVariables[variable]; !ok {
+		if !isSupportedImageHostingUploadPathVariable(variable) {
 			return fmt.Errorf("uploadPathTemplate contains unsupported variable {%s}", variable)
 		}
 	}
@@ -88,4 +93,82 @@ func ValidateImageHostingUploadPathTemplate(rawValue string) error {
 		return fmt.Errorf("uploadPathTemplate is invalid path")
 	}
 	return nil
+}
+
+// RenderImageHostingUploadPathTemplate 按模板与变量渲染最终对象 key 片段。
+// 支持固定变量与动态随机变量 {Rand:N}（N 仅允许 4-10）。
+func RenderImageHostingUploadPathTemplate(
+	rawTemplate string,
+	variables map[string]string,
+) (string, error) {
+	template := NormalizeImageHostingUploadPathTemplate(rawTemplate)
+	var renderErr error
+	rendered := imageHostingUploadPathVariablePattern.ReplaceAllStringFunc(template, func(placeholder string) string {
+		if renderErr != nil {
+			return placeholder
+		}
+		matched := imageHostingUploadPathVariablePattern.FindStringSubmatch(placeholder)
+		if len(matched) != 2 {
+			renderErr = fmt.Errorf("invalid placeholder %s", placeholder)
+			return placeholder
+		}
+		variable := strings.TrimSpace(matched[1])
+		if value, ok := variables[variable]; ok {
+			return value
+		}
+		randLength, ok := parseImageHostingUploadPathRandLength(variable)
+		if !ok {
+			renderErr = fmt.Errorf("unsupported variable {%s}", variable)
+			return placeholder
+		}
+		randomValue, err := generateImageHostingUploadPathRandString(randLength)
+		if err != nil {
+			renderErr = err
+			return placeholder
+		}
+		return randomValue
+	})
+	if renderErr != nil {
+		return "", renderErr
+	}
+	if strings.Contains(rendered, "{") || strings.Contains(rendered, "}") {
+		return "", fmt.Errorf("unresolved placeholders in upload path template")
+	}
+	return rendered, nil
+}
+
+func isSupportedImageHostingUploadPathVariable(variable string) bool {
+	if _, ok := imageHostingUploadPathVariables[variable]; ok {
+		return true
+	}
+	_, ok := parseImageHostingUploadPathRandLength(variable)
+	return ok
+}
+
+func parseImageHostingUploadPathRandLength(variable string) (int, bool) {
+	matched := imageHostingUploadPathRandPattern.FindStringSubmatch(strings.TrimSpace(variable))
+	if len(matched) != 2 {
+		return 0, false
+	}
+	length, err := strconv.Atoi(strings.TrimSpace(matched[1]))
+	if err != nil || length < 4 || length > 10 {
+		return 0, false
+	}
+	return length, true
+}
+
+func generateImageHostingUploadPathRandString(length int) (string, error) {
+	if length < 4 || length > 10 {
+		return "", fmt.Errorf("rand length must be between 4 and 10")
+	}
+	randomBytes := make([]byte, length)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	charsetLength := byte(len(imageHostingUploadPathRandomCharset))
+	output := make([]byte, length)
+	for index, value := range randomBytes {
+		output[index] = imageHostingUploadPathRandomCharset[value%charsetLength]
+	}
+	return string(output), nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,11 +24,28 @@ const (
 	defaultDataRetentionRetryIntervalWhenFailed = 10 * time.Minute
 )
 
+const (
+	DataRetentionCleanupTableAuditLogs             = "audit_logs"
+	DataRetentionCleanupTableAuthCaptchaChallenges = "auth_captcha_challenges"
+	DataRetentionCleanupTableAuthRiskStates        = "auth_risk_states"
+	DataRetentionCleanupTableUserSessions          = "user_sessions"
+	DataRetentionCleanupTableDocumentImageAssets   = "document_image_assets"
+)
+
+var defaultDataRetentionCleanupTables = []string{
+	DataRetentionCleanupTableAuditLogs,
+	DataRetentionCleanupTableAuthCaptchaChallenges,
+	DataRetentionCleanupTableAuthRiskStates,
+	DataRetentionCleanupTableUserSessions,
+	DataRetentionCleanupTableDocumentImageAssets,
+}
+
 // DataRetentionPolicy 描述数据清理策略。
 type DataRetentionPolicy struct {
 	Enabled                    bool
 	ScheduleMinutes            int
 	CleanupBatchSize           int
+	CleanupTables              []string
 	AuditLogRetentionDays      int
 	AuthCaptchaRetentionHours  int
 	AuthRiskStateRetentionDays int
@@ -43,22 +61,25 @@ type DataRetentionCleanupResult struct {
 	DeletedAuthCaptchaChallenges int64
 	DeletedAuthRiskStates        int64
 	DeletedUserSessions          int64
+	DeletedDocumentImageAssets   int64
 }
 
 type dataRetentionPolicyPayload struct {
-	Enabled                    *bool `json:"enabled"`
-	ScheduleMinutes            *int  `json:"scheduleMinutes"`
-	CleanupBatchSize           *int  `json:"cleanupBatchSize"`
-	AuditLogRetentionDays      *int  `json:"auditLogRetentionDays"`
-	AuthCaptchaRetentionHours  *int  `json:"authCaptchaRetentionHours"`
-	AuthRiskStateRetentionDays *int  `json:"authRiskStateRetentionDays"`
-	UserSessionRetentionDays   *int  `json:"userSessionRetentionDays"`
+	Enabled                    *bool    `json:"enabled"`
+	ScheduleMinutes            *int     `json:"scheduleMinutes"`
+	CleanupBatchSize           *int     `json:"cleanupBatchSize"`
+	CleanupTables              []string `json:"cleanupTables"`
+	AuditLogRetentionDays      *int     `json:"auditLogRetentionDays"`
+	AuthCaptchaRetentionHours  *int     `json:"authCaptchaRetentionHours"`
+	AuthRiskStateRetentionDays *int     `json:"authRiskStateRetentionDays"`
+	UserSessionRetentionDays   *int     `json:"userSessionRetentionDays"`
 }
 
 // DataRetentionCleanupService 负责按策略清理持续增长的审计和临时数据。
 type DataRetentionCleanupService struct {
-	db               *gorm.DB
-	systemConfigRepo repository.SystemConfigRepository
+	db                        *gorm.DB
+	systemConfigRepo          repository.SystemConfigRepository
+	documentImageAssetService *DocumentImageAssetService
 }
 
 // NewDataRetentionCleanupService 创建数据清理服务。
@@ -67,8 +88,9 @@ func NewDataRetentionCleanupService(
 	systemConfigRepo repository.SystemConfigRepository,
 ) *DataRetentionCleanupService {
 	return &DataRetentionCleanupService{
-		db:               db,
-		systemConfigRepo: systemConfigRepo,
+		db:                        db,
+		systemConfigRepo:          systemConfigRepo,
+		documentImageAssetService: NewDocumentImageAssetService(db, NewImageHostingService(systemConfigRepo)),
 	}
 }
 
@@ -113,21 +135,35 @@ func (s *DataRetentionCleanupService) runOnce(
 	userSessionCutoff := now.AddDate(0, 0, -result.Policy.UserSessionRetentionDays)
 
 	var err error
-	result.DeletedAuditLogs, err = s.cleanupAuditLogs(ctx, auditLogCutoff, result.Policy.CleanupBatchSize)
-	if err != nil {
-		return result, err
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableAuditLogs) {
+		result.DeletedAuditLogs, err = s.cleanupAuditLogs(ctx, auditLogCutoff, result.Policy.CleanupBatchSize)
+		if err != nil {
+			return result, err
+		}
 	}
-	result.DeletedAuthCaptchaChallenges, err = s.cleanupAuthCaptchaChallenges(ctx, authCaptchaCutoff, result.Policy.CleanupBatchSize)
-	if err != nil {
-		return result, err
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableAuthCaptchaChallenges) {
+		result.DeletedAuthCaptchaChallenges, err = s.cleanupAuthCaptchaChallenges(ctx, authCaptchaCutoff, result.Policy.CleanupBatchSize)
+		if err != nil {
+			return result, err
+		}
 	}
-	result.DeletedAuthRiskStates, err = s.cleanupAuthRiskStates(ctx, authRiskStateCutoff, result.Policy.CleanupBatchSize)
-	if err != nil {
-		return result, err
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableAuthRiskStates) {
+		result.DeletedAuthRiskStates, err = s.cleanupAuthRiskStates(ctx, authRiskStateCutoff, result.Policy.CleanupBatchSize)
+		if err != nil {
+			return result, err
+		}
 	}
-	result.DeletedUserSessions, err = s.cleanupUserSessions(ctx, userSessionCutoff, result.Policy.CleanupBatchSize)
-	if err != nil {
-		return result, err
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableUserSessions) {
+		result.DeletedUserSessions, err = s.cleanupUserSessions(ctx, userSessionCutoff, result.Policy.CleanupBatchSize)
+		if err != nil {
+			return result, err
+		}
+	}
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentImageAssets) {
+		result.DeletedDocumentImageAssets, err = s.cleanupDocumentImageAssets(ctx, result.Policy.CleanupBatchSize)
+		if err != nil {
+			return result, err
+		}
 	}
 
 	return result, nil
@@ -176,6 +212,7 @@ func defaultDataRetentionPolicy() DataRetentionPolicy {
 		Enabled:                    defaultDataRetentionEnabled,
 		ScheduleMinutes:            defaultDataRetentionScheduleMinutes,
 		CleanupBatchSize:           defaultDataRetentionBatchSize,
+		CleanupTables:              append([]string(nil), defaultDataRetentionCleanupTables...),
 		AuditLogRetentionDays:      defaultAuditLogRetentionDays,
 		AuthCaptchaRetentionHours:  defaultAuthCaptchaRetentionHours,
 		AuthRiskStateRetentionDays: defaultAuthRiskStateRetentionDays,
@@ -195,6 +232,9 @@ func patchDataRetentionPolicy(policy *DataRetentionPolicy, patch dataRetentionPo
 	}
 	if patch.CleanupBatchSize != nil {
 		policy.CleanupBatchSize = *patch.CleanupBatchSize
+	}
+	if patch.CleanupTables != nil {
+		policy.CleanupTables = normalizeDataRetentionCleanupTables(patch.CleanupTables)
 	}
 	if patch.AuditLogRetentionDays != nil {
 		policy.AuditLogRetentionDays = *patch.AuditLogRetentionDays
@@ -224,6 +264,10 @@ func normalizeDataRetentionPolicy(policy *DataRetentionPolicy) {
 		minDataRetentionBatchSize,
 		maxDataRetentionBatchSize,
 	)
+	policy.CleanupTables = normalizeDataRetentionCleanupTables(policy.CleanupTables)
+	if len(policy.CleanupTables) == 0 {
+		policy.CleanupTables = append([]string(nil), defaultDataRetentionCleanupTables...)
+	}
 	policy.AuditLogRetentionDays = clampRetentionInt(
 		policy.AuditLogRetentionDays,
 		minAuditLogRetentionDays,
@@ -254,6 +298,50 @@ func clampRetentionInt(value int, minValue int, maxValue int) int {
 		return maxValue
 	}
 	return value
+}
+
+func normalizeDataRetentionCleanupTables(input []string) []string {
+	if len(input) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(input))
+	for _, item := range input {
+		normalized := strings.TrimSpace(strings.ToLower(item))
+		if normalized == "" || !isSupportedDataRetentionCleanupTable(normalized) {
+			continue
+		}
+		if slices.Contains(result, normalized) {
+			continue
+		}
+		result = append(result, normalized)
+	}
+	return result
+}
+
+func isSupportedDataRetentionCleanupTable(table string) bool {
+	switch strings.TrimSpace(strings.ToLower(table)) {
+	case DataRetentionCleanupTableAuditLogs,
+		DataRetentionCleanupTableAuthCaptchaChallenges,
+		DataRetentionCleanupTableAuthRiskStates,
+		DataRetentionCleanupTableUserSessions,
+		DataRetentionCleanupTableDocumentImageAssets:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasDataRetentionCleanupTable(selectedTables []string, table string) bool {
+	normalizedTable := strings.TrimSpace(strings.ToLower(table))
+	if normalizedTable == "" {
+		return false
+	}
+	for _, item := range selectedTables {
+		if strings.TrimSpace(strings.ToLower(item)) == normalizedTable {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *DataRetentionCleanupService) cleanupAuditLogs(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
@@ -312,6 +400,20 @@ func (s *DataRetentionCleanupService) cleanupUserSessions(ctx context.Context, c
 	)
 	if err != nil {
 		return deleted, fmt.Errorf("cleanup user_sessions failed: %w", err)
+	}
+	return deleted, nil
+}
+
+func (s *DataRetentionCleanupService) cleanupDocumentImageAssets(
+	ctx context.Context,
+	batchSize int,
+) (int64, error) {
+	if s == nil || s.documentImageAssetService == nil {
+		return 0, nil
+	}
+	deleted, err := s.documentImageAssetService.CleanupPendingDocumentImageAssets(ctx, batchSize)
+	if err != nil {
+		return deleted, fmt.Errorf("cleanup document_image_assets failed: %w", err)
 	}
 	return deleted, nil
 }

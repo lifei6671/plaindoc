@@ -444,6 +444,41 @@ type AdminDocumentAttachmentListRecord struct {
 	CreatedByEmail  string
 }
 
+// ListAdminDocumentImageAssetsParams 管理后台文档图片资源分页查询参数。
+type ListAdminDocumentImageAssetsParams struct {
+	ActorUserID      string
+	RestrictToScopes bool
+	Keyword          string
+	SpaceID          string
+	DocumentID       string
+	Statuses         []string
+	StorageProviders []string
+	Limit            int
+	Offset           int
+}
+
+// AdminDocumentImageAssetListRecord 管理后台文档图片资源列表项。
+type AdminDocumentImageAssetListRecord struct {
+	ImageAsset      models.DocumentImageAsset
+	DocumentTitle   string
+	DocumentStatus  models.EntityStatus
+	SpaceName       string
+	SpaceOwnerID    string
+	SpaceOwnerName  string
+	SpaceOwnerEmail string
+}
+
+// DocumentImageAssetReferenceRecord 表示同一图片对象的活跃引用记录。
+type DocumentImageAssetReferenceRecord struct {
+	ImageAssetID   string
+	DocumentID     string
+	DocumentTitle  string
+	SpaceID        string
+	SpaceName      string
+	Status         string
+	LastReferenced time.Time
+}
+
 // DocumentAttachmentReferenceRecord 表示同一物理文件的附件引用记录。
 type DocumentAttachmentReferenceRecord struct {
 	AttachmentID  string
@@ -508,6 +543,28 @@ type DocumentAttachmentRepository interface {
 	GetByAttachmentID(ctx context.Context, attachmentID string) (*models.DocumentAttachment, error)
 	SoftDelete(ctx context.Context, attachmentID string, deletedAt time.Time) (bool, error)
 	HardDelete(ctx context.Context, attachmentID string) (bool, error)
+}
+
+// DocumentImageAssetRepository 文档图片资源仓储接口。
+type DocumentImageAssetRepository interface {
+	ListForAdmin(
+		ctx context.Context,
+		params ListAdminDocumentImageAssetsParams,
+	) ([]AdminDocumentImageAssetListRecord, int64, error)
+	GetByImageAssetID(ctx context.Context, imageAssetID string) (*models.DocumentImageAsset, error)
+	SoftDelete(ctx context.Context, imageAssetID string, deletedAt time.Time) (bool, error)
+	HardDelete(ctx context.Context, imageAssetID string) (bool, error)
+	CountActiveReferencesByObject(
+		ctx context.Context,
+		storageProvider string,
+		objectKey string,
+	) (int64, error)
+	ListActiveReferencesByObject(
+		ctx context.Context,
+		storageProvider string,
+		objectKey string,
+		limit int,
+	) ([]DocumentImageAssetReferenceRecord, error)
 }
 
 // RevisionRepository 文档修订仓储最小接口。
