@@ -485,6 +485,112 @@ a {
 #plaindoc-preview-body {
   padding: 20px 24px 30px;
 }
+.reader-attachments {
+  margin: 0 24px 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+.reader-attachments__header {
+  border-bottom: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  padding: 12px 14px 10px;
+}
+.reader-attachments__title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+.reader-attachments__count {
+  color: #475569;
+  font-weight: 600;
+}
+.reader-attachments__hint {
+  margin: 7px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.reader-attachments__hint--error {
+  color: #b91c1c;
+}
+.reader-attachments__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.reader-attachment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px dashed #e2e8f0;
+}
+.reader-attachments__list > .reader-attachment:first-child {
+  border-top: 0;
+}
+.reader-attachment__meta {
+  min-width: 0;
+  flex: 1;
+}
+.reader-attachment__name {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-attachment__desc {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reader-attachment__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.reader-attachment__action {
+  min-height: 30px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.reader-attachment__action:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.reader-attachment__action--preview {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.reader-attachment__action--busy,
+.reader-attachment__action:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
 @media (max-width: 1480px) {
   .reader-main[data-reader-outline="1"] {
     display: block;
@@ -523,5 +629,15 @@ a {
   }
   .reader-article-title {
     font-size: 24px;
+  }
+  .reader-attachments {
+    margin: 0 16px 20px;
+  }
+  .reader-attachment {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .reader-attachment__actions {
+    width: 100%;
   }
 }

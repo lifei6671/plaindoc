@@ -419,6 +419,52 @@ export interface AdminDocumentListResult {
   };
 }
 
+export type AdminDocumentAttachmentStatusFilter = "all" | "active" | "deleted";
+export type AdminDocumentAttachmentStorageProviderFilter = "all" | "local" | "cloudflare-r2" | "aliyun-oss";
+
+export interface AdminDocumentAttachment {
+  attachmentId: string;
+  documentId: string;
+  documentTitle: string;
+  documentStatus: EntityStatus;
+  spaceId: string;
+  spaceName: string;
+  spaceOwnerUserId: string;
+  spaceOwnerName: string;
+  spaceOwnerEmail: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageProvider: string;
+  previewKind: DocumentAttachmentPreviewKind;
+  status: EntityStatus;
+  createdByUserId: string | null;
+  createdByName: string;
+  createdByEmail: string;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminDocumentAttachmentListInput {
+  keyword?: string;
+  spaceId?: string;
+  documentId?: string;
+  status?: AdminDocumentAttachmentStatusFilter;
+  storageProvider?: AdminDocumentAttachmentStorageProviderFilter;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminDocumentAttachmentListResult {
+  items: AdminDocumentAttachment[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
 export interface AdminTheme {
   themeId: string;
   name: string;
@@ -573,6 +619,8 @@ export interface AdminGateway {
   listDocuments(input?: AdminDocumentListInput): Promise<AdminDocumentListResult>;
   updateDocumentStatus(input: { documentId: string; status: "active" | "banned"; reason?: string }): Promise<AdminDocument>;
   deleteDocument(documentId: string): Promise<void>;
+  listDocumentAttachments(input?: AdminDocumentAttachmentListInput): Promise<AdminDocumentAttachmentListResult>;
+  deleteDocumentAttachment(input: { attachmentId: string; physicalDelete?: boolean }): Promise<void>;
   listThemes(): Promise<AdminTheme[]>;
   createTheme(input: {
     themeId: string;

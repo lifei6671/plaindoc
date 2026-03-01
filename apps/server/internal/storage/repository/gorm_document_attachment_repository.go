@@ -99,6 +99,195 @@ func (r *gormDocumentAttachmentRepository) ListByDocumentID(
 	return attachments, nil
 }
 
+func (r *gormDocumentAttachmentRepository) ListForAdmin(
+	ctx context.Context,
+	params ListAdminDocumentAttachmentsParams,
+) ([]AdminDocumentAttachmentListRecord, int64, error) {
+	if r == nil || r.db == nil {
+		return nil, 0, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	baseQuery := r.db.WithContext(ctx).
+		Table("document_attachments AS da").
+		Joins("JOIN documents AS d ON d.document_id = da.document_id").
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
+		Joins("JOIN users AS uo ON uo.user_id = s.owner_user_id").
+		Joins("LEFT JOIN users AS uc ON uc.user_id = da.created_by_user_id")
+
+	if params.RestrictToScopes {
+		actorUserID := strings.TrimSpace(params.ActorUserID)
+		baseQuery = baseQuery.Where(
+			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			actorUserID,
+			actorUserID,
+		)
+	}
+
+	keyword := strings.ToLower(strings.TrimSpace(params.Keyword))
+	if keyword != "" {
+		likeKeyword := "%" + keyword + "%"
+		baseQuery = baseQuery.Where(
+			"LOWER(da.attachment_id) LIKE ? OR LOWER(da.document_id) LIKE ? OR LOWER(da.file_name) LIKE ? OR LOWER(da.object_key) LIKE ? OR LOWER(da.mime_type) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(uo.user_id) LIKE ? OR LOWER(uo.email) LIKE ? OR LOWER(uo.name) LIKE ? OR LOWER(COALESCE(uc.user_id,'')) LIKE ? OR LOWER(COALESCE(uc.email,'')) LIKE ? OR LOWER(COALESCE(uc.name,'')) LIKE ?",
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+			likeKeyword,
+		)
+	}
+
+	spaceID := strings.TrimSpace(params.SpaceID)
+	if spaceID != "" {
+		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
+	}
+
+	documentID := strings.TrimSpace(params.DocumentID)
+	if documentID != "" {
+		baseQuery = baseQuery.Where("da.document_id = ?", documentID)
+	}
+
+	statuses := normalizeAttachmentStatuses(params.Statuses)
+	if len(statuses) > 0 {
+		baseQuery = baseQuery.Where("da.status IN ?", statuses)
+	}
+
+	storageProviders := normalizeAttachmentStorageProviders(params.StorageProviders)
+	if len(storageProviders) > 0 {
+		baseQuery = baseQuery.Where("LOWER(da.storage_provider) IN ?", storageProviders)
+	}
+
+	var total int64
+	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	type adminDocumentAttachmentListRow struct {
+		ID              int64               `gorm:"column:id"`
+		AttachmentID    string              `gorm:"column:attachment_id"`
+		DocumentID      string              `gorm:"column:document_id"`
+		SpaceID         string              `gorm:"column:space_id"`
+		StorageProvider string              `gorm:"column:storage_provider"`
+		FileName        string              `gorm:"column:file_name"`
+		ObjectKey       string              `gorm:"column:object_key"`
+		ObjectURL       string              `gorm:"column:object_url"`
+		MimeType        string              `gorm:"column:mime_type"`
+		SizeBytes       int64               `gorm:"column:size_bytes"`
+		PreviewKind     string              `gorm:"column:preview_kind"`
+		Status          models.EntityStatus `gorm:"column:status"`
+		DeletedAtRaw    *string             `gorm:"column:deleted_at"`
+		CreatedByUserID *string             `gorm:"column:created_by_user_id"`
+		CreatedAtRaw    string              `gorm:"column:created_at"`
+		UpdatedAtRaw    string              `gorm:"column:updated_at"`
+
+		DocumentTitle  string              `gorm:"column:document_title"`
+		DocumentStatus models.EntityStatus `gorm:"column:document_status"`
+		SpaceName      string              `gorm:"column:space_name"`
+		SpaceOwnerID   string              `gorm:"column:space_owner_user_id"`
+		SpaceOwnerName string              `gorm:"column:space_owner_name"`
+		SpaceOwnerMail string              `gorm:"column:space_owner_email"`
+		CreatedByName  string              `gorm:"column:created_by_name"`
+		CreatedByEmail string              `gorm:"column:created_by_email"`
+	}
+
+	var rows []adminDocumentAttachmentListRow
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select(
+			"da.id",
+			"da.attachment_id",
+			"da.document_id",
+			"da.space_id",
+			"da.storage_provider",
+			"da.file_name",
+			"da.object_key",
+			"da.object_url",
+			"da.mime_type",
+			"da.size_bytes",
+			"da.preview_kind",
+			"da.status",
+			"da.deleted_at",
+			"da.created_by_user_id",
+			"da.created_at",
+			"da.updated_at",
+			"d.title AS document_title",
+			"d.status AS document_status",
+			"s.name AS space_name",
+			"s.owner_user_id AS space_owner_user_id",
+			"uo.name AS space_owner_name",
+			"uo.email AS space_owner_email",
+			"COALESCE(uc.name,'') AS created_by_name",
+			"COALESCE(uc.email,'') AS created_by_email",
+		).
+		Order("da.created_at DESC, da.id DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]AdminDocumentAttachmentListRecord, 0, len(rows))
+	for _, row := range rows {
+		attachment := models.DocumentAttachment{
+			ID:              row.ID,
+			AttachmentID:    strings.TrimSpace(row.AttachmentID),
+			DocumentID:      strings.TrimSpace(row.DocumentID),
+			SpaceID:         strings.TrimSpace(row.SpaceID),
+			StorageProvider: strings.TrimSpace(row.StorageProvider),
+			FileName:        strings.TrimSpace(row.FileName),
+			ObjectKey:       strings.TrimSpace(row.ObjectKey),
+			ObjectURL:       strings.TrimSpace(row.ObjectURL),
+			MimeType:        strings.TrimSpace(row.MimeType),
+			SizeBytes:       row.SizeBytes,
+			PreviewKind:     strings.TrimSpace(row.PreviewKind),
+			Status:          row.Status,
+			DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
+			CreatedByUserID: row.CreatedByUserID,
+			CreatedAt:       parseRecordTime(row.CreatedAtRaw),
+			UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+		}
+		if !models.IsValidEntityStatus(attachment.Status) {
+			attachment.Status = models.EntityStatusActive
+		}
+
+		documentStatus := row.DocumentStatus
+		if !models.IsValidEntityStatus(documentStatus) {
+			documentStatus = models.EntityStatusActive
+		}
+
+		result = append(result, AdminDocumentAttachmentListRecord{
+			Attachment:      attachment,
+			DocumentTitle:   strings.TrimSpace(row.DocumentTitle),
+			DocumentStatus:  documentStatus,
+			SpaceName:       strings.TrimSpace(row.SpaceName),
+			SpaceOwnerID:    strings.TrimSpace(row.SpaceOwnerID),
+			SpaceOwnerName:  strings.TrimSpace(row.SpaceOwnerName),
+			SpaceOwnerEmail: strings.TrimSpace(row.SpaceOwnerMail),
+			CreatedByName:   strings.TrimSpace(row.CreatedByName),
+			CreatedByEmail:  strings.TrimSpace(row.CreatedByEmail),
+		})
+	}
+
+	return result, total, nil
+}
+
 func (r *gormDocumentAttachmentRepository) GetByAttachmentID(
 	ctx context.Context,
 	attachmentID string,
@@ -161,6 +350,28 @@ func (r *gormDocumentAttachmentRepository) SoftDelete(
 	return updateResult.RowsAffected > 0, nil
 }
 
+func (r *gormDocumentAttachmentRepository) HardDelete(
+	ctx context.Context,
+	attachmentID string,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedAttachmentID := strings.TrimSpace(attachmentID)
+	if normalizedAttachmentID == "" {
+		return false, nil
+	}
+
+	deleteResult := r.db.WithContext(ctx).
+		Where("attachment_id = ?", normalizedAttachmentID).
+		Delete(&models.DocumentAttachment{})
+	if deleteResult.Error != nil {
+		return false, deleteResult.Error
+	}
+	return deleteResult.RowsAffected > 0, nil
+}
+
 func mapDocumentAttachmentRow(row documentAttachmentRow) models.DocumentAttachment {
 	return models.DocumentAttachment{
 		ID:              row.ID,
@@ -180,4 +391,43 @@ func mapDocumentAttachmentRow(row documentAttachmentRow) models.DocumentAttachme
 		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
 		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
 	}
+}
+
+func normalizeAttachmentStatuses(statuses []models.EntityStatus) []models.EntityStatus {
+	if len(statuses) == 0 {
+		return nil
+	}
+	result := make([]models.EntityStatus, 0, len(statuses))
+	seen := make(map[models.EntityStatus]struct{}, len(statuses))
+	for _, status := range statuses {
+		if !models.IsValidEntityStatus(status) {
+			continue
+		}
+		if _, exists := seen[status]; exists {
+			continue
+		}
+		seen[status] = struct{}{}
+		result = append(result, status)
+	}
+	return result
+}
+
+func normalizeAttachmentStorageProviders(storageProviders []string) []string {
+	if len(storageProviders) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(storageProviders))
+	seen := make(map[string]struct{}, len(storageProviders))
+	for _, storageProvider := range storageProviders {
+		value := strings.ToLower(strings.TrimSpace(storageProvider))
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }

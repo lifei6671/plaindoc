@@ -1,5 +1,5 @@
 import katexStyleText from "katex/dist/katex.min.css?inline";
-import { ChevronDown, Lock, LockOpen } from "lucide-react";
+import { ChevronDown, Download, Eye, Lock, LockOpen, Paperclip } from "lucide-react";
 import MarkdownIt from "markdown-it";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
@@ -16,7 +16,7 @@ import readerBaseStyleText from "./render-space-reader.base.css?inline";
 import { READER_ASYNC_ENHANCEMENT_SCRIPT } from "./render-space-reader.async-script";
 import readerGoogleSansCodeStyleText from "./render-space-reader.font.css?inline";
 import { buildReaderMarkdownRenderer } from "./markdown-shared";
-import type { ReaderPagePayload, ReaderTreeNode } from "./ssr-types";
+import type { ReaderDocumentAttachmentPayload, ReaderPagePayload, ReaderTreeNode } from "./ssr-types";
 
 const SEO_TITLE_SUFFIX = "PlainDoc - 一个适合中小团队文档在线管理系统";
 const readerTocParser = new MarkdownIt({
@@ -307,6 +307,45 @@ function composeSEOTitle(title: string): string {
   return `${normalizedTitle} - ${SEO_TITLE_SUFFIX}`;
 }
 
+function formatAttachmentSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return "未知大小";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = sizeBytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex === 0) {
+    return `${Math.round(value)} ${units[unitIndex]}`;
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function normalizeAttachmentPreviewKind(value: unknown): ReaderDocumentAttachmentPayload["previewKind"] {
+  if (value === "image" || value === "pdf" || value === "office" || value === "text") {
+    return value;
+  }
+  return "none";
+}
+
+function resolveAttachmentPreviewLabel(previewKind: ReaderDocumentAttachmentPayload["previewKind"]): string {
+  switch (previewKind) {
+    case "image":
+      return "图片";
+    case "pdf":
+      return "PDF";
+    case "office":
+      return "Office";
+    case "text":
+      return "文本";
+    default:
+      return "文件";
+  }
+}
+
 function buildReaderOutlineItems(markdownContent: string): ReaderOutlineItem[] {
   const parsedItems = parseTocFromMarkdown(markdownContent, readerTocParser).items;
   const outlineItems: ReaderOutlineItem[] = [];
@@ -353,6 +392,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const documentVisibilityMarker = hasDeniedAccess ? null : renderVisibilityMarker(payload.document.visibility);
   const readerOutlineItems = hasDeniedAccess ? [] : buildReaderOutlineItems(payload.document.contentMd);
   const hasReaderOutline = readerOutlineItems.length > 0;
+  const documentAttachments = hasDeniedAccess ? [] : (Array.isArray(payload.attachments) ? payload.attachments : []);
   const spaceLandingPath = `/r/${encodeURIComponent(payload.space.id)}`;
   const loginPath = `/login?redirect=${encodeURIComponent(canonicalPath)}`;
 
@@ -461,18 +501,87 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                   </div>
                 </section>
               ) : (
-                <article
-                  id={PREVIEW_BODY_ID}
-                  className={`markdown-body ${PREVIEW_BODY_CLASS} ${previewThemeClassName}`}
-                >
-                  <ReactMarkdown
-                    remarkPlugins={markdownRenderer.remarkPlugins}
-                    rehypePlugins={markdownRenderer.rehypePlugins}
-                    components={markdownRenderer.components}
+                <>
+                  <article
+                    id={PREVIEW_BODY_ID}
+                    className={`markdown-body ${PREVIEW_BODY_CLASS} ${previewThemeClassName}`}
                   >
-                    {payload.document.contentMd}
-                  </ReactMarkdown>
-                </article>
+                    <ReactMarkdown
+                      remarkPlugins={markdownRenderer.remarkPlugins}
+                      rehypePlugins={markdownRenderer.rehypePlugins}
+                      components={markdownRenderer.components}
+                    >
+                      {payload.document.contentMd}
+                    </ReactMarkdown>
+                  </article>
+                  {documentAttachments.length > 0 ? (
+                    <section className="reader-attachments" aria-label="文档附件">
+                      <div className="reader-attachments__header">
+                        <h2 className="reader-attachments__title">
+                          <Paperclip size={15} aria-hidden="true" />
+                          <span>文档附件</span>
+                          <span className="reader-attachments__count">({documentAttachments.length})</span>
+                        </h2>
+                        <p className="reader-attachments__hint" data-reader-hook="attachment-status" aria-live="polite">
+                          预览会打开独立预览页，下载会自动生成访问链接。
+                        </p>
+                      </div>
+                      <ul className="reader-attachments__list">
+                        {documentAttachments.map((attachment) => {
+                          const attachmentID = (attachment.attachmentId ?? "").trim();
+                          if (!attachmentID) {
+                            return null;
+                          }
+                          const fileName = (attachment.fileName ?? "").trim() || attachmentID;
+                          const mimeType = (attachment.mimeType ?? "").trim() || "application/octet-stream";
+                          const documentID = (attachment.documentId ?? "").trim() || payload.document.id;
+                          const previewKind = normalizeAttachmentPreviewKind(attachment.previewKind);
+                          const previewSupported = attachment.previewSupported === true;
+                          return (
+                            <li key={attachmentID} className="reader-attachment">
+                              <div className="reader-attachment__meta">
+                                <div className="reader-attachment__name" title={fileName}>
+                                  {fileName}
+                                </div>
+                                <div className="reader-attachment__desc">
+                                  <span>{formatAttachmentSize(Number(attachment.sizeBytes))}</span>
+                                  <span>{resolveAttachmentPreviewLabel(previewKind)}</span>
+                                  <span>{mimeType}</span>
+                                </div>
+                              </div>
+                              <div className="reader-attachment__actions">
+                                <button
+                                  type="button"
+                                  className="reader-attachment__action"
+                                  data-reader-attachment-action="1"
+                                  data-reader-attachment-purpose="download"
+                                  data-reader-attachment-id={attachmentID}
+                                  data-reader-doc-id={documentID}
+                                >
+                                  <Download size={14} aria-hidden="true" />
+                                  <span>下载</span>
+                                </button>
+                                {previewSupported ? (
+                                  <button
+                                    type="button"
+                                    className="reader-attachment__action reader-attachment__action--preview"
+                                    data-reader-attachment-action="1"
+                                    data-reader-attachment-purpose="preview"
+                                    data-reader-attachment-id={attachmentID}
+                                    data-reader-doc-id={documentID}
+                                  >
+                                    <Eye size={14} aria-hidden="true" />
+                                    <span>预览</span>
+                                  </button>
+                                ) : null}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  ) : null}
+                </>
               )}
             </div>
           </main>

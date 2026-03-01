@@ -1,6 +1,6 @@
 # 文档附件下载鉴权实现任务清单（本地）
 
-> 更新时间：2026-02-28
+> 更新时间：2026-03-01
 > 说明：以下状态基于当前本地代码实现与可编译结果。
 
 ## 范围
@@ -30,11 +30,11 @@
 - [x] 前端对附件链接做绝对 URL 归一化（避免跨域/基路径问题）
 - [x] 构建验证通过：`go test ./...`、`npm run build`
 
-- [ ] 非本地私有存储的“真实预签名 URL”生成（R2/OSS SDK 签名）
-- [ ] 非本地下载链接策略配置化（公开桶直链 vs 私有桶签名）
-- [ ] 文档阅读页底部附件渲染（按文档读取并展示）
-- [ ] PDF/Office 在线预览页（消费 `purpose=preview`）
-- [ ] 后台附件管理页面（检索/删除/审计）
+- [x] 非本地私有存储的“真实预签名 URL”生成（R2/OSS SDK 签名）
+- [x] 非本地下载链接策略配置化（公开桶直链 vs 私有桶签名）
+- [x] 文档阅读页底部附件渲染（按文档读取并展示）
+- [x] PDF/Office 在线预览页（消费 `purpose=preview`）
+- [x] 后台附件管理页面（检索/删除/审计）
 - [ ] 删除文档时附件物理清理策略（批量与失败补偿）
 - [ ] 附件链路自动化测试补齐（handler/service/e2e）
 - [ ] 对外 API 文档补齐（请求参数、错误码、时效约束）
@@ -42,7 +42,12 @@
 ## 备注（当前实现边界）
 
 - 当前“非本地下载链接能力”已支持：
-  - 使用 `object_url` 直接跳转；
-  - 或按 provider 的 `publicBaseURL + objectKey` 组装公开链接。
-- 但“私有桶临时签名 URL”尚未落地，因此该项仍标记为未完成。
-
+  - `downloadStrategy=public`：优先使用 `objectUrl`，否则按 `publicBaseURL + objectKey` 组装；
+  - `downloadStrategy=signed`：按 provider 使用 SDK 生成临时签名 URL（R2/OSS）。
+- 新增图床配置字段：
+  - `cloudflareR2.downloadStrategy` / `aliyunOss.downloadStrategy`：`public | signed`
+  - `cloudflareR2.signedUrlTtlSeconds` / `aliyunOss.signedUrlTtlSeconds`：默认 `86400`（24h）
+- 在线预览页当前行为：
+  - `image/pdf/text`：直接内嵌预览；
+  - `office`：公开附件走 Office Web Viewer，需鉴权附件提示下载查看；
+  - 预留 `window.__PLAINDOC_ATTACHMENT_PREVIEW_RENDERERS__.office` 扩展点，可接入自建 Office/PDF 预览服务。

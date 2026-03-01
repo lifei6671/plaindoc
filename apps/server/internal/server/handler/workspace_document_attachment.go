@@ -108,6 +108,8 @@ func (h *workspaceHandler) ListDocumentAttachments(c *gin.Context) {
 	if h.imageHostingService != nil {
 		if loadedConfig, configErr := h.imageHostingService.GetConfig(c.Request.Context()); configErr == nil {
 			config = loadedConfig
+		} else {
+			setRequestErrmsg(c, configErr, "读取图床配置失败")
 		}
 	}
 
@@ -115,7 +117,17 @@ func (h *workspaceHandler) ListDocumentAttachments(c *gin.Context) {
 	for _, attachment := range attachments {
 		publicDownloadURL := ""
 		if publicReadable {
-			publicDownloadURL = h.resolveAttachmentPublicDownloadURL(c.Request.Context(), attachment, config)
+			resolvedURL, resolvedURLErr := h.resolveAttachmentPublicDownloadURL(
+				c.Request.Context(),
+				attachment,
+				config,
+				service.DocumentAttachmentLinkPurposeDownload,
+			)
+			if resolvedURLErr != nil {
+				setRequestErrmsg(c, resolvedURLErr, "生成附件公开链接失败")
+			} else {
+				publicDownloadURL = resolvedURL
+			}
 		}
 		items = append(items, mapWorkspaceDocumentAttachmentResponse(
 			attachment,
@@ -272,7 +284,17 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
 	publicDownloadURL := ""
 	if publicReadable {
-		publicDownloadURL = h.resolveAttachmentPublicDownloadURL(c.Request.Context(), *attachment, config)
+		resolvedURL, resolvedURLErr := h.resolveAttachmentPublicDownloadURL(
+			c.Request.Context(),
+			*attachment,
+			config,
+			service.DocumentAttachmentLinkPurposeDownload,
+		)
+		if resolvedURLErr != nil {
+			setRequestErrmsg(c, resolvedURLErr, "生成附件公开链接失败")
+		} else {
+			publicDownloadURL = resolvedURL
+		}
 	}
 	response.JSON(
 		c,
@@ -281,7 +303,9 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 	)
 }
 
-// DeleteDocumentAttachment 删除文档附件（默认软删除；可选物理删除本地文件）。
+// DeleteDocumentAttachment 删除文档附件。
+// - physicalDelete=false: 仅逻辑删除（status=deleted，保留记录与文件）
+// - physicalDelete=true: 物理删除（删除文件并硬删除记录）
 func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 	actorUserID, ok := h.requireActorUserID(c)
 	if !ok {
@@ -342,32 +366,53 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
 		return
 	}
-	if attachment.Status == models.EntityStatusDeleted {
+	physicalDelete := parseBoolLikeValue(c.Query("physicalDelete"))
+	if !physicalDelete {
+		if attachment.Status == models.EntityStatusDeleted {
+			response.JSON(c, http.StatusOK, struct{}{})
+			return
+		}
+		deleted, deleteErr := h.documentAttachmentRepo.SoftDelete(c.Request.Context(), attachmentID, time.Now().UTC())
+		if deleteErr != nil {
+			setRequestErrmsg(c, deleteErr, "逻辑删除文档附件失败")
+			response.InternalError(c)
+			return
+		}
+		if !deleted {
+			response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+			return
+		}
 		response.JSON(c, http.StatusOK, struct{}{})
 		return
 	}
 
-	deleted, err := h.documentAttachmentRepo.SoftDelete(c.Request.Context(), attachmentID, time.Now().UTC())
-	if err != nil {
-		setRequestErrmsg(c, err, "删除文档附件失败")
+	if strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
+		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
+		if pathErr != nil {
+			setRequestErrmsg(c, pathErr, "解析本地附件路径失败")
+			response.InternalError(c)
+			return
+		}
+		if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			setRequestErrmsg(c, removeErr, "物理删除本地附件文件失败")
+			response.InternalError(c)
+			return
+		}
+	} else {
+		setRequestErrmsgText(c, "当前附件存储提供商暂不支持物理删除")
 		response.InternalError(c)
 		return
 	}
-	if !deleted {
-		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+
+	hardDeleted, hardDeleteErr := h.documentAttachmentRepo.HardDelete(c.Request.Context(), attachmentID)
+	if hardDeleteErr != nil {
+		setRequestErrmsg(c, hardDeleteErr, "物理删除附件记录失败")
+		response.InternalError(c)
 		return
 	}
-
-	physicalDelete := parseBoolLikeValue(c.Query("physicalDelete"))
-	if physicalDelete && strings.EqualFold(strings.TrimSpace(attachment.StorageProvider), string(service.ImageHostingProviderLocal)) {
-		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(attachment.ObjectKey)
-		if pathErr == nil {
-			if removeErr := os.Remove(targetPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				setRequestErrmsg(c, removeErr, "删除本地附件文件失败")
-				response.InternalError(c)
-				return
-			}
-		}
+	if !hardDeleted {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
 	}
 
 	response.JSON(c, http.StatusOK, struct{}{})
@@ -439,9 +484,19 @@ func (h *workspaceHandler) CreateDocumentAttachmentAccessLink(c *gin.Context) {
 		if h.imageHostingService != nil {
 			if loadedConfig, configErr := h.imageHostingService.GetConfig(c.Request.Context()); configErr == nil {
 				config = loadedConfig
+			} else {
+				setRequestErrmsg(c, configErr, "读取图床配置失败")
 			}
 		}
-		publicDownloadURL := h.resolveAttachmentPublicDownloadURL(c.Request.Context(), *attachment, config)
+		publicDownloadURL, publicDownloadURLErr := h.resolveAttachmentPublicDownloadURL(
+			c.Request.Context(),
+			*attachment,
+			config,
+			service.DocumentAttachmentLinkPurpose(purpose),
+		)
+		if publicDownloadURLErr != nil {
+			setRequestErrmsg(c, publicDownloadURLErr, "生成附件公开链接失败")
+		}
 		if publicDownloadURL != "" {
 			response.JSON(c, http.StatusOK, workspaceDocumentAttachmentAccessLinkResponse{
 				URL:          publicDownloadURL,
@@ -535,7 +590,28 @@ func (h *workspaceHandler) ServeDocumentAttachmentByToken(c *gin.Context) {
 		return
 	}
 
-	targetURL := h.resolveNonLocalAttachmentObjectURL(c.Request.Context(), *attachment)
+	config := service.DefaultImageHostingConfig()
+	if h.imageHostingService != nil {
+		loadedConfig, configErr := h.imageHostingService.GetConfig(c.Request.Context())
+		if configErr != nil {
+			setRequestErrmsg(c, configErr, "读取图床配置失败")
+			response.InternalError(c)
+			return
+		}
+		config = loadedConfig
+	}
+
+	targetURL, targetURLErr := h.resolveNonLocalAttachmentObjectURL(
+		c.Request.Context(),
+		*attachment,
+		config,
+		claims.Purpose,
+	)
+	if targetURLErr != nil {
+		setRequestErrmsg(c, targetURLErr, "生成附件下载链接失败")
+		response.InternalError(c)
+		return
+	}
 	if targetURL == "" {
 		setRequestErrmsgText(c, "附件对象 URL 为空")
 		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
@@ -690,43 +766,45 @@ func (h *workspaceHandler) resolveAttachmentPublicDownloadURL(
 	ctx context.Context,
 	attachment models.DocumentAttachment,
 	config service.ImageHostingConfig,
-) string {
+	purpose service.DocumentAttachmentLinkPurpose,
+) (string, error) {
 	provider := strings.ToLower(strings.TrimSpace(attachment.StorageProvider))
 	switch provider {
 	case string(service.ImageHostingProviderLocal):
-		return resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads")
+		return resolvePublicURL(config.Local.PublicBaseURL, attachment.ObjectKey, "/uploads"), nil
 	default:
-		return h.resolveNonLocalAttachmentObjectURL(ctx, attachment)
+		return h.resolveNonLocalAttachmentObjectURL(
+			ctx,
+			attachment,
+			config,
+			purpose,
+		)
 	}
 }
 
 func (h *workspaceHandler) resolveNonLocalAttachmentObjectURL(
 	ctx context.Context,
 	attachment models.DocumentAttachment,
-) string {
-	targetURL := strings.TrimSpace(attachment.ObjectURL)
-	if targetURL != "" {
-		return targetURL
-	}
-
-	if h == nil || h.imageHostingService == nil {
-		return ""
-	}
-	config, err := h.imageHostingService.GetConfig(ctx)
-	if err != nil {
-		logit.SetRequestAttrs(ctx, logit.Error("errmsg", fmt.Errorf("获取图片托管服务配置失败: %w", err)))
-		return ""
-	}
-
-	provider := strings.ToLower(strings.TrimSpace(attachment.StorageProvider))
-	switch provider {
-	case string(service.ImageHostingProviderCloudflareR2):
-		return resolvePublicURL(config.CloudflareR2.PublicBaseURL, attachment.ObjectKey, "")
-	case string(service.ImageHostingProviderAliyunOSS):
-		return resolvePublicURL(config.AliyunOSS.PublicBaseURL, attachment.ObjectKey, "")
+	config service.ImageHostingConfig,
+	purpose service.DocumentAttachmentLinkPurpose,
+) (string, error) {
+	normalizedProvider := service.ImageHostingProvider(strings.ToLower(strings.TrimSpace(attachment.StorageProvider)))
+	switch normalizedProvider {
+	case service.ImageHostingProviderCloudflareR2, service.ImageHostingProviderAliyunOSS:
 	default:
-		return ""
+		return "", nil
 	}
+	if h == nil || h.imageHostingService == nil {
+		return "", errors.New("image hosting service is nil")
+	}
+
+	return h.imageHostingService.BuildObjectReadURL(ctx, config, service.BuildImageHostingObjectReadURLInput{
+		Provider:  normalizedProvider,
+		ObjectKey: attachment.ObjectKey,
+		ObjectURL: attachment.ObjectURL,
+		FileName:  attachment.FileName,
+		Purpose:   purpose,
+	})
 }
 
 func normalizeWorkspaceDocumentAttachmentPurpose(

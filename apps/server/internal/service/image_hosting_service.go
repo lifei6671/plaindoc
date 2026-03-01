@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -18,23 +20,40 @@ const (
 	ImageHostingProviderAliyunOSS    ImageHostingProvider = "aliyun-oss"
 )
 
+type ImageHostingDownloadStrategy string
+
+const (
+	ImageHostingDownloadStrategyPublic ImageHostingDownloadStrategy = "public"
+	ImageHostingDownloadStrategySigned ImageHostingDownloadStrategy = "signed"
+)
+
+const (
+	defaultImageHostingSignedURLTTLSeconds = 24 * 60 * 60
+	minImageHostingSignedURLTTLSeconds     = 60
+	maxImageHostingSignedURLTTLSeconds     = 7 * 24 * 60 * 60
+)
+
 // CloudflareR2ImageHostingConfig Cloudflare R2 图床配置。
 type CloudflareR2ImageHostingConfig struct {
-	AccountID       string `json:"accountId"`
-	Bucket          string `json:"bucket"`
-	AccessKeyID     string `json:"accessKeyId"`
-	SecretAccessKey string `json:"secretAccessKey"`
-	PublicBaseURL   string `json:"publicBaseUrl"`
+	AccountID           string                       `json:"accountId"`
+	Bucket              string                       `json:"bucket"`
+	AccessKeyID         string                       `json:"accessKeyId"`
+	SecretAccessKey     string                       `json:"secretAccessKey"`
+	PublicBaseURL       string                       `json:"publicBaseUrl"`
+	DownloadStrategy    ImageHostingDownloadStrategy `json:"downloadStrategy"`
+	SignedURLTTLSeconds int                          `json:"signedUrlTtlSeconds"`
 }
 
 // AliyunOSSImageHostingConfig 阿里云 OSS 图床配置。
 type AliyunOSSImageHostingConfig struct {
-	Region          string `json:"region"`
-	Bucket          string `json:"bucket"`
-	Endpoint        string `json:"endpoint"`
-	AccessKeyID     string `json:"accessKeyId"`
-	AccessKeySecret string `json:"accessKeySecret"`
-	PublicBaseURL   string `json:"publicBaseUrl"`
+	Region              string                       `json:"region"`
+	Bucket              string                       `json:"bucket"`
+	Endpoint            string                       `json:"endpoint"`
+	AccessKeyID         string                       `json:"accessKeyId"`
+	AccessKeySecret     string                       `json:"accessKeySecret"`
+	PublicBaseURL       string                       `json:"publicBaseUrl"`
+	DownloadStrategy    ImageHostingDownloadStrategy `json:"downloadStrategy"`
+	SignedURLTTLSeconds int                          `json:"signedUrlTtlSeconds"`
 }
 
 // LocalImageHostingConfig 本地图片存储配置。
@@ -68,19 +87,23 @@ func DefaultImageHostingConfig() ImageHostingConfig {
 	return ImageHostingConfig{
 		DefaultProvider: ImageHostingProviderLocal,
 		CloudflareR2: CloudflareR2ImageHostingConfig{
-			AccountID:       "",
-			Bucket:          "",
-			AccessKeyID:     "",
-			SecretAccessKey: "",
-			PublicBaseURL:   "",
+			AccountID:           "",
+			Bucket:              "",
+			AccessKeyID:         "",
+			SecretAccessKey:     "",
+			PublicBaseURL:       "",
+			DownloadStrategy:    ImageHostingDownloadStrategyPublic,
+			SignedURLTTLSeconds: defaultImageHostingSignedURLTTLSeconds,
 		},
 		AliyunOSS: AliyunOSSImageHostingConfig{
-			Region:          "",
-			Bucket:          "",
-			Endpoint:        "",
-			AccessKeyID:     "",
-			AccessKeySecret: "",
-			PublicBaseURL:   "",
+			Region:              "",
+			Bucket:              "",
+			Endpoint:            "",
+			AccessKeyID:         "",
+			AccessKeySecret:     "",
+			PublicBaseURL:       "",
+			DownloadStrategy:    ImageHostingDownloadStrategyPublic,
+			SignedURLTTLSeconds: defaultImageHostingSignedURLTTLSeconds,
 		},
 		Local: LocalImageHostingConfig{
 			UploadEndpoint: "/api/uploads/images",
@@ -110,6 +133,12 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 		config.CloudflareR2.AccessKeyID = readString(cloudflareR2, "accessKeyId")
 		config.CloudflareR2.SecretAccessKey = readString(cloudflareR2, "secretAccessKey")
 		config.CloudflareR2.PublicBaseURL = readString(cloudflareR2, "publicBaseUrl")
+		if strategy := normalizeImageHostingDownloadStrategy(readString(cloudflareR2, "downloadStrategy")); strategy != "" {
+			config.CloudflareR2.DownloadStrategy = strategy
+		}
+		config.CloudflareR2.SignedURLTTLSeconds = normalizeImageHostingSignedURLTTLSeconds(
+			readInt(cloudflareR2, "signedUrlTtlSeconds", config.CloudflareR2.SignedURLTTLSeconds),
+		)
 	}
 
 	if aliyunOSS, ok := readObject(value, "aliyunOss"); ok {
@@ -119,6 +148,12 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 		config.AliyunOSS.AccessKeyID = readString(aliyunOSS, "accessKeyId")
 		config.AliyunOSS.AccessKeySecret = readString(aliyunOSS, "accessKeySecret")
 		config.AliyunOSS.PublicBaseURL = readString(aliyunOSS, "publicBaseUrl")
+		if strategy := normalizeImageHostingDownloadStrategy(readString(aliyunOSS, "downloadStrategy")); strategy != "" {
+			config.AliyunOSS.DownloadStrategy = strategy
+		}
+		config.AliyunOSS.SignedURLTTLSeconds = normalizeImageHostingSignedURLTTLSeconds(
+			readInt(aliyunOSS, "signedUrlTtlSeconds", config.AliyunOSS.SignedURLTTLSeconds),
+		)
 	}
 
 	if local, ok := readObject(value, "local"); ok {
@@ -187,6 +222,49 @@ func normalizeImageHostingProvider(rawValue string) ImageHostingProvider {
 	}
 }
 
+func normalizeImageHostingDownloadStrategy(rawValue string) ImageHostingDownloadStrategy {
+	switch strings.ToLower(strings.TrimSpace(rawValue)) {
+	case string(ImageHostingDownloadStrategyPublic):
+		return ImageHostingDownloadStrategyPublic
+	case string(ImageHostingDownloadStrategySigned):
+		return ImageHostingDownloadStrategySigned
+	default:
+		return ""
+	}
+}
+
+func normalizeImageHostingSignedURLTTLSeconds(rawValue int) int {
+	if rawValue < minImageHostingSignedURLTTLSeconds || rawValue > maxImageHostingSignedURLTTLSeconds {
+		return defaultImageHostingSignedURLTTLSeconds
+	}
+	return rawValue
+}
+
+func (c ImageHostingConfig) DownloadStrategy(provider ImageHostingProvider) ImageHostingDownloadStrategy {
+	switch provider {
+	case ImageHostingProviderCloudflareR2:
+		if c.CloudflareR2.DownloadStrategy != "" {
+			return c.CloudflareR2.DownloadStrategy
+		}
+	case ImageHostingProviderAliyunOSS:
+		if c.AliyunOSS.DownloadStrategy != "" {
+			return c.AliyunOSS.DownloadStrategy
+		}
+	}
+	return ImageHostingDownloadStrategyPublic
+}
+
+func (c ImageHostingConfig) SignedURLTTL(provider ImageHostingProvider) time.Duration {
+	ttlSeconds := defaultImageHostingSignedURLTTLSeconds
+	switch provider {
+	case ImageHostingProviderCloudflareR2:
+		ttlSeconds = normalizeImageHostingSignedURLTTLSeconds(c.CloudflareR2.SignedURLTTLSeconds)
+	case ImageHostingProviderAliyunOSS:
+		ttlSeconds = normalizeImageHostingSignedURLTTLSeconds(c.AliyunOSS.SignedURLTTLSeconds)
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
 func normalizeLocalPublicBaseURL(rawValue string) string {
 	trimmed := strings.TrimSpace(rawValue)
 	normalized := strings.TrimRight(trimmed, "/")
@@ -221,4 +299,27 @@ func readObject(payload map[string]any, key string) (map[string]any, bool) {
 		return nil, false
 	}
 	return value, true
+}
+
+func readInt(payload map[string]any, key string, fallback int) int {
+	rawValue, ok := payload[key]
+	if !ok {
+		return fallback
+	}
+	switch value := rawValue.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }

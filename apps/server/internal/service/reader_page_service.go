@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
 // ReaderPageService 负责聚合阅读页 SSR 所需的数据视图。
 type ReaderPageService struct {
-	db                *gorm.DB
-	visibilityService *VisibilityService
+	db                     *gorm.DB
+	visibilityService      *VisibilityService
+	documentAttachmentRepo repository.DocumentAttachmentRepository
 }
 
 type readerDocumentRow struct {
@@ -59,10 +61,15 @@ type readerResolvedDocument struct {
 }
 
 // NewReaderPageService 创建阅读页聚合服务。
-func NewReaderPageService(db *gorm.DB, visibilityService *VisibilityService) *ReaderPageService {
+func NewReaderPageService(
+	db *gorm.DB,
+	visibilityService *VisibilityService,
+	documentAttachmentRepo repository.DocumentAttachmentRepository,
+) *ReaderPageService {
 	return &ReaderPageService{
-		db:                db,
-		visibilityService: visibilityService,
+		db:                     db,
+		visibilityService:      visibilityService,
+		documentAttachmentRepo: documentAttachmentRepo,
 	}
 }
 
@@ -177,6 +184,10 @@ func (s *ReaderPageService) BuildPage(
 	if err != nil {
 		return ReaderPageViewModel{}, err
 	}
+	attachments, err := s.loadDocumentAttachments(ctx, resolvedDocumentID)
+	if err != nil {
+		return ReaderPageViewModel{}, err
+	}
 
 	spaceName := strings.TrimSpace(space.Name)
 	documentTitle := strings.TrimSpace(documentRow.Title)
@@ -207,6 +218,7 @@ func (s *ReaderPageService) BuildPage(
 			AuthorNickname: normalizeReaderAuthorNickname(documentRow.AuthorNickname),
 			UpdatedAt:      updatedAt,
 		},
+		Attachments: attachments,
 		Tree:        tree,
 		ActiveDocID: strings.TrimSpace(documentRow.DocumentID),
 	}, nil
@@ -469,6 +481,76 @@ func mapReaderTreeNodes(nodes []*readerTreeNode) []ReaderTreeNodeViewModel {
 		})
 	}
 	return items
+}
+
+func (s *ReaderPageService) loadDocumentAttachments(
+	ctx context.Context,
+	documentID string,
+) ([]ReaderDocumentAttachmentViewModel, error) {
+	if s == nil || s.documentAttachmentRepo == nil {
+		return []ReaderDocumentAttachmentViewModel{}, nil
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return []ReaderDocumentAttachmentViewModel{}, nil
+	}
+
+	attachmentRows, err := s.documentAttachmentRepo.ListByDocumentID(ctx, normalizedDocumentID, false)
+	if err != nil {
+		return nil, err
+	}
+
+	attachments := make([]ReaderDocumentAttachmentViewModel, 0, len(attachmentRows))
+	for _, item := range attachmentRows {
+		attachmentID := strings.TrimSpace(item.AttachmentID)
+		if attachmentID == "" {
+			continue
+		}
+		fileName := strings.TrimSpace(item.FileName)
+		if fileName == "" {
+			fileName = attachmentID
+		}
+		mimeType := strings.TrimSpace(item.MimeType)
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		previewKind := normalizeReaderAttachmentPreviewKind(item.PreviewKind)
+		attachments = append(attachments, ReaderDocumentAttachmentViewModel{
+			AttachmentID:     attachmentID,
+			DocumentID:       strings.TrimSpace(item.DocumentID),
+			FileName:         fileName,
+			MimeType:         mimeType,
+			SizeBytes:        item.SizeBytes,
+			PreviewKind:      previewKind,
+			PreviewSupported: isReaderAttachmentPreviewSupported(previewKind),
+		})
+	}
+	return attachments, nil
+}
+
+func normalizeReaderAttachmentPreviewKind(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "image":
+		return "image"
+	case "pdf":
+		return "pdf"
+	case "office":
+		return "office"
+	case "text":
+		return "text"
+	default:
+		return "none"
+	}
+}
+
+func isReaderAttachmentPreviewSupported(previewKind string) bool {
+	switch normalizeReaderAttachmentPreviewKind(previewKind) {
+	case "image", "pdf", "office", "text":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeReaderVisibility(raw string) models.Visibility {

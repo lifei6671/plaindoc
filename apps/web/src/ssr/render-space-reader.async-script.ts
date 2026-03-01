@@ -25,6 +25,9 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const OUTLINE_SELECTOR = "[data-reader-hook='outline']";
   const OUTLINE_LINK_SELECTOR = "[data-reader-hook='outline-link'][data-outline-index]";
   const OUTLINE_LINK_ACTIVE_CLASS = "reader-outline__link--active";
+  const ATTACHMENT_ACTION_SELECTOR = "button[data-reader-attachment-action='1']";
+  const ATTACHMENT_STATUS_SELECTOR = "[data-reader-hook='attachment-status']";
+  const ATTACHMENT_ACTION_BUSY_CLASS = "reader-attachment__action--busy";
   const PREVIEW_HEADING_SELECTOR =
     "#plaindoc-preview-body h1, #plaindoc-preview-body h2, #plaindoc-preview-body h3, #plaindoc-preview-body h4, #plaindoc-preview-body h5, #plaindoc-preview-body h6";
   const OUTLINE_SCROLL_OFFSET = 16;
@@ -49,6 +52,142 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       return parsedURL;
     } catch {
       return null;
+    }
+  };
+
+  const resolveJSONPayload = (rawText) => {
+    const normalizedText = typeof rawText === "string" ? rawText.trim() : "";
+    if (!normalizedText) {
+      return null;
+    }
+    try {
+      return JSON.parse(normalizedText);
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveJsonResultData = (payload) => {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    if ("data" in payload && payload.data && typeof payload.data === "object") {
+      return payload.data;
+    }
+    return payload;
+  };
+
+  const setAttachmentStatus = (message, isError) => {
+    const statusNode = document.querySelector(ATTACHMENT_STATUS_SELECTOR);
+    if (!(statusNode instanceof HTMLElement)) {
+      return;
+    }
+    const text = typeof message === "string" ? message.trim() : "";
+    if (!text) {
+      return;
+    }
+    statusNode.textContent = text;
+    statusNode.classList.toggle("reader-attachments__hint--error", isError === true);
+  };
+
+  const triggerAttachmentNavigation = (targetURL, purpose) => {
+    const normalizedURL = typeof targetURL === "string" ? targetURL.trim() : "";
+    if (!normalizedURL) {
+      return false;
+    }
+    const anchor = document.createElement("a");
+    anchor.href = normalizedURL;
+    if (purpose === "preview") {
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+    }
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    return true;
+  };
+
+  const buildAttachmentPreviewPageURL = (documentID, attachmentID) => {
+    const normalizedDocumentID = typeof documentID === "string" ? documentID.trim() : "";
+    const normalizedAttachmentID = typeof attachmentID === "string" ? attachmentID.trim() : "";
+    if (!normalizedDocumentID || !normalizedAttachmentID) {
+      return "";
+    }
+    return (
+      "/preview/docs/" +
+      encodeURIComponent(normalizedDocumentID) +
+      "/attachments/" +
+      encodeURIComponent(normalizedAttachmentID)
+    );
+  };
+
+  const requestAttachmentAccessLink = async (actionButton) => {
+    if (!(actionButton instanceof HTMLButtonElement)) {
+      return;
+    }
+    const documentID = (actionButton.getAttribute("data-reader-doc-id") || "").trim();
+    const attachmentID = (actionButton.getAttribute("data-reader-attachment-id") || "").trim();
+    const purposeValue = (actionButton.getAttribute("data-reader-attachment-purpose") || "").trim();
+    const purpose = purposeValue === "preview" ? "preview" : "download";
+    if (!documentID || !attachmentID) {
+      setAttachmentStatus("附件参数无效，请刷新页面后重试。", true);
+      return;
+    }
+    if (purpose === "preview") {
+      const previewPageURL = buildAttachmentPreviewPageURL(documentID, attachmentID);
+      if (!previewPageURL || !triggerAttachmentNavigation(previewPageURL, "preview")) {
+        setAttachmentStatus("打开预览页失败，请稍后重试。", true);
+        return;
+      }
+      setAttachmentStatus("已打开预览。", false);
+      return;
+    }
+
+    actionButton.disabled = true;
+    actionButton.classList.add(ATTACHMENT_ACTION_BUSY_CLASS);
+    setAttachmentStatus("正在生成下载链接...", false);
+
+    try {
+      const requestPath =
+        "/api/docs/" +
+        encodeURIComponent(documentID) +
+        "/attachments/" +
+        encodeURIComponent(attachmentID) +
+        "/access-link?purpose=" +
+        encodeURIComponent(purpose);
+      const response = await fetch(requestPath, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "X-Requested-With": "plaindoc-reader-async"
+        }
+      });
+      const rawResponseText = await response.text();
+      const payload = resolveJSONPayload(rawResponseText);
+      const responseData = resolveJsonResultData(payload);
+      const responseCode = payload && typeof payload === "object" && typeof payload.code === "number" ? payload.code : 0;
+      const responseMessage =
+        payload && typeof payload === "object" && typeof payload.message === "string" ? payload.message.trim() : "";
+      const accessURL = responseData && typeof responseData === "object" && typeof responseData.url === "string"
+        ? responseData.url.trim()
+        : "";
+      if (!response.ok || responseCode !== 0 || !accessURL) {
+        throw new Error(responseMessage || "附件访问链接生成失败");
+      }
+      if (!triggerAttachmentNavigation(accessURL, purpose)) {
+        throw new Error("附件访问链接无效");
+      }
+      setAttachmentStatus(purpose === "preview" ? "已打开预览。" : "已开始下载。", false);
+    } catch (error) {
+      const message =
+        error && typeof error === "object" && "message" in error && typeof error.message === "string"
+          ? error.message
+          : "附件操作失败，请稍后重试。";
+      setAttachmentStatus(message, true);
+    } finally {
+      actionButton.disabled = false;
+      actionButton.classList.remove(ATTACHMENT_ACTION_BUSY_CLASS);
     }
   };
 
@@ -495,6 +634,17 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       "click",
       (event) => {
         if (!(event.target instanceof Element)) {
+          return;
+        }
+
+        const attachmentActionButton = event.target.closest(ATTACHMENT_ACTION_SELECTOR);
+        if (attachmentActionButton instanceof HTMLButtonElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          void requestAttachmentAccessLink(attachmentActionButton);
           return;
         }
 

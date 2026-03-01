@@ -1168,11 +1168,13 @@ func validateImageHostingConfig(payload map[string]any) error {
 		return err
 	}
 	if err := validateNoUnknownKeys(cloudflareR2, map[string]struct{}{
-		"accountId":       {},
-		"bucket":          {},
-		"accessKeyId":     {},
-		"secretAccessKey": {},
-		"publicBaseUrl":   {},
+		"accountId":           {},
+		"bucket":              {},
+		"accessKeyId":         {},
+		"secretAccessKey":     {},
+		"publicBaseUrl":       {},
+		"downloadStrategy":    {},
+		"signedUrlTtlSeconds": {},
 	}); err != nil {
 		return fmt.Errorf("cloudflareR2 %w", err)
 	}
@@ -1196,18 +1198,46 @@ func validateImageHostingConfig(payload map[string]any) error {
 	if err != nil {
 		return err
 	}
+	cloudflareDownloadStrategy := ImageHostingDownloadStrategyPublic
+	if strategy, hasStrategy, strategyErr := getOptionalString(cloudflareR2, "downloadStrategy"); strategyErr != nil {
+		return strategyErr
+	} else if hasStrategy {
+		normalized := normalizeImageHostingDownloadStrategy(strategy)
+		if normalized == "" {
+			return fmt.Errorf("cloudflareR2.downloadStrategy must be public/signed")
+		}
+		cloudflareDownloadStrategy = normalized
+	}
+	cloudflareSignedURLTTLSeconds, err := getOptionalInt(
+		cloudflareR2,
+		"signedUrlTtlSeconds",
+		defaultImageHostingSignedURLTTLSeconds,
+	)
+	if err != nil {
+		return err
+	}
+	if cloudflareSignedURLTTLSeconds < minImageHostingSignedURLTTLSeconds ||
+		cloudflareSignedURLTTLSeconds > maxImageHostingSignedURLTTLSeconds {
+		return fmt.Errorf(
+			"cloudflareR2.signedUrlTtlSeconds must be between %d and %d",
+			minImageHostingSignedURLTTLSeconds,
+			maxImageHostingSignedURLTTLSeconds,
+		)
+	}
 
 	aliyunOSS, err := getRequiredObject(payload, "aliyunOss")
 	if err != nil {
 		return err
 	}
 	if err := validateNoUnknownKeys(aliyunOSS, map[string]struct{}{
-		"region":          {},
-		"bucket":          {},
-		"endpoint":        {},
-		"accessKeyId":     {},
-		"accessKeySecret": {},
-		"publicBaseUrl":   {},
+		"region":              {},
+		"bucket":              {},
+		"endpoint":            {},
+		"accessKeyId":         {},
+		"accessKeySecret":     {},
+		"publicBaseUrl":       {},
+		"downloadStrategy":    {},
+		"signedUrlTtlSeconds": {},
 	}); err != nil {
 		return fmt.Errorf("aliyunOss %w", err)
 	}
@@ -1234,6 +1264,32 @@ func validateImageHostingConfig(payload map[string]any) error {
 	aliyunPublicBaseURL, err := getRequiredStringAllowEmpty(aliyunOSS, "publicBaseUrl")
 	if err != nil {
 		return err
+	}
+	aliyunDownloadStrategy := ImageHostingDownloadStrategyPublic
+	if strategy, hasStrategy, strategyErr := getOptionalString(aliyunOSS, "downloadStrategy"); strategyErr != nil {
+		return strategyErr
+	} else if hasStrategy {
+		normalized := normalizeImageHostingDownloadStrategy(strategy)
+		if normalized == "" {
+			return fmt.Errorf("aliyunOss.downloadStrategy must be public/signed")
+		}
+		aliyunDownloadStrategy = normalized
+	}
+	aliyunSignedURLTTLSeconds, err := getOptionalInt(
+		aliyunOSS,
+		"signedUrlTtlSeconds",
+		defaultImageHostingSignedURLTTLSeconds,
+	)
+	if err != nil {
+		return err
+	}
+	if aliyunSignedURLTTLSeconds < minImageHostingSignedURLTTLSeconds ||
+		aliyunSignedURLTTLSeconds > maxImageHostingSignedURLTTLSeconds {
+		return fmt.Errorf(
+			"aliyunOss.signedUrlTtlSeconds must be between %d and %d",
+			minImageHostingSignedURLTTLSeconds,
+			maxImageHostingSignedURLTTLSeconds,
+		)
 	}
 
 	local, err := getRequiredObject(payload, "local")
@@ -1264,12 +1320,32 @@ func validateImageHostingConfig(payload map[string]any) error {
 			cloudflarePublicBaseURL == "" {
 			return fmt.Errorf("cloudflareR2 is incomplete for default provider")
 		}
+		if cloudflareDownloadStrategy == ImageHostingDownloadStrategySigned {
+			if cloudflareSignedURLTTLSeconds < minImageHostingSignedURLTTLSeconds ||
+				cloudflareSignedURLTTLSeconds > maxImageHostingSignedURLTTLSeconds {
+				return fmt.Errorf(
+					"cloudflareR2.signedUrlTtlSeconds must be between %d and %d for signed strategy",
+					minImageHostingSignedURLTTLSeconds,
+					maxImageHostingSignedURLTTLSeconds,
+				)
+			}
+		}
 	case string(ImageHostingProviderAliyunOSS):
 		if aliyunBucket == "" || aliyunAccessKeyID == "" || aliyunAccessKeySecret == "" || aliyunPublicBaseURL == "" {
 			return fmt.Errorf("aliyunOss is incomplete for default provider")
 		}
 		if aliyunRegion == "" && aliyunEndpoint == "" {
 			return fmt.Errorf("aliyunOss requires endpoint or region for default provider")
+		}
+		if aliyunDownloadStrategy == ImageHostingDownloadStrategySigned {
+			if aliyunSignedURLTTLSeconds < minImageHostingSignedURLTTLSeconds ||
+				aliyunSignedURLTTLSeconds > maxImageHostingSignedURLTTLSeconds {
+				return fmt.Errorf(
+					"aliyunOss.signedUrlTtlSeconds must be between %d and %d for signed strategy",
+					minImageHostingSignedURLTTLSeconds,
+					maxImageHostingSignedURLTTLSeconds,
+				)
+			}
 		}
 	case string(ImageHostingProviderLocal):
 		if localUploadEndpoint == "" || localPublicBaseURL == "" {
@@ -1618,6 +1694,33 @@ func getRequiredInt(payload map[string]any, key string) (int, error) {
 	rawValue, ok := payload[key]
 	if !ok {
 		return 0, fmt.Errorf("%s is required", key)
+	}
+	number, ok := rawValue.(float64)
+	if !ok {
+		return 0, fmt.Errorf("%s must be number", key)
+	}
+	if number != math.Trunc(number) {
+		return 0, fmt.Errorf("%s must be integer", key)
+	}
+	return int(number), nil
+}
+
+func getOptionalString(payload map[string]any, key string) (string, bool, error) {
+	rawValue, ok := payload[key]
+	if !ok {
+		return "", false, nil
+	}
+	value, ok := rawValue.(string)
+	if !ok {
+		return "", false, fmt.Errorf("%s must be string", key)
+	}
+	return strings.TrimSpace(value), true, nil
+}
+
+func getOptionalInt(payload map[string]any, key string, fallback int) (int, error) {
+	rawValue, ok := payload[key]
+	if !ok {
+		return fallback, nil
 	}
 	number, ok := rawValue.(float64)
 	if !ok {

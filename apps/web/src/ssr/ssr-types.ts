@@ -27,6 +27,16 @@ export interface ReaderDocumentPayload {
   updatedAt: string;
 }
 
+export interface ReaderDocumentAttachmentPayload {
+  attachmentId: string;
+  documentId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewKind: "none" | "image" | "pdf" | "office" | "text";
+  previewSupported: boolean;
+}
+
 export interface ReaderViewerPayload {
   userId?: string;
   name?: string;
@@ -43,6 +53,7 @@ export interface ReaderAccessPayload {
 export interface ReaderPagePayload {
   space: ReaderSpacePayload;
   document: ReaderDocumentPayload;
+  attachments: ReaderDocumentAttachmentPayload[];
   tree: ReaderTreeNode[];
   activeDocId: string;
   requestOrigin?: string;

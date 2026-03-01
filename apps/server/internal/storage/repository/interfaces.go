@@ -418,6 +418,32 @@ type AdminDocumentListRecord struct {
 	SpaceOwnerEmail string
 }
 
+// ListAdminDocumentAttachmentsParams 管理后台文档附件分页查询参数。
+type ListAdminDocumentAttachmentsParams struct {
+	ActorUserID      string
+	RestrictToScopes bool
+	Keyword          string
+	SpaceID          string
+	DocumentID       string
+	Statuses         []models.EntityStatus
+	StorageProviders []string
+	Limit            int
+	Offset           int
+}
+
+// AdminDocumentAttachmentListRecord 管理后台文档附件列表项。
+type AdminDocumentAttachmentListRecord struct {
+	Attachment      models.DocumentAttachment
+	DocumentTitle   string
+	DocumentStatus  models.EntityStatus
+	SpaceName       string
+	SpaceOwnerID    string
+	SpaceOwnerName  string
+	SpaceOwnerEmail string
+	CreatedByName   string
+	CreatedByEmail  string
+}
+
 // UpdateDocumentStatusParams 管理后台文档状态更新参数。
 type UpdateDocumentStatusParams struct {
 	DocumentID   string
@@ -452,8 +478,13 @@ type DocumentRepository interface {
 type DocumentAttachmentRepository interface {
 	Create(ctx context.Context, attachment *models.DocumentAttachment) error
 	ListByDocumentID(ctx context.Context, documentID string, includeDeleted bool) ([]models.DocumentAttachment, error)
+	ListForAdmin(
+		ctx context.Context,
+		params ListAdminDocumentAttachmentsParams,
+	) ([]AdminDocumentAttachmentListRecord, int64, error)
 	GetByAttachmentID(ctx context.Context, attachmentID string) (*models.DocumentAttachment, error)
 	SoftDelete(ctx context.Context, attachmentID string, deletedAt time.Time) (bool, error)
+	HardDelete(ctx context.Context, attachmentID string) (bool, error)
 }
 
 // RevisionRepository 文档修订仓储最小接口。

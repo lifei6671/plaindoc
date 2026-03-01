@@ -127,7 +127,7 @@ func newRouter(
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
 	visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 	// 阅读页服务：聚合空间树与文档正文，供 SSR worker 渲染。
-	readerPageService := service.NewReaderPageService(db, visibilityService)
+	readerPageService := service.NewReaderPageService(db, visibilityService, documentAttachmentRepo)
 	// 阅读页 SSR 渲染缓存：仅缓存 Node 渲染结果，不缓存鉴权流程。
 	readerRenderCache := buildReaderRenderCache(cfg, logger, readerSSRDispatcher != nil)
 	// 首页 Handler：承接 SSR 渲染与登录态相关行为。
@@ -147,6 +147,16 @@ func newRouter(
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
+	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache)
+	workspaceHandler := handler.NewWorkspaceHandler(
+		workspaceRepo,
+		documentAttachmentRepo,
+		authService,
+		visibilityService,
+		imageHostingService,
+		documentAttachmentTokenService,
+		readerRenderCache,
+	)
 
 	// ---- SSR 页面与静态资源路由（不走 /api）----
 	// 模板静态资源（CSS/字体/图片）统一挂在 /assets。
@@ -171,6 +181,8 @@ func newRouter(
 	router.GET("/r/:spaceId", readerPageHandler.Space)
 	// 文档阅读页：优先走 SSR worker 渲染，失败时降级 HTML 壳页。
 	router.GET("/r/:spaceId/:docId", readerPageHandler.Page)
+	// 文档附件预览页：页面内部按 purpose=preview 动态获取可访问链接。
+	router.GET("/preview/docs/:docId/attachments/:attachmentId", workspaceHandler.DocumentAttachmentPreviewPage)
 	// 页面层登出入口：与 SSR 页面交互保持一致。
 	router.POST("/logout", homeHandler.Logout)
 	// 本地图片公开访问路径（不带 /api），便于前端 Markdown 直接渲染。
@@ -279,17 +291,6 @@ func newRouter(
 		api.GET("/uploads/*path", imageHostingHandler.ServeLocalImage)
 
 		// ---- 工作区与文档协作 API（业务主链）----
-		accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache)
-		workspaceHandler := handler.NewWorkspaceHandler(
-			workspaceRepo,
-			documentAttachmentRepo,
-			authService,
-			visibilityService,
-			imageHostingService,
-			documentAttachmentTokenService,
-			readerRenderCache,
-		)
-
 		// 空间列表（按访问者可见范围过滤）。
 		api.GET("/spaces", workspaceHandler.ListSpaces)
 		// 新建空间（业务端入口，不是后台治理入口）。
@@ -320,7 +321,8 @@ func newRouter(
 		api.GET("/docs/:docId/attachments", workspaceHandler.ListDocumentAttachments)
 		// 上传文档附件（当前仅支持本地存储 provider）。
 		api.POST("/docs/:docId/attachments", workspaceHandler.UploadDocumentAttachment)
-		// 删除文档附件（支持可选物理删除本地文件）。
+		// 删除文档附件：
+		// physicalDelete=false => 逻辑删除；physicalDelete=true => 删除文件并硬删除记录。
 		api.DELETE("/docs/:docId/attachments/:attachmentId", workspaceHandler.DeleteDocumentAttachment)
 		// 创建文档附件访问链接（下载/预览）。
 		api.POST(
@@ -356,6 +358,12 @@ func newRouter(
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
 		adminDocumentService := service.NewAdminDocumentService(documentRepo, userRepo, adminAccessService, adminAuditService)
 		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
+		adminDocumentAttachmentService := service.NewAdminDocumentAttachmentService(
+			documentAttachmentRepo,
+			adminAccessService,
+			adminAuditService,
+		)
+		adminDocumentAttachmentHandler := handler.NewAdminDocumentAttachmentHandler(adminDocumentAttachmentService)
 		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
 		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
 		dataRetentionCleanupService := service.NewDataRetentionCleanupService(db, systemConfigRepo)
@@ -552,6 +560,19 @@ func newRouter(
 					},
 				),
 				adminDocumentHandler.DeleteDocument,
+			)
+			adminAPI.GET("/document-attachments", adminDocumentAttachmentHandler.ListAttachments)
+			adminAPI.DELETE(
+				"/document-attachments/:attachmentId",
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document_attachment.delete",
+						TargetType:    "document_attachment",
+						TargetIDParam: "attachmentId",
+					},
+				),
+				adminDocumentAttachmentHandler.DeleteAttachment,
 			)
 
 			// ---- 主题治理（仅平台管理员）----

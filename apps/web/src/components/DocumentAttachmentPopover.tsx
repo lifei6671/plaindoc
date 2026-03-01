@@ -6,9 +6,10 @@ import {
   Paperclip,
   RefreshCw,
   Trash2,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
-import { memo, useMemo, useRef, type ChangeEvent } from "react";
+import { memo, useEffect, useMemo, useRef, type ChangeEvent } from "react";
 import type { DocumentAttachment } from "../data-access";
 import {
   Tooltip,
@@ -16,7 +17,6 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "./ui/tooltip";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 interface PendingAttachmentAction {
   attachmentId: string;
@@ -25,6 +25,9 @@ interface PendingAttachmentAction {
 
 interface DocumentAttachmentPopoverProps {
   attachments: DocumentAttachment[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  showTrigger?: boolean;
   disabled?: boolean;
   loading?: boolean;
   uploading?: boolean;
@@ -54,6 +57,9 @@ function formatFileSize(sizeBytes: number): string {
 
 export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover({
   attachments,
+  open,
+  onOpenChange,
+  showTrigger = true,
   disabled = false,
   loading = false,
   uploading = false,
@@ -67,6 +73,21 @@ export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasAttachments = attachments.length > 0;
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onOpenChange(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onOpenChange, open]);
+
   const summaryText = useMemo(() => {
     if (loading) {
       return "附件加载中...";
@@ -78,7 +99,7 @@ export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover
   }, [attachments.length, hasAttachments, loading]);
 
   const triggerUploadPicker = () => {
-    if (disabled || uploading) {
+    if (disabled || uploading || !open) {
       return;
     }
     const input = fileInputRef.current;
@@ -104,142 +125,161 @@ export const DocumentAttachmentPopover = memo(function DocumentAttachmentPopover
 
   return (
     <>
-      <Popover>
+      {showTrigger ? (
         <TooltipProvider delayDuration={120}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="attachment-menu__trigger"
-                  aria-label="文档附件"
-                  disabled={disabled}
-                >
-                  <Paperclip size={15} />
-                </button>
-              </PopoverTrigger>
+              <button
+                type="button"
+                className="attachment-menu__trigger"
+                aria-label="文档附件"
+                disabled={disabled}
+                onClick={() => onOpenChange(true)}
+              >
+                <Paperclip size={15} />
+              </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">文档附件</TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        <PopoverContent className="attachment-menu" align="end" sideOffset={10}>
-          <div className="attachment-menu__header">
-            <div>
-              <p className="attachment-menu__title">文档附件</p>
-              <p className="attachment-menu__summary">{summaryText}</p>
+      ) : null}
+      {open ? (
+        <div
+          className="attachment-modal-layer"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              onOpenChange(false);
+            }
+          }}
+        >
+          <section className="attachment-modal attachment-menu" role="dialog" aria-modal="true" aria-label="文档附件">
+            <div className="attachment-menu__header">
+              <div>
+                <p className="attachment-menu__title">文档附件</p>
+                <p className="attachment-menu__summary">{summaryText}</p>
+              </div>
+              <div className="attachment-menu__header-actions">
+                <button
+                  type="button"
+                  className="attachment-menu__header-button"
+                  onClick={onRefresh}
+                  disabled={loading || uploading || disabled}
+                  aria-label="刷新附件列表"
+                >
+                  <RefreshCw size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="attachment-menu__header-button attachment-menu__header-button--primary"
+                  onClick={triggerUploadPicker}
+                  disabled={uploading || disabled}
+                >
+                  {uploading ? <LoaderCircle size={14} className="attachment-menu__spin" /> : <Upload size={14} />}
+                  <span>{uploading ? "上传中" : "上传"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="attachment-menu__header-button attachment-menu__header-button--ghost"
+                  onClick={() => onOpenChange(false)}
+                  aria-label="关闭附件弹窗"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
-            <div className="attachment-menu__header-actions">
-              <button
-                type="button"
-                className="attachment-menu__header-button"
-                onClick={onRefresh}
-                disabled={loading || uploading || disabled}
-                aria-label="刷新附件列表"
-              >
-                <RefreshCw size={14} />
-              </button>
-              <button
-                type="button"
-                className="attachment-menu__header-button attachment-menu__header-button--primary"
-                onClick={triggerUploadPicker}
-                disabled={uploading || disabled}
-              >
-                {uploading ? <LoaderCircle size={14} className="attachment-menu__spin" /> : <Upload size={14} />}
-                <span>{uploading ? "上传中" : "上传"}</span>
-              </button>
-            </div>
-          </div>
 
-          <div className="attachment-menu__body">
-            {loading ? (
-              <div className="attachment-menu__loading">
-                <LoaderCircle size={14} className="attachment-menu__spin" />
-                <span>附件列表加载中...</span>
-              </div>
-            ) : null}
-            {!loading && !hasAttachments ? (
-              <div className="attachment-menu__empty">
-                <FileText size={14} />
-                <span>暂无附件，点击“上传”添加文件</span>
-              </div>
-            ) : null}
-            {!loading && hasAttachments ? (
-              <ul className="attachment-menu__list">
-                {attachments.map((attachment) => {
-                  const isBusy = isAttachmentActionBusy(attachment.attachmentId);
-                  const busyAction = isBusy ? pendingAction?.action : null;
-                  return (
-                    <li key={attachment.attachmentId} className="attachment-menu__item">
-                      <div className="attachment-menu__meta">
-                        <p className="attachment-menu__name" title={attachment.fileName}>
-                          {attachment.fileName}
-                        </p>
-                        <p className="attachment-menu__info">
-                          <span>{formatFileSize(attachment.sizeBytes)}</span>
-                          <span>·</span>
-                          <span>{attachment.storageProvider}</span>
-                          {attachment.requiresAuthDownload ? (
-                            <>
-                              <span>·</span>
-                              <span className="attachment-menu__badge">鉴权</span>
-                            </>
+            <div className="attachment-menu__body">
+              {loading ? (
+                <div className="attachment-menu__loading">
+                  <LoaderCircle size={14} className="attachment-menu__spin" />
+                  <span>附件列表加载中...</span>
+                </div>
+              ) : null}
+              {!loading && !hasAttachments ? (
+                <div className="attachment-menu__empty">
+                  <FileText size={14} />
+                  <span>暂无附件，点击“上传”添加文件</span>
+                </div>
+              ) : null}
+              {!loading && hasAttachments ? (
+                <ul className="attachment-menu__list">
+                  {attachments.map((attachment) => {
+                    const isBusy = isAttachmentActionBusy(attachment.attachmentId);
+                    const busyAction = isBusy ? pendingAction?.action : null;
+                    return (
+                      <li key={attachment.attachmentId} className="attachment-menu__item">
+                        <div className="attachment-menu__meta">
+                          <p className="attachment-menu__name" title={attachment.fileName}>
+                            {attachment.fileName}
+                          </p>
+                          <p className="attachment-menu__info">
+                            <span>{formatFileSize(attachment.sizeBytes)}</span>
+                            <span>·</span>
+                            <span>{attachment.storageProvider}</span>
+                            {attachment.requiresAuthDownload ? (
+                              <>
+                                <span>·</span>
+                                <span className="attachment-menu__badge">鉴权</span>
+                              </>
+                            ) : null}
+                          </p>
+                        </div>
+                        <div className="attachment-menu__actions">
+                          {attachment.previewSupported ? (
+                            <button
+                              type="button"
+                              className="attachment-menu__action"
+                              onClick={() => onPreview(attachment)}
+                              disabled={uploading || isBusy || disabled}
+                              title="在线预览"
+                              aria-label={`预览附件 ${attachment.fileName}`}
+                            >
+                              {busyAction === "preview" ? (
+                                <LoaderCircle size={13} className="attachment-menu__spin" />
+                              ) : (
+                                <Eye size={13} />
+                              )}
+                            </button>
                           ) : null}
-                        </p>
-                      </div>
-                      <div className="attachment-menu__actions">
-                        {attachment.previewSupported ? (
                           <button
                             type="button"
                             className="attachment-menu__action"
-                            onClick={() => onPreview(attachment)}
+                            onClick={() => onDownload(attachment)}
                             disabled={uploading || isBusy || disabled}
-                            title="在线预览"
-                            aria-label={`预览附件 ${attachment.fileName}`}
+                            title="下载文件"
+                            aria-label={`下载附件 ${attachment.fileName}`}
                           >
-                            {busyAction === "preview" ? (
+                            {busyAction === "download" ? (
                               <LoaderCircle size={13} className="attachment-menu__spin" />
                             ) : (
-                              <Eye size={13} />
+                              <Download size={13} />
                             )}
                           </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="attachment-menu__action"
-                          onClick={() => onDownload(attachment)}
-                          disabled={uploading || isBusy || disabled}
-                          title="下载文件"
-                          aria-label={`下载附件 ${attachment.fileName}`}
-                        >
-                          {busyAction === "download" ? (
-                            <LoaderCircle size={13} className="attachment-menu__spin" />
-                          ) : (
-                            <Download size={13} />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="attachment-menu__action attachment-menu__action--danger"
-                          onClick={() => onDelete(attachment)}
-                          disabled={uploading || isBusy || disabled}
-                          title="删除附件"
-                          aria-label={`删除附件 ${attachment.fileName}`}
-                        >
-                          {busyAction === "delete" ? (
-                            <LoaderCircle size={13} className="attachment-menu__spin" />
-                          ) : (
-                            <Trash2 size={13} />
-                          )}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </div>
-        </PopoverContent>
-      </Popover>
+                          <button
+                            type="button"
+                            className="attachment-menu__action attachment-menu__action--danger"
+                            onClick={() => onDelete(attachment)}
+                            disabled={uploading || isBusy || disabled}
+                            title="删除附件"
+                            aria-label={`删除附件 ${attachment.fileName}`}
+                          >
+                            {busyAction === "delete" ? (
+                              <LoaderCircle size={13} className="attachment-menu__spin" />
+                            ) : (
+                              <Trash2 size={13} />
+                            )}
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
       <input
         ref={fileInputRef}
         type="file"

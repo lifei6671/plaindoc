@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LoaderCircle,
   LogOut,
+  Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -36,12 +37,22 @@ import { ADMIN_LOGIN_ROUTE_PATH, ADMIN_ROUTE_BASE_PATH } from "./routes";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AdminSpacesPage } from "./pages/AdminSpacesPage";
 import { AdminDocumentsPage } from "./pages/AdminDocumentsPage";
+import { AdminDocumentAttachmentsPage } from "./pages/AdminDocumentAttachmentsPage";
 import { AdminThemesPage } from "./pages/AdminThemesPage";
 import { AdminSystemConfigsPage } from "./pages/AdminSystemConfigsPage";
 import { AdminAuditsPage } from "./pages/AdminAuditsPage";
 import { AdminProfilePage } from "./pages/AdminProfilePage";
 
-type AdminMenuKey = "dashboard" | "profile" | "users" | "spaces" | "documents" | "themes" | "system" | "audits";
+type AdminMenuKey =
+  | "dashboard"
+  | "profile"
+  | "users"
+  | "spaces"
+  | "documents"
+  | "attachments"
+  | "themes"
+  | "system"
+  | "audits";
 
 interface AdminMenuItem {
   key: AdminMenuKey;
@@ -112,6 +123,13 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
       description: "筛选文档并处理违规内容",
       path: "/admin/documents",
       icon: FileText
+    },
+    {
+      key: "attachments",
+      label: "附件管理",
+      description: "检索与删除文档附件",
+      path: "/admin/attachments",
+      icon: Paperclip
     }
   );
 
@@ -195,6 +213,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         title: "文档管理",
         description: "文档检索、状态变更和内容治理。",
         todo: ["实现多条件搜索", "支持封禁/删除", "支持按空间过滤"]
+      };
+    case "attachments":
+      return {
+        title: "附件管理",
+        description: "附件检索、删除与审计追踪。",
+        todo: ["支持多条件搜索", "支持逻辑删除/物理删除", "记录附件治理审计日志"]
       };
     case "themes":
       return {
@@ -300,7 +324,7 @@ const DASHBOARD_TODO: readonly DashboardTodo[] = [
 const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
   { label: "账号", keys: ["profile"] },
-  { label: "内容管理", keys: ["users", "spaces", "documents"] },
+  { label: "内容管理", keys: ["users", "spaces", "documents", "attachments"] },
   { label: "系统治理", keys: ["themes", "system", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
@@ -795,6 +819,8 @@ export function AdminApp({
                 <AdminSpacesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "documents" ? (
                 <AdminDocumentsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "attachments" ? (
+                <AdminDocumentAttachmentsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "themes" ? (
                 <AdminThemesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "system" ? (

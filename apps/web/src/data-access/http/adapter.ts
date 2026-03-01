@@ -4,6 +4,8 @@ import {
   type AdminAuditListInput,
   type AdminAuditListResult,
   type AdminDocument,
+  type AdminDocumentAttachmentListInput,
+  type AdminDocumentAttachmentListResult,
   type AdminDocumentListInput,
   type AdminDocumentListResult,
   type AdminGateway,
@@ -1431,6 +1433,56 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         targetId: targetDocumentID
       });
       await request<void>(`/admin/documents/${encodeURIComponent(targetDocumentID)}`, {
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async listDocumentAttachments(input: AdminDocumentAttachmentListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.spaceId === "string" && input.spaceId.trim()) {
+        query.set("spaceId", input.spaceId.trim());
+      }
+      if (typeof input.documentId === "string" && input.documentId.trim()) {
+        query.set("documentId", input.documentId.trim());
+      }
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status);
+      }
+      if (typeof input.storageProvider === "string" && input.storageProvider.trim()) {
+        query.set("storageProvider", input.storageProvider);
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+
+      const queryText = query.toString();
+      const path = queryText ? `/admin/document-attachments?${queryText}` : "/admin/document-attachments";
+      return request<AdminDocumentAttachmentListResult>(path);
+    },
+    async deleteDocumentAttachment(input: { attachmentId: string; physicalDelete?: boolean }) {
+      const targetAttachmentID = input.attachmentId.trim();
+      if (!targetAttachmentID) {
+        throw new Error("附件 ID 不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document_attachment.delete",
+        targetType: "document_attachment",
+        targetId: targetAttachmentID
+      });
+      const query = new URLSearchParams();
+      if (input.physicalDelete === true) {
+        query.set("physicalDelete", "true");
+      }
+      const queryText = query.toString();
+      const path =
+        `/admin/document-attachments/${encodeURIComponent(targetAttachmentID)}` + (queryText ? `?${queryText}` : "");
+      await request<void>(path, {
         method: "DELETE",
         headers: buildAdminOperationTokenHeaders(operationToken)
       });

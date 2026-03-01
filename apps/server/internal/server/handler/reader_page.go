@@ -40,13 +40,14 @@ type readerPageViewerIdentity struct {
 }
 
 type readerPagePayload struct {
-	Space         service.ReaderSpaceViewModel      `json:"space"`
-	Document      service.ReaderDocumentViewModel   `json:"document"`
-	Tree          []service.ReaderTreeNodeViewModel `json:"tree"`
-	ActiveDocID   string                            `json:"activeDocId"`
-	RequestOrigin string                            `json:"requestOrigin,omitempty"`
-	Viewer        readerPageViewerIdentity          `json:"viewer"`
-	Access        *readerPageAccessState            `json:"access,omitempty"`
+	Space         service.ReaderSpaceViewModel                `json:"space"`
+	Document      service.ReaderDocumentViewModel             `json:"document"`
+	Attachments   []service.ReaderDocumentAttachmentViewModel `json:"attachments"`
+	Tree          []service.ReaderTreeNodeViewModel           `json:"tree"`
+	ActiveDocID   string                                      `json:"activeDocId"`
+	RequestOrigin string                                      `json:"requestOrigin,omitempty"`
+	Viewer        readerPageViewerIdentity                    `json:"viewer"`
+	Access        *readerPageAccessState                      `json:"access,omitempty"`
 }
 
 type readerPageAccessState struct {
@@ -228,6 +229,7 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 	payload := readerPagePayload{
 		Space:         viewModel.Space,
 		Document:      viewModel.Document,
+		Attachments:   viewModel.Attachments,
 		Tree:          viewModel.Tree,
 		ActiveDocID:   viewModel.ActiveDocID,
 		RequestOrigin: resolveRequestOrigin(c),
@@ -479,6 +481,7 @@ func (h *readerPageHandler) renderReaderAccessDeniedPage(
 			AuthorNickname: "未知作者",
 			UpdatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 		},
+		Attachments:   []service.ReaderDocumentAttachmentViewModel{},
 		Tree:          tree,
 		ActiveDocID:   activeDocID,
 		RequestOrigin: resolveRequestOrigin(c),

@@ -20,6 +20,7 @@ import {
   LoaderCircle,
   Monitor,
   Minus,
+  Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
   Quote,
@@ -640,6 +641,23 @@ function resolveAttachmentAccessURL(rawURL: string): string {
   return new URL(normalizedURL, window.location.origin).toString();
 }
 
+function buildAttachmentPreviewPageURL(docId: string, attachmentId: string): string {
+  const normalizedDocID = docId.trim();
+  const normalizedAttachmentID = attachmentId.trim();
+  if (!normalizedDocID || !normalizedAttachmentID) {
+    return "";
+  }
+  const pathname =
+    "/preview/docs/" +
+    encodeURIComponent(normalizedDocID) +
+    "/attachments/" +
+    encodeURIComponent(normalizedAttachmentID);
+  if (typeof window === "undefined") {
+    return pathname;
+  }
+  return new URL(pathname, window.location.origin).toString();
+}
+
 function triggerDownloadByURL(resourceURL: string, suggestedFileName?: string): void {
   const normalizedURL = resolveAttachmentAccessURL(resourceURL);
   if (!normalizedURL) {
@@ -656,23 +674,26 @@ function triggerDownloadByURL(resourceURL: string, suggestedFileName?: string): 
   anchor.remove();
 }
 
+function openInNewTabByURL(resourceURL: string): void {
+  const normalizedURL = resolveAttachmentAccessURL(resourceURL);
+  if (!normalizedURL) {
+    return;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = normalizedURL;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 function triggerDownloadByBlob(blob: Blob, suggestedFileName: string): void {
   const objectURL = URL.createObjectURL(blob);
   triggerDownloadByURL(objectURL, suggestedFileName);
   window.setTimeout(() => {
     URL.revokeObjectURL(objectURL);
   }, 15_000);
-}
-
-function triggerPreviewByBlob(blob: Blob): void {
-  const objectURL = URL.createObjectURL(blob);
-  const previewWindow = window.open(objectURL, "_blank", "noopener,noreferrer");
-  if (!previewWindow) {
-    window.location.assign(objectURL);
-  }
-  window.setTimeout(() => {
-    URL.revokeObjectURL(objectURL);
-  }, 60_000);
 }
 
 async function fetchAttachmentBlobWithAuth(resourceURL: string): Promise<{
@@ -970,8 +991,10 @@ export default function App() {
   const [imageUploadCompletedCount, setImageUploadCompletedCount] = useState(0);
   // 文档附件列表与交互状态。
   const [documentAttachments, setDocumentAttachments] = useState<DocumentAttachment[]>([]);
+  const [attachmentListDocID, setAttachmentListDocID] = useState("");
   const [isAttachmentListLoading, setIsAttachmentListLoading] = useState(false);
   const [isAttachmentUploading, setIsAttachmentUploading] = useState(false);
+  const [isAttachmentDialogOpen, setIsAttachmentDialogOpen] = useState(false);
   const [pendingAttachmentAction, setPendingAttachmentAction] = useState<{
     attachmentId: string;
     action: "download" | "preview" | "delete";
@@ -1023,6 +1046,13 @@ export default function App() {
     () => resolvePreviewTheme(activePreviewThemeId, previewThemes),
     [activePreviewThemeId, previewThemes]
   );
+  const activeDocumentAttachments = useMemo(() => {
+    const currentDocumentID = (activeDocId ?? "").trim();
+    if (!currentDocumentID || attachmentListDocID !== currentDocumentID) {
+      return [];
+    }
+    return documentAttachments;
+  }, [activeDocId, attachmentListDocID, documentAttachments]);
   // 预览区主题类名：挂到正文 article 上参与主题变量匹配。
   const activePreviewThemeClassName = useMemo(
     () => getPreviewThemeClassName(activePreviewTheme.id),
@@ -1623,12 +1653,14 @@ export default function App() {
       const targetDocumentID = (docIDInput ?? activeDocIDRef.current ?? "").trim();
       if (!targetDocumentID) {
         setDocumentAttachments([]);
+        setAttachmentListDocID("");
         return;
       }
       setIsAttachmentListLoading(true);
       try {
         const attachmentItems = await dataGateway.document.listAttachments(targetDocumentID);
         setDocumentAttachments(attachmentItems);
+        setAttachmentListDocID(targetDocumentID);
       } catch (error) {
         console.error("[editor][attachment] 附件列表读取失败", {
           docId: targetDocumentID,
@@ -1647,11 +1679,18 @@ export default function App() {
   useEffect(() => {
     if (!activeUser || !activeDocId) {
       setDocumentAttachments([]);
+      setAttachmentListDocID("");
       setIsAttachmentListLoading(false);
       return;
     }
     void reloadDocumentAttachments(activeDocId);
   }, [activeDocId, activeUser, reloadDocumentAttachments]);
+
+  useEffect(() => {
+    if (!activeDocId) {
+      setIsAttachmentDialogOpen(false);
+    }
+  }, [activeDocId]);
 
   const handleUploadDocumentAttachments = useCallback(
     async (files: File[]): Promise<void> => {
@@ -1712,7 +1751,7 @@ export default function App() {
 
       const confirmPhysicalDelete = await confirmByModal({
         title: "是否物理删除文件",
-        description: "确认后将同时尝试删除底层文件；取消则只做逻辑删除。",
+        description: "确认后将删除附件记录并删除物理文件；取消则仅标记逻辑删除。",
         confirmText: "物理删除",
         cancelText: "仅逻辑删除",
         tone: "danger"
@@ -1817,17 +1856,12 @@ export default function App() {
         action: "preview"
       });
       try {
-        const accessLink = await dataGateway.document.createAttachmentAccessLink({
-          docId: targetDocumentID,
-          attachmentId: attachment.attachmentId,
-          purpose: "preview"
-        });
-        if (attachment.requiresAuthDownload || accessLink.requiresAuth) {
-          const { blob } = await fetchAttachmentBlobWithAuth(accessLink.url);
-          triggerPreviewByBlob(blob);
-        } else {
-          window.open(resolveAttachmentAccessURL(accessLink.url), "_blank", "noopener,noreferrer");
+        const previewPageURL = buildAttachmentPreviewPageURL(targetDocumentID, attachment.attachmentId);
+        if (!previewPageURL) {
+          throw new Error("附件预览链接无效");
         }
+        openInNewTabByURL(previewPageURL);
+        setStatusMessage(`已打开预览页：${attachment.fileName}`);
       } catch (error) {
         console.error("[editor][attachment] 附件预览失败", {
           docId: targetDocumentID,
@@ -1845,7 +1879,7 @@ export default function App() {
         });
       }
     },
-    [dataGateway]
+    []
   );
 
   // 登录后加载后台图床配置：由管理后台统一维护。
@@ -2961,7 +2995,10 @@ export default function App() {
           </div>
           <div className="header-actions">
             <DocumentAttachmentPopover
-              attachments={documentAttachments}
+              attachments={activeDocumentAttachments}
+              open={isAttachmentDialogOpen}
+              onOpenChange={setIsAttachmentDialogOpen}
+              showTrigger
               disabled={!activeDocId}
               loading={isAttachmentListLoading}
               uploading={isAttachmentUploading}
@@ -3135,6 +3172,20 @@ export default function App() {
           <span className="status-pill" title={activeDocumentTitle}>
             {activeDocumentTitle}
           </span>
+          {activeDocumentAttachments.length > 0 ? (
+            <>
+              <span className="status-separator">|</span>
+              <button
+                type="button"
+                className="status-attachment-trigger"
+                onClick={() => setIsAttachmentDialogOpen(true)}
+                aria-label={`打开附件列表，共 ${activeDocumentAttachments.length} 个附件`}
+              >
+                <Paperclip size={12} aria-hidden="true" />
+                <span>附件 {activeDocumentAttachments.length}</span>
+              </button>
+            </>
+          ) : null}
         </div>
         <div className="status-bar__side status-bar__side--right">
           {/* 保存状态图标：未保存=黄色，保存中=旋转，已保存=绿色。 */}

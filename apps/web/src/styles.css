@@ -205,9 +205,34 @@ input[type="reset"]:not(:disabled) {
   cursor: not-allowed;
 }
 
-/* 附件菜单弹层。 */
+/* 附件弹窗层：替代原先 popover，提供更稳定的列表交互空间。 */
+.attachment-modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  background: rgba(15, 23, 42, 0.44);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 24px) 24px 24px;
+}
+
+.attachment-modal {
+  border: 1px solid #d7e0ea;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.24);
+  overflow: hidden;
+}
+
+.attachment-modal.attachment-menu {
+  width: min(1024px, 92vw);
+  max-width: 1024px;
+}
+
+/* 附件菜单内容区。 */
 .attachment-menu {
-  width: min(420px, 94vw);
+  width: 100%;
   padding: 0;
   overflow: hidden;
 }
@@ -272,8 +297,12 @@ input[type="reset"]:not(:disabled) {
   color: #1d4ed8;
 }
 
+.attachment-menu__header-button--ghost {
+  color: #475569;
+}
+
 .attachment-menu__body {
-  max-height: min(420px, 58vh);
+  max-height: min(520px, 65vh);
   overflow: auto;
   padding: 8px 10px 10px;
 }
@@ -2620,6 +2649,31 @@ input[type="reset"]:not(:disabled) {
   color: #94a3b8;
 }
 
+.status-attachment-trigger {
+  height: 22px;
+  border: 1px solid #dbe2ea;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1e293b;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-attachment-trigger:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.status-attachment-trigger:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
 .confirm-dialog-layer {
   position: fixed;
   inset: 0;
@@ -3046,6 +3100,14 @@ input[type="reset"]:not(:disabled) {
 
   .confirm-dialog-layer {
     padding: 12px;
+  }
+
+  .attachment-modal-layer {
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px 12px;
+  }
+
+  .attachment-modal.attachment-menu {
+    width: min(100%, 100vw - 24px);
   }
 
   .confirm-dialog {

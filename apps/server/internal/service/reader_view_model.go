@@ -27,6 +27,17 @@ type ReaderDocumentViewModel struct {
 	UpdatedAt      string            `json:"updatedAt"`
 }
 
+// ReaderDocumentAttachmentViewModel 表示阅读页附件元数据。
+type ReaderDocumentAttachmentViewModel struct {
+	AttachmentID     string `json:"attachmentId"`
+	DocumentID       string `json:"documentId"`
+	FileName         string `json:"fileName"`
+	MimeType         string `json:"mimeType"`
+	SizeBytes        int64  `json:"sizeBytes"`
+	PreviewKind      string `json:"previewKind"`
+	PreviewSupported bool   `json:"previewSupported"`
+}
+
 // ReaderSpaceViewModel 表示阅读页空间元信息。
 type ReaderSpaceViewModel struct {
 	ID    string `json:"id"`
@@ -36,8 +47,9 @@ type ReaderSpaceViewModel struct {
 
 // ReaderPageViewModel 表示阅读页 SSR 所需完整输入。
 type ReaderPageViewModel struct {
-	Space       ReaderSpaceViewModel      `json:"space"`
-	Document    ReaderDocumentViewModel   `json:"document"`
-	Tree        []ReaderTreeNodeViewModel `json:"tree"`
-	ActiveDocID string                    `json:"activeDocId"`
+	Space       ReaderSpaceViewModel                `json:"space"`
+	Document    ReaderDocumentViewModel             `json:"document"`
+	Attachments []ReaderDocumentAttachmentViewModel `json:"attachments"`
+	Tree        []ReaderTreeNodeViewModel           `json:"tree"`
+	ActiveDocID string                              `json:"activeDocId"`
 }
