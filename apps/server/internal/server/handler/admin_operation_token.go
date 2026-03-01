@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -44,15 +45,22 @@ func (h *adminOperationTokenHandler) Issue(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminOperationTokenErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req issueAdminOperationTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminOperationTokenErrRequestBody.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("operation", req.Operation),
+		logit.Any("targetType", req.TargetType),
+		logit.Any("targetID", req.TargetID),
+	)
 
 	payload, err := h.adminOperationTokenService.Issue(c.Request.Context(), service.IssueAdminOperationTokenInput{
 		ActorUserID: actorUserID,
@@ -61,6 +69,7 @@ func (h *adminOperationTokenHandler) Issue(c *gin.Context) {
 		TargetID:    strings.TrimSpace(req.TargetID),
 	})
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.FromError(c, err)
 		return
 	}

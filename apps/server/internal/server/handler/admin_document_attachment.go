@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -169,6 +170,11 @@ func (h *adminDocumentAttachmentHandler) DeleteAttachment(c *gin.Context) {
 		response.AdminDocumentAttachmentErrAttachmentIDRequired.Write(c)
 		return
 	}
+
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("attachmentId", attachmentID),
+		logit.Any("actorUserID", actorUserID),
+	)
 
 	result, err := h.adminDocumentAttachmentService.DeleteAttachment(c.Request.Context(), service.DeleteAdminDocumentAttachmentInput{
 		ActorUserID:                actorUserID,

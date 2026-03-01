@@ -161,10 +161,12 @@ func (h *authHandler) Register(c *gin.Context) {
 	if h.authRegistrationPolicyService != nil {
 		allowRegistration, err := h.authRegistrationPolicyService.AllowRegistration(c.Request.Context())
 		if err != nil {
+			setRequestErrmsg(c, err, "检查注册策略失败")
 			response.InternalError(c)
 			return
 		}
 		if !allowRegistration {
+			setRequestErrmsg(c, nil, "网站未开启注册")
 			response.AuthErrRegistrationDisabled.Write(c)
 			return
 		}
@@ -172,6 +174,7 @@ func (h *authHandler) Register(c *gin.Context) {
 
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AuthErrRequestBody.Write(c)
 		return
 	}
@@ -180,14 +183,17 @@ func (h *authHandler) Register(c *gin.Context) {
 	name := strings.TrimSpace(req.Name)
 	password := req.Password
 	if email == "" || !strings.Contains(email, "@") {
+		setRequestErrmsg(c, nil, "邮箱格式不正确")
 		response.AuthErrEmail.Write(c)
 		return
 	}
 	if len(password) < 6 {
+		setRequestErrmsg(c, nil, "密码长度至少 6 位")
 		response.AuthErrPasswordLeast6Characters.Write(c)
 		return
 	}
 	if name == "" {
+		setRequestErrmsg(c, nil, "名字不能为空")
 		response.AuthErrNameRequired.Write(c)
 		return
 	}
@@ -201,11 +207,13 @@ func (h *authHandler) Register(c *gin.Context) {
 			CaptchaAnswer: strings.TrimSpace(req.CaptchaAnswer),
 		},
 	); err != nil {
+		setRequestErrmsg(c, err, "检查认证风险失败")
 		return
 	}
 
 	session, err := h.authService.Register(c.Request.Context(), email, password, name)
 	if err != nil {
+		setRequestErrmsg(c, err, "用户注册失败")
 		h.recordAuthRisk(c, service.AuthRiskRecordInput{
 			Scene:      "register",
 			ClientIP:   strings.TrimSpace(c.ClientIP()),
@@ -251,6 +259,7 @@ func (h *authHandler) Options(c *gin.Context) {
 
 	options, err := h.authRegistrationPolicyService.ResolveLoginOptions(c.Request.Context())
 	if err != nil {
+		setRequestErrmsg(c, err, "获取登录选项失败")
 		response.InternalError(c)
 		return
 	}
@@ -282,6 +291,7 @@ func (h *authHandler) Login(c *gin.Context) {
 
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AuthErrRequestBody.Write(c)
 		return
 	}
@@ -291,6 +301,7 @@ func (h *authHandler) Login(c *gin.Context) {
 		identifier = strings.TrimSpace(req.Email)
 	}
 	if identifier == "" || req.Password == "" {
+		setRequestErrmsg(c, nil, "邮箱/用户名和密码不能为空")
 		response.AuthErrEmailPasswordRequired.Write(c)
 		return
 	}
@@ -313,6 +324,7 @@ func (h *authHandler) Login(c *gin.Context) {
 		Password:   req.Password,
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "用户登录失败")
 		h.recordAuthRisk(c, service.AuthRiskRecordInput{
 			Scene:      "login",
 			ClientIP:   strings.TrimSpace(c.ClientIP()),
@@ -353,12 +365,14 @@ func (h *authHandler) RefreshCaptcha(c *gin.Context) {
 
 	var req refreshCaptchaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AuthErrRequestBody.Write(c)
 		return
 	}
 
 	scene := strings.ToLower(strings.TrimSpace(req.Scene))
 	if scene != "login" && scene != "register" {
+		setRequestErrmsg(c, nil, "场景参数不合法")
 		response.AuthErrRequestBody.Write(c)
 		return
 	}
@@ -382,6 +396,7 @@ func (h *authHandler) RefreshCaptcha(c *gin.Context) {
 		CaptchaID:  strings.TrimSpace(req.CaptchaID),
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "刷新验证码失败")
 		var riskErr *service.AuthRiskError
 		if errors.As(err, &riskErr) {
 			h.writeAuthRiskError(c, riskErr)
@@ -427,6 +442,7 @@ func (h *authHandler) Refresh(c *gin.Context) {
 
 	session, err := h.authService.Refresh(c.Request.Context(), refreshToken)
 	if err != nil {
+		setRequestErrmsg(c, err, "刷新 token 失败")
 		if !response.WriteMappedError(c, err, authRefreshErrorMappings...) {
 			response.InternalError(c)
 		}
@@ -461,6 +477,7 @@ func (h *authHandler) Me(c *gin.Context) {
 
 	session, err := h.authService.Me(c.Request.Context(), accessToken)
 	if err != nil {
+		setRequestErrmsg(c, err, "获取会话信息失败")
 		if !response.WriteMappedError(c, err, authMeErrorMappings...) {
 			response.InternalError(c)
 		}
@@ -503,6 +520,7 @@ func (h *authHandler) checkAuthRisk(c *gin.Context, input service.AuthRiskCheckI
 	}
 
 	if err := h.authRiskControlService.Check(c.Request.Context(), input); err != nil {
+		setRequestErrmsg(c, err, "检查风控信息失败")
 		var riskErr *service.AuthRiskError
 		if errors.As(err, &riskErr) {
 			h.writeAuthRiskError(c, riskErr)

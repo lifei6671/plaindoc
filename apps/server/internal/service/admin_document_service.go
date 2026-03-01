@@ -87,10 +87,11 @@ type UpdateAdminDocumentStatusInput struct {
 
 // AdminDocumentService 封装文档管理业务。
 type AdminDocumentService struct {
-	documentRepo       repository.DocumentRepository
-	userRepo           repository.UserRepository
-	adminAccessService *AdminAccessService
-	adminAuditService  *AdminAuditService
+	documentRepo                     repository.DocumentRepository
+	userRepo                         repository.UserRepository
+	adminAccessService               *AdminAccessService
+	adminAuditService                *AdminAuditService
+	documentAttachmentCleanupService *DocumentAttachmentCleanupService
 }
 
 // NewAdminDocumentService 创建后台文档管理服务。
@@ -99,12 +100,14 @@ func NewAdminDocumentService(
 	userRepo repository.UserRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
+	documentAttachmentCleanupService *DocumentAttachmentCleanupService,
 ) *AdminDocumentService {
 	return &AdminDocumentService{
-		documentRepo:       documentRepo,
-		userRepo:           userRepo,
-		adminAccessService: adminAccessService,
-		adminAuditService:  adminAuditService,
+		documentRepo:                     documentRepo,
+		userRepo:                         userRepo,
+		adminAccessService:               adminAccessService,
+		adminAuditService:                adminAuditService,
+		documentAttachmentCleanupService: documentAttachmentCleanupService,
 	}
 }
 
@@ -298,6 +301,21 @@ func (s *AdminDocumentService) DeleteDocument(
 		return errcode.ErrAdminDocumentNotFound
 	}
 
+	var (
+		cleanupDeletedAttachments int64
+		cleanupDeletedBlobs       int64
+		cleanupErrorText          string
+	)
+	if s.documentAttachmentCleanupService != nil {
+		cleanupResult, cleanupErr := s.documentAttachmentCleanupService.CleanupDeletedDocumentAttachments(ctx, defaultDataRetentionBatchSize)
+		if cleanupErr != nil {
+			cleanupErrorText = strings.TrimSpace(cleanupErr.Error())
+		} else {
+			cleanupDeletedAttachments = cleanupResult.DeletedAttachments
+			cleanupDeletedBlobs = cleanupResult.DeletedBlobs
+		}
+	}
+
 	if err := s.recordDocumentAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleDocument,
 		Action:     AdminAuditActionDelete,
@@ -305,9 +323,12 @@ func (s *AdminDocumentService) DeleteDocument(
 		TargetID:   targetDocumentID,
 		Summary:    "document deleted: " + targetDocumentID,
 		Detail: map[string]any{
-			"spaceId":      accessInfo.SpaceID,
-			"statusBefore": accessInfo.Document.Status,
-			"statusAfter":  models.EntityStatusDeleted,
+			"spaceId":                   accessInfo.SpaceID,
+			"statusBefore":              accessInfo.Document.Status,
+			"statusAfter":               models.EntityStatusDeleted,
+			"cleanupDeletedAttachments": cleanupDeletedAttachments,
+			"cleanupDeletedBlobs":       cleanupDeletedBlobs,
+			"cleanupError":              cleanupErrorText,
 		},
 	}); err != nil {
 		return err

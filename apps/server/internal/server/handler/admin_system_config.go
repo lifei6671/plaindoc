@@ -53,6 +53,8 @@ type runDataRetentionCleanupResponse struct {
 	DeletedAuthCaptchaChallenges int64                              `json:"deletedAuthCaptchaChallenges"`
 	DeletedAuthRiskStates        int64                              `json:"deletedAuthRiskStates"`
 	DeletedUserSessions          int64                              `json:"deletedUserSessions"`
+	DeletedDocumentAttachments   int64                              `json:"deletedDocumentAttachments"`
+	DeletedAttachmentBlobs       int64                              `json:"deletedAttachmentBlobs"`
 	DeletedDocumentImageAssets   int64                              `json:"deletedDocumentImageAssets"`
 	TotalDeleted                 int64                              `json:"totalDeleted"`
 }
@@ -99,18 +101,21 @@ func (h *adminSystemConfigHandler) UpsertConfig(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminSystemConfigErrAdminActorMissing.Write(c)
 		return
 	}
 
 	configKey := strings.TrimSpace(c.Param("key"))
 	if configKey == "" {
+		setRequestErrmsg(c, nil, "配置项不存在")
 		response.AdminSystemConfigErrConfigKeyRequired.Write(c)
 		return
 	}
 
 	var req upsertAdminSystemConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminSystemConfigErrRequestBody.Write(c)
 		return
 	}
@@ -123,6 +128,7 @@ func (h *adminSystemConfigHandler) UpsertConfig(c *gin.Context) {
 		ExpectedVersion: req.ExpectedVersion,
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "创建/更新系统配置失败")
 		response.FromError(c, err)
 		return
 	}
@@ -139,12 +145,14 @@ func (h *adminSystemConfigHandler) TestLDAPConnection(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminSystemConfigErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req testAdminLDAPConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminSystemConfigErrRequestBody.Write(c)
 		return
 	}
@@ -157,6 +165,7 @@ func (h *adminSystemConfigHandler) TestLDAPConnection(c *gin.Context) {
 			ProviderID:  strings.TrimSpace(req.ProviderID),
 		},
 	); err != nil {
+		setRequestErrmsg(c, err, "测试 LDAP 连接失败")
 		response.FromError(c, err)
 		return
 	}
@@ -173,12 +182,14 @@ func (h *adminSystemConfigHandler) RunDataRetentionCleanup(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminSystemConfigErrAdminActorMissing.Write(c)
 		return
 	}
 
 	configKey := strings.TrimSpace(c.Param("key"))
 	if configKey == "" {
+		setRequestErrmsg(c, nil, "配置项不存在")
 		response.AdminSystemConfigErrConfigKeyRequired.Write(c)
 		return
 	}
@@ -192,6 +203,7 @@ func (h *adminSystemConfigHandler) RunDataRetentionCleanup(c *gin.Context) {
 		},
 	)
 	if err != nil {
+		setRequestErrmsg(c, err, "运行数据保留清理失败")
 		response.FromError(c, err)
 		return
 	}
@@ -217,6 +229,8 @@ func mapRunDataRetentionCleanupResponse(
 		value.DeletedAuthCaptchaChallenges +
 		value.DeletedAuthRiskStates +
 		value.DeletedUserSessions +
+		value.DeletedDocumentAttachments +
+		value.DeletedAttachmentBlobs +
 		value.DeletedDocumentImageAssets
 
 	return runDataRetentionCleanupResponse{
@@ -236,6 +250,8 @@ func mapRunDataRetentionCleanupResponse(
 		DeletedAuthCaptchaChallenges: value.DeletedAuthCaptchaChallenges,
 		DeletedAuthRiskStates:        value.DeletedAuthRiskStates,
 		DeletedUserSessions:          value.DeletedUserSessions,
+		DeletedDocumentAttachments:   value.DeletedDocumentAttachments,
+		DeletedAttachmentBlobs:       value.DeletedAttachmentBlobs,
 		DeletedDocumentImageAssets:   value.DeletedDocumentImageAssets,
 		TotalDeleted:                 totalDeleted,
 	}

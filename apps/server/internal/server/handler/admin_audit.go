@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -55,28 +56,33 @@ func (h *adminAuditHandler) ListAudits(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminAuditErrAdminActorMissing.Write(c)
 		return
 	}
 
 	page, err := parseQueryInt(c.Query("page"))
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminAuditErrPagePositiveInteger.Write(c)
 		return
 	}
 	pageSize, err := parseQueryInt(c.Query("pageSize"))
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminAuditErrPageSizePositiveInteger.Write(c)
 		return
 	}
 
 	createdAtFrom, err := parseAdminAuditQueryTime(c.Query("from"))
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminAuditErrRFC3339Datetime.Write(c)
 		return
 	}
 	createdAtTo, err := parseAdminAuditQueryTime(c.Query("to"))
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminAuditErrInvalidToRFC3339Datetime.Write(c)
 		return
 	}

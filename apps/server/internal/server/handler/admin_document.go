@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -80,6 +81,15 @@ func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 		response.AdminDocumentErrPageSizePositiveInteger.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("actorUserID", actorUserID),
+		logit.Any("keyword", c.Query("keyword")),
+		logit.Any("spaceId", c.Query("spaceId")),
+		logit.Any("status", c.Query("status")),
+		logit.Any("visibility", c.Query("visibility")),
+		logit.Any("page", page),
+		logit.Any("pageSize", pageSize),
+	)
 
 	payload, err := h.adminDocumentService.ListDocuments(c.Request.Context(), service.ListAdminDocumentsInput{
 		ActorUserID:      actorUserID,
@@ -134,6 +144,11 @@ func (h *adminDocumentHandler) UpdateStatus(c *gin.Context) {
 		response.AdminDocumentErrRequestBody.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("documentID", documentID),
+		logit.Any("status", req.Status),
+		logit.Any("reason", req.Reason),
+	)
 
 	payload, err := h.adminDocumentService.UpdateStatus(c.Request.Context(), service.UpdateAdminDocumentStatusInput{
 		ActorUserID: actorUserID,
@@ -168,6 +183,10 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 		response.AdminDocumentErrDocumentIDRequired.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("documentID", documentID),
+		logit.Any("actorUserID", actorUserID),
+	)
 
 	if err := h.adminDocumentService.DeleteDocument(
 		c.Request.Context(),

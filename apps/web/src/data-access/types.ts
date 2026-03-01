@@ -599,6 +599,8 @@ export interface AdminDataRetentionCleanupResult {
   deletedAuthCaptchaChallenges: number;
   deletedAuthRiskStates: number;
   deletedUserSessions: number;
+  deletedDocumentAttachments: number;
+  deletedAttachmentBlobs: number;
   deletedDocumentImageAssets: number;
   totalDeleted: number;
 }

@@ -301,33 +301,34 @@ func (s *AdminDocumentAttachmentService) DeleteAttachment(
 		}
 		result.HardDeleted = true
 
-		blob, getBlobErr := s.documentAttachmentRepo.GetBlobByBlobID(ctx, blobID)
-		if getBlobErr != nil && !errors.Is(getBlobErr, gorm.ErrRecordNotFound) {
-			return DeleteAdminDocumentAttachmentResult{}, getBlobErr
-		}
-
-		blobDeleted, deleteBlobErr := s.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(ctx, blobID)
-		if deleteBlobErr != nil {
-			return DeleteAdminDocumentAttachmentResult{}, deleteBlobErr
-		}
-		if blobDeleted && blob != nil {
-			deletePhysicalErr := s.tryPhysicalDeleteBlob(ctx, blob)
-			if deletePhysicalErr != nil {
-				result.PhysicalDeleteError = deletePhysicalErr.Error()
-			} else {
-				physicalDeleteExecuted = true
-			}
-		} else if blob == nil {
-			result.PhysicalDeleteError = "文件实体不存在，跳过物理文件删除"
-		} else {
-			result.PhysicalDeleteError = "文件仍存在引用，未执行物理文件删除"
-		}
-
 		remainingRefCount, remainingCountErr := s.documentAttachmentRepo.CountActiveReferencesByBlobID(ctx, blobID)
 		if remainingCountErr != nil {
 			return DeleteAdminDocumentAttachmentResult{}, remainingCountErr
 		}
 		result.SharedReferenceCount = remainingRefCount
+		if remainingRefCount > 0 {
+			result.PhysicalDeleteError = "文件仍存在引用，未执行物理文件删除"
+		} else {
+			blob, getBlobErr := s.documentAttachmentRepo.GetBlobByBlobID(ctx, blobID)
+			if getBlobErr != nil && !errors.Is(getBlobErr, gorm.ErrRecordNotFound) {
+				return DeleteAdminDocumentAttachmentResult{}, getBlobErr
+			}
+			if blob == nil {
+				result.PhysicalDeleteError = "文件实体不存在，跳过物理文件删除"
+			} else {
+				deletePhysicalErr := s.tryPhysicalDeleteBlob(ctx, blob)
+				if deletePhysicalErr != nil {
+					// 物理删除失败时保留 file_blobs 记录，由后续批次清理补偿重试。
+					result.PhysicalDeleteError = deletePhysicalErr.Error()
+				} else {
+					blobDeleted, deleteBlobErr := s.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(ctx, blobID)
+					if deleteBlobErr != nil {
+						return DeleteAdminDocumentAttachmentResult{}, deleteBlobErr
+					}
+					physicalDeleteExecuted = blobDeleted
+				}
+			}
+		}
 		afterStatus = "hard_deleted"
 	} else if beforeStatus != models.EntityStatusDeleted {
 		deleted, deleteErr := s.documentAttachmentRepo.SoftDelete(ctx, attachmentID, time.Now().UTC())

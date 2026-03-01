@@ -585,6 +585,13 @@ func (s *stubDocumentAttachmentRepo) GetBlobByBlobID(
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (s *stubDocumentAttachmentRepo) ListOrphanBlobs(
+	_ context.Context,
+	_ int,
+) ([]models.DocumentAttachmentBlob, error) {
+	return []models.DocumentAttachmentBlob{}, nil
+}
+
 func (s *stubDocumentAttachmentRepo) CreateBlob(_ context.Context, _ *models.DocumentAttachmentBlob) error {
 	return nil
 }

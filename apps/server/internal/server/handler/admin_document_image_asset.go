@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -107,6 +108,16 @@ func (h *adminDocumentImageAssetHandler) ListImageAssets(c *gin.Context) {
 		response.AdminDocumentImageAssetErrPageSizePositiveInteger.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("actorUserID", actorUserID),
+		logit.Any("keyword", c.Query("keyword")),
+		logit.Any("spaceId", c.Query("spaceId")),
+		logit.Any("documentId", c.Query("documentId")),
+		logit.Any("status", c.Query("status")),
+		logit.Any("storageProvider", c.Query("storageProvider")),
+		logit.Any("page", page),
+		logit.Any("pageSize", pageSize),
+	)
 
 	payload, err := h.adminDocumentImageAssetService.ListImageAssets(
 		c.Request.Context(),

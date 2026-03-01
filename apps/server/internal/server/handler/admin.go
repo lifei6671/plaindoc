@@ -51,17 +51,20 @@ func (h *adminHandler) Me(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminErrAdminActorMissing.Write(c)
 		return
 	}
 
 	roles, err := h.adminAccessService.ListAdminRoles(c.Request.Context(), actorUserID)
 	if err != nil {
+		setRequestErrmsg(c, err, "获取管理员角色失败")
 		response.InternalError(c)
 		return
 	}
 	user, err := h.userRepo.GetByUserID(c.Request.Context(), actorUserID)
 	if err != nil {
+		setRequestErrmsg(c, err, "获取管理员用户信息失败")
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.AdminErrAdminUserNotFound.Write(c)
 			return
@@ -93,6 +96,7 @@ func (h *adminHandler) CheckSpace(c *gin.Context) {
 
 	spaceID := c.Param("spaceId")
 	if spaceID == "" {
+		setRequestErrmsg(c, nil, "空间 ID 不能为空")
 		response.AdminErrSpaceIDRequired.Write(c)
 		return
 	}

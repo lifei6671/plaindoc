@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -152,15 +153,23 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminSpaceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminSpaceErrRequestBody.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("spaceId", req.SpaceID),
+		logit.Any("name", req.Name),
+		logit.Any("categoryId", req.CategoryID),
+		logit.Any("visibility", req.Visibility),
+	)
 
 	payload, err := h.adminSpaceService.CreateSpace(c.Request.Context(), service.CreateAdminSpaceInput{
 		ActorUserID:  actorUserID,
@@ -173,6 +182,7 @@ func (h *adminSpaceHandler) CreateSpace(c *gin.Context) {
 		CoverAssetID: strings.TrimSpace(req.CoverAssetID),
 	})
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.FromError(c, err)
 		return
 	}
@@ -189,6 +199,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminSpaceErrAdminActorMissing.Write(c)
 		return
 	}
@@ -202,6 +213,7 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 	if source == service.AdminSpaceCoverSourceUserUpload {
 		fileHeader, err := c.FormFile("file")
 		if err != nil || fileHeader == nil {
+			logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 			response.AdminSpaceErrFileRequired.Write(c)
 			return
 		}
@@ -210,11 +222,22 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 		fileContentType = strings.TrimSpace(fileHeader.Header.Get("Content-Type"))
 		content, err := readAdminUploadedFileBytes(fileHeader)
 		if err != nil {
+			logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 			response.AdminSpaceErrCannotReadUploadedFile.Write(c)
 			return
 		}
 		fileBytes = content
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("source", source),
+		logit.Any("spaceName", spaceName),
+		logit.Any("fileName", fileName),
+		logit.Any("fileContentType", fileContentType),
+		logit.Any("clientWidth", c.PostForm("clientWidth")),
+		logit.Any("clientHeight", c.PostForm("clientHeight")),
+		logit.Any("clientMimeType", c.PostForm("clientMimeType")),
+		logit.Any("clientProcessed", c.PostForm("clientProcessed")),
+	)
 
 	clientWidth, _ := parseAdminSpaceQueryInt(c.PostForm("clientWidth"))
 	clientHeight, _ := parseAdminSpaceQueryInt(c.PostForm("clientHeight"))

@@ -536,6 +536,7 @@ type DocumentAttachmentRepository interface {
 		sizeBytes int64,
 	) (*models.DocumentAttachmentBlob, error)
 	GetBlobByBlobID(ctx context.Context, blobID string) (*models.DocumentAttachmentBlob, error)
+	ListOrphanBlobs(ctx context.Context, limit int) ([]models.DocumentAttachmentBlob, error)
 	CreateBlob(ctx context.Context, blob *models.DocumentAttachmentBlob) error
 	HardDeleteBlobIfUnreferenced(ctx context.Context, blobID string) (bool, error)
 	CountActiveReferencesByBlobID(ctx context.Context, blobID string) (int64, error)

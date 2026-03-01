@@ -27,6 +27,7 @@ const (
 type workspaceHandler struct {
 	workspaceRepo              repository.WorkspaceRepository
 	documentAttachmentRepo     repository.DocumentAttachmentRepository
+	documentAttachmentCleanup  *service.DocumentAttachmentCleanupService
 	documentImageAssetService  *service.DocumentImageAssetService
 	authService                *service.AuthService
 	visibilityService          *service.VisibilityService
@@ -149,6 +150,7 @@ type workspaceTreeNode struct {
 func NewWorkspaceHandler(
 	workspaceRepo repository.WorkspaceRepository,
 	documentAttachmentRepo repository.DocumentAttachmentRepository,
+	documentAttachmentCleanup *service.DocumentAttachmentCleanupService,
 	documentImageAssetService *service.DocumentImageAssetService,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
@@ -159,6 +161,7 @@ func NewWorkspaceHandler(
 	return &workspaceHandler{
 		workspaceRepo:             workspaceRepo,
 		documentAttachmentRepo:    documentAttachmentRepo,
+		documentAttachmentCleanup: documentAttachmentCleanup,
 		documentImageAssetService: documentImageAssetService,
 		authService:               authService,
 		visibilityService:         visibilityService,
@@ -746,6 +749,12 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 	if !deleted {
 		response.WorkspaceErrNodeNotFound.Write(c)
 		return
+	}
+
+	if h != nil && h.documentAttachmentCleanup != nil {
+		if _, cleanupErr := h.documentAttachmentCleanup.CleanupDeletedDocumentAttachments(c.Request.Context(), 200); cleanupErr != nil {
+			setRequestErrmsg(c, cleanupErr, "删除节点后清理附件孤儿文件失败")
+		}
 	}
 
 	response.JSON(c, http.StatusOK, struct{}{})

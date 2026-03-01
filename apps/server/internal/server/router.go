@@ -146,6 +146,11 @@ func newRouter(
 	)
 	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
+	documentAttachmentCleanupService := service.NewDocumentAttachmentCleanupService(
+		db,
+		documentAttachmentRepo,
+		imageHostingService,
+	)
 	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
@@ -153,6 +158,7 @@ func newRouter(
 	workspaceHandler := handler.NewWorkspaceHandler(
 		workspaceRepo,
 		documentAttachmentRepo,
+		documentAttachmentCleanupService,
 		documentImageAssetService,
 		authService,
 		visibilityService,
@@ -361,7 +367,13 @@ func newRouter(
 			adminAuditService,
 		)
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
-		adminDocumentService := service.NewAdminDocumentService(documentRepo, userRepo, adminAccessService, adminAuditService)
+		adminDocumentService := service.NewAdminDocumentService(
+			documentRepo,
+			userRepo,
+			adminAccessService,
+			adminAuditService,
+			documentAttachmentCleanupService,
+		)
 		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
 		adminDocumentAttachmentService := service.NewAdminDocumentAttachmentService(
 			documentAttachmentRepo,

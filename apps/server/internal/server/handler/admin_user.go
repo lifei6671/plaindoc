@@ -73,12 +73,14 @@ func (h *adminUserHandler) CreateUser(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminUserErrRequestBody.Write(c)
 		return
 	}
@@ -92,6 +94,7 @@ func (h *adminUserHandler) CreateUser(c *gin.Context) {
 		Role:        service.AdminUserRole(strings.ToLower(strings.TrimSpace(req.Role))),
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "创建用户失败")
 		response.FromError(c, err)
 		return
 	}
@@ -108,17 +111,20 @@ func (h *adminUserHandler) ListUsers(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	page, err := parseQueryInt(c.Query("page"))
 	if err != nil {
+		setRequestErrmsg(c, err, "解析页码失败")
 		response.AdminUserErrPagePositiveInteger.Write(c)
 		return
 	}
 	pageSize, err := parseQueryInt(c.Query("pageSize"))
 	if err != nil {
+		setRequestErrmsg(c, err, "解析每页条数失败")
 		response.AdminUserErrPageSizePositiveInteger.Write(c)
 		return
 	}
@@ -131,6 +137,7 @@ func (h *adminUserHandler) ListUsers(c *gin.Context) {
 		PageSize:     pageSize,
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "查询用户列表失败")
 		response.FromError(c, err)
 		return
 	}
@@ -159,18 +166,21 @@ func (h *adminUserHandler) UpdateStatus(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	targetUserID := strings.TrimSpace(c.Param("userId"))
 	if targetUserID == "" {
+		setRequestErrmsg(c, nil, "用户 ID 不能为空")
 		response.AdminUserErrUserIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminUserStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminUserErrRequestBody.Write(c)
 		return
 	}
@@ -199,18 +209,21 @@ func (h *adminUserHandler) UpdateRole(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	targetUserID := strings.TrimSpace(c.Param("userId"))
 	if targetUserID == "" {
+		setRequestErrmsg(c, nil, "用户 ID 不能为空")
 		response.AdminUserErrUserIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminUserRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminUserErrRequestBody.Write(c)
 		return
 	}
@@ -222,6 +235,7 @@ func (h *adminUserHandler) UpdateRole(c *gin.Context) {
 		Role:        service.AdminUserRole(strings.ToLower(strings.TrimSpace(req.Role))),
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "更新用户角色失败")
 		response.FromError(c, err)
 		return
 	}
@@ -238,12 +252,14 @@ func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminUserErrAdminActorMissing.Write(c)
 		return
 	}
 
 	targetUserID := strings.TrimSpace(c.Param("userId"))
 	if targetUserID == "" {
+		setRequestErrmsg(c, nil, "用户 ID 不能为空")
 		response.AdminUserErrUserIDRequired.Write(c)
 		return
 	}
@@ -254,6 +270,7 @@ func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 		targetUserID,
 		response.RequestIDFromContext(c),
 	); err != nil {
+		setRequestErrmsg(c, err, "删除用户失败")
 		response.FromError(c, err)
 		return
 	}

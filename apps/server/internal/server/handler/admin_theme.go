@@ -70,12 +70,14 @@ func (h *adminThemeHandler) ListThemes(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	items, err := h.adminThemeService.ListThemes(c.Request.Context(), actorUserID)
 	if err != nil {
+		setRequestErrmsg(c, err, "查询主题列表失败")
 		response.FromError(c, err)
 		return
 	}
@@ -96,12 +98,14 @@ func (h *adminThemeHandler) CreateTheme(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req createAdminThemeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminThemeErrRequestBody.Write(c)
 		return
 	}
@@ -126,6 +130,7 @@ func (h *adminThemeHandler) CreateTheme(c *gin.Context) {
 		Enabled:            enabled,
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "创建主题失败")
 		response.FromError(c, err)
 		return
 	}
@@ -142,18 +147,21 @@ func (h *adminThemeHandler) UpdateTheme(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	themeID := strings.TrimSpace(c.Param("themeId"))
 	if themeID == "" {
+		setRequestErrmsg(c, nil, "主题 ID 不能为空")
 		response.AdminThemeErrThemeIDRequired.Write(c)
 		return
 	}
 
 	var req updateAdminThemeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
 		response.AdminThemeErrRequestBody.Write(c)
 		return
 	}
@@ -173,6 +181,7 @@ func (h *adminThemeHandler) UpdateTheme(c *gin.Context) {
 		Enabled:            req.Enabled,
 	})
 	if err != nil {
+		setRequestErrmsg(c, err, "更新主题失败")
 		response.FromError(c, err)
 		return
 	}
@@ -189,12 +198,14 @@ func (h *adminThemeHandler) DeleteTheme(c *gin.Context) {
 
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
 		response.AdminThemeErrAdminActorMissing.Write(c)
 		return
 	}
 
 	themeID := strings.TrimSpace(c.Param("themeId"))
 	if themeID == "" {
+		setRequestErrmsg(c, nil, "主题 ID 不能为空")
 		response.AdminThemeErrThemeIDRequired.Write(c)
 		return
 	}
@@ -205,6 +216,7 @@ func (h *adminThemeHandler) DeleteTheme(c *gin.Context) {
 		themeID,
 		response.RequestIDFromContext(c),
 	); err != nil {
+		setRequestErrmsg(c, err, "删除主题失败")
 		response.FromError(c, err)
 		return
 	}

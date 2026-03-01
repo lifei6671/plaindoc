@@ -12,6 +12,34 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 )
 
+var (
+	accessGetSpaceErrorMappings = []response.ErrorTemplateMapping{
+		{Target: service.ErrSpaceNotFound, Template: response.AccessErrSpaceNotFound},
+		{Target: service.ErrViewerLoginRequired, Template: response.AccessErrLoginRequired},
+		{Target: service.ErrSpaceAccessDenied, Template: response.AccessErrInsufficientSpacePermission},
+	}
+
+	accessUpdateSpaceVisibilityErrorMappings = []response.ErrorTemplateMapping{
+		{Target: service.ErrInvalidVisibilityValue, Template: response.AccessErrVisibilityPublicAuthenticatedMember},
+		{Target: service.ErrViewerLoginRequired, Template: response.AccessErrLoginRequired},
+		{Target: service.ErrSpaceNotFound, Template: response.AccessErrSpaceNotFound},
+		{Target: service.ErrSpaceAccessDenied, Template: response.AccessErrOnlyOwnerCanUpdateSpaceVisibility},
+	}
+
+	accessGetDocumentErrorMappings = []response.ErrorTemplateMapping{
+		{Target: service.ErrDocumentNotFound, Template: response.AccessErrDocumentNotFound},
+		{Target: service.ErrViewerLoginRequired, Template: response.AccessErrLoginRequired},
+		{Target: service.ErrDocumentAccessDenied, Template: response.AccessErrInsufficientDocumentPermission},
+	}
+
+	accessUpdateDocumentVisibilityErrorMappings = []response.ErrorTemplateMapping{
+		{Target: service.ErrInvalidVisibilityValue, Template: response.AccessErrVisibilityPublicAuthenticatedMember},
+		{Target: service.ErrViewerLoginRequired, Template: response.AccessErrLoginRequired},
+		{Target: service.ErrDocumentNotFound, Template: response.AccessErrDocumentNotFound},
+		{Target: service.ErrDocumentAccessDenied, Template: response.AccessErrInsufficientDocumentPermission},
+	}
+)
+
 type accessHandler struct {
 	authService       *service.AuthService
 	visibilityService *service.VisibilityService
@@ -69,20 +97,15 @@ func (h *accessHandler) GetSpace(c *gin.Context) {
 
 	viewerUserID, err := h.resolveOptionalViewerUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
 		response.AccessErrAccessToken.Write(c)
 		return
 	}
 
 	space, err := h.visibilityService.GetSpace(c.Request.Context(), spaceID, viewerUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrSpaceNotFound):
-			response.AccessErrSpaceNotFound.Write(c)
-		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.AccessErrLoginRequired.Write(c)
-		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.AccessErrInsufficientSpacePermission.Write(c)
-		default:
+		setRequestErrmsg(c, err, "查询空间访问信息失败")
+		if !response.WriteMappedError(c, err, accessGetSpaceErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
@@ -123,16 +146,8 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 
 	space, err := h.visibilityService.UpdateSpaceVisibility(c.Request.Context(), spaceID, actorUserID, req.Visibility)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidVisibilityValue):
-			response.AccessErrVisibilityPublicAuthenticatedMember.Write(c)
-		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.AccessErrLoginRequired.Write(c)
-		case errors.Is(err, service.ErrSpaceNotFound):
-			response.AccessErrSpaceNotFound.Write(c)
-		case errors.Is(err, service.ErrSpaceAccessDenied):
-			response.AccessErrOnlyOwnerCanUpdateSpaceVisibility.Write(c)
-		default:
+		setRequestErrmsg(c, err, "更新空间可见性失败")
+		if !response.WriteMappedError(c, err, accessUpdateSpaceVisibilityErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
@@ -162,20 +177,15 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 
 	viewerUserID, err := h.resolveOptionalViewerUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
 		response.AccessErrAccessToken.Write(c)
 		return
 	}
 
 	document, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, viewerUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrDocumentNotFound):
-			response.AccessErrDocumentNotFound.Write(c)
-		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.AccessErrLoginRequired.Write(c)
-		case errors.Is(err, service.ErrDocumentAccessDenied):
-			response.AccessErrInsufficientDocumentPermission.Write(c)
-		default:
+		setRequestErrmsg(c, err, "查询文档访问信息失败")
+		if !response.WriteMappedError(c, err, accessGetDocumentErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
@@ -213,22 +223,15 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 
 	var req updateVisibilityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析文档可见性请求失败")
 		response.AccessErrVisibilityRequired.Write(c)
 		return
 	}
 
 	document, err := h.visibilityService.UpdateDocumentVisibility(c.Request.Context(), documentID, actorUserID, req.Visibility)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidVisibilityValue):
-			response.AccessErrVisibilityPublicAuthenticatedMember.Write(c)
-		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.AccessErrLoginRequired.Write(c)
-		case errors.Is(err, service.ErrDocumentNotFound):
-			response.AccessErrDocumentNotFound.Write(c)
-		case errors.Is(err, service.ErrDocumentAccessDenied):
-			response.AccessErrInsufficientDocumentPermission.Write(c)
-		default:
+		setRequestErrmsg(c, err, "更新文档可见性失败")
+		if !response.WriteMappedError(c, err, accessUpdateDocumentVisibilityErrorMappings...) {
 			response.InternalError(c)
 		}
 		return
@@ -254,6 +257,7 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 func (h *accessHandler) requireViewerUserID(c *gin.Context) (string, bool) {
 	viewerUserID, err := h.resolveRequiredViewerUserID(c)
 	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
 		response.AccessErrAuthorizationTokenRequired.Write(c)
 		return "", false
 	}

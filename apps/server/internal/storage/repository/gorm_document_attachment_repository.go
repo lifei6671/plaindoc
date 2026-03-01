@@ -384,6 +384,43 @@ func (r *gormDocumentAttachmentRepository) GetBlobByBlobID(
 	return &blob, nil
 }
 
+func (r *gormDocumentAttachmentRepository) ListOrphanBlobs(
+	ctx context.Context,
+	limit int,
+) ([]models.DocumentAttachmentBlob, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+
+	rows := make([]documentAttachmentBlobRow, 0, limit)
+	if err := r.db.WithContext(ctx).
+		Table("file_blobs").
+		Select(
+			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, " +
+				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+		).
+		Where("deleted_at IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM document_attachments WHERE document_attachments.blob_id = file_blobs.blob_id)").
+		Order("created_at ASC, id ASC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	blobs := make([]models.DocumentAttachmentBlob, 0, len(rows))
+	for _, row := range rows {
+		blobs = append(blobs, mapDocumentAttachmentBlobRow(row))
+	}
+	return blobs, nil
+}
+
 func (r *gormDocumentAttachmentRepository) CreateBlob(
 	ctx context.Context,
 	blob *models.DocumentAttachmentBlob,

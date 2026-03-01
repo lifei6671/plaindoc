@@ -16,13 +16,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 )
 
 const (
-	defaultAdminProfileLocalImageRoot = "uploads/local"
+	defaultAdminProfileLocalImageRoot = "uploads/"
 	maxAdminProfileAvatarSizeBytes    = 10 << 20
 )
 
@@ -73,12 +74,14 @@ func (h *adminProfileHandler) GetProfile(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
 	payload, err := h.adminProfileService.GetProfile(c.Request.Context(), actorUserID)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.FromError(c, err)
 		return
 	}
@@ -93,15 +96,21 @@ func (h *adminProfileHandler) UpdateProfile(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
 	var req updateAdminProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrRequestBody.Write(c)
 		return
 	}
+	logit.SetRequestAttrs(c.Request.Context(),
+		logit.Any("name", req.Name),
+		logit.Any("avatarUrl", req.AvatarURL),
+	)
 
 	payload, err := h.adminProfileService.UpdateProfile(c.Request.Context(), service.UpdateAdminProfileInput{
 		ActorUserID: actorUserID,
@@ -110,6 +119,7 @@ func (h *adminProfileHandler) UpdateProfile(c *gin.Context) {
 		AvatarURL:   req.AvatarURL,
 	})
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.FromError(c, err)
 		return
 	}
@@ -124,6 +134,7 @@ func (h *adminProfileHandler) UpdatePassword(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
@@ -134,6 +145,7 @@ func (h *adminProfileHandler) UpdatePassword(c *gin.Context) {
 		return
 	}
 	if req.NewPassword != req.ConfirmPassword {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", "new password and confirm password do not match"))
 		response.AdminProfileErrNewPasswordConfirmPasswordMismatch.Write(c)
 		return
 	}
@@ -160,36 +172,43 @@ func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 	}
 	actorUserID, err := middleware.AdminActorUserID(c)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrAdminActorMissing.Write(c)
 		return
 	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil || fileHeader == nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrFileRequired.Write(c)
 		return
 	}
 	if fileHeader.Size <= 0 {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", "avatar file is empty"))
 		response.AdminProfileErrFileEmpty.Write(c)
 		return
 	}
 	if fileHeader.Size > maxAdminProfileAvatarSizeBytes {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", "avatar file exceeds 10MB limit"))
 		response.AdminProfileErrAvatarFileExceeds10mbLimit.Write(c)
 		return
 	}
 
 	contentType, err := detectAdminProfileUploadedFileContentType(fileHeader)
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.AdminProfileErrCannotReadUploadedFile.Write(c)
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", "uploaded file is not an image"))
 		response.AdminProfileErrOnlyImageFileAllowed.Write(c)
 		return
 	}
 
 	objectKey, err := buildAdminProfileAvatarObjectKey(actorUserID, fileHeader.Filename, contentType, time.Now().UTC())
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.InternalError(c)
 		return
 	}
@@ -201,10 +220,12 @@ func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 	targetPath := filepath.Join(localImageRootDir, filepath.FromSlash(objectKey))
 	targetDir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.InternalError(c)
 		return
 	}
 	if err := c.SaveUploadedFile(fileHeader, targetPath); err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.InternalError(c)
 		return
 	}
@@ -213,6 +234,7 @@ func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 	if h.imageHostingService != nil {
 		config, err := h.imageHostingService.GetConfig(c.Request.Context())
 		if err != nil {
+			logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 			response.InternalError(c)
 			return
 		}
@@ -225,6 +247,7 @@ func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 		AvatarURL:   &avatarURL,
 	})
 	if err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
 		response.FromError(c, err)
 		return
 	}

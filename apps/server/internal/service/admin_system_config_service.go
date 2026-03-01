@@ -503,6 +503,8 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 		result.DeletedAuthCaptchaChallenges +
 		result.DeletedAuthRiskStates +
 		result.DeletedUserSessions +
+		result.DeletedDocumentAttachments +
+		result.DeletedAttachmentBlobs +
 		result.DeletedDocumentImageAssets
 
 	detail := map[string]any{
@@ -522,6 +524,8 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 		"deletedAuthCaptchaChallenges": result.DeletedAuthCaptchaChallenges,
 		"deletedAuthRiskStates":        result.DeletedAuthRiskStates,
 		"deletedUserSessions":          result.DeletedUserSessions,
+		"deletedDocumentAttachments":   result.DeletedDocumentAttachments,
+		"deletedAttachmentBlobs":       result.DeletedAttachmentBlobs,
 		"deletedDocumentImageAssets":   result.DeletedDocumentImageAssets,
 		"totalDeleted":                 totalDeleted,
 	}

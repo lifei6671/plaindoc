@@ -528,19 +528,39 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 		return
 	}
 
-	blobDeleted, blobDeleteErr := h.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(
-		c.Request.Context(),
-		blobID,
-	)
-	if blobDeleteErr != nil {
-		setRequestErrmsg(c, blobDeleteErr, "删除文件实体失败")
+	activeRefCount, countRefErr := h.documentAttachmentRepo.CountActiveReferencesByBlobID(c.Request.Context(), blobID)
+	if countRefErr != nil {
+		setRequestErrmsg(c, countRefErr, "查询附件引用数量失败")
 		response.InternalError(c)
 		return
 	}
+	if activeRefCount == 0 {
+		blob, getBlobErr := h.documentAttachmentRepo.GetBlobByBlobID(c.Request.Context(), blobID)
+		if getBlobErr != nil && !errors.Is(getBlobErr, gorm.ErrRecordNotFound) {
+			setRequestErrmsg(c, getBlobErr, "查询附件文件实体失败")
+			response.InternalError(c)
+			return
+		}
 
-	if blobDeleted {
-		if deletePhysicalErr := h.deleteDocumentAttachmentPhysicalObject(c.Request.Context(), attachment); deletePhysicalErr != nil {
-			setRequestErrmsg(c, deletePhysicalErr, "物理删除附件文件失败")
+		targetAttachment := *attachment
+		if blob != nil {
+			targetAttachment.StorageProvider = strings.TrimSpace(blob.StorageProvider)
+			targetAttachment.ObjectKey = strings.TrimSpace(blob.ObjectKey)
+			targetAttachment.ObjectURL = strings.TrimSpace(blob.ObjectURL)
+		}
+		if strings.TrimSpace(targetAttachment.ObjectKey) != "" {
+			if deletePhysicalErr := h.deleteDocumentAttachmentPhysicalObject(c.Request.Context(), &targetAttachment); deletePhysicalErr != nil {
+				setRequestErrmsg(c, deletePhysicalErr, "物理删除附件文件失败")
+				response.InternalError(c)
+				return
+			}
+		}
+
+		if _, blobDeleteErr := h.documentAttachmentRepo.HardDeleteBlobIfUnreferenced(
+			c.Request.Context(),
+			blobID,
+		); blobDeleteErr != nil {
+			setRequestErrmsg(c, blobDeleteErr, "删除附件文件实体失败")
 			response.InternalError(c)
 			return
 		}

@@ -29,6 +29,7 @@ const (
 	DataRetentionCleanupTableAuthCaptchaChallenges = "auth_captcha_challenges"
 	DataRetentionCleanupTableAuthRiskStates        = "auth_risk_states"
 	DataRetentionCleanupTableUserSessions          = "user_sessions"
+	DataRetentionCleanupTableDocumentAttachments   = "document_attachments"
 	DataRetentionCleanupTableDocumentImageAssets   = "document_image_assets"
 )
 
@@ -37,6 +38,7 @@ var defaultDataRetentionCleanupTables = []string{
 	DataRetentionCleanupTableAuthCaptchaChallenges,
 	DataRetentionCleanupTableAuthRiskStates,
 	DataRetentionCleanupTableUserSessions,
+	DataRetentionCleanupTableDocumentAttachments,
 	DataRetentionCleanupTableDocumentImageAssets,
 }
 
@@ -61,6 +63,8 @@ type DataRetentionCleanupResult struct {
 	DeletedAuthCaptchaChallenges int64
 	DeletedAuthRiskStates        int64
 	DeletedUserSessions          int64
+	DeletedDocumentAttachments   int64
+	DeletedAttachmentBlobs       int64
 	DeletedDocumentImageAssets   int64
 }
 
@@ -77,9 +81,10 @@ type dataRetentionPolicyPayload struct {
 
 // DataRetentionCleanupService 负责按策略清理持续增长的审计和临时数据。
 type DataRetentionCleanupService struct {
-	db                        *gorm.DB
-	systemConfigRepo          repository.SystemConfigRepository
-	documentImageAssetService *DocumentImageAssetService
+	db                               *gorm.DB
+	systemConfigRepo                 repository.SystemConfigRepository
+	documentAttachmentCleanupService *DocumentAttachmentCleanupService
+	documentImageAssetService        *DocumentImageAssetService
 }
 
 // NewDataRetentionCleanupService 创建数据清理服务。
@@ -87,10 +92,13 @@ func NewDataRetentionCleanupService(
 	db *gorm.DB,
 	systemConfigRepo repository.SystemConfigRepository,
 ) *DataRetentionCleanupService {
+	imageHostingService := NewImageHostingService(systemConfigRepo)
+	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	return &DataRetentionCleanupService{
-		db:                        db,
-		systemConfigRepo:          systemConfigRepo,
-		documentImageAssetService: NewDocumentImageAssetService(db, NewImageHostingService(systemConfigRepo)),
+		db:                               db,
+		systemConfigRepo:                 systemConfigRepo,
+		documentAttachmentCleanupService: NewDocumentAttachmentCleanupService(db, documentAttachmentRepo, imageHostingService),
+		documentImageAssetService:        NewDocumentImageAssetService(db, imageHostingService),
 	}
 }
 
@@ -155,6 +163,12 @@ func (s *DataRetentionCleanupService) runOnce(
 	}
 	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableUserSessions) {
 		result.DeletedUserSessions, err = s.cleanupUserSessions(ctx, userSessionCutoff, result.Policy.CleanupBatchSize)
+		if err != nil {
+			return result, err
+		}
+	}
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentAttachments) {
+		result.DeletedDocumentAttachments, result.DeletedAttachmentBlobs, err = s.cleanupDocumentAttachments(ctx, result.Policy.CleanupBatchSize)
 		if err != nil {
 			return result, err
 		}
@@ -324,6 +338,7 @@ func isSupportedDataRetentionCleanupTable(table string) bool {
 		DataRetentionCleanupTableAuthCaptchaChallenges,
 		DataRetentionCleanupTableAuthRiskStates,
 		DataRetentionCleanupTableUserSessions,
+		DataRetentionCleanupTableDocumentAttachments,
 		DataRetentionCleanupTableDocumentImageAssets:
 		return true
 	default:
@@ -416,6 +431,20 @@ func (s *DataRetentionCleanupService) cleanupDocumentImageAssets(
 		return deleted, fmt.Errorf("cleanup document_image_assets failed: %w", err)
 	}
 	return deleted, nil
+}
+
+func (s *DataRetentionCleanupService) cleanupDocumentAttachments(
+	ctx context.Context,
+	batchSize int,
+) (int64, int64, error) {
+	if s == nil || s.documentAttachmentCleanupService == nil {
+		return 0, 0, nil
+	}
+	result, err := s.documentAttachmentCleanupService.CleanupDeletedDocumentAttachments(ctx, batchSize)
+	if err != nil {
+		return result.DeletedAttachments, result.DeletedBlobs, fmt.Errorf("cleanup document_attachments failed: %w", err)
+	}
+	return result.DeletedAttachments, result.DeletedBlobs, nil
 }
 
 func (s *DataRetentionCleanupService) deleteRowsByID(

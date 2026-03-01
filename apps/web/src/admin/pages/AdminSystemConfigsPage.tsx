@@ -43,6 +43,7 @@ type DataRetentionCleanupTable =
   | "auth_captcha_challenges"
   | "auth_risk_states"
   | "user_sessions"
+  | "document_attachments"
   | "document_image_assets";
 
 interface SiteSystemConfigValue {
@@ -324,6 +325,7 @@ const DATA_RETENTION_TEMPLATE: DataRetentionSystemConfigValue = {
     "auth_captcha_challenges",
     "auth_risk_states",
     "user_sessions",
+    "document_attachments",
     "document_image_assets"
   ],
   auditLogRetentionDays: 180,
@@ -356,6 +358,11 @@ const DATA_RETENTION_CLEANUP_TABLE_OPTIONS: Array<{
       value: "user_sessions",
       label: "user_sessions",
       description: "用户登录会话"
+    },
+    {
+      value: "document_attachments",
+      label: "document_attachments",
+      description: "文档附件引用与孤儿文件实体"
     },
     {
       value: "document_image_assets",
@@ -512,6 +519,7 @@ function parseDataRetentionConfig(value: unknown): DataRetentionSystemConfigValu
       item === "auth_captcha_challenges" ||
       item === "auth_risk_states" ||
       item === "user_sessions" ||
+      item === "document_attachments" ||
       item === "document_image_assets"
     );
   const cleanupTables =
@@ -1192,7 +1200,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       const result = await dataGateway.admin.runDataRetentionCleanup();
       if (result.totalDeleted > 0) {
         openToast(
-          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、图片 ${result.deletedDocumentImageAssets}）`,
+          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、附件引用 ${result.deletedDocumentAttachments}、附件文件 ${result.deletedAttachmentBlobs}、图片 ${result.deletedDocumentImageAssets}）`,
           "success"
         );
       } else {
