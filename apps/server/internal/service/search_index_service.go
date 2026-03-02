@@ -19,8 +19,17 @@ import (
 const defaultSearchIndexRebuildBatchSize = 200
 
 const (
-	searchIndexRebuildSourceBootstrap = "bootstrap"
-	searchIndexRebuildSourceManual    = "manual"
+	searchIndexRebuildSourceBootstrap  = "bootstrap"
+	searchIndexRebuildSourceManual     = "manual"
+	searchIndexRebuildSourceSyncDoc    = "sync_document"
+	searchIndexRebuildSourceDeleteDoc  = "delete_document"
+	searchIndexRebuildSourceSyncSpace  = "sync_space"
+	searchIndexRebuildSourcePurgeSpace = "purge_space"
+)
+
+var (
+	// ErrSearchIndexRebuildInProgress 表示当前已有索引重建任务在执行。
+	ErrSearchIndexRebuildInProgress = errors.New("search index rebuild is already in progress")
 )
 
 // SearchIndexBootstrapResult 表示索引启动阶段结果。
@@ -43,6 +52,7 @@ type SearchIndexStatusResult struct {
 	EffectiveProvider           searchcfg.ProviderName
 	FallbackPolicy              searchcfg.FallbackPolicy
 	ActiveAnalyzer              searchcfg.AnalyzerName
+	RebuildInProgress           bool
 	ProviderHealthy             bool
 	ProviderMessage             string
 	SupportsDocCount            bool
@@ -59,6 +69,7 @@ type SearchIndexService struct {
 	providers           map[searchcfg.ProviderName]searchprovider.Provider
 
 	runtimeMu                   sync.RWMutex
+	rebuildInProgress           bool
 	lastRebuildAt               time.Time
 	lastRebuildSource           string
 	lastRebuildIndexedDocuments int
@@ -173,6 +184,212 @@ func (s *SearchIndexService) RebuildActiveProvider(ctx context.Context) (SearchI
 	)
 }
 
+// SyncDocumentByID 按文档 ID 增量同步索引（存在则 upsert，不存在或不可索引则删除）。
+func (s *SearchIndexService) SyncDocumentByID(ctx context.Context, documentID string) error {
+	if s == nil || s.db == nil || s.searchConfigService == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+	if ctx == nil {
+		return errors.New("search index sync context is nil")
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return nil
+	}
+
+	snapshot, err := s.searchConfigService.Refresh(ctx)
+	if err != nil {
+		return err
+	}
+	if !snapshot.Config.Enabled {
+		return nil
+	}
+
+	providerName, providerInstance, err := s.resolveProvider(snapshot.Config)
+	if err != nil {
+		return err
+	}
+	if providerName == searchcfg.ProviderDatabase {
+		return nil
+	}
+	if err := providerInstance.EnsureSchema(ctx); err != nil {
+		return err
+	}
+
+	row, err := s.loadActiveDocumentForSync(ctx, normalizedDocumentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := providerInstance.Delete(ctx, []string{normalizedDocumentID}); err != nil {
+				return err
+			}
+			s.setRebuildRuntimeState(searchIndexRebuildSourceDeleteDoc, 0)
+			return nil
+		}
+		return err
+	}
+
+	record, err := buildSearchIndexRecord(ctx, snapshot, row)
+	if err != nil {
+		return err
+	}
+	if err := providerInstance.Upsert(ctx, []searchprovider.IndexRecord{record}); err != nil {
+		return err
+	}
+	s.setRebuildRuntimeState(searchIndexRebuildSourceSyncDoc, 1)
+	return nil
+}
+
+// DeleteDocumentByID 按文档 ID 删除索引记录。
+func (s *SearchIndexService) DeleteDocumentByID(ctx context.Context, documentID string) error {
+	if s == nil || s.db == nil || s.searchConfigService == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+	if ctx == nil {
+		return errors.New("search index delete context is nil")
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return nil
+	}
+
+	snapshot, err := s.searchConfigService.Refresh(ctx)
+	if err != nil {
+		return err
+	}
+	if !snapshot.Config.Enabled {
+		return nil
+	}
+
+	providerName, providerInstance, err := s.resolveProvider(snapshot.Config)
+	if err != nil {
+		return err
+	}
+	if providerName == searchcfg.ProviderDatabase {
+		return nil
+	}
+	if err := providerInstance.Delete(ctx, []string{normalizedDocumentID}); err != nil {
+		return err
+	}
+	s.setRebuildRuntimeState(searchIndexRebuildSourceDeleteDoc, 0)
+	return nil
+}
+
+// SyncSpaceByID 按空间增量重建索引：先清空该空间索引，再批量写入当前可索引文档。
+func (s *SearchIndexService) SyncSpaceByID(ctx context.Context, spaceID string) error {
+	if s == nil || s.db == nil || s.searchConfigService == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+	if ctx == nil {
+		return errors.New("search index sync context is nil")
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID == "" {
+		return nil
+	}
+
+	snapshot, err := s.searchConfigService.Refresh(ctx)
+	if err != nil {
+		return err
+	}
+	if !snapshot.Config.Enabled {
+		return nil
+	}
+
+	providerName, providerInstance, err := s.resolveProvider(snapshot.Config)
+	if err != nil {
+		return err
+	}
+	if providerName == searchcfg.ProviderDatabase {
+		return nil
+	}
+	if err := providerInstance.EnsureSchema(ctx); err != nil {
+		return err
+	}
+	if err := providerInstance.PurgeBySpace(ctx, normalizedSpaceID); err != nil {
+		return err
+	}
+
+	offset := 0
+	indexedDocuments := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		rows, err := s.loadActiveDocumentsForSpaceSync(
+			ctx,
+			normalizedSpaceID,
+			defaultSearchIndexRebuildBatchSize,
+			offset,
+		)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			break
+		}
+
+		records := make([]searchprovider.IndexRecord, 0, len(rows))
+		for _, row := range rows {
+			record, err := buildSearchIndexRecord(ctx, snapshot, row)
+			if err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		if err := providerInstance.Upsert(ctx, records); err != nil {
+			return err
+		}
+		indexedDocuments += len(records)
+
+		if len(rows) < defaultSearchIndexRebuildBatchSize {
+			break
+		}
+		offset += len(rows)
+	}
+	s.setRebuildRuntimeState(searchIndexRebuildSourceSyncSpace, indexedDocuments)
+	return nil
+}
+
+// PurgeSpaceByID 删除目标空间在索引中的全部文档。
+func (s *SearchIndexService) PurgeSpaceByID(ctx context.Context, spaceID string) error {
+	if s == nil || s.db == nil || s.searchConfigService == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+	if ctx == nil {
+		return errors.New("search index purge context is nil")
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID == "" {
+		return nil
+	}
+
+	snapshot, err := s.searchConfigService.Refresh(ctx)
+	if err != nil {
+		return err
+	}
+	if !snapshot.Config.Enabled {
+		return nil
+	}
+
+	providerName, providerInstance, err := s.resolveProvider(snapshot.Config)
+	if err != nil {
+		return err
+	}
+	if providerName == searchcfg.ProviderDatabase {
+		return nil
+	}
+	if err := providerInstance.PurgeBySpace(ctx, normalizedSpaceID); err != nil {
+		return err
+	}
+	s.setRebuildRuntimeState(searchIndexRebuildSourcePurgeSpace, 0)
+	return nil
+}
+
 func (s *SearchIndexService) rebuildWithSnapshot(
 	ctx context.Context,
 	snapshot SearchRuntimeSnapshot,
@@ -180,6 +397,11 @@ func (s *SearchIndexService) rebuildWithSnapshot(
 	providerInstance searchprovider.Provider,
 	source string,
 ) (SearchIndexRebuildResult, error) {
+	if !s.tryBeginRebuild() {
+		return SearchIndexRebuildResult{}, ErrSearchIndexRebuildInProgress
+	}
+	defer s.finishRebuild()
+
 	if providerInstance == nil {
 		return SearchIndexRebuildResult{}, ErrSearchProviderUnavailable
 	}
@@ -252,12 +474,13 @@ func (s *SearchIndexService) Status(ctx context.Context) (SearchIndexStatusResul
 		return SearchIndexStatusResult{}, err
 	}
 
-	lastRebuildAt, lastRebuildSource, lastRebuildIndexedDocuments := s.readRebuildRuntimeState()
+	lastRebuildAt, lastRebuildSource, lastRebuildIndexedDocuments, rebuildInProgress := s.readRebuildRuntimeState()
 	result := SearchIndexStatusResult{
 		Enabled:                     snapshot.Config.Enabled,
 		ActiveProvider:              snapshot.Config.ActiveProvider,
 		FallbackPolicy:              snapshot.Config.FallbackPolicy,
 		ActiveAnalyzer:              snapshot.Config.Analysis.ActiveAnalyzer,
+		RebuildInProgress:           rebuildInProgress,
 		ProviderHealthy:             false,
 		ProviderMessage:             "",
 		SupportsDocCount:            false,
@@ -312,13 +535,45 @@ func (s *SearchIndexService) setRebuildRuntimeState(source string, indexedDocume
 	s.lastRebuildIndexedDocuments = indexedDocuments
 }
 
-func (s *SearchIndexService) readRebuildRuntimeState() (time.Time, string, int) {
+func (s *SearchIndexService) readRebuildRuntimeState() (time.Time, string, int, bool) {
 	if s == nil {
-		return time.Time{}, "", 0
+		return time.Time{}, "", 0, false
 	}
 	s.runtimeMu.RLock()
 	defer s.runtimeMu.RUnlock()
-	return s.lastRebuildAt, s.lastRebuildSource, s.lastRebuildIndexedDocuments
+	return s.lastRebuildAt, s.lastRebuildSource, s.lastRebuildIndexedDocuments, s.rebuildInProgress
+}
+
+func (s *SearchIndexService) tryBeginRebuild() bool {
+	if s == nil {
+		return false
+	}
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	if s.rebuildInProgress {
+		return false
+	}
+	s.rebuildInProgress = true
+	return true
+}
+
+func (s *SearchIndexService) finishRebuild() {
+	if s == nil {
+		return
+	}
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	s.rebuildInProgress = false
+}
+
+// IsRebuildInProgress 返回索引重建任务是否正在执行。
+func (s *SearchIndexService) IsRebuildInProgress() bool {
+	if s == nil {
+		return false
+	}
+	s.runtimeMu.RLock()
+	defer s.runtimeMu.RUnlock()
+	return s.rebuildInProgress
 }
 
 func (s *SearchIndexService) resolveProvider(
@@ -333,10 +588,10 @@ func (s *SearchIndexService) resolveProvider(
 		return activeProvider, providerInstance, nil
 	}
 
-	if config.FallbackPolicy == searchcfg.FallbackPolicyDegradeToBleve &&
-		activeProvider != searchcfg.ProviderBleve {
-		if fallbackProvider := s.providers[searchcfg.ProviderBleve]; fallbackProvider != nil {
-			return searchcfg.ProviderBleve, fallbackProvider, nil
+	if config.FallbackPolicy == searchcfg.FallbackPolicyDegradeToDatabase &&
+		activeProvider != searchcfg.ProviderDatabase {
+		if fallbackProvider := s.providers[searchcfg.ProviderDatabase]; fallbackProvider != nil {
+			return searchcfg.ProviderDatabase, fallbackProvider, nil
 		}
 	}
 
@@ -377,6 +632,87 @@ func (s *SearchIndexService) loadActiveDocumentsForRebuild(
 		).
 		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
 		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
+		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
+		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
+		Order("d.id ASC").
+		Limit(limit).
+		Offset(offset).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (s *SearchIndexService) loadActiveDocumentForSync(
+	ctx context.Context,
+	documentID string,
+) (searchIndexRebuildRow, error) {
+	if s == nil || s.db == nil {
+		return searchIndexRebuildRow{}, errors.New("search index service db is nil")
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return searchIndexRebuildRow{}, gorm.ErrRecordNotFound
+	}
+
+	var row searchIndexRebuildRow
+	err := s.db.WithContext(ctx).
+		Table("documents AS d").
+		Select(
+			"s.space_id AS space_id",
+			"d.document_id AS document_id",
+			"d.node_id AS node_id",
+			"d.title AS title",
+			"d.content_md AS content_md",
+			"s.visibility AS space_visibility",
+			"d.visibility AS doc_visibility",
+			"d.updated_at AS updated_at",
+		).
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
+		Where("d.document_id = ?", normalizedDocumentID).
+		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
+		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
+		Take(&row).Error
+	return row, err
+}
+
+func (s *SearchIndexService) loadActiveDocumentsForSpaceSync(
+	ctx context.Context,
+	spaceID string,
+	limit int,
+	offset int,
+) ([]searchIndexRebuildRow, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("search index service db is nil")
+	}
+	if limit <= 0 {
+		limit = defaultSearchIndexRebuildBatchSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID == "" {
+		return []searchIndexRebuildRow{}, nil
+	}
+
+	rows := make([]searchIndexRebuildRow, 0, limit)
+	err := s.db.WithContext(ctx).
+		Table("documents AS d").
+		Select(
+			"s.space_id AS space_id",
+			"d.document_id AS document_id",
+			"d.node_id AS node_id",
+			"d.title AS title",
+			"d.content_md AS content_md",
+			"s.visibility AS space_visibility",
+			"d.visibility AS doc_visibility",
+			"d.updated_at AS updated_at",
+		).
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
+		Where("s.space_id = ?", normalizedSpaceID).
 		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
 		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
 		Order("d.id ASC").

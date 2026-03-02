@@ -671,6 +671,7 @@ export interface AdminSearchIndexStatusResult {
   effectiveProvider: string;
   fallbackPolicy: string;
   activeAnalyzer: string;
+  rebuildInProgress: boolean;
   providerHealthy: boolean;
   providerMessage: string;
   supportsDocCount: boolean;

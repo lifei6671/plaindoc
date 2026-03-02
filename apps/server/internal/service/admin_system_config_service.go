@@ -467,7 +467,9 @@ func (s *AdminSystemConfigService) RunSearchIndexRebuild(
 
 	rebuildResult, err := s.searchIndexService.RebuildActiveProvider(ctx)
 	if err != nil {
-		if errors.Is(err, ErrSearchDisabled) || errors.Is(err, ErrSearchProviderUnavailable) {
+		if errors.Is(err, ErrSearchDisabled) ||
+			errors.Is(err, ErrSearchProviderUnavailable) ||
+			errors.Is(err, ErrSearchIndexRebuildInProgress) {
 			return SearchIndexRebuildResult{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 		}
 		return SearchIndexRebuildResult{}, err

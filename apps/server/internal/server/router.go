@@ -154,9 +154,12 @@ func newRouter(
 		databaseProvider,
 		bleveProvider,
 	)
-	if _, err := searchIndexService.Bootstrap(context.Background()); err != nil && logger != nil {
-		logger.Error("search index bootstrap failed", slog.String("error", err.Error()))
-	}
+	// 启动阶段异步初始化索引，避免大数据量重建阻塞服务启动。
+	go func() {
+		if _, err := searchIndexService.Bootstrap(context.Background()); err != nil && logger != nil {
+			logger.Error("search index bootstrap failed", slog.String("error", err.Error()))
+		}
+	}()
 	// 首页全文检索服务：负责首页落地页检索结果读取与可见性过滤。
 	homeSearchService := service.NewHomeSearchService(searchQueryService, db)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
@@ -195,7 +198,7 @@ func newRouter(
 	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
-	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache)
+	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache, searchIndexService)
 	workspaceHandler := handler.NewWorkspaceHandler(
 		workspaceRepo,
 		documentAttachmentRepo,
@@ -206,6 +209,7 @@ func newRouter(
 		imageHostingService,
 		documentAttachmentTokenService,
 		readerRenderCache,
+		searchIndexService,
 	)
 
 	// ---- SSR 页面与静态资源路由（不走 /api）----
@@ -410,7 +414,7 @@ func newRouter(
 			adminAccessService,
 			adminAuditService,
 		)
-		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService)
+		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService, searchIndexService)
 		adminDocumentService := service.NewAdminDocumentService(
 			documentRepo,
 			userRepo,
@@ -419,7 +423,7 @@ func newRouter(
 			adminAuditService,
 			documentAttachmentCleanupService,
 		)
-		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService)
+		adminDocumentHandler := handler.NewAdminDocumentHandler(adminDocumentService, searchIndexService)
 		adminDocumentAttachmentService := service.NewAdminDocumentAttachmentService(
 			documentAttachmentRepo,
 			adminAccessService,

@@ -29,6 +29,7 @@ type workspaceHandler struct {
 	documentAttachmentRepo     repository.DocumentAttachmentRepository
 	documentAttachmentCleanup  *service.DocumentAttachmentCleanupService
 	documentImageAssetService  *service.DocumentImageAssetService
+	searchIndexService         *service.SearchIndexService
 	authService                *service.AuthService
 	visibilityService          *service.VisibilityService
 	imageHostingService        *service.ImageHostingService
@@ -157,12 +158,19 @@ func NewWorkspaceHandler(
 	imageHostingService *service.ImageHostingService,
 	attachmentTokenService *service.DocumentAttachmentDownloadTokenService,
 	renderCache *rendercache.Cache,
+	searchIndexServices ...*service.SearchIndexService,
 ) *workspaceHandler {
+	var searchIndexService *service.SearchIndexService
+	if len(searchIndexServices) > 0 {
+		searchIndexService = searchIndexServices[0]
+	}
+
 	return &workspaceHandler{
 		workspaceRepo:             workspaceRepo,
 		documentAttachmentRepo:    documentAttachmentRepo,
 		documentAttachmentCleanup: documentAttachmentCleanup,
 		documentImageAssetService: documentImageAssetService,
+		searchIndexService:        searchIndexService,
 		authService:               authService,
 		visibilityService:         visibilityService,
 		imageHostingService:       imageHostingService,
@@ -491,6 +499,12 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		return
 	}
 
+	if req.Type == models.NodeTypeDoc && h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), responseBody.DocID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "创建文档后同步全文检索索引失败")
+		}
+	}
+
 	response.JSON(c, http.StatusOK, responseBody)
 }
 
@@ -613,6 +627,11 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 	if h != nil && h.renderCache != nil && node.Type == models.NodeTypeDoc {
 		// 文档节点标题变更会影响阅读页展示，按文档维度主动失效缓存。
 		h.renderCache.PurgeDoc(strings.TrimSpace(node.NodeID))
+	}
+	if node.Type == models.NodeTypeDoc && req.Title != nil && h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), strings.TrimSpace(node.NodeID)); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "更新文档标题后同步全文检索索引失败")
+		}
 	}
 
 	response.JSON(c, http.StatusOK, struct{}{})
@@ -756,6 +775,11 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 			setRequestErrmsg(c, cleanupErr, "删除节点后清理附件孤儿文件失败")
 		}
 	}
+	if h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.SyncSpaceByID(c.Request.Context(), spaceID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "删除节点后同步全文检索索引失败")
+		}
+	}
 
 	response.JSON(c, http.StatusOK, struct{}{})
 }
@@ -891,6 +915,11 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 			},
 		); syncErr != nil {
 			setRequestErrmsg(c, syncErr, "同步文档图片引用失败")
+		}
+	}
+	if h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), documentID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "保存文档后同步全文检索索引失败")
 		}
 	}
 

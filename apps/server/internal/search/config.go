@@ -28,8 +28,10 @@ const (
 type FallbackPolicy string
 
 const (
-	FallbackPolicyDegradeToBleve FallbackPolicy = "degrade_to_bleve"
-	FallbackPolicyReturnError    FallbackPolicy = "return_error"
+	FallbackPolicyDegradeToDatabase FallbackPolicy = "degrade_to_database"
+	FallbackPolicyReturnError       FallbackPolicy = "return_error"
+	// FallbackPolicyDegradeToBleveLegacy 兼容历史配置值，统一归一到 degrade_to_database。
+	FallbackPolicyDegradeToBleveLegacy FallbackPolicy = "degrade_to_bleve"
 )
 
 // AnalyzerName 定义分词器名称。
@@ -97,7 +99,7 @@ func DefaultConfig() Config {
 	return Config{
 		Enabled:        false,
 		ActiveProvider: ProviderBleve,
-		FallbackPolicy: FallbackPolicyDegradeToBleve,
+		FallbackPolicy: FallbackPolicyDegradeToDatabase,
 		Analysis: AnalysisConfig{
 			ActiveAnalyzer: AnalyzerSimple,
 			Analyzers: AnalyzerConfigs{
@@ -217,7 +219,7 @@ func ValidateConfigPayload(payload map[string]any) error {
 		return err
 	}
 	if normalizeFallbackPolicy(fallbackPolicy) == "" {
-		return fmt.Errorf("fallbackPolicy must be degrade_to_bleve/return_error")
+		return fmt.Errorf("fallbackPolicy must be degrade_to_database/return_error")
 	}
 
 	analysis, err := getRequiredObject(payload, "analysis")
@@ -358,8 +360,8 @@ func normalizeProviderName(value string) ProviderName {
 
 func normalizeFallbackPolicy(value string) FallbackPolicy {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(FallbackPolicyDegradeToBleve):
-		return FallbackPolicyDegradeToBleve
+	case string(FallbackPolicyDegradeToDatabase), string(FallbackPolicyDegradeToBleveLegacy):
+		return FallbackPolicyDegradeToDatabase
 	case string(FallbackPolicyReturnError):
 		return FallbackPolicyReturnError
 	default:

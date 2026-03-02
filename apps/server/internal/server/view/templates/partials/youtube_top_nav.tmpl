@@ -10,18 +10,20 @@
 
     {{ if .SearchEnabled }}
       <div class="yt-header-center">
-        <form class="yt-header-search-form" action="{{ .SearchActionURL }}" method="get" role="search">
-          <input
-            class="yt-header-search-input"
-            type="search"
-            name="q"
-            value="{{ .SearchKeyword }}"
-            placeholder="检索文档标题或正文"
-            aria-label="全文检索关键词"
-            autocomplete="off"
-          >
-          <button class="yt-header-search-button" type="submit">搜索</button>
-        </form>
+        <div class="yt-header-search-wrap">
+          <form class="yt-header-search-form" action="{{ .SearchActionURL }}" method="get" role="search">
+            <input
+              class="yt-header-search-input"
+              type="search"
+              name="q"
+              value="{{ .SearchKeyword }}"
+              placeholder="检索文档标题或正文"
+              aria-label="全文检索关键词"
+              autocomplete="off"
+            >
+            <button class="yt-header-search-button" type="submit">搜索</button>
+          </form>
+        </div>
       </div>
     {{ end }}
 

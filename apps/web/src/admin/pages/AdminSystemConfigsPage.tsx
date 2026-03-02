@@ -40,7 +40,7 @@ type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
 type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
 type SearchProvider = "bleve" | "meili" | "typesense" | "database";
-type SearchFallbackPolicy = "degrade_to_bleve" | "return_error";
+type SearchFallbackPolicy = "degrade_to_database" | "return_error";
 type SearchAnalyzer = "simple" | "jieba";
 type SearchJiebaMode = "search";
 type SearchJiebaDictSource = "db" | "file";
@@ -359,9 +359,9 @@ const SEARCH_PROVIDER_OPTIONS: Array<{ value: SearchProvider; label: string }> =
 
 const SEARCH_FALLBACK_POLICY_OPTIONS: Array<{ value: SearchFallbackPolicy; label: string; description: string }> = [
   {
-    value: "degrade_to_bleve",
-    label: "自动降级到 Bleve",
-    description: "外部引擎不可用时尝试降级到 Bleve。"
+    value: "degrade_to_database",
+    label: "自动降级到数据库查询",
+    description: "检索引擎不可用时降级到数据库简单查询。"
   },
   {
     value: "return_error",
@@ -385,7 +385,7 @@ const SEARCH_DICT_VERSION_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/;
 const SEARCH_TEMPLATE: SearchSystemConfigValue = {
   enabled: false,
   activeProvider: "bleve",
-  fallbackPolicy: "degrade_to_bleve",
+  fallbackPolicy: "degrade_to_database",
   analysis: {
     activeAnalyzer: "simple",
     analyzers: {
@@ -527,6 +527,18 @@ function formatSearchRebuildSource(value: string): string {
   if (source === "bootstrap") {
     return "启动自检";
   }
+  if (source === "sync_document") {
+    return "文档增量同步";
+  }
+  if (source === "delete_document") {
+    return "文档索引删除";
+  }
+  if (source === "sync_space") {
+    return "空间增量同步";
+  }
+  if (source === "purge_space") {
+    return "空间索引清理";
+  }
   return source || "-";
 }
 
@@ -641,7 +653,7 @@ function parseSearchFallbackPolicy(value: unknown, fallbackValue: SearchFallback
   if (normalizedValue === "return_error") {
     return "return_error";
   }
-  return "degrade_to_bleve";
+  return "degrade_to_database";
 }
 
 function parseSearchAnalyzer(value: unknown, fallbackValue: SearchAnalyzer): SearchAnalyzer {
@@ -1056,16 +1068,23 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     }
   }, [dataGateway, openToast]);
 
-  const loadSearchIndexStatus = useCallback(async () => {
-    setSearchStatusLoading(true);
+  const loadSearchIndexStatus = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setSearchStatusLoading(true);
+    }
     try {
       const statusResult = await dataGateway.admin.getSearchIndexStatus();
       setSearchIndexStatus(statusResult);
     } catch (error) {
-      openToast(`加载索引状态失败：${formatError(error)}`);
-      setSearchIndexStatus(null);
+      if (!silent) {
+        openToast(`加载索引状态失败：${formatError(error)}`);
+        setSearchIndexStatus(null);
+      }
     } finally {
-      setSearchStatusLoading(false);
+      if (!silent) {
+        setSearchStatusLoading(false);
+      }
     }
   }, [dataGateway.admin, openToast]);
 
@@ -1078,6 +1097,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       return;
     }
     void loadSearchIndexStatus();
+    const timer = window.setInterval(() => {
+      void loadSearchIndexStatus({ silent: true });
+    }, 10000);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [loadSearchIndexStatus, selectedKey]);
 
   useEffect(() => {
@@ -1587,11 +1612,18 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={loading || saving || runningSearchRebuild}
+                      disabled={
+                        loading ||
+                        saving ||
+                        runningSearchRebuild ||
+                        searchIndexStatus?.rebuildInProgress === true
+                      }
                       onClick={() => void handleRunSearchIndexRebuild()}
                     >
                       <RefreshCw size={14} />
-                      <span>{runningSearchRebuild ? "重建中..." : "重建索引"}</span>
+                      <span>
+                        {runningSearchRebuild || searchIndexStatus?.rebuildInProgress === true ? "重建中..." : "重建索引"}
+                      </span>
                     </Button>
                   ) : null}
                   {selectedKey === "search" ? (
@@ -1782,6 +1814,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                       </div>
                       <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
                         <p>
+                          重建任务：
+                          <span className={searchIndexStatus?.rebuildInProgress ? "text-amber-600" : "text-slate-600"}>
+                            {searchIndexStatus?.rebuildInProgress ? "进行中" : "空闲"}
+                          </span>
+                        </p>
+                        <p>
                           运行状态：
                           <span className={searchIndexStatus?.providerHealthy ? "text-emerald-600" : "text-amber-600"}>
                             {searchIndexStatus?.providerHealthy ? "健康" : "待检查/异常"}
@@ -1796,9 +1834,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             ? String(searchIndexStatus.indexedDocuments)
                             : "当前引擎不支持统计"}
                         </p>
-                        <p>最近重建时间：{formatDateTime(searchIndexStatus?.lastRebuildAt ?? null)}</p>
-                        <p>最近重建来源：{formatSearchRebuildSource(searchIndexStatus?.lastRebuildSource ?? "")}</p>
-                        <p>最近重建文档数：{searchIndexStatus?.lastRebuildIndexedDocuments ?? 0}</p>
+                        <p>最近索引变更时间：{formatDateTime(searchIndexStatus?.lastRebuildAt ?? null)}</p>
+                        <p>最近索引变更来源：{formatSearchRebuildSource(searchIndexStatus?.lastRebuildSource ?? "")}</p>
+                        <p>最近索引变更文档数：{searchIndexStatus?.lastRebuildIndexedDocuments ?? 0}</p>
                       </div>
                       {searchIndexStatus?.providerMessage ? (
                         <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">

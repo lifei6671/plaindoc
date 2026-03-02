@@ -41,9 +41,10 @@ var (
 )
 
 type accessHandler struct {
-	authService       *service.AuthService
-	visibilityService *service.VisibilityService
-	renderCache       *rendercache.Cache
+	authService        *service.AuthService
+	visibilityService  *service.VisibilityService
+	renderCache        *rendercache.Cache
+	searchIndexService *service.SearchIndexService
 }
 
 type updateVisibilityRequest struct {
@@ -74,11 +75,18 @@ func NewAccessHandler(
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
 	renderCache *rendercache.Cache,
+	searchIndexServices ...*service.SearchIndexService,
 ) *accessHandler {
+	var searchIndexService *service.SearchIndexService
+	if len(searchIndexServices) > 0 {
+		searchIndexService = searchIndexServices[0]
+	}
+
 	return &accessHandler{
-		authService:       authService,
-		visibilityService: visibilityService,
-		renderCache:       renderCache,
+		authService:        authService,
+		visibilityService:  visibilityService,
+		renderCache:        renderCache,
+		searchIndexService: searchIndexService,
 	}
 }
 
@@ -151,6 +159,11 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 			response.InternalError(c)
 		}
 		return
+	}
+	if h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.SyncSpaceByID(c.Request.Context(), space.SpaceID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "更新空间可见性后同步全文检索索引失败")
+		}
 	}
 
 	response.JSON(c, http.StatusOK, spaceAccessResponse{
@@ -240,6 +253,11 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 	if h != nil && h.renderCache != nil {
 		// 文档可见性变化会直接影响阅读页输出，需主动失效渲染缓存。
 		h.renderCache.PurgeDoc(document.DocumentID)
+	}
+	if h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), document.DocumentID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "更新文档可见性后同步全文检索索引失败")
+		}
 	}
 
 	response.JSON(c, http.StatusOK, documentAccessResponse{

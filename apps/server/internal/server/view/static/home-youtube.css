@@ -85,9 +85,16 @@ pre {
   padding-inline: 20px;
 }
 
-.yt-header-search-form {
+.yt-header-search-wrap {
   width: 100%;
   max-width: 660px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.yt-header-search-form {
+  width: 100%;
   display: flex;
   align-items: center;
   border: 1px solid #d6d6d6;

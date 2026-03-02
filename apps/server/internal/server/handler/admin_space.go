@@ -18,7 +18,8 @@ import (
 )
 
 type adminSpaceHandler struct {
-	adminSpaceService *service.AdminSpaceService
+	adminSpaceService  *service.AdminSpaceService
+	searchIndexService *service.SearchIndexService
 }
 
 type adminSpaceResponse struct {
@@ -140,8 +141,19 @@ type adminSpaceMemberResponse struct {
 }
 
 // NewAdminSpaceHandler 创建后台空间管理处理器。
-func NewAdminSpaceHandler(adminSpaceService *service.AdminSpaceService) *adminSpaceHandler {
-	return &adminSpaceHandler{adminSpaceService: adminSpaceService}
+func NewAdminSpaceHandler(
+	adminSpaceService *service.AdminSpaceService,
+	searchIndexServices ...*service.SearchIndexService,
+) *adminSpaceHandler {
+	var searchIndexService *service.SearchIndexService
+	if len(searchIndexServices) > 0 {
+		searchIndexService = searchIndexServices[0]
+	}
+
+	return &adminSpaceHandler{
+		adminSpaceService:  adminSpaceService,
+		searchIndexService: searchIndexService,
+	}
 }
 
 // CreateSpace 创建后台空间。
@@ -771,6 +783,11 @@ func (h *adminSpaceHandler) DeleteSpace(c *gin.Context) {
 	); err != nil {
 		response.FromError(c, err)
 		return
+	}
+	if h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.PurgeSpaceByID(c.Request.Context(), spaceID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "后台删除空间后清理全文检索索引失败")
+		}
 	}
 
 	response.JSON(c, http.StatusOK, struct{}{})

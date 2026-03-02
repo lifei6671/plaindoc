@@ -306,7 +306,10 @@ func (h *homeHandler) resolveHomepageSearchEnabled(c *gin.Context) bool {
 	if !snapshot.Config.Enabled {
 		return false
 	}
-	return snapshot.Config.IsAnalyzerEnabled(snapshot.Config.Analysis.ActiveAnalyzer)
+	if !snapshot.Config.IsAnalyzerEnabled(snapshot.Config.Analysis.ActiveAnalyzer) {
+		return false
+	}
+	return true
 }
 
 func buildHomeCategoryItems(

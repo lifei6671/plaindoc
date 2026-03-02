@@ -70,6 +70,7 @@ type searchIndexStatusResponse struct {
 	EffectiveProvider           string     `json:"effectiveProvider"`
 	FallbackPolicy              string     `json:"fallbackPolicy"`
 	ActiveAnalyzer              string     `json:"activeAnalyzer"`
+	RebuildInProgress           bool       `json:"rebuildInProgress"`
 	ProviderHealthy             bool       `json:"providerHealthy"`
 	ProviderMessage             string     `json:"providerMessage"`
 	SupportsDocCount            bool       `json:"supportsDocCount"`
@@ -370,6 +371,7 @@ func mapSearchIndexStatusResponse(
 		EffectiveProvider:           string(value.EffectiveProvider),
 		FallbackPolicy:              string(value.FallbackPolicy),
 		ActiveAnalyzer:              string(value.ActiveAnalyzer),
+		RebuildInProgress:           value.RebuildInProgress,
 		ProviderHealthy:             value.ProviderHealthy,
 		ProviderMessage:             value.ProviderMessage,
 		SupportsDocCount:            value.SupportsDocCount,

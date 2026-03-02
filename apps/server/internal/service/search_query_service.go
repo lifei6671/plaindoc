@@ -158,10 +158,10 @@ func (s *SearchQueryService) resolveProvider(
 		return activeProvider, providerInstance, nil
 	}
 
-	if config.FallbackPolicy == searchcfg.FallbackPolicyDegradeToBleve &&
-		activeProvider != searchcfg.ProviderBleve {
-		if fallbackProvider := s.providers[searchcfg.ProviderBleve]; fallbackProvider != nil {
-			return searchcfg.ProviderBleve, fallbackProvider, nil
+	if config.FallbackPolicy == searchcfg.FallbackPolicyDegradeToDatabase &&
+		activeProvider != searchcfg.ProviderDatabase {
+		if fallbackProvider := s.providers[searchcfg.ProviderDatabase]; fallbackProvider != nil {
+			return searchcfg.ProviderDatabase, fallbackProvider, nil
 		}
 	}
 

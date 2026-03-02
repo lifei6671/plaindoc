@@ -17,6 +17,7 @@ import (
 
 type adminDocumentHandler struct {
 	adminDocumentService *service.AdminDocumentService
+	searchIndexService   *service.SearchIndexService
 }
 
 type adminDocumentResponse struct {
@@ -54,8 +55,19 @@ type updateAdminDocumentStatusRequest struct {
 }
 
 // NewAdminDocumentHandler 创建后台文档管理处理器。
-func NewAdminDocumentHandler(adminDocumentService *service.AdminDocumentService) *adminDocumentHandler {
-	return &adminDocumentHandler{adminDocumentService: adminDocumentService}
+func NewAdminDocumentHandler(
+	adminDocumentService *service.AdminDocumentService,
+	searchIndexServices ...*service.SearchIndexService,
+) *adminDocumentHandler {
+	var searchIndexService *service.SearchIndexService
+	if len(searchIndexServices) > 0 {
+		searchIndexService = searchIndexServices[0]
+	}
+
+	return &adminDocumentHandler{
+		adminDocumentService: adminDocumentService,
+		searchIndexService:   searchIndexService,
+	}
 }
 
 // ListDocuments 返回后台文档列表，支持关键词、空间、状态、可见性与分页查询。
@@ -196,6 +208,11 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 	); err != nil {
 		response.FromError(c, err)
 		return
+	}
+	if h != nil && h.searchIndexService != nil {
+		if syncErr := h.searchIndexService.DeleteDocumentByID(c.Request.Context(), documentID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "后台删除文档后同步全文检索索引失败")
+		}
 	}
 
 	response.JSON(c, http.StatusOK, struct{}{})
