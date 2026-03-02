@@ -51,6 +51,7 @@ import ReactMarkdown from "react-markdown";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthPanel } from "./components/AuthPanel";
 import { EditorAccessErrorPage } from "./components/EditorAccessErrorPage";
+import { EditorLoadingPage } from "./components/EditorLoadingPage";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
@@ -973,6 +974,8 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState("初始化中...");
   // 当前可用主题列表：统一从数据层读取（local/http 均走 DataGateway）。
   const [previewThemes, setPreviewThemes] = useState([DEFAULT_PREVIEW_THEME_TEMPLATE]);
+  // 主题资源加载态：用于首次进入编辑器时展示全屏 loading。
+  const [isPreviewThemesLoading, setIsPreviewThemesLoading] = useState(true);
   // 当前生效的预览主题 ID。
   const [activePreviewThemeId, setActivePreviewThemeId] = useState(DEFAULT_PREVIEW_THEME_ID);
   // 外部注入的预览样式文本；为空时仅使用内置主题。
@@ -1029,6 +1032,8 @@ export default function App() {
   const [editorAccessError, setEditorAccessError] = useState<EditorAccessErrorState | null>(null);
   // 手动重试计数：点击“重新校验”时递增，触发路由同步 effect 重新执行。
   const [editorAccessRetryCount, setEditorAccessRetryCount] = useState(0);
+  // 首次编辑器资源是否已就绪：仅首次加载阶段展示全屏 loading。
+  const [hasEditorInitialResourcesReady, setHasEditorInitialResourcesReady] = useState(false);
   const workspaceSidebarResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
   // 记录“由本地动作触发的目标文档路由”，避免路由 effect 在状态尚未同步时重复请求。
   const pendingRouteDocumentIDRef = useRef<{ docId: string; startedAt: number } | null>(null);
@@ -1323,6 +1328,7 @@ export default function App() {
     let cancelled = false;
 
     const loadThemes = async () => {
+      setIsPreviewThemesLoading(true);
       try {
         const themes = await dataGateway.theme.listThemes();
         if (cancelled) {
@@ -1339,6 +1345,10 @@ export default function App() {
         }
         console.error("[theme] 加载主题列表失败", error);
         setPreviewThemes([DEFAULT_PREVIEW_THEME_TEMPLATE]);
+      } finally {
+        if (!cancelled) {
+          setIsPreviewThemesLoading(false);
+        }
       }
     };
 
@@ -1347,6 +1357,14 @@ export default function App() {
       cancelled = true;
     };
   }, [dataGateway]);
+
+  // 退出登录后重置“首次资源已就绪”标记，确保下一次进入编辑器仍有加载页。
+  useEffect(() => {
+    if (activeUser) {
+      return;
+    }
+    setHasEditorInitialResourcesReady(false);
+  }, [activeUser]);
 
   // 当前文档变化时，自动切换到文档绑定的主题。
   useEffect(() => {
@@ -2063,6 +2081,58 @@ export default function App() {
     }
     return `图片上传中（${Math.min(imageUploadCompletedCount, imageUploadTotalCount)}/${imageUploadTotalCount}）...`;
   }, [imageUploadCompletedCount, imageUploadTotalCount, isImageUploading]);
+
+  const isEditorInitialResourcesLoaded = useMemo(
+    () =>
+      isEditorRoute &&
+      !isAuthChecking &&
+      Boolean(activeUser) &&
+      !editorAccessError &&
+      saveStatus !== "loading" &&
+      !isImageHostingConfigLoading &&
+      !isPreviewThemesLoading &&
+      Boolean(activeSpaceId) &&
+      Boolean(activeDocId),
+    [
+      activeDocId,
+      activeSpaceId,
+      activeUser,
+      editorAccessError,
+      isAuthChecking,
+      isEditorRoute,
+      isImageHostingConfigLoading,
+      isPreviewThemesLoading,
+      saveStatus
+    ]
+  );
+
+  useEffect(() => {
+    if (!isEditorInitialResourcesLoaded || hasEditorInitialResourcesReady) {
+      return;
+    }
+    setHasEditorInitialResourcesReady(true);
+  }, [hasEditorInitialResourcesReady, isEditorInitialResourcesLoaded]);
+
+  const shouldShowEditorLoadingPage =
+    isEditorRoute &&
+    !isAuthChecking &&
+    Boolean(activeUser) &&
+    !editorAccessError &&
+    !hasEditorInitialResourcesReady;
+
+  const editorLoadingDescription = useMemo(() => {
+    if (isPreviewThemesLoading) {
+      return "正在加载主题资源...";
+    }
+    if (isImageHostingConfigLoading) {
+      return "正在加载图床配置...";
+    }
+    if (saveStatus === "loading") {
+      const message = statusMessage.trim();
+      return message || "正在加载文档...";
+    }
+    return "正在准备编辑器资源...";
+  }, [isImageHostingConfigLoading, isPreviewThemesLoading, saveStatus, statusMessage]);
 
   // 粘贴图片上传期间展示 sonner loading，结束后自动关闭。
   useEffect(() => {
@@ -2837,6 +2907,19 @@ export default function App() {
             <span>登录成功，正在跳转...</span>
           </div>
         </div>
+      </>
+    );
+  }
+
+  // 编辑器首次资源加载：先展示全屏 loading，待核心资源就绪后再渲染完整编辑器布局。
+  if (shouldShowEditorLoadingPage) {
+    return (
+      <>
+        <Toaster />
+        <EditorLoadingPage
+          description={editorLoadingDescription}
+          detail={activeSpaceName ? `目标空间：${activeSpaceName}` : "正在同步工作区上下文..."}
+        />
       </>
     );
   }

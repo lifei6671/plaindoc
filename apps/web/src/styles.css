@@ -2796,6 +2796,68 @@ input[type="reset"]:not(:disabled) {
   color: #9f1239;
 }
 
+.editor-loading-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 11% 18%, rgba(14, 116, 144, 0.18), transparent 42%),
+    radial-gradient(circle at 87% 10%, rgba(2, 132, 199, 0.12), transparent 34%),
+    linear-gradient(158deg, #f8fafc 0%, #ffffff 45%, #eff6ff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-loading-page__panel {
+  width: min(92vw, 480px);
+  padding: 24px 22px;
+  border: 1px solid #dbe2ea;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(6px);
+  display: grid;
+  gap: 12px;
+}
+
+.editor-loading-page__icon-wrap {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-loading-page__icon {
+  animation: status-save-spin 0.9s linear infinite;
+}
+
+.editor-loading-page__title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.editor-loading-page__description {
+  margin: 0;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.editor-loading-page__detail {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
 /* 管理后台登录页：与编辑器登录页视觉区分，突出“受控入口”语义。 */
 .admin-auth-page {
   min-height: 100vh;
