@@ -255,8 +255,8 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 		h.renderCache.PurgeDoc(document.DocumentID)
 	}
 	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), document.DocumentID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "更新文档可见性后同步全文检索索引失败")
+		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(document.DocumentID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "更新文档可见性后加入全文检索索引同步队列失败")
 		}
 	}
 

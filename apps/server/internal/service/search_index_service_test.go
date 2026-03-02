@@ -407,6 +407,108 @@ func TestSearchIndexService_RebuildActiveProvider_RejectsConcurrentRebuild(t *te
 	}
 }
 
+func TestSearchIndexService_EnqueueSyncDocumentByID_NonBlocking(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-search-index-enqueue-sync-doc?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	if err := storage.MigrateUp(context.Background(), database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+	if err := seedSearchIndexServiceFixture(database.ORM); err != nil {
+		t.Fatalf("seed fixture failed: %v", err)
+	}
+
+	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	provider := newBlockingIncrementalSearchIndexProvider()
+	indexService := NewSearchIndexService(
+		database.ORM,
+		searchConfigService,
+		provider,
+	)
+
+	startAt := time.Now()
+	if err := indexService.EnqueueSyncDocumentByID("search-doc-1"); err != nil {
+		t.Fatalf("enqueue sync document failed: %v", err)
+	}
+	if elapsed := time.Since(startAt); elapsed > 200*time.Millisecond {
+		t.Fatalf("expected enqueue call to be non-blocking, elapsed=%s", elapsed)
+	}
+
+	select {
+	case <-provider.upsertStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for async sync-document task start")
+	}
+
+	close(provider.upsertRelease)
+
+	waitForSearchIndexStatus(t, 3*time.Second, 50*time.Millisecond, func(status SearchIndexStatusResult) bool {
+		return status.LastRebuildSource == searchIndexRebuildSourceSyncDoc
+	}, func(status SearchIndexStatusResult) string {
+		return "last source=" + status.LastRebuildSource
+	}, indexService)
+}
+
+func TestSearchIndexService_EnqueueDeleteDocumentByID_NonBlocking(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-search-index-enqueue-delete-doc?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	if err := storage.MigrateUp(context.Background(), database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+	if err := seedSearchIndexServiceFixture(database.ORM); err != nil {
+		t.Fatalf("seed fixture failed: %v", err)
+	}
+
+	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	provider := newBlockingIncrementalSearchIndexProvider()
+	indexService := NewSearchIndexService(
+		database.ORM,
+		searchConfigService,
+		provider,
+	)
+
+	startAt := time.Now()
+	if err := indexService.EnqueueDeleteDocumentByID("search-doc-1"); err != nil {
+		t.Fatalf("enqueue delete document failed: %v", err)
+	}
+	if elapsed := time.Since(startAt); elapsed > 200*time.Millisecond {
+		t.Fatalf("expected enqueue call to be non-blocking, elapsed=%s", elapsed)
+	}
+
+	select {
+	case <-provider.deleteStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for async delete-document task start")
+	}
+
+	close(provider.deleteRelease)
+
+	waitForSearchIndexStatus(t, 3*time.Second, 50*time.Millisecond, func(status SearchIndexStatusResult) bool {
+		return status.LastRebuildSource == searchIndexRebuildSourceDeleteDoc
+	}, func(status SearchIndexStatusResult) string {
+		return "last source=" + status.LastRebuildSource
+	}, indexService)
+}
+
 type blockingSearchIndexProvider struct {
 	started chan struct{}
 	release chan struct{}
@@ -469,6 +571,113 @@ func (p *blockingSearchIndexProvider) Search(
 
 func (p *blockingSearchIndexProvider) Capabilities() searchprovider.Capabilities {
 	return searchprovider.Capabilities{}
+}
+
+type blockingIncrementalSearchIndexProvider struct {
+	upsertStarted chan struct{}
+	upsertRelease chan struct{}
+	deleteStarted chan struct{}
+	deleteRelease chan struct{}
+}
+
+func newBlockingIncrementalSearchIndexProvider() *blockingIncrementalSearchIndexProvider {
+	return &blockingIncrementalSearchIndexProvider{
+		upsertStarted: make(chan struct{}),
+		upsertRelease: make(chan struct{}),
+		deleteStarted: make(chan struct{}),
+		deleteRelease: make(chan struct{}),
+	}
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Name() string {
+	return "bleve"
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Verify(ctx context.Context, config map[string]any) error {
+	return nil
+}
+
+func (p *blockingIncrementalSearchIndexProvider) EnsureSchema(ctx context.Context) error {
+	return nil
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Upsert(
+	ctx context.Context,
+	records []searchprovider.IndexRecord,
+) error {
+	select {
+	case <-p.upsertStarted:
+	default:
+		close(p.upsertStarted)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.upsertRelease:
+		return nil
+	}
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Delete(ctx context.Context, docIDs []string) error {
+	select {
+	case <-p.deleteStarted:
+	default:
+		close(p.deleteStarted)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.deleteRelease:
+		return nil
+	}
+}
+
+func (p *blockingIncrementalSearchIndexProvider) PurgeBySpace(ctx context.Context, spaceID string) error {
+	return nil
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Search(
+	ctx context.Context,
+	request searchprovider.SearchRequest,
+) (searchprovider.SearchResponse, error) {
+	return searchprovider.SearchResponse{}, nil
+}
+
+func (p *blockingIncrementalSearchIndexProvider) Capabilities() searchprovider.Capabilities {
+	return searchprovider.Capabilities{}
+}
+
+func waitForSearchIndexStatus(
+	t *testing.T,
+	timeout time.Duration,
+	interval time.Duration,
+	condition func(status SearchIndexStatusResult) bool,
+	describe func(status SearchIndexStatusResult) string,
+	indexService *SearchIndexService,
+) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	lastStatus, statusErr := indexService.Status(context.Background())
+	if statusErr != nil {
+		t.Fatalf("read search index status failed: %v", statusErr)
+	}
+	for {
+		if condition(lastStatus) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting status condition: %s", describe(lastStatus))
+		}
+		time.Sleep(interval)
+		lastStatus, statusErr = indexService.Status(context.Background())
+		if statusErr != nil {
+			t.Fatalf("read search index status failed: %v", statusErr)
+		}
+	}
 }
 
 func seedSearchIndexServiceFixture(dbORM *gorm.DB) error {

@@ -500,8 +500,8 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 	}
 
 	if req.Type == models.NodeTypeDoc && h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), responseBody.DocID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "创建文档后同步全文检索索引失败")
+		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(responseBody.DocID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "创建文档后加入全文检索索引同步队列失败")
 		}
 	}
 
@@ -629,8 +629,8 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		h.renderCache.PurgeDoc(strings.TrimSpace(node.NodeID))
 	}
 	if node.Type == models.NodeTypeDoc && req.Title != nil && h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), strings.TrimSpace(node.NodeID)); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "更新文档标题后同步全文检索索引失败")
+		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(strings.TrimSpace(node.NodeID)); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "更新文档标题后加入全文检索索引同步队列失败")
 		}
 	}
 
@@ -918,8 +918,8 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		}
 	}
 	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.SyncDocumentByID(c.Request.Context(), documentID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "保存文档后同步全文检索索引失败")
+		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(documentID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "保存文档后加入全文检索索引同步队列失败")
 		}
 	}
 

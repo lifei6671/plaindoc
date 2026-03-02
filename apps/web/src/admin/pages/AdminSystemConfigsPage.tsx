@@ -1167,7 +1167,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         markDirty("security");
         return;
       case "search":
-        setSearchDraft(cloneSearchConfig(SEARCH_TEMPLATE));
+        setSearchDraft((previous) => {
+          const nextConfig = cloneSearchConfig(SEARCH_TEMPLATE);
+          nextConfig.analysis.analyzers.jieba.dictSource = previous.analysis.analyzers.jieba.dictSource;
+          nextConfig.analysis.analyzers.jieba.dictVersion = previous.analysis.analyzers.jieba.dictVersion;
+          return nextConfig;
+        });
         markDirty("search");
         return;
       case "data-retention":
@@ -2034,65 +2039,28 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
                         <label className="space-y-1.5">
                           <span className="text-xs font-semibold tracking-wide text-slate-600">词典来源</span>
-                          <Select
-                            value={searchDraft.analysis.analyzers.jieba.dictSource}
-                            onValueChange={(value) => {
-                              setSearchDraft((previous) => ({
-                                ...previous,
-                                analysis: {
-                                  ...previous.analysis,
-                                  analyzers: {
-                                    ...previous.analysis.analyzers,
-                                    jieba: {
-                                      ...previous.analysis.analyzers.jieba,
-                                      dictSource: value as SearchJiebaDictSource
-                                    }
-                                  }
-                                }
-                              }));
-                              markDirty("search");
-                            }}
-                            disabled={saving}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {SEARCH_JIEBA_DICT_SOURCE_OPTIONS.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Input
+                            value={
+                              SEARCH_JIEBA_DICT_SOURCE_OPTIONS.find(
+                                (option) => option.value === searchDraft.analysis.analyzers.jieba.dictSource
+                              )?.label ?? searchDraft.analysis.analyzers.jieba.dictSource
+                            }
+                            readOnly
+                            disabled
+                          />
+                          <p className="text-xs text-slate-500">该值由运行时配置决定，此处仅展示。</p>
                         </label>
 
                         <label className="space-y-1.5 sm:col-span-2">
                           <span className="text-xs font-semibold tracking-wide text-slate-600">词典版本</span>
                           <Input
                             value={searchDraft.analysis.analyzers.jieba.dictVersion}
-                            onChange={(event) => {
-                              setSearchDraft((previous) => ({
-                                ...previous,
-                                analysis: {
-                                  ...previous.analysis,
-                                  analyzers: {
-                                    ...previous.analysis.analyzers,
-                                    jieba: {
-                                      ...previous.analysis.analyzers.jieba,
-                                      dictVersion: parseString(
-                                        event.target.value,
-                                        previous.analysis.analyzers.jieba.dictVersion
-                                      )
-                                    }
-                                  }
-                                }
-                              }));
-                              markDirty("search");
-                            }}
-                            disabled={saving}
+                            readOnly
+                            disabled
                           />
-                          <p className="text-xs text-slate-500">仅允许字母数字与 `._:-`，长度 1-64。</p>
+                          <p className="text-xs text-slate-500">
+                            该值由“分词治理”中的词典变更自动维护，此处仅展示当前生效版本。
+                          </p>
                         </label>
 
                         <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2.5">
@@ -2116,7 +2084,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             }}
                             disabled={saving}
                           />
-                          <span className="text-xs font-medium text-slate-700">开启 HMM</span>
+                          <div className="space-y-0.5">
+                            <span className="text-xs font-medium text-slate-700">开启 HMM</span>
+                            <p className="text-xs text-slate-500">
+                              仅在活跃分词器为 jieba 时生效；会额外生成连续中文二元词，提升未登录词命中率。
+                            </p>
+                          </div>
                         </label>
 
                         <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2.5">
@@ -2140,7 +2113,12 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             }}
                             disabled={saving}
                           />
-                          <span className="text-xs font-medium text-slate-700">启用停用词过滤</span>
+                          <div className="space-y-0.5">
+                            <span className="text-xs font-medium text-slate-700">启用停用词过滤</span>
+                            <p className="text-xs text-slate-500">
+                              当前版本为预留配置，运行时暂未接入停用词过滤逻辑，开启后不会改变检索结果。
+                            </p>
+                          </div>
                         </label>
                       </div>
                     </div>

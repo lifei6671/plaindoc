@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,14 +42,54 @@ func (r *stubSystemConfigRepository) GetByConfigKey(
 }
 
 func (r *stubSystemConfigRepository) Create(ctx context.Context, config *models.SystemConfig) error {
-	return errors.New("not implemented")
+	if r == nil {
+		return errors.New("stub system config repository is nil")
+	}
+	if config == nil {
+		return errors.New("system config is nil")
+	}
+	if r.recordByKey == nil {
+		r.recordByKey = map[string]*models.SystemConfig{}
+	}
+	configKey := strings.TrimSpace(config.ConfigKey)
+	if configKey == "" {
+		return errors.New("config key is empty")
+	}
+	if _, exists := r.recordByKey[configKey]; exists {
+		return gorm.ErrDuplicatedKey
+	}
+	cloned := *config
+	r.recordByKey[configKey] = &cloned
+	return nil
 }
 
 func (r *stubSystemConfigRepository) UpdateByVersion(
 	ctx context.Context,
 	params repository.UpdateSystemConfigByVersionParams,
 ) (bool, error) {
-	return false, errors.New("not implemented")
+	if r == nil {
+		return false, errors.New("stub system config repository is nil")
+	}
+	configKey := strings.TrimSpace(params.ConfigKey)
+	if configKey == "" {
+		return false, nil
+	}
+	record, exists := r.recordByKey[configKey]
+	if !exists || record == nil {
+		return false, nil
+	}
+	if record.Version != params.ExpectedVersion {
+		return false, nil
+	}
+	updatedAt := params.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	record.ConfigValueJSON = params.ConfigValueJSON
+	record.Version = params.NextVersion
+	record.UpdatedByUserID = params.UpdatedByUserID
+	record.UpdatedAt = updatedAt
+	return true, nil
 }
 
 func TestSearchConfigService_Resolve_DefaultWhenConfigMissing(t *testing.T) {

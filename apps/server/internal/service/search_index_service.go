@@ -17,6 +17,8 @@ import (
 )
 
 const defaultSearchIndexRebuildBatchSize = 200
+const defaultSearchIndexAsyncQueueSize = 1024
+const defaultSearchIndexAsyncTaskTimeout = 45 * time.Second
 
 const (
 	searchIndexRebuildSourceBootstrap  = "bootstrap"
@@ -30,6 +32,8 @@ const (
 var (
 	// ErrSearchIndexRebuildInProgress 表示当前已有索引重建任务在执行。
 	ErrSearchIndexRebuildInProgress = errors.New("search index rebuild is already in progress")
+	// ErrSearchIndexTaskQueueFull 表示异步索引任务队列已满。
+	ErrSearchIndexTaskQueueFull = errors.New("search index task queue is full")
 )
 
 // SearchIndexBootstrapResult 表示索引启动阶段结果。
@@ -68,11 +72,26 @@ type SearchIndexService struct {
 	searchConfigService *SearchConfigService
 	providers           map[searchcfg.ProviderName]searchprovider.Provider
 
+	asyncTaskQueue      chan searchIndexAsyncTask
+	asyncTaskWorkerOnce sync.Once
+
 	runtimeMu                   sync.RWMutex
 	rebuildInProgress           bool
 	lastRebuildAt               time.Time
 	lastRebuildSource           string
 	lastRebuildIndexedDocuments int
+}
+
+type searchIndexAsyncTaskType string
+
+const (
+	searchIndexAsyncTaskTypeSyncDocument   searchIndexAsyncTaskType = "sync_document"
+	searchIndexAsyncTaskTypeDeleteDocument searchIndexAsyncTaskType = "delete_document"
+)
+
+type searchIndexAsyncTask struct {
+	taskType   searchIndexAsyncTaskType
+	documentID string
 }
 
 // NewSearchIndexService 创建索引服务。
@@ -96,6 +115,7 @@ func NewSearchIndexService(
 		db:                  db,
 		searchConfigService: searchConfigService,
 		providers:           providerMap,
+		asyncTaskQueue:      make(chan searchIndexAsyncTask, defaultSearchIndexAsyncQueueSize),
 	}
 }
 
@@ -182,6 +202,38 @@ func (s *SearchIndexService) RebuildActiveProvider(ctx context.Context) (SearchI
 		providerInstance,
 		searchIndexRebuildSourceManual,
 	)
+}
+
+// EnqueueSyncDocumentByID 异步入队按文档 ID 增量同步索引任务。
+func (s *SearchIndexService) EnqueueSyncDocumentByID(documentID string) error {
+	if s == nil || s.db == nil || s.searchConfigService == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return nil
+	}
+	return s.enqueueTask(searchIndexAsyncTask{
+		taskType:   searchIndexAsyncTaskTypeSyncDocument,
+		documentID: normalizedDocumentID,
+	})
+}
+
+// EnqueueDeleteDocumentByID 异步入队按文档 ID 删除索引任务。
+func (s *SearchIndexService) EnqueueDeleteDocumentByID(documentID string) error {
+	if s == nil || s.db == nil || s.searchConfigService == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedDocumentID == "" {
+		return nil
+	}
+	return s.enqueueTask(searchIndexAsyncTask{
+		taskType:   searchIndexAsyncTaskTypeDeleteDocument,
+		documentID: normalizedDocumentID,
+	})
 }
 
 // SyncDocumentByID 按文档 ID 增量同步索引（存在则 upsert，不存在或不可索引则删除）。
@@ -574,6 +626,42 @@ func (s *SearchIndexService) IsRebuildInProgress() bool {
 	s.runtimeMu.RLock()
 	defer s.runtimeMu.RUnlock()
 	return s.rebuildInProgress
+}
+
+func (s *SearchIndexService) enqueueTask(task searchIndexAsyncTask) error {
+	if s == nil {
+		return errors.New("search index service dependencies are nil")
+	}
+	if s.asyncTaskQueue == nil {
+		return errors.New("search index task queue is nil")
+	}
+
+	s.asyncTaskWorkerOnce.Do(func() {
+		go s.runAsyncTaskWorker()
+	})
+
+	select {
+	case s.asyncTaskQueue <- task:
+		return nil
+	default:
+		return ErrSearchIndexTaskQueueFull
+	}
+}
+
+func (s *SearchIndexService) runAsyncTaskWorker() {
+	if s == nil || s.asyncTaskQueue == nil {
+		return
+	}
+	for task := range s.asyncTaskQueue {
+		taskCtx, cancel := context.WithTimeout(context.Background(), defaultSearchIndexAsyncTaskTimeout)
+		switch task.taskType {
+		case searchIndexAsyncTaskTypeSyncDocument:
+			_ = s.SyncDocumentByID(taskCtx, task.documentID)
+		case searchIndexAsyncTaskTypeDeleteDocument:
+			_ = s.DeleteDocumentByID(taskCtx, task.documentID)
+		}
+		cancel()
+	}
 }
 
 func (s *SearchIndexService) resolveProvider(

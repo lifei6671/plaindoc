@@ -1,4 +1,4 @@
-import { LoaderCircle, Pencil, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Database, LoaderCircle, Pencil, RefreshCw, Search, type LucideIcon, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -107,6 +107,36 @@ interface AnalyzerCapabilityBadge {
   enabled: boolean;
 }
 
+type AnalyzerConfigSectionKey = "status" | "dictionary" | "preview";
+
+interface AnalyzerConfigSectionItem {
+  key: AnalyzerConfigSectionKey;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+const ANALYZER_CONFIG_SECTIONS: AnalyzerConfigSectionItem[] = [
+  {
+    key: "status",
+    label: "分词状态",
+    description: "运行状态与能力标识",
+    icon: Search
+  },
+  {
+    key: "dictionary",
+    label: "词典治理",
+    description: "词条维护与筛选",
+    icon: Database
+  },
+  {
+    key: "preview",
+    label: "分词预览",
+    description: "在线分词调试",
+    icon: Pencil
+  }
+];
+
 function renderCapabilityBadges(analyzer: AdminSearchAnalyzerRecord | null): AnalyzerCapabilityBadge[] {
   if (!analyzer) {
     return [];
@@ -148,6 +178,7 @@ function renderCapabilityBadges(analyzer: AdminSearchAnalyzerRecord | null): Ana
 export function AdminSearchAnalyzersPage({ dataGateway }: AdminSearchAnalyzersPageProps) {
   const [analyzers, setAnalyzers] = useState<AdminSearchAnalyzerRecord[]>([]);
   const managedAnalyzer: AdminSearchAnalyzerName = "jieba";
+  const [selectedSectionKey, setSelectedSectionKey] = useState<AnalyzerConfigSectionKey>("status");
   const [loadingAnalyzers, setLoadingAnalyzers] = useState(false);
   const [loadingDict, setLoadingDict] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "deleted">("active");
@@ -202,6 +233,10 @@ export function AdminSearchAnalyzersPage({ dataGateway }: AdminSearchAnalyzersPa
     const pageSize = dictState.pagination.pageSize || DEFAULT_PAGE_SIZE;
     return Math.max(1, Math.ceil(total / pageSize));
   }, [dictState.pagination.pageSize, dictState.pagination.total]);
+  const selectedSection = useMemo(
+    () => ANALYZER_CONFIG_SECTIONS.find((item) => item.key === selectedSectionKey) ?? ANALYZER_CONFIG_SECTIONS[0],
+    [selectedSectionKey]
+  );
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -405,419 +440,492 @@ export function AdminSearchAnalyzersPage({ dataGateway }: AdminSearchAnalyzersPa
 
   return (
     <section aria-label="分词治理">
-      <AdminPageCard contentClassName="space-y-5 px-2 pb-5 pt-2 lg:px-0">
-        <div className="rounded-sm border border-slate-200/80 bg-slate-50 p-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-slate-900">分词器状态与平台能力</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
-                  治理对象：{selectedAnalyzer?.name ?? managedAnalyzer}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className={runtimeActiveAnalyzer
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-slate-200 bg-slate-100 text-slate-600"}
-                >
-                  系统活跃：{runtimeActiveAnalyzer?.name ?? "未知"}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className={isManagedAnalyzerActive
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-amber-200 bg-amber-50 text-amber-700"}
-                >
-                  治理对象状态：{isManagedAnalyzerActive ? "已活跃" : "未活跃"}
-                </Badge>
-                <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
-                  词典版本：{selectedAnalyzer?.dictVersion ?? "default"}
-                </Badge>
+      <AdminPageCard>
+        <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+          <div className="grid min-h-[560px] gap-0 md:grid-cols-[240px_minmax(0,1fr)]">
+            <aside className="hidden bg-transparent p-2 md:block">
+              <nav className="space-y-1" aria-label="分词治理配置项">
+                {ANALYZER_CONFIG_SECTIONS.map((section) => {
+                  const isActive = section.key === selectedSectionKey;
+                  const SectionIcon = section.icon;
+                  return (
+                    <button
+                      key={section.key}
+                      type="button"
+                      className={`w-full appearance-none rounded-lg border border-transparent px-3 py-2.5 text-left shadow-none outline-none transition focus-visible:ring-2 focus-visible:ring-sky-200 ${isActive
+                        ? "bg-slate-200 text-slate-900"
+                        : "text-slate-700 hover:bg-slate-200/70"
+                        }`}
+                      onClick={() => setSelectedSectionKey(section.key)}
+                      disabled={loadingAnalyzers || reloading}
+                    >
+                      <p className="flex items-center gap-2.5 text-sm font-medium">
+                        <SectionIcon size={16} />
+                        <span>{section.label}</span>
+                      </p>
+                      <p className="mt-0.5 pl-[26px] text-xs text-slate-500">{section.description}</p>
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
+
+            <main className="flex min-h-[560px] flex-col">
+              <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-800">{selectedSection.label}</h3>
+                </div>
+                <AdminToolbarActions className="space-y-0">
+                  {(selectedSectionKey === "status" || selectedSectionKey === "dictionary") ? (
+                    <Button type="button" variant="outline" size="sm" disabled={loadingAnalyzers || loadingDict} onClick={handleRefresh}>
+                      {loadingAnalyzers || loadingDict ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <RefreshCw className="mr-1" size={14} />}
+                      刷新
+                    </Button>
+                  ) : null}
+                  {(selectedSectionKey === "dictionary" || selectedSectionKey === "preview") ? (
+                    <Button type="button" variant="outline" size="sm" disabled={reloading || loadingAnalyzers} onClick={() => void handleReload()}>
+                      {reloading ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <RefreshCw className="mr-1" size={14} />}
+                      重载词典
+                    </Button>
+                  ) : null}
+                </AdminToolbarActions>
+              </header>
+
+              <div className="border-b border-slate-200 bg-white px-4 py-2 md:hidden">
+                <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="移动端分词治理配置项">
+                  {ANALYZER_CONFIG_SECTIONS.map((section) => {
+                    const isActive = section.key === selectedSectionKey;
+                    return (
+                      <button
+                        key={section.key}
+                        type="button"
+                        className={`whitespace-nowrap rounded-md border px-2.5 py-1 text-xs transition ${isActive
+                          ? "border-slate-300 bg-slate-200 text-slate-900"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                          }`}
+                        onClick={() => setSelectedSectionKey(section.key)}
+                        disabled={loadingAnalyzers || reloading}
+                      >
+                        {section.label}
+                      </button>
+                    );
+                  })}
+                </nav>
               </div>
-              <p className="text-xs text-slate-500">
-                下方标签是 PlainDoc 平台定义的分词能力位，不是随机标签。蓝色表示治理对象已支持，灰色表示当前未支持或规划中。
-              </p>
-              {!isManagedAnalyzerActive && runtimeActiveAnalyzer ? (
-                <p className="rounded-sm border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-                  当前系统活跃分词器是 <code>{runtimeActiveAnalyzer.name}</code>，不是 <code>{managedAnalyzer}</code>。
-                  此页面的词典治理变更不会影响线上检索，需要先在“系统配置 / 全文检索”切换活跃分词器。
-                </p>
-              ) : null}
-              <TooltipProvider delayDuration={120}>
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">已支持</span>
-                    {supportedCapabilityBadges.map((item) => (
-                      <Tooltip key={item.key}>
-                        <TooltipTrigger asChild>
-                          <Badge variant="outline" className="cursor-help border-sky-200 bg-sky-50 text-sky-700">
-                            {item.label}
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[320px] whitespace-pre-wrap break-words">
-                          {item.tooltip}
-                        </TooltipContent>
-                      </Tooltip>
-                    ))}
-                    {supportedCapabilityBadges.length === 0 ? (
-                      <span className="text-xs text-slate-500">暂无</span>
+
+              <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4">
+                <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  配置项：<code>{selectedSection.key}</code>，治理对象：<code>{selectedAnalyzer?.name ?? managedAnalyzer}</code>
+                </div>
+
+                {selectedSectionKey === "status" ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-4">
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-slate-900">分词器状态与平台能力</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
+                          治理对象：{selectedAnalyzer?.name ?? managedAnalyzer}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={runtimeActiveAnalyzer
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-100 text-slate-600"}
+                        >
+                          系统活跃：{runtimeActiveAnalyzer?.name ?? "未知"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={isManagedAnalyzerActive
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-amber-200 bg-amber-50 text-amber-700"}
+                        >
+                          治理对象状态：{isManagedAnalyzerActive ? "已活跃" : "未活跃"}
+                        </Badge>
+                        <Badge variant="outline" className="border-slate-200 bg-white text-slate-700">
+                          词典版本：{selectedAnalyzer?.dictVersion ?? "default"}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        下方标签是 PlainDoc 平台定义的分词能力位，不是随机标签。蓝色表示治理对象已支持，灰色表示当前未支持或规划中。
+                      </p>
+                      {!isManagedAnalyzerActive && runtimeActiveAnalyzer ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+                          当前系统活跃分词器是 <code>{runtimeActiveAnalyzer.name}</code>，不是 <code>{managedAnalyzer}</code>。
+                          此页面的词典治理变更不会影响线上检索，需要先在“系统配置 / 全文检索”切换活跃分词器。
+                        </p>
+                      ) : null}
+                      <TooltipProvider delayDuration={120}>
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">已支持</span>
+                            {supportedCapabilityBadges.map((item) => (
+                              <Tooltip key={item.key}>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="outline" className="cursor-help border-sky-200 bg-sky-50 text-sky-700">
+                                    {item.label}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[320px] whitespace-pre-wrap break-words">
+                                  {item.tooltip}
+                                </TooltipContent>
+                              </Tooltip>
+                            ))}
+                            {supportedCapabilityBadges.length === 0 ? (
+                              <span className="text-xs text-slate-500">暂无</span>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-semibold tracking-wide text-slate-600">未支持 / 规划中</span>
+                            {unsupportedCapabilityBadges.map((item) => (
+                              <Tooltip key={item.key}>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="outline" className="cursor-help border-slate-200 bg-slate-100 text-slate-500">
+                                    {item.label}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[320px] whitespace-pre-wrap break-words">
+                                  {item.tooltip}
+                                </TooltipContent>
+                              </Tooltip>
+                            ))}
+                            {unsupportedCapabilityBadges.length === 0 ? (
+                              <span className="text-xs text-slate-500">暂无</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </TooltipProvider>
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedSectionKey === "dictionary" ? (
+                  <div className="space-y-3 rounded-md border border-slate-200 bg-white p-4">
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold text-slate-900">词典治理</h3>
+                      <p className="text-xs text-slate-500">
+                        支持新增、编辑、删除词条；变更后可使用上方“重载词典”使其生效。
+                      </p>
+                    </div>
+
+                    <form className="grid gap-2 md:grid-cols-[minmax(0,2fr)_130px_130px_auto]" onSubmit={handleCreate}>
+                      <Input
+                        value={termInput}
+                        onChange={(event) => setTermInput(event.target.value)}
+                        placeholder="词条（必填）"
+                        disabled={creating || updating}
+                      />
+                      <Input
+                        value={weightInput}
+                        onChange={(event) => setWeightInput(event.target.value)}
+                        placeholder="权重（可选）"
+                        disabled={creating || updating}
+                      />
+                      <Input
+                        value={tagInput}
+                        onChange={(event) => setTagInput(event.target.value)}
+                        placeholder="词性（可选）"
+                        disabled={creating || updating}
+                      />
+                      <div className="flex gap-2">
+                        <Button type="submit" size="sm" disabled={creating || updating}>
+                          {creating ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : null}
+                          新增
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={!editingEntryID || creating || updating}
+                          onClick={() => void handleUpdate()}
+                        >
+                          {updating ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <Pencil className="mr-1" size={14} />}
+                          更新
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" disabled={!editingEntryID || creating || updating} onClick={resetEditForm}>
+                          取消
+                        </Button>
+                      </div>
+                    </form>
+
+                    <TooltipProvider delayDuration={120}>
+                      <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2.5">
+                        <p className="text-xs text-slate-600">
+                          字段说明：`weight` 是词频权重（正整数，可选），`tag` 是词性标记（可选）。不确定时可以留空。
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">权重推荐</span>
+                          {JIEBA_WEIGHT_PRESETS.map((item) => (
+                            <Tooltip key={item.value}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
+                                  disabled={creating || updating}
+                                  onClick={() => setWeightInput(String(item.value))}
+                                >
+                                  {item.label}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">{item.description}</TooltipContent>
+                            </Tooltip>
+                          ))}
+                          <button
+                            type="button"
+                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
+                            disabled={creating || updating}
+                            onClick={() => setWeightInput("")}
+                          >
+                            留空
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">词性可选项</span>
+                          {JIEBA_POS_TAG_OPTIONS.map((item) => (
+                            <Tooltip key={item.value}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
+                                  disabled={creating || updating}
+                                  onClick={() => setTagInput(item.value)}
+                                >
+                                  {item.label}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                {item.value}：{item.description}
+                              </TooltipContent>
+                            </Tooltip>
+                          ))}
+                          <button
+                            type="button"
+                            className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
+                            disabled={creating || updating}
+                            onClick={() => setTagInput("")}
+                          >
+                            清空
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          当前版本说明：检索主路径主要按 `term` 生效，`weight/tag` 已保留为 jieba 词典兼容字段与后续增强能力预留。
+                        </p>
+                      </div>
+                    </TooltipProvider>
+
+                    {editingEntryID ? (
+                      <p className="text-xs text-amber-700">正在编辑词条 ID #{editingEntryID}，点击“更新”提交。</p>
+                    ) : null}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">状态筛选</span>
+                        <Select
+                          value={statusFilter}
+                          onValueChange={(value) => {
+                            setStatusFilter(value as typeof statusFilter);
+                            setPage(1);
+                          }}
+                          disabled={loadingDict}
+                        >
+                          <SelectTrigger className="h-8 w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">全部</SelectItem>
+                            <SelectItem value="active">生效中</SelectItem>
+                            <SelectItem value="deleted">已删除</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        共 {dictState.pagination.total} 条，页码 {dictState.pagination.page}/{totalPages}
+                      </p>
+                    </div>
+
+                    <AdminTableContainer>
+                      <table className="min-w-[760px] w-full border-collapse text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                          <tr>
+                            <th className="border-b border-slate-200 px-3 py-2 font-semibold">词条</th>
+                            <th className="border-b border-slate-200 px-3 py-2 font-semibold">权重</th>
+                            <th className="border-b border-slate-200 px-3 py-2 font-semibold">标签</th>
+                            <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
+                            <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
+                            <th className="border-b border-slate-200 px-3 py-2 font-semibold text-right">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loadingDict ? (
+                            <tr>
+                              <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
+                                <span className="inline-flex items-center gap-2">
+                                  <LoaderCircle size={16} className="animate-spin" />
+                                  正在加载词典...
+                                </span>
+                              </td>
+                            </tr>
+                          ) : dictState.items.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
+                                当前筛选条件下暂无词条
+                              </td>
+                            </tr>
+                          ) : (
+                            dictState.items.map((entry) => {
+                              const badge = renderDictStatusBadge(entry.status);
+                              return (
+                                <tr key={entry.id} className="border-b border-slate-100 text-slate-700">
+                                  <td className="px-3 py-2.5 font-medium text-slate-900">{entry.term}</td>
+                                  <td className="px-3 py-2.5 text-xs text-slate-600">{entry.weight ?? "-"}</td>
+                                  <td className="px-3 py-2.5 text-xs text-slate-600">{entry.tag || "-"}</td>
+                                  <td className="px-3 py-2.5">
+                                    <Badge variant="outline" className={badge.className}>
+                                      {badge.label}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-3 py-2.5 text-xs text-slate-600">{formatDateTime(entry.updatedAt)}</td>
+                                  <td className="px-3 py-2.5">
+                                    <div className="flex justify-end gap-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={creating || updating || deletingEntryID !== null}
+                                        onClick={() => handleStartEdit(entry)}
+                                      >
+                                        <Pencil className="mr-1" size={14} />
+                                        编辑
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="border-rose-200 text-rose-600 hover:bg-rose-50"
+                                        disabled={deletingEntryID === entry.id || creating || updating}
+                                        onClick={() => void handleDelete(entry)}
+                                      >
+                                        {deletingEntryID === entry.id ? (
+                                          <LoaderCircle className="mr-1 animate-spin" size={14} />
+                                        ) : (
+                                          <Trash2 className="mr-1" size={14} />
+                                        )}
+                                        删除
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </AdminTableContainer>
+
+                    <AdminPaginationFooter
+                      summary={`共 ${dictState.pagination.total} 条记录`}
+                      previousDisabled={loadingDict || page <= 1}
+                      nextDisabled={loadingDict || page >= totalPages}
+                      onPrevious={() => setPage((previous) => Math.max(1, previous - 1))}
+                      onNext={() => setPage((previous) => Math.min(totalPages, previous + 1))}
+                    />
+                  </div>
+                ) : null}
+
+                {selectedSectionKey === "preview" ? (
+                  <div className="space-y-3 rounded-md border border-slate-200 bg-white p-4">
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold text-slate-900">分词预览</h3>
+                      <p className="text-xs text-slate-500">
+                        调用 `analyze-preview` 实时查看分词结果，便于验证词典效果。
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">模式</span>
+                        <Select
+                          value={previewMode}
+                          onValueChange={(value) => setPreviewMode(value as AdminSearchAnalyzerMode)}
+                          disabled={previewing}
+                        >
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="query">query</SelectItem>
+                            <SelectItem value="index">index</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">language</span>
+                        <Input
+                          value={previewLanguage}
+                          onChange={(event) => setPreviewLanguage(event.target.value)}
+                          placeholder="zh-CN"
+                          disabled={previewing}
+                        />
+                      </label>
+                    </div>
+
+                    <label className="space-y-1.5">
+                      <span className="text-xs font-semibold tracking-wide text-slate-600">spaceId（可选）</span>
+                      <Input
+                        value={previewSpaceID}
+                        onChange={(event) => setPreviewSpaceID(event.target.value)}
+                        placeholder="space-id"
+                        disabled={previewing}
+                      />
+                    </label>
+
+                    <label className="space-y-1.5">
+                      <span className="text-xs font-semibold tracking-wide text-slate-600">输入文本</span>
+                      <Textarea
+                        value={previewText}
+                        onChange={(event) => setPreviewText(event.target.value)}
+                        placeholder="输入 Markdown 文本，代码块/公式/mermaid 会在分词前清洗。"
+                        className="min-h-[140px]"
+                        disabled={previewing}
+                      />
+                    </label>
+
+                    <Button type="button" size="sm" className="w-full" disabled={previewing} onClick={() => void handleAnalyzePreview()}>
+                      {previewing ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <Search className="mr-1" size={14} />}
+                      开始分词
+                    </Button>
+
+                    {previewResult ? (
+                      <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs text-slate-600">
+                          analyzer: <span className="font-medium text-slate-800">{previewResult.analyzer}</span> / mode:{" "}
+                          <span className="font-medium text-slate-800">{previewResult.mode}</span> / dictVersion:{" "}
+                          <span className="font-medium text-slate-800">{previewResult.dictVersion}</span>
+                        </p>
+                        <p className="text-xs text-slate-600">tokenCount: {previewResult.tokenCount}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {previewResult.tokens.length === 0 ? (
+                            <span className="text-xs text-slate-500">无 token 输出</span>
+                          ) : (
+                            previewResult.tokens.map((token, index) => (
+                              <Badge key={`${token}-${index}`} variant="outline" className="border-slate-200 bg-white text-slate-700">
+                                {token}
+                              </Badge>
+                            ))
+                          )}
+                        </div>
+                        <div className="rounded-md border border-slate-200 bg-white p-2">
+                          <p className="mb-1 text-xs font-semibold text-slate-600">Normalized Text</p>
+                          <p className="whitespace-pre-wrap break-words text-xs text-slate-700">
+                            {previewResult.normalizedText || "-"}
+                          </p>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-semibold tracking-wide text-slate-600">未支持 / 规划中</span>
-                    {unsupportedCapabilityBadges.map((item) => (
-                      <Tooltip key={item.key}>
-                        <TooltipTrigger asChild>
-                          <Badge variant="outline" className="cursor-help border-slate-200 bg-slate-100 text-slate-500">
-                            {item.label}
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[320px] whitespace-pre-wrap break-words">
-                          {item.tooltip}
-                        </TooltipContent>
-                      </Tooltip>
-                    ))}
-                    {unsupportedCapabilityBadges.length === 0 ? (
-                      <span className="text-xs text-slate-500">暂无</span>
-                    ) : null}
-                  </div>
-                </div>
-              </TooltipProvider>
-            </div>
-            <AdminToolbarActions className="space-y-0">
-              <Button type="button" variant="outline" size="sm" disabled={loadingAnalyzers || loadingDict} onClick={handleRefresh}>
-                {loadingAnalyzers || loadingDict ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <RefreshCw className="mr-1" size={14} />}
-                刷新
-              </Button>
-              <Button type="button" variant="outline" size="sm" disabled={reloading || loadingAnalyzers} onClick={() => void handleReload()}>
-                {reloading ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <RefreshCw className="mr-1" size={14} />}
-                重载词典
-              </Button>
-            </AdminToolbarActions>
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-          <div className="space-y-3 rounded-sm border border-slate-200/80 bg-white p-3">
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold text-slate-900">词典治理</h3>
-              <p className="text-xs text-slate-500">
-                支持新增、编辑、删除词条；变更后可使用上方“重载词典”使其生效。
-              </p>
-            </div>
-
-            <form className="grid gap-2 md:grid-cols-[minmax(0,2fr)_130px_130px_auto]" onSubmit={handleCreate}>
-              <Input
-                value={termInput}
-                onChange={(event) => setTermInput(event.target.value)}
-                placeholder="词条（必填）"
-                disabled={creating || updating}
-              />
-              <Input
-                value={weightInput}
-                onChange={(event) => setWeightInput(event.target.value)}
-                placeholder="权重（可选）"
-                disabled={creating || updating}
-              />
-              <Input
-                value={tagInput}
-                onChange={(event) => setTagInput(event.target.value)}
-                placeholder="词性（可选）"
-                disabled={creating || updating}
-              />
-              <div className="flex gap-2">
-                <Button type="submit" size="sm" disabled={creating || updating}>
-                  {creating ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : null}
-                  新增
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={!editingEntryID || creating || updating}
-                  onClick={() => void handleUpdate()}
-                >
-                  {updating ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <Pencil className="mr-1" size={14} />}
-                  更新
-                </Button>
-                <Button type="button" size="sm" variant="ghost" disabled={!editingEntryID || creating || updating} onClick={resetEditForm}>
-                  取消
-                </Button>
+                ) : null}
               </div>
-            </form>
-
-            <TooltipProvider delayDuration={120}>
-              <div className="space-y-2 rounded-sm border border-slate-200 bg-slate-50 p-2.5">
-                <p className="text-xs text-slate-600">
-                  字段说明：`weight` 是词频权重（正整数，可选），`tag` 是词性标记（可选）。不确定时可以留空。
-                </p>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-semibold tracking-wide text-slate-600">权重推荐</span>
-                  {JIEBA_WEIGHT_PRESETS.map((item) => (
-                    <Tooltip key={item.value}>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
-                          disabled={creating || updating}
-                          onClick={() => setWeightInput(String(item.value))}
-                        >
-                          {item.label}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">{item.description}</TooltipContent>
-                    </Tooltip>
-                  ))}
-                  <button
-                    type="button"
-                    className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
-                    disabled={creating || updating}
-                    onClick={() => setWeightInput("")}
-                  >
-                    留空
-                  </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-semibold tracking-wide text-slate-600">词性可选项</span>
-                  {JIEBA_POS_TAG_OPTIONS.map((item) => (
-                    <Tooltip key={item.value}>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
-                          disabled={creating || updating}
-                          onClick={() => setTagInput(item.value)}
-                        >
-                          {item.label}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        {item.value}：{item.description}
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
-                  <button
-                    type="button"
-                    className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 transition hover:bg-slate-100"
-                    disabled={creating || updating}
-                    onClick={() => setTagInput("")}
-                  >
-                    清空
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  当前版本说明：检索主路径主要按 `term` 生效，`weight/tag` 已保留为 jieba 词典兼容字段与后续增强能力预留。
-                </p>
-              </div>
-            </TooltipProvider>
-
-            {editingEntryID ? (
-              <p className="text-xs text-amber-700">正在编辑词条 ID #{editingEntryID}，点击“更新”提交。</p>
-            ) : null}
-
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold tracking-wide text-slate-600">状态筛选</span>
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value) => {
-                    setStatusFilter(value as typeof statusFilter);
-                    setPage(1);
-                  }}
-                  disabled={loadingDict}
-                >
-                  <SelectTrigger className="h-8 w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部</SelectItem>
-                    <SelectItem value="active">生效中</SelectItem>
-                    <SelectItem value="deleted">已删除</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <p className="text-xs text-slate-500">
-                共 {dictState.pagination.total} 条，页码 {dictState.pagination.page}/{totalPages}
-              </p>
-            </div>
-
-            <AdminTableContainer>
-              <table className="min-w-[760px] w-full border-collapse text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">词条</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">权重</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">标签</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">状态</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold">更新时间</th>
-                    <th className="border-b border-slate-200 px-3 py-2 font-semibold text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingDict ? (
-                    <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
-                        <span className="inline-flex items-center gap-2">
-                          <LoaderCircle size={16} className="animate-spin" />
-                          正在加载词典...
-                        </span>
-                      </td>
-                    </tr>
-                  ) : dictState.items.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
-                        当前筛选条件下暂无词条
-                      </td>
-                    </tr>
-                  ) : (
-                    dictState.items.map((entry) => {
-                      const badge = renderDictStatusBadge(entry.status);
-                      return (
-                        <tr key={entry.id} className="border-b border-slate-100 text-slate-700">
-                          <td className="px-3 py-2.5 font-medium text-slate-900">{entry.term}</td>
-                          <td className="px-3 py-2.5 text-xs text-slate-600">{entry.weight ?? "-"}</td>
-                          <td className="px-3 py-2.5 text-xs text-slate-600">{entry.tag || "-"}</td>
-                          <td className="px-3 py-2.5">
-                            <Badge variant="outline" className={badge.className}>
-                              {badge.label}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-slate-600">{formatDateTime(entry.updatedAt)}</td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={creating || updating || deletingEntryID !== null}
-                                onClick={() => handleStartEdit(entry)}
-                              >
-                                <Pencil className="mr-1" size={14} />
-                                编辑
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="border-rose-200 text-rose-600 hover:bg-rose-50"
-                                disabled={deletingEntryID === entry.id || creating || updating}
-                                onClick={() => void handleDelete(entry)}
-                              >
-                                {deletingEntryID === entry.id ? (
-                                  <LoaderCircle className="mr-1 animate-spin" size={14} />
-                                ) : (
-                                  <Trash2 className="mr-1" size={14} />
-                                )}
-                                删除
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </AdminTableContainer>
-
-            <AdminPaginationFooter
-              summary={`共 ${dictState.pagination.total} 条记录`}
-              previousDisabled={loadingDict || page <= 1}
-              nextDisabled={loadingDict || page >= totalPages}
-              onPrevious={() => setPage((previous) => Math.max(1, previous - 1))}
-              onNext={() => setPage((previous) => Math.min(totalPages, previous + 1))}
-            />
-          </div>
-
-          <div className="space-y-3 rounded-sm border border-slate-200/80 bg-white p-3">
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold text-slate-900">分词预览</h3>
-              <p className="text-xs text-slate-500">
-                调用 `analyze-preview` 实时查看分词结果，便于验证词典效果。
-              </p>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className="text-xs font-semibold tracking-wide text-slate-600">模式</span>
-                <Select
-                  value={previewMode}
-                  onValueChange={(value) => setPreviewMode(value as AdminSearchAnalyzerMode)}
-                  disabled={previewing}
-                >
-                  <SelectTrigger className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="query">query</SelectItem>
-                    <SelectItem value="index">index</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-semibold tracking-wide text-slate-600">language</span>
-                <Input
-                  value={previewLanguage}
-                  onChange={(event) => setPreviewLanguage(event.target.value)}
-                  placeholder="zh-CN"
-                  disabled={previewing}
-                />
-              </label>
-            </div>
-
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold tracking-wide text-slate-600">spaceId（可选）</span>
-              <Input
-                value={previewSpaceID}
-                onChange={(event) => setPreviewSpaceID(event.target.value)}
-                placeholder="space-id"
-                disabled={previewing}
-              />
-            </label>
-
-            <label className="space-y-1.5">
-              <span className="text-xs font-semibold tracking-wide text-slate-600">输入文本</span>
-              <Textarea
-                value={previewText}
-                onChange={(event) => setPreviewText(event.target.value)}
-                placeholder="输入 Markdown 文本，代码块/公式/mermaid 会在分词前清洗。"
-                className="min-h-[140px]"
-                disabled={previewing}
-              />
-            </label>
-
-            <Button type="button" size="sm" className="w-full" disabled={previewing} onClick={() => void handleAnalyzePreview()}>
-              {previewing ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <Search className="mr-1" size={14} />}
-              开始分词
-            </Button>
-
-            {previewResult ? (
-              <div className="space-y-2 rounded-sm border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs text-slate-600">
-                  analyzer: <span className="font-medium text-slate-800">{previewResult.analyzer}</span> / mode:{" "}
-                  <span className="font-medium text-slate-800">{previewResult.mode}</span> / dictVersion:{" "}
-                  <span className="font-medium text-slate-800">{previewResult.dictVersion}</span>
-                </p>
-                <p className="text-xs text-slate-600">tokenCount: {previewResult.tokenCount}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {previewResult.tokens.length === 0 ? (
-                    <span className="text-xs text-slate-500">无 token 输出</span>
-                  ) : (
-                    previewResult.tokens.map((token, index) => (
-                      <Badge key={`${token}-${index}`} variant="outline" className="border-slate-200 bg-white text-slate-700">
-                        {token}
-                      </Badge>
-                    ))
-                  )}
-                </div>
-                <div className="rounded-sm border border-slate-200 bg-white p-2">
-                  <p className="mb-1 text-xs font-semibold text-slate-600">Normalized Text</p>
-                  <p className="whitespace-pre-wrap break-words text-xs text-slate-700">
-                    {previewResult.normalizedText || "-"}
-                  </p>
-                </div>
-              </div>
-            ) : null}
+            </main>
           </div>
         </div>
       </AdminPageCard>

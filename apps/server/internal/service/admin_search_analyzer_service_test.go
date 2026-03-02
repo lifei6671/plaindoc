@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -222,7 +223,7 @@ func TestAdminSearchAnalyzerService_CreateAndDeleteDictEntry(t *testing.T) {
 	ctx := context.Background()
 	dictRepo := newInMemorySearchAnalyzerDictEntryRepo()
 	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
-	service := NewAdminSearchAnalyzerService(dictRepo, adminAccessService, nil, nil)
+	service := NewAdminSearchAnalyzerService(dictRepo, nil, adminAccessService, nil, nil)
 
 	weight200 := 200
 	created, err := service.CreateDictEntry(ctx, UpsertAdminSearchAnalyzerDictEntryInput{
@@ -263,6 +264,88 @@ func TestAdminSearchAnalyzerService_CreateAndDeleteDictEntry(t *testing.T) {
 	}
 }
 
+func TestAdminSearchAnalyzerService_CreateDictEntry_SyncsSearchDictVersion(t *testing.T) {
+	ctx := context.Background()
+	dictRepo := newInMemorySearchAnalyzerDictEntryRepo()
+	systemConfigRepo := &stubSystemConfigRepository{
+		recordByKey: map[string]*models.SystemConfig{
+			searchcfg.SystemConfigKey: {
+				ConfigKey: searchcfg.SystemConfigKey,
+				ConfigValueJSON: `{
+					"enabled":true,
+					"activeProvider":"bleve",
+					"fallbackPolicy":"degrade_to_database",
+					"analysis":{
+						"activeAnalyzer":"jieba",
+						"analyzers":{
+							"simple":{"enabled":true},
+							"jieba":{
+								"enabled":true,
+								"mode":"search",
+								"hmm":true,
+								"stopwordsEnabled":false,
+								"dictSource":"db",
+								"dictVersion":"v2026-03-02-001"
+							}
+						}
+					}
+				}`,
+				Version: 2,
+			},
+		},
+		errByKey: map[string]error{},
+	}
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
+	service := NewAdminSearchAnalyzerService(dictRepo, systemConfigRepo, adminAccessService, nil, searchConfigService)
+
+	if _, err := service.CreateDictEntry(ctx, UpsertAdminSearchAnalyzerDictEntryInput{
+		ActorUserID: "admin-user-id",
+		Analyzer:    "jieba",
+		Term:        "可观察性平台",
+		Tag:         "n",
+	}); err != nil {
+		t.Fatalf("create dict entry failed: %v", err)
+	}
+
+	record, err := systemConfigRepo.GetByConfigKey(ctx, searchcfg.SystemConfigKey)
+	if err != nil {
+		t.Fatalf("load search config failed: %v", err)
+	}
+	if record.Version != 3 {
+		t.Fatalf("expected search config version 3, got %d", record.Version)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(record.ConfigValueJSON), &payload); err != nil {
+		t.Fatalf("unmarshal search config failed: %v", err)
+	}
+	config := searchcfg.NormalizeConfig(payload)
+	if config.Analysis.Analyzers.Jieba.DictVersion == "v2026-03-02-001" {
+		t.Fatalf("expected dict version changed, got %q", config.Analysis.Analyzers.Jieba.DictVersion)
+	}
+	if !strings.HasPrefix(config.Analysis.Analyzers.Jieba.DictVersion, "v") {
+		t.Fatalf("expected dict version prefix v, got %q", config.Analysis.Analyzers.Jieba.DictVersion)
+	}
+
+	analyzers, err := service.ListAnalyzers(ctx, "admin-user-id")
+	if err != nil {
+		t.Fatalf("list analyzers failed: %v", err)
+	}
+	var jiebaVersion string
+	for _, item := range analyzers {
+		if item.Name == "jieba" {
+			jiebaVersion = item.DictVersion
+			break
+		}
+	}
+	if jiebaVersion == "" {
+		t.Fatal("expected jieba analyzer record")
+	}
+	if jiebaVersion != config.Analysis.Analyzers.Jieba.DictVersion {
+		t.Fatalf("expected analyzer dict version %q, got %q", config.Analysis.Analyzers.Jieba.DictVersion, jiebaVersion)
+	}
+}
+
 func TestAdminSearchAnalyzerService_ReloadAnalyzer(t *testing.T) {
 	ctx := context.Background()
 	systemConfigRepo := &stubSystemConfigRepository{
@@ -294,7 +377,7 @@ func TestAdminSearchAnalyzerService_ReloadAnalyzer(t *testing.T) {
 	}
 	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
 	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
-	service := NewAdminSearchAnalyzerService(nil, adminAccessService, nil, searchConfigService)
+	service := NewAdminSearchAnalyzerService(nil, nil, adminAccessService, nil, searchConfigService)
 
 	result, err := service.ReloadAnalyzer(ctx, ReloadAdminSearchAnalyzerInput{
 		ActorUserID: "admin-user-id",
@@ -356,7 +439,7 @@ func TestAdminSearchAnalyzerService_AnalyzePreview(t *testing.T) {
 	}
 	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
 	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
-	service := NewAdminSearchAnalyzerService(dictRepo, adminAccessService, nil, searchConfigService)
+	service := NewAdminSearchAnalyzerService(dictRepo, nil, adminAccessService, nil, searchConfigService)
 
 	result, err := service.AnalyzePreview(ctx, AnalyzePreviewAdminSearchAnalyzerInput{
 		ActorUserID: "admin-user-id",
@@ -418,7 +501,7 @@ func TestAdminSearchAnalyzerService_AnalyzePreviewInvalidMode(t *testing.T) {
 
 	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
 	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
-	service := NewAdminSearchAnalyzerService(dictRepo, adminAccessService, nil, searchConfigService)
+	service := NewAdminSearchAnalyzerService(dictRepo, nil, adminAccessService, nil, searchConfigService)
 
 	_, err := service.AnalyzePreview(ctx, AnalyzePreviewAdminSearchAnalyzerInput{
 		ActorUserID: "admin-user-id",
@@ -472,7 +555,7 @@ func TestAdminSearchAnalyzerService_AnalyzePreviewAnalyzerDisabled(t *testing.T)
 	}
 	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
 	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
-	service := NewAdminSearchAnalyzerService(dictRepo, adminAccessService, nil, searchConfigService)
+	service := NewAdminSearchAnalyzerService(dictRepo, nil, adminAccessService, nil, searchConfigService)
 
 	result, err := service.AnalyzePreview(ctx, AnalyzePreviewAdminSearchAnalyzerInput{
 		ActorUserID: "admin-user-id",

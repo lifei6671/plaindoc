@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -20,6 +21,7 @@ const (
 	defaultAdminSearchAnalyzerPage     = 1
 	defaultAdminSearchAnalyzerPageSize = 20
 	maxAdminSearchAnalyzerPageSize     = 100
+	maxSearchDictVersionSyncRetries    = 5
 	adminSearchAnalyzerModeQuery       = "query"
 	adminSearchAnalyzerModeIndex       = "index"
 )
@@ -145,6 +147,7 @@ type AnalyzePreviewAdminSearchAnalyzerResult struct {
 // AdminSearchAnalyzerService 封装后台分词器与词典治理。
 type AdminSearchAnalyzerService struct {
 	dictEntryRepo       repository.SearchAnalyzerDictEntryRepository
+	systemConfigRepo    repository.SystemConfigRepository
 	adminAccessService  *AdminAccessService
 	adminAuditService   *AdminAuditService
 	searchConfigService *SearchConfigService
@@ -153,12 +156,14 @@ type AdminSearchAnalyzerService struct {
 // NewAdminSearchAnalyzerService 创建后台分词器治理服务。
 func NewAdminSearchAnalyzerService(
 	dictEntryRepo repository.SearchAnalyzerDictEntryRepository,
+	systemConfigRepo repository.SystemConfigRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
 	searchConfigService *SearchConfigService,
 ) *AdminSearchAnalyzerService {
 	return &AdminSearchAnalyzerService{
 		dictEntryRepo:       dictEntryRepo,
+		systemConfigRepo:    systemConfigRepo,
 		adminAccessService:  adminAccessService,
 		adminAuditService:   adminAuditService,
 		searchConfigService: searchConfigService,
@@ -333,6 +338,10 @@ func (s *AdminSearchAnalyzerService) CreateDictEntry(
 		if err := s.dictEntryRepo.Create(ctx, entry); err != nil {
 			return AdminSearchAnalyzerDictEntryRecord{}, err
 		}
+		dictVersion, err := s.syncJiebaDictVersion(ctx, input.ActorUserID)
+		if err != nil {
+			return AdminSearchAnalyzerDictEntryRecord{}, err
+		}
 		if err := s.recordAudit(ctx, RecordAdminAuditInput{
 			Module:     AdminAuditModuleSystemConfig,
 			Action:     AdminAuditActionCreate,
@@ -340,11 +349,12 @@ func (s *AdminSearchAnalyzerService) CreateDictEntry(
 			TargetID:   strconv.FormatInt(entry.ID, 10),
 			Summary:    "search analyzer dict entry created: " + term,
 			Detail: map[string]any{
-				"analyzer": analyzerName,
-				"term":     term,
-				"weight":   weight,
-				"tag":      tag,
-				"status":   entry.Status,
+				"analyzer":    analyzerName,
+				"term":        term,
+				"weight":      weight,
+				"tag":         tag,
+				"status":      entry.Status,
+				"dictVersion": dictVersion,
 			},
 			RequestID: strings.TrimSpace(input.RequestID),
 		}); err != nil {
@@ -378,6 +388,10 @@ func (s *AdminSearchAnalyzerService) CreateDictEntry(
 	if latest == nil {
 		return AdminSearchAnalyzerDictEntryRecord{}, errcode.ErrAdminSearchAnalyzerDictEntryNotFound
 	}
+	dictVersion, err := s.syncJiebaDictVersion(ctx, input.ActorUserID)
+	if err != nil {
+		return AdminSearchAnalyzerDictEntryRecord{}, err
+	}
 	if err := s.recordAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleSystemConfig,
 		Action:     AdminAuditActionUpdate,
@@ -385,11 +399,12 @@ func (s *AdminSearchAnalyzerService) CreateDictEntry(
 		TargetID:   strconv.FormatInt(latest.ID, 10),
 		Summary:    "search analyzer dict entry revived: " + latest.Term,
 		Detail: map[string]any{
-			"analyzer": latest.Analyzer,
-			"term":     latest.Term,
-			"weight":   latest.Weight,
-			"tag":      latest.Tag,
-			"status":   latest.Status,
+			"analyzer":    latest.Analyzer,
+			"term":        latest.Term,
+			"weight":      latest.Weight,
+			"tag":         latest.Tag,
+			"status":      latest.Status,
+			"dictVersion": dictVersion,
 		},
 		RequestID: strings.TrimSpace(input.RequestID),
 	}); err != nil {
@@ -481,6 +496,10 @@ func (s *AdminSearchAnalyzerService) UpdateDictEntry(
 	if latest == nil {
 		return AdminSearchAnalyzerDictEntryRecord{}, errcode.ErrAdminSearchAnalyzerDictEntryNotFound
 	}
+	dictVersion, err := s.syncJiebaDictVersion(ctx, input.ActorUserID)
+	if err != nil {
+		return AdminSearchAnalyzerDictEntryRecord{}, err
+	}
 	if err := s.recordAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleSystemConfig,
 		Action:     AdminAuditActionUpdate,
@@ -488,11 +507,12 @@ func (s *AdminSearchAnalyzerService) UpdateDictEntry(
 		TargetID:   strconv.FormatInt(latest.ID, 10),
 		Summary:    "search analyzer dict entry updated: " + latest.Term,
 		Detail: map[string]any{
-			"analyzer": analyzerName,
-			"term":     latest.Term,
-			"weight":   latest.Weight,
-			"tag":      latest.Tag,
-			"status":   latest.Status,
+			"analyzer":    analyzerName,
+			"term":        latest.Term,
+			"weight":      latest.Weight,
+			"tag":         latest.Tag,
+			"status":      latest.Status,
+			"dictVersion": dictVersion,
 		},
 		RequestID: strings.TrimSpace(input.RequestID),
 	}); err != nil {
@@ -560,6 +580,10 @@ func (s *AdminSearchAnalyzerService) DeleteDictEntry(
 	if latest == nil {
 		return AdminSearchAnalyzerDictEntryRecord{}, errcode.ErrAdminSearchAnalyzerDictEntryNotFound
 	}
+	dictVersion, err := s.syncJiebaDictVersion(ctx, input.ActorUserID)
+	if err != nil {
+		return AdminSearchAnalyzerDictEntryRecord{}, err
+	}
 	if err := s.recordAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleSystemConfig,
 		Action:     AdminAuditActionDelete,
@@ -567,11 +591,12 @@ func (s *AdminSearchAnalyzerService) DeleteDictEntry(
 		TargetID:   strconv.FormatInt(latest.ID, 10),
 		Summary:    "search analyzer dict entry deleted: " + latest.Term,
 		Detail: map[string]any{
-			"analyzer": analyzerName,
-			"term":     latest.Term,
-			"weight":   latest.Weight,
-			"tag":      latest.Tag,
-			"status":   latest.Status,
+			"analyzer":    analyzerName,
+			"term":        latest.Term,
+			"weight":      latest.Weight,
+			"tag":         latest.Tag,
+			"status":      latest.Status,
+			"dictVersion": dictVersion,
 		},
 		RequestID: strings.TrimSpace(input.RequestID),
 	}); err != nil {
@@ -774,6 +799,106 @@ func (s *AdminSearchAnalyzerService) recordAudit(ctx context.Context, input Reco
 		return nil
 	}
 	return s.adminAuditService.Record(ctx, input)
+}
+
+func (s *AdminSearchAnalyzerService) syncJiebaDictVersion(
+	ctx context.Context,
+	actorUserID string,
+) (string, error) {
+	dictVersion := buildSearchDictVersion(time.Now().UTC())
+	if s == nil || s.systemConfigRepo == nil {
+		return dictVersion, nil
+	}
+
+	normalizedActorUserID := strings.TrimSpace(actorUserID)
+	var actorPtr *string
+	if normalizedActorUserID != "" {
+		actorPtr = &normalizedActorUserID
+	}
+
+	for attempt := 0; attempt < maxSearchDictVersionSyncRetries; attempt++ {
+		searchConfigRecord, err := s.systemConfigRepo.GetByConfigKey(ctx, searchcfg.SystemConfigKey)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				config := searchcfg.DefaultConfig()
+				config.Analysis.Analyzers.Jieba.DictVersion = dictVersion
+				configJSONBytes, marshalErr := json.Marshal(config)
+				if marshalErr != nil {
+					return "", marshalErr
+				}
+				now := time.Now().UTC()
+				createErr := s.systemConfigRepo.Create(ctx, &models.SystemConfig{
+					ConfigKey:       searchcfg.SystemConfigKey,
+					ConfigValueJSON: string(configJSONBytes),
+					Version:         1,
+					UpdatedByUserID: actorPtr,
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				})
+				if createErr != nil {
+					continue
+				}
+				if s.searchConfigService != nil {
+					if _, refreshErr := s.searchConfigService.Refresh(ctx); refreshErr != nil {
+						return "", refreshErr
+					}
+				}
+				return dictVersion, nil
+			}
+			return "", err
+		}
+		if searchConfigRecord == nil {
+			return "", errors.New("search config record is nil")
+		}
+
+		configPayload := map[string]any{}
+		if strings.TrimSpace(searchConfigRecord.ConfigValueJSON) != "" {
+			if err := json.Unmarshal([]byte(searchConfigRecord.ConfigValueJSON), &configPayload); err != nil {
+				return "", err
+			}
+		}
+
+		config := searchcfg.NormalizeConfig(configPayload)
+		config.Analysis.Analyzers.Jieba.DictVersion = dictVersion
+		configJSONBytes, err := json.Marshal(config)
+		if err != nil {
+			return "", err
+		}
+
+		expectedVersion := searchConfigRecord.Version
+		if expectedVersion <= 0 {
+			return "", errors.New("invalid search config version")
+		}
+		updated, err := s.systemConfigRepo.UpdateByVersion(ctx, repository.UpdateSystemConfigByVersionParams{
+			ConfigKey:       searchcfg.SystemConfigKey,
+			ConfigValueJSON: string(configJSONBytes),
+			ExpectedVersion: expectedVersion,
+			NextVersion:     expectedVersion + 1,
+			UpdatedByUserID: actorPtr,
+			UpdatedAt:       time.Now().UTC(),
+		})
+		if err != nil {
+			return "", err
+		}
+		if !updated {
+			continue
+		}
+		if s.searchConfigService != nil {
+			if _, refreshErr := s.searchConfigService.Refresh(ctx); refreshErr != nil {
+				return "", refreshErr
+			}
+		}
+		return dictVersion, nil
+	}
+
+	return "", errors.New("sync search dict version reached max retries")
+}
+
+func buildSearchDictVersion(now time.Time) string {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return fmt.Sprintf("v%d", now.UnixNano())
 }
 
 func normalizeAdminSearchAnalyzerName(rawValue string) (string, error) {

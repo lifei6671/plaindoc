@@ -210,8 +210,8 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 		return
 	}
 	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.DeleteDocumentByID(c.Request.Context(), documentID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "后台删除文档后同步全文检索索引失败")
+		if syncErr := h.searchIndexService.EnqueueDeleteDocumentByID(documentID); syncErr != nil {
+			setRequestErrmsg(c, syncErr, "后台删除文档后加入全文检索索引删除队列失败")
 		}
 	}
 

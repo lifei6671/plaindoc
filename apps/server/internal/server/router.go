@@ -440,6 +440,7 @@ func newRouter(
 		adminDocumentImageAssetHandler := handler.NewAdminDocumentImageAssetHandler(adminDocumentImageAssetService)
 		adminSearchAnalyzerService := service.NewAdminSearchAnalyzerService(
 			searchAnalyzerDictEntryRepo,
+			systemConfigRepo,
 			adminAccessService,
 			adminAuditService,
 			searchConfigService,
