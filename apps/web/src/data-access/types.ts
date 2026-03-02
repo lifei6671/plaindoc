@@ -580,6 +580,61 @@ export interface AdminSystemConfig {
   updatedAt: string;
 }
 
+export type AdminSearchAnalyzerName = "jieba";
+export type AdminSearchAnalyzerMode = "query" | "index";
+export type AdminSearchAnalyzerDictStatus = "active" | "deleted";
+
+export interface AdminSearchAnalyzerRecord {
+  name: string;
+  enabled: boolean;
+  active: boolean;
+  dictVersion: string;
+  supportsUserDict: boolean;
+  supportsHotReload: boolean;
+  supportsPhraseHint: boolean;
+  supportsStopwords: boolean;
+  supportsSynonyms: boolean;
+}
+
+export interface AdminSearchAnalyzerDictEntry {
+  id: number;
+  analyzer: string;
+  term: string;
+  weight: number | null;
+  tag: string;
+  status: AdminSearchAnalyzerDictStatus;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminSearchAnalyzerDictListResult {
+  items: AdminSearchAnalyzerDictEntry[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
+export interface AdminSearchAnalyzerReloadResult {
+  analyzer: string;
+  dictVersion: string;
+  sourceVersion: number;
+  loadedAt: string;
+  activeAnalyzer: string;
+}
+
+export interface AdminSearchAnalyzerAnalyzePreviewResult {
+  analyzer: string;
+  mode: AdminSearchAnalyzerMode;
+  tokens: string[];
+  normalizedText: string;
+  tokenCount: number;
+  dictVersion: string;
+}
+
 export interface AdminDataRetentionCleanupPolicy {
   enabled: boolean;
   scheduleMinutes: number;
@@ -753,10 +808,44 @@ export interface AdminGateway {
   deleteTheme(themeId: string): Promise<void>;
   listSystemConfigs(): Promise<AdminSystemConfig[]>;
   upsertSystemConfig(input: {
-    configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap" | "data-retention";
+    configKey: "site" | "editor" | "security" | "search" | "auth" | "image-hosting" | "sitemap" | "data-retention";
     value: Record<string, unknown>;
     expectedVersion?: number;
   }): Promise<AdminSystemConfig>;
+  listSearchAnalyzers(): Promise<AdminSearchAnalyzerRecord[]>;
+  listSearchAnalyzerDictEntries(input: {
+    analyzer: AdminSearchAnalyzerName;
+    status?: "all" | AdminSearchAnalyzerDictStatus;
+    page?: number;
+    pageSize?: number;
+  }): Promise<AdminSearchAnalyzerDictListResult>;
+  createSearchAnalyzerDictEntry(input: {
+    analyzer: AdminSearchAnalyzerName;
+    term: string;
+    weight?: number;
+    tag?: string;
+  }): Promise<AdminSearchAnalyzerDictEntry>;
+  updateSearchAnalyzerDictEntry(input: {
+    analyzer: AdminSearchAnalyzerName;
+    entryId: number;
+    term: string;
+    weight?: number;
+    tag?: string;
+  }): Promise<AdminSearchAnalyzerDictEntry>;
+  deleteSearchAnalyzerDictEntry(input: {
+    analyzer: AdminSearchAnalyzerName;
+    entryId: number;
+  }): Promise<AdminSearchAnalyzerDictEntry>;
+  reloadSearchAnalyzer(input: {
+    analyzer: AdminSearchAnalyzerName;
+  }): Promise<AdminSearchAnalyzerReloadResult>;
+  analyzeSearchAnalyzerPreview(input: {
+    analyzer: AdminSearchAnalyzerName;
+    text: string;
+    mode?: AdminSearchAnalyzerMode;
+    language?: string;
+    spaceId?: string;
+  }): Promise<AdminSearchAnalyzerAnalyzePreviewResult>;
   runDataRetentionCleanup(): Promise<AdminDataRetentionCleanupResult>;
   testAuthLDAPConnection(input: {
     value: Record<string, unknown>;

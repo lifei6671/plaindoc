@@ -7,6 +7,7 @@ import {
   Lock,
   Map,
   RefreshCw,
+  Search,
   Save,
   type LucideIcon
 } from "lucide-react";
@@ -34,10 +35,15 @@ import {
 } from "../../settings/image-hosting";
 import { AdminPageCard, AdminToolbarActions } from "../components/AdminPageLayout";
 
-type SystemConfigKey = "site" | "editor" | "security" | "data-retention" | "auth" | "image-hosting" | "sitemap";
+type SystemConfigKey = "site" | "editor" | "security" | "search" | "data-retention" | "auth" | "image-hosting" | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
 type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
+type SearchProvider = "bleve" | "meili" | "typesense";
+type SearchFallbackPolicy = "degrade_to_bleve" | "return_error";
+type SearchAnalyzer = "simple" | "jieba";
+type SearchJiebaMode = "search";
+type SearchJiebaDictSource = "db" | "file";
 type DataRetentionCleanupTable =
   | "audit_logs"
   | "auth_captcha_challenges"
@@ -59,6 +65,27 @@ interface EditorSystemConfigValue {
 interface SecuritySystemConfigValue {
   accessTokenTTLMinutes: number;
   refreshTokenTTLMinutes: number;
+}
+
+interface SearchSystemConfigValue {
+  activeProvider: SearchProvider;
+  fallbackPolicy: SearchFallbackPolicy;
+  analysis: {
+    activeAnalyzer: SearchAnalyzer;
+    analyzers: {
+      simple: {
+        enabled: boolean;
+      };
+      jieba: {
+        enabled: boolean;
+        mode: SearchJiebaMode;
+        hmm: boolean;
+        stopwordsEnabled: boolean;
+        dictSource: SearchJiebaDictSource;
+        dictVersion: string;
+      };
+    };
+  };
 }
 
 interface DataRetentionSystemConfigValue {
@@ -144,6 +171,12 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     label: "安全设置",
     description: "Token 生命周期",
     icon: Lock
+  },
+  {
+    key: "search",
+    label: "全文检索",
+    description: "引擎与分词策略",
+    icon: Search
   },
   {
     key: "data-retention",
@@ -314,6 +347,58 @@ const EDITOR_TEMPLATE: EditorSystemConfigValue = {
 const SECURITY_TEMPLATE: SecuritySystemConfigValue = {
   accessTokenTTLMinutes: 120,
   refreshTokenTTLMinutes: 10080
+};
+
+const SEARCH_PROVIDER_OPTIONS: Array<{ value: SearchProvider; label: string }> = [
+  { value: "bleve", label: "Bleve（内置）" },
+  { value: "meili", label: "Meilisearch" },
+  { value: "typesense", label: "Typesense" }
+];
+
+const SEARCH_FALLBACK_POLICY_OPTIONS: Array<{ value: SearchFallbackPolicy; label: string; description: string }> = [
+  {
+    value: "degrade_to_bleve",
+    label: "自动降级到 Bleve",
+    description: "外部引擎不可用时尝试降级到 Bleve。"
+  },
+  {
+    value: "return_error",
+    label: "直接返回错误",
+    description: "外部引擎不可用时直接返回错误。"
+  }
+];
+
+const SEARCH_ANALYZER_OPTIONS: Array<{ value: SearchAnalyzer; label: string }> = [
+  { value: "simple", label: "simple" },
+  { value: "jieba", label: "jieba" }
+];
+
+const SEARCH_JIEBA_DICT_SOURCE_OPTIONS: Array<{ value: SearchJiebaDictSource; label: string }> = [
+  { value: "db", label: "db（数据库词典）" },
+  { value: "file", label: "file（文件词典）" }
+];
+
+const SEARCH_DICT_VERSION_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/;
+
+const SEARCH_TEMPLATE: SearchSystemConfigValue = {
+  activeProvider: "bleve",
+  fallbackPolicy: "degrade_to_bleve",
+  analysis: {
+    activeAnalyzer: "simple",
+    analyzers: {
+      simple: {
+        enabled: true
+      },
+      jieba: {
+        enabled: false,
+        mode: "search",
+        hmm: true,
+        stopwordsEnabled: false,
+        dictSource: "db",
+        dictVersion: "default"
+      }
+    }
+  }
 };
 
 const DATA_RETENTION_TEMPLATE: DataRetentionSystemConfigValue = {
@@ -497,6 +582,131 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
     accessTokenTTLMinutes: parseInteger(payload.accessTokenTTLMinutes, SECURITY_TEMPLATE.accessTokenTTLMinutes),
     refreshTokenTTLMinutes: parseInteger(payload.refreshTokenTTLMinutes, SECURITY_TEMPLATE.refreshTokenTTLMinutes)
   };
+}
+
+function cloneSearchConfig(value: SearchSystemConfigValue): SearchSystemConfigValue {
+  return {
+    activeProvider: value.activeProvider,
+    fallbackPolicy: value.fallbackPolicy,
+    analysis: {
+      activeAnalyzer: value.analysis.activeAnalyzer,
+      analyzers: {
+        simple: {
+          enabled: value.analysis.analyzers.simple.enabled
+        },
+        jieba: {
+          enabled: value.analysis.analyzers.jieba.enabled,
+          mode: value.analysis.analyzers.jieba.mode,
+          hmm: value.analysis.analyzers.jieba.hmm,
+          stopwordsEnabled: value.analysis.analyzers.jieba.stopwordsEnabled,
+          dictSource: value.analysis.analyzers.jieba.dictSource,
+          dictVersion: value.analysis.analyzers.jieba.dictVersion
+        }
+      }
+    }
+  };
+}
+
+function parseSearchProvider(value: unknown, fallbackValue: SearchProvider): SearchProvider {
+  const normalizedValue = parseString(value, fallbackValue).toLowerCase();
+  if (normalizedValue === "meili") {
+    return "meili";
+  }
+  if (normalizedValue === "typesense") {
+    return "typesense";
+  }
+  return "bleve";
+}
+
+function parseSearchFallbackPolicy(value: unknown, fallbackValue: SearchFallbackPolicy): SearchFallbackPolicy {
+  const normalizedValue = parseString(value, fallbackValue).toLowerCase();
+  if (normalizedValue === "return_error") {
+    return "return_error";
+  }
+  return "degrade_to_bleve";
+}
+
+function parseSearchAnalyzer(value: unknown, fallbackValue: SearchAnalyzer): SearchAnalyzer {
+  const normalizedValue = parseString(value, fallbackValue).toLowerCase();
+  if (normalizedValue === "jieba") {
+    return "jieba";
+  }
+  return "simple";
+}
+
+function parseSearchJiebaDictSource(value: unknown, fallbackValue: SearchJiebaDictSource): SearchJiebaDictSource {
+  const normalizedValue = parseString(value, fallbackValue).toLowerCase();
+  if (normalizedValue === "file") {
+    return "file";
+  }
+  return "db";
+}
+
+function parseSearchDictVersion(value: unknown, fallbackValue: string): string {
+  const dictVersion = parseString(value, fallbackValue);
+  return SEARCH_DICT_VERSION_PATTERN.test(dictVersion) ? dictVersion : fallbackValue;
+}
+
+function normalizeSearchConfigForSave(value: SearchSystemConfigValue): SearchSystemConfigValue {
+  const config = cloneSearchConfig(value);
+  if (config.analysis.activeAnalyzer === "simple") {
+    config.analysis.analyzers.simple.enabled = true;
+  } else {
+    config.analysis.analyzers.jieba.enabled = true;
+  }
+  config.analysis.analyzers.jieba.mode = "search";
+  config.analysis.analyzers.jieba.dictVersion = parseSearchDictVersion(
+    config.analysis.analyzers.jieba.dictVersion,
+    SEARCH_TEMPLATE.analysis.analyzers.jieba.dictVersion
+  );
+  return config;
+}
+
+function parseSearchConfig(value: unknown): SearchSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return cloneSearchConfig(SEARCH_TEMPLATE);
+  }
+  const analysis = asRecord(payload.analysis);
+  const analyzers = asRecord(analysis?.analyzers);
+  const simple = asRecord(analyzers?.simple);
+  const jieba = asRecord(analyzers?.jieba);
+
+  const activeAnalyzer = parseSearchAnalyzer(analysis?.activeAnalyzer, SEARCH_TEMPLATE.analysis.activeAnalyzer);
+
+  const parsed: SearchSystemConfigValue = {
+    activeProvider: parseSearchProvider(payload.activeProvider, SEARCH_TEMPLATE.activeProvider),
+    fallbackPolicy: parseSearchFallbackPolicy(payload.fallbackPolicy, SEARCH_TEMPLATE.fallbackPolicy),
+    analysis: {
+      activeAnalyzer,
+      analyzers: {
+        simple: {
+          enabled:
+            typeof simple?.enabled === "boolean" ? simple.enabled : SEARCH_TEMPLATE.analysis.analyzers.simple.enabled
+        },
+        jieba: {
+          enabled:
+            typeof jieba?.enabled === "boolean" ? jieba.enabled : SEARCH_TEMPLATE.analysis.analyzers.jieba.enabled,
+          mode: "search",
+          hmm: typeof jieba?.hmm === "boolean" ? jieba.hmm : SEARCH_TEMPLATE.analysis.analyzers.jieba.hmm,
+          stopwordsEnabled:
+            typeof jieba?.stopwordsEnabled === "boolean"
+              ? jieba.stopwordsEnabled
+              : SEARCH_TEMPLATE.analysis.analyzers.jieba.stopwordsEnabled,
+          dictSource: parseSearchJiebaDictSource(
+            jieba?.dictSource,
+            SEARCH_TEMPLATE.analysis.analyzers.jieba.dictSource
+          ),
+          dictVersion: parseSearchDictVersion(
+            jieba?.dictVersion,
+            SEARCH_TEMPLATE.analysis.analyzers.jieba.dictVersion
+          )
+        }
+      }
+    }
+  };
+
+  return normalizeSearchConfigForSave(parsed);
 }
 
 function cloneDataRetentionConfig(value: DataRetentionSystemConfigValue): DataRetentionSystemConfigValue {
@@ -754,6 +964,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [siteDraft, setSiteDraft] = useState<SiteSystemConfigValue>({ ...SITE_TEMPLATE });
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
+  const [searchDraft, setSearchDraft] = useState<SearchSystemConfigValue>(cloneSearchConfig(SEARCH_TEMPLATE));
   const [dataRetentionDraft, setDataRetentionDraft] = useState<DataRetentionSystemConfigValue>({
     ...cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE)
   });
@@ -767,6 +978,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     site: false,
     editor: false,
     security: false,
+    search: false,
     "data-retention": false,
     auth: false,
     sitemap: false,
@@ -836,6 +1048,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     if (!dirtyKeys.security) {
       setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
     }
+    if (!dirtyKeys.search) {
+      setSearchDraft(parseSearchConfig(findConfigValue("search")));
+    }
     if (!dirtyKeys["data-retention"]) {
       setDataRetentionDraft(parseDataRetentionConfig(findConfigValue("data-retention")));
     }
@@ -884,6 +1099,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setSecurityDraft({ ...SECURITY_TEMPLATE });
         markDirty("security");
         return;
+      case "search":
+        setSearchDraft(cloneSearchConfig(SEARCH_TEMPLATE));
+        markDirty("search");
+        return;
       case "data-retention":
         setDataRetentionDraft(cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE));
         markDirty("data-retention");
@@ -920,6 +1139,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       case "security":
         setSecurityDraft(parseSecurityConfig(findConfigValue("security")));
         clearDirty("security");
+        return;
+      case "search":
+        setSearchDraft(parseSearchConfig(findConfigValue("search")));
+        clearDirty("search");
         return;
       case "data-retention":
         setDataRetentionDraft(parseDataRetentionConfig(findConfigValue("data-retention")));
@@ -965,6 +1188,8 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
           accessTokenTTLMinutes: securityDraft.accessTokenTTLMinutes,
           refreshTokenTTLMinutes: securityDraft.refreshTokenTTLMinutes
         };
+      case "search":
+        return normalizeSearchConfigForSave(searchDraft) as unknown as Record<string, unknown>;
       case "data-retention":
         return {
           enabled: dataRetentionDraft.enabled,
@@ -988,7 +1213,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return {};
     }
-  }, [authDraft, dataRetentionDraft, editorDraft, imageHostingDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
+  }, [authDraft, dataRetentionDraft, editorDraft, imageHostingDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -1442,6 +1667,285 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                           disabled={saving}
                         />
                       </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "search" ? (
+                  <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">活跃检索引擎</span>
+                        <Select
+                          value={searchDraft.activeProvider}
+                          onValueChange={(value) => {
+                            setSearchDraft((previous) => ({
+                              ...previous,
+                              activeProvider: value as SearchProvider
+                            }));
+                            markDirty("search");
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SEARCH_PROVIDER_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </label>
+
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">降级策略</span>
+                        <Select
+                          value={searchDraft.fallbackPolicy}
+                          onValueChange={(value) => {
+                            setSearchDraft((previous) => ({
+                              ...previous,
+                              fallbackPolicy: value as SearchFallbackPolicy
+                            }));
+                            markDirty("search");
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SEARCH_FALLBACK_POLICY_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-slate-500">
+                          {
+                            SEARCH_FALLBACK_POLICY_OPTIONS.find(
+                              (option) => option.value === searchDraft.fallbackPolicy
+                            )?.description
+                          }
+                        </p>
+                      </label>
+
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">活跃分词器</span>
+                        <Select
+                          value={searchDraft.analysis.activeAnalyzer}
+                          onValueChange={(value) => {
+                            const nextAnalyzer = value as SearchAnalyzer;
+                            setSearchDraft((previous) => {
+                              const nextConfig = cloneSearchConfig(previous);
+                              nextConfig.analysis.activeAnalyzer = nextAnalyzer;
+                              if (nextAnalyzer === "simple") {
+                                nextConfig.analysis.analyzers.simple.enabled = true;
+                              } else {
+                                nextConfig.analysis.analyzers.jieba.enabled = true;
+                              }
+                              return nextConfig;
+                            });
+                            markDirty("search");
+                          }}
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SEARCH_ANALYZER_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </label>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                        <Checkbox
+                          checked={searchDraft.analysis.analyzers.simple.enabled}
+                          onCheckedChange={(checked) => {
+                            setSearchDraft((previous) => ({
+                              ...previous,
+                              analysis: {
+                                ...previous.analysis,
+                                analyzers: {
+                                  ...previous.analysis.analyzers,
+                                  simple: {
+                                    enabled: checked === true
+                                  }
+                                }
+                              }
+                            }));
+                            markDirty("search");
+                          }}
+                          disabled={saving || searchDraft.analysis.activeAnalyzer === "simple"}
+                        />
+                        <div className="space-y-0.5">
+                          <span className="text-sm font-medium text-slate-700">启用 simple 分词器</span>
+                          <p className="text-xs text-slate-500">
+                            活跃分词器必须保持启用，切换活跃分词器后才能关闭。
+                          </p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                        <Checkbox
+                          checked={searchDraft.analysis.analyzers.jieba.enabled}
+                          onCheckedChange={(checked) => {
+                            setSearchDraft((previous) => ({
+                              ...previous,
+                              analysis: {
+                                ...previous.analysis,
+                                analyzers: {
+                                  ...previous.analysis.analyzers,
+                                  jieba: {
+                                    ...previous.analysis.analyzers.jieba,
+                                    enabled: checked === true
+                                  }
+                                }
+                              }
+                            }));
+                            markDirty("search");
+                          }}
+                          disabled={saving || searchDraft.analysis.activeAnalyzer === "jieba"}
+                        />
+                        <div className="space-y-0.5">
+                          <span className="text-sm font-medium text-slate-700">启用 jieba 分词器</span>
+                          <p className="text-xs text-slate-500">
+                            当前分词治理仅支持 jieba 词典，建议开启以支持中文搜索优化。
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold tracking-wide text-slate-700">jieba 参数</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">模式</span>
+                          <Input value={searchDraft.analysis.analyzers.jieba.mode} disabled />
+                          <p className="text-xs text-slate-500">当前版本固定为 `search`。</p>
+                        </label>
+
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">词典来源</span>
+                          <Select
+                            value={searchDraft.analysis.analyzers.jieba.dictSource}
+                            onValueChange={(value) => {
+                              setSearchDraft((previous) => ({
+                                ...previous,
+                                analysis: {
+                                  ...previous.analysis,
+                                  analyzers: {
+                                    ...previous.analysis.analyzers,
+                                    jieba: {
+                                      ...previous.analysis.analyzers.jieba,
+                                      dictSource: value as SearchJiebaDictSource
+                                    }
+                                  }
+                                }
+                              }));
+                              markDirty("search");
+                            }}
+                            disabled={saving}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {SEARCH_JIEBA_DICT_SOURCE_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </label>
+
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">词典版本</span>
+                          <Input
+                            value={searchDraft.analysis.analyzers.jieba.dictVersion}
+                            onChange={(event) => {
+                              setSearchDraft((previous) => ({
+                                ...previous,
+                                analysis: {
+                                  ...previous.analysis,
+                                  analyzers: {
+                                    ...previous.analysis.analyzers,
+                                    jieba: {
+                                      ...previous.analysis.analyzers.jieba,
+                                      dictVersion: parseString(
+                                        event.target.value,
+                                        previous.analysis.analyzers.jieba.dictVersion
+                                      )
+                                    }
+                                  }
+                                }
+                              }));
+                              markDirty("search");
+                            }}
+                            disabled={saving}
+                          />
+                          <p className="text-xs text-slate-500">仅允许字母数字与 `._:-`，长度 1-64。</p>
+                        </label>
+
+                        <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2.5">
+                          <Checkbox
+                            checked={searchDraft.analysis.analyzers.jieba.hmm}
+                            onCheckedChange={(checked) => {
+                              setSearchDraft((previous) => ({
+                                ...previous,
+                                analysis: {
+                                  ...previous.analysis,
+                                  analyzers: {
+                                    ...previous.analysis.analyzers,
+                                    jieba: {
+                                      ...previous.analysis.analyzers.jieba,
+                                      hmm: checked === true
+                                    }
+                                  }
+                                }
+                              }));
+                              markDirty("search");
+                            }}
+                            disabled={saving}
+                          />
+                          <span className="text-xs font-medium text-slate-700">开启 HMM</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2.5">
+                          <Checkbox
+                            checked={searchDraft.analysis.analyzers.jieba.stopwordsEnabled}
+                            onCheckedChange={(checked) => {
+                              setSearchDraft((previous) => ({
+                                ...previous,
+                                analysis: {
+                                  ...previous.analysis,
+                                  analyzers: {
+                                    ...previous.analysis.analyzers,
+                                    jieba: {
+                                      ...previous.analysis.analyzers.jieba,
+                                      stopwordsEnabled: checked === true
+                                    }
+                                  }
+                                }
+                              }));
+                              markDirty("search");
+                            }}
+                            disabled={saving}
+                          />
+                          <span className="text-xs font-medium text-slate-700">启用停用词过滤</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 ) : null}

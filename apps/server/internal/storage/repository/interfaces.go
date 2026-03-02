@@ -619,6 +619,24 @@ type SystemConfigRepository interface {
 	UpdateByVersion(ctx context.Context, params UpdateSystemConfigByVersionParams) (bool, error)
 }
 
+// ListSearchAnalyzerDictEntriesParams 分词词典词条分页查询参数。
+type ListSearchAnalyzerDictEntriesParams struct {
+	Analyzer string
+	Statuses []string
+	Limit    int
+	Offset   int
+}
+
+// SearchAnalyzerDictEntryRepository 分词词典词条仓储接口。
+type SearchAnalyzerDictEntryRepository interface {
+	List(ctx context.Context, params ListSearchAnalyzerDictEntriesParams) ([]models.SearchAnalyzerDictEntry, int64, error)
+	ListActiveByAnalyzer(ctx context.Context, analyzer string) ([]models.SearchAnalyzerDictEntry, error)
+	GetByID(ctx context.Context, id int64) (*models.SearchAnalyzerDictEntry, error)
+	GetByAnalyzerAndTerm(ctx context.Context, analyzer string, term string) (*models.SearchAnalyzerDictEntry, error)
+	Create(ctx context.Context, entry *models.SearchAnalyzerDictEntry) error
+	UpdateByID(ctx context.Context, id int64, updates map[string]any) (bool, error)
+}
+
 // ListAuditLogsParams 后台审计日志分页查询参数。
 type ListAuditLogsParams struct {
 	ActorUserID     string

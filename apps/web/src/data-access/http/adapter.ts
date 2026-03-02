@@ -16,6 +16,13 @@ import {
   type AdminIdentity,
   type AdminProfile,
   type AdminRole,
+  type AdminSearchAnalyzerAnalyzePreviewResult,
+  type AdminSearchAnalyzerDictEntry,
+  type AdminSearchAnalyzerDictListResult,
+  type AdminSearchAnalyzerMode,
+  type AdminSearchAnalyzerName,
+  type AdminSearchAnalyzerRecord,
+  type AdminSearchAnalyzerReloadResult,
   type AdminSpace,
   type AdminSpaceCategory,
   type AdminSpaceCover,
@@ -1648,7 +1655,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig[]>("/admin/system-configs");
     },
     async upsertSystemConfig(input: {
-      configKey: "site" | "editor" | "security" | "auth" | "image-hosting" | "sitemap" | "data-retention";
+      configKey: "site" | "editor" | "security" | "search" | "auth" | "image-hosting" | "sitemap" | "data-retention";
       value: Record<string, unknown>;
       expectedVersion?: number;
     }) {
@@ -1677,6 +1684,169 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         headers: buildAdminOperationTokenHeaders(operationToken),
         body: JSON.stringify(payload)
       });
+    },
+    async listSearchAnalyzers() {
+      return request<AdminSearchAnalyzerRecord[]>("/admin/search/analyzers");
+    },
+    async listSearchAnalyzerDictEntries(input: {
+      analyzer: AdminSearchAnalyzerName;
+      status?: "all" | "active" | "deleted";
+      page?: number;
+      pageSize?: number;
+    }) {
+      const analyzer = input.analyzer.trim();
+      if (!analyzer) {
+        throw new Error("分词器名称不能为空");
+      }
+      const query = new URLSearchParams();
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status.trim());
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText
+        ? `/admin/search/analyzers/${encodeURIComponent(analyzer)}/dict?${queryText}`
+        : `/admin/search/analyzers/${encodeURIComponent(analyzer)}/dict`;
+      return request<AdminSearchAnalyzerDictListResult>(path);
+    },
+    async createSearchAnalyzerDictEntry(input: {
+      analyzer: AdminSearchAnalyzerName;
+      term: string;
+      weight?: number;
+      tag?: string;
+    }) {
+      const analyzer = input.analyzer.trim();
+      const term = input.term.trim();
+      if (!analyzer) {
+        throw new Error("分词器名称不能为空");
+      }
+      if (!term) {
+        throw new Error("词条不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "search_analyzer_dict.create",
+        targetType: "search_analyzer",
+        targetId: analyzer
+      });
+      const payload: { term: string; weight?: number; tag?: string } = { term };
+      if (typeof input.weight === "number" && Number.isFinite(input.weight) && input.weight > 0) {
+        payload.weight = Math.trunc(input.weight);
+      }
+      if (typeof input.tag === "string" && input.tag.trim()) {
+        payload.tag = input.tag.trim();
+      }
+      return request<AdminSearchAnalyzerDictEntry>(`/admin/search/analyzers/${encodeURIComponent(analyzer)}/dict`, {
+        method: "POST",
+        headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify(payload)
+      });
+    },
+    async updateSearchAnalyzerDictEntry(input: {
+      analyzer: AdminSearchAnalyzerName;
+      entryId: number;
+      term: string;
+      weight?: number;
+      tag?: string;
+    }) {
+      const analyzer = input.analyzer.trim();
+      const entryID = Math.trunc(input.entryId);
+      const term = input.term.trim();
+      if (!analyzer) {
+        throw new Error("分词器名称不能为空");
+      }
+      if (!Number.isFinite(entryID) || entryID <= 0) {
+        throw new Error("词条 ID 无效");
+      }
+      if (!term) {
+        throw new Error("词条不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "search_analyzer_dict.update",
+        targetType: "search_analyzer_dict",
+        targetId: String(entryID)
+      });
+      const payload: { term: string; weight?: number; tag?: string } = { term };
+      if (typeof input.weight === "number" && Number.isFinite(input.weight) && input.weight > 0) {
+        payload.weight = Math.trunc(input.weight);
+      }
+      if (typeof input.tag === "string" && input.tag.trim()) {
+        payload.tag = input.tag.trim();
+      }
+      return request<AdminSearchAnalyzerDictEntry>(`/admin/search/analyzers/${encodeURIComponent(analyzer)}/dict/${entryID}`, {
+        method: "PATCH",
+        headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify(payload)
+      });
+    },
+    async deleteSearchAnalyzerDictEntry(input: { analyzer: AdminSearchAnalyzerName; entryId: number }) {
+      const analyzer = input.analyzer.trim();
+      const entryID = Math.trunc(input.entryId);
+      if (!analyzer) {
+        throw new Error("分词器名称不能为空");
+      }
+      if (!Number.isFinite(entryID) || entryID <= 0) {
+        throw new Error("词条 ID 无效");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "search_analyzer_dict.delete",
+        targetType: "search_analyzer_dict",
+        targetId: String(entryID)
+      });
+      return request<AdminSearchAnalyzerDictEntry>(`/admin/search/analyzers/${encodeURIComponent(analyzer)}/dict/${entryID}`, {
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async reloadSearchAnalyzer(input: { analyzer: AdminSearchAnalyzerName }) {
+      const analyzer = input.analyzer.trim();
+      if (!analyzer) {
+        throw new Error("分词器名称不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "search_analyzer.reload",
+        targetType: "search_analyzer",
+        targetId: analyzer
+      });
+      return request<AdminSearchAnalyzerReloadResult>(`/admin/search/analyzers/${encodeURIComponent(analyzer)}/reload`, {
+        method: "POST",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async analyzeSearchAnalyzerPreview(input: {
+      analyzer: AdminSearchAnalyzerName;
+      text: string;
+      mode?: AdminSearchAnalyzerMode;
+      language?: string;
+      spaceId?: string;
+    }) {
+      const analyzer = input.analyzer.trim();
+      if (!analyzer) {
+        throw new Error("分词器名称不能为空");
+      }
+      const payload: { text: string; mode?: AdminSearchAnalyzerMode; language?: string; spaceId?: string } = {
+        text: input.text ?? ""
+      };
+      if (input.mode === "query" || input.mode === "index") {
+        payload.mode = input.mode;
+      }
+      if (typeof input.language === "string" && input.language.trim()) {
+        payload.language = input.language.trim();
+      }
+      if (typeof input.spaceId === "string" && input.spaceId.trim()) {
+        payload.spaceId = input.spaceId.trim();
+      }
+      return request<AdminSearchAnalyzerAnalyzePreviewResult>(
+        `/admin/search/analyzers/${encodeURIComponent(analyzer)}/analyze-preview`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }
+      );
     },
     async runDataRetentionCleanup() {
       const operationToken = await issueAdminOperationToken({

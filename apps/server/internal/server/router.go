@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -109,6 +110,7 @@ func newRouter(
 	documentRepo := repository.NewGormDocumentRepository(db)
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	documentImageAssetRepo := repository.NewGormDocumentImageAssetRepository(db)
+	searchAnalyzerDictEntryRepo := repository.NewGormSearchAnalyzerDictEntryRepository(db)
 	themeRepo := repository.NewGormThemeRepository(db)
 	systemConfigRepo := repository.NewGormSystemConfigRepository(db)
 	auditLogRepo := repository.NewGormAuditLogRepository(db)
@@ -125,6 +127,15 @@ func newRouter(
 	homeService := service.NewHomeService(spaceRepo, spaceCategoryRepo, systemConfigRepo)
 	// sitemap 服务：负责公开空间/文档 URL 的收敛输出。
 	sitemapService := service.NewSitemapService(db, systemConfigRepo)
+	// 搜索词典服务：负责从 DB 加载 jieba 用户词条。
+	searchAnalyzerDictService := service.NewSearchAnalyzerDictService(searchAnalyzerDictEntryRepo)
+	// 搜索配置服务：负责 search 配置解析与 active analyzer 选择。
+	searchConfigService := service.NewSearchConfigService(systemConfigRepo, service.SearchConfigServiceOptions{
+		JiebaDictLoader: searchAnalyzerDictService.BuildJiebaDictLoader(),
+	})
+	if _, err := searchConfigService.Resolve(context.Background()); err != nil && logger != nil {
+		logger.Error("search config initialization failed", slog.String("error", err.Error()))
+	}
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
 	visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 	// 阅读页服务：聚合空间树与文档正文，供 SSR worker 渲染。
@@ -391,6 +402,13 @@ func newRouter(
 			imageHostingService,
 		)
 		adminDocumentImageAssetHandler := handler.NewAdminDocumentImageAssetHandler(adminDocumentImageAssetService)
+		adminSearchAnalyzerService := service.NewAdminSearchAnalyzerService(
+			searchAnalyzerDictEntryRepo,
+			adminAccessService,
+			adminAuditService,
+			searchConfigService,
+		)
+		adminSearchAnalyzerHandler := handler.NewAdminSearchAnalyzerHandler(adminSearchAnalyzerService)
 		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
 		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
 		dataRetentionCleanupService := service.NewDataRetentionCleanupService(db, systemConfigRepo)
@@ -690,6 +708,75 @@ func newRouter(
 				"/system-configs/auth/providers/ldap/test",
 				middleware.RequirePlatformAdmin(adminAccessService),
 				adminSystemConfigHandler.TestLDAPConnection,
+			)
+
+			// ---- 全文检索分词治理（仅平台管理员）----
+			adminAPI.GET(
+				"/search/analyzers",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSearchAnalyzerHandler.ListAnalyzers,
+			)
+			adminAPI.GET(
+				"/search/analyzers/:analyzer/dict",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSearchAnalyzerHandler.ListDictEntries,
+			)
+			adminAPI.POST(
+				"/search/analyzers/:analyzer/dict",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "search_analyzer_dict.create",
+						TargetType:    "search_analyzer",
+						TargetIDParam: "analyzer",
+					},
+				),
+				adminSearchAnalyzerHandler.CreateDictEntry,
+			)
+			adminAPI.PATCH(
+				"/search/analyzers/:analyzer/dict/:entryId",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "search_analyzer_dict.update",
+						TargetType:    "search_analyzer_dict",
+						TargetIDParam: "entryId",
+					},
+				),
+				adminSearchAnalyzerHandler.UpdateDictEntry,
+			)
+			adminAPI.DELETE(
+				"/search/analyzers/:analyzer/dict/:entryId",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "search_analyzer_dict.delete",
+						TargetType:    "search_analyzer_dict",
+						TargetIDParam: "entryId",
+					},
+				),
+				adminSearchAnalyzerHandler.DeleteDictEntry,
+			)
+			adminAPI.POST(
+				"/search/analyzers/:analyzer/analyze-preview",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSearchAnalyzerHandler.AnalyzePreview,
+			)
+			adminAPI.POST(
+				"/search/analyzers/:analyzer/reload",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "search_analyzer.reload",
+						TargetType:    "search_analyzer",
+						TargetIDParam: "analyzer",
+					},
+				),
+				adminSearchAnalyzerHandler.ReloadAnalyzer,
 			)
 
 			// ---- 审计检索（仅平台管理员）----

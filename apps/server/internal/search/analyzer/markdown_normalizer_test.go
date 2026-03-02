@@ -1,0 +1,72 @@
+package analyzer
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestNormalizeMarkdownToPlainText_RemovesCodeMathAndSyntax(t *testing.T) {
+	input := strings.Join([]string{
+		"# 文档标题",
+		"",
+		"这是 **正文**，包含 [链接文本](https://example.com) 和 ![图片说明](https://example.com/image.png)。",
+		"",
+		"`inline_code_should_not_appear`",
+		"",
+		"```go",
+		"fmt.Println(\"code_should_not_appear\")",
+		"```",
+		"",
+		"```mermaid",
+		"graph TD",
+		"A-->B",
+		"```",
+		"",
+		"行内公式 $E=mc^2$ 不应进入索引。",
+		"",
+		"$$",
+		"a^2+b^2=c^2",
+		"$$",
+	}, "\n")
+
+	normalized := NormalizeMarkdownToPlainText(input)
+
+	mustContain := []string{
+		"文档标题",
+		"这是",
+		"正文",
+		"链接文本",
+		"图片说明",
+		"不应进入索引",
+	}
+	for _, expected := range mustContain {
+		if !strings.Contains(normalized, expected) {
+			t.Fatalf("expected normalized content to contain %q, got %q", expected, normalized)
+		}
+	}
+
+	mustNotContain := []string{
+		"inline_code_should_not_appear",
+		"code_should_not_appear",
+		"graph TD",
+		"A-->B",
+		"E=mc^2",
+		"a^2+b^2=c^2",
+		"```",
+		"#",
+		"[",
+		"](",
+	}
+	for _, unexpected := range mustNotContain {
+		if strings.Contains(normalized, unexpected) {
+			t.Fatalf("expected normalized content not to contain %q, got %q", unexpected, normalized)
+		}
+	}
+}
+
+func TestNormalizeMarkdownToPlainText_EmptyInput(t *testing.T) {
+	normalized := NormalizeMarkdownToPlainText("   \n\n")
+	if normalized != "" {
+		t.Fatalf("expected empty normalized output, got %q", normalized)
+	}
+}

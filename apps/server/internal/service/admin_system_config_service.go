@@ -13,6 +13,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
+	searchconfig "github.com/lifei6671/plaindoc/apps/server/internal/search"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -25,6 +26,7 @@ var systemConfigValidators = map[string]func(map[string]any) error{
 	SystemConfigKeyAuth:             validateAuthConfig,
 	SystemConfigKeyDataRetention:    validateDataRetentionConfig,
 	"image-hosting":                 validateImageHostingConfig,
+	searchconfig.SystemConfigKey:    validateSearchConfig,
 	SitemapConfigKey:                validateSitemapConfig,
 	HomepageAnonymousCacheConfigKey: validateHomepageAnonymousCacheConfig,
 }
@@ -1546,6 +1548,10 @@ func validateHomepageAnonymousCacheConfig(payload map[string]any) error {
 	}
 
 	return nil
+}
+
+func validateSearchConfig(payload map[string]any) error {
+	return searchconfig.ValidateConfigPayload(payload)
 }
 
 func buildLDAPProviderConfigFromAuthConfig(

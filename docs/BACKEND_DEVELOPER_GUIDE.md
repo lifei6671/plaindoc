@@ -1,6 +1,6 @@
 # 后端统一开发文档（`apps/server`）
 
-**Last Updated**: 2026-02-28  
+**Last Updated**: 2026-03-02  
 **适用对象**: 后端工程师、全栈工程师、AI Agent  
 **目标**: 用一份文档覆盖后端架构、配置、接口、SSR、数据模型、发布与排障，作为唯一后端事实口径。
 
@@ -476,3 +476,276 @@
 1. 阅读页 SSR M6/M7（一致性自动化、性能与发布加固）未完全收口。
 2. LDAP Phase 6（灰度、监控、回滚演练）待完成。
 3. 后续文档维护只更新本文件，不再新增并行“后端主文档”。
+
+---
+
+## 13. 全文检索可行性方案（M0-M9 对齐，适配当前项目）
+
+本章节给出“可落地、可切换、可回滚”的全文检索方案，目标是先交付 L1 基线能力，再平滑演进到 L2。
+
+分词抽象与自定义词典专题见：`docs/FULLTEXT_SEARCH_ANALYZER_DESIGN.md`。
+
+### 13.1 现状与可行性结论
+
+基于当前代码与结构（`router.go`、`workspace/access handler`、`VisibilityService`、`system_configs`、后台审计与 operation token、`main.go` 后台循环任务模型）：
+
+1. **可行**：项目已有单体服务、统一路由注入、配置中心、后台治理与审计机制，具备新增检索子系统的基础。
+2. **主要缺口**：目前无通用搜索 API、无可插拔搜索 Provider、无索引任务队列与状态机。
+3. **推荐路线**：`Bleve 先行（L1） -> 补齐任务系统与状态机 -> 对接 Meilisearch/Typesense（L2）`。
+
+### 13.2 L1/L2 范围定义（产品边界）
+
+| 层级 | 本项目建议能力 |
+| --- | --- |
+| L1（首期必须） | `q` 关键词、`space_id` 过滤、权限过滤、分页、排序（`relevance` / `updated_at_desc`）、返回 `doc_id + score`（snippet 可选） |
+| L2（增强） | 高亮、typo、同义词、facets、复杂排序、多字段权重可配 |
+
+首期明确不做：
+
+1. 跨空间一次性聚合搜索（先做单空间检索，降低权限泄露风险）。
+2. 基于向量/语义检索的复杂召回（留到后续专题）。
+
+### 13.3 权限模型映射（贴合当前实现）
+
+当前项目内容权限核心来自：
+
+1. `spaces.visibility` 与 `documents.visibility`（`public/authenticated/member`）。
+2. 空间成员角色：`owner/collaborator/reader`（见 `space_members.role`、`models.Role`）。
+3. 可见性判定由 `VisibilityService` 统一执行（后端真值来源）。
+
+为兼容检索过滤，定义 `role_level`（内容访问角色）：
+
+1. `reader=1`
+2. `collaborator=2`（对应通用方案的 Editor）
+3. `owner=3`（对应通用方案的 Admin）
+
+同时保留 `visibility_scope`（因为仅靠 `min_role` 无法表达 `authenticated`）：
+
+1. `public`
+2. `authenticated`
+3. `member`
+
+检索过滤规则必须同时满足：
+
+1. `space_id = ?`
+2. 文档与空间状态有效（非 `deleted/banned`）
+3. 可见性过滤：
+   - `public`：任意请求可见
+   - `authenticated`：登录用户可见
+   - `member`：`role_level >= min_role`
+
+> 说明：现阶段 `member` 下默认 `min_role=1`；后续若启用 `node_permissions/document_permissions` 细粒度策略，再提升 `min_role` 或扩展 `acl_hash/allow_list`。
+
+### 13.4 统一索引文档与查询模型
+
+**IndexRecord（L1）建议字段**
+
+1. `space_id`
+2. `doc_id`
+3. `node_id`
+4. `title`
+5. `body`（必须为 Markdown 清洗后的纯文本：去除代码块、公式、mermaid 与 Markdown 语法，不允许直接使用 `content_md` 原文）
+6. `visibility_scope`（`public/authenticated/member`）
+7. `min_role`（`1/2/3`，首期多数为 `1`）
+8. `updated_at_unix`（排序统一字段）
+9. `is_deleted`
+10. `space_status` / `doc_status`（可选冗余字段，便于过滤）
+
+**SearchRequest（L1）**
+
+1. `space_id`
+2. `actor_user_id`
+3. `is_authenticated`
+4. `user_role_level`（在该空间内计算）
+5. `q`
+6. `page` / `page_size`
+7. `sort`（`relevance|updated_at_desc`）
+8. `need_highlight`（L1 可忽略实现但保留协议位）
+
+**SearchResponse（L1）**
+
+1. `total`
+2. `hits[]`：`doc_id`、`score`、`snippet?`
+
+### 13.5 Provider 抽象（可插拔框架）
+
+建议新增 `apps/server/internal/search/provider` 抽象层，契约如下（伪接口）：
+
+1. `Health(ctx) error`
+2. `Verify(ctx, cfg) error`
+3. `EnsureSchema(ctx) error`
+4. `Upsert(ctx, []IndexRecord) error`
+5. `Delete(ctx, []docID) error`
+6. `PurgeBySpace(ctx, spaceID) error`
+7. `Search(ctx, SearchRequest) (SearchResponse, error)`
+8. `Capabilities() ProviderCapabilities`
+
+`ProviderCapabilities` 建议包含：
+
+1. `supports_highlight`
+2. `supports_sort_updated_at`
+3. `supports_typo`
+4. `supports_facets`
+
+后台 UI（系统配置/搜索管理）基于 capability 控制开关可见性与禁用状态。
+
+### 13.6 Provider 注册与配置治理（复用现有 system_configs）
+
+现有 `system_configs` + `AdminSystemConfigService` 已具备版本控制、校验、审计、operation token 保护，建议新增配置键：
+
+1. `search`
+
+`search` 配置建议结构：
+
+1. `activeProvider`: `bleve|meili|typesense`
+2. `fallbackPolicy`: `error|degrade_to_bleve`
+3. `providers.bleve`: `{ enabled, indexDir }`
+4. `providers.meili`: `{ enabled, endpoint, apiKey, indexName }`
+5. `providers.typesense`: `{ enabled, endpoint, apiKey, collectionName }`
+6. `switch`: `{ dualWriteEnabled, dualWriteWindowMinutes }`
+
+状态机建议单独落表（避免高频进度更新冲突 `system_configs.version`）：
+
+1. `configured -> verified -> building -> ready -> active`
+2. 异常分支：`failed` / `degraded`
+
+### 13.7 内置 Bleve 方案（首选）
+
+首期采用 **单索引 + 字段过滤**（A 方案）：
+
+1. 索引数量可控，复杂度低，便于先上线。
+2. 使用 `space_id` + `visibility_scope` + `min_role` 过滤避免跨空间泄露。
+3. 通过 `updated_at_unix` 支持统一排序。
+
+索引目录建议：
+
+1. 默认：`/app/data/search/bleve`（容器）/ `./data/search/bleve`（本地）
+2. 新增配置项：`SEARCH_BLEVE_DIR`（可选）
+
+重建策略：
+
+1. 全量：按空间分页扫描 `documents + nodes + spaces` 流式 upsert。
+2. 增量：消费索引任务表（见 13.9）。
+3. 损坏恢复：`Health/Verify` 失败时标记 `failed`，允许后台一键重建。
+
+### 13.8 外部 Provider（Meilisearch / Typesense）统一要求
+
+字段与过滤语义统一：
+
+1. 必须支持：`space_id = X`
+2. 必须支持可见性过滤：`visibility_scope + min_role + is_authenticated`
+3. 统一排序字段：`updated_at_unix`
+4. 全文字段：`title/body`
+
+外部引擎不可用策略（可配置）：
+
+1. `error`：直接返回明确错误（可观测、可预期）
+2. `degrade_to_bleve`：当且仅当 Bleve `ready` 时降级读取
+
+### 13.9 索引任务系统（Outbox/Job）
+
+当前项目没有通用任务队列，建议新增专用表 `search_index_jobs`：
+
+1. `job_id`
+2. `provider`
+3. `job_type`：`upsert/delete/purge_space/rebuild`
+4. `dedupe_key`
+5. `payload_json`
+6. `status`：`pending/running/success/failed`
+7. `retry_count`
+8. `next_run_at`
+9. `last_error`
+10. `created_at/updated_at`
+
+幂等与去重规则：
+
+1. 同 provider + 同 doc 的连续 `upsert` 合并为最后一次。
+2. `delete` 优先级高于 `upsert`（删后不回写）。
+3. `purge_space` 会吞并该空间尚未执行的 doc 粒度任务。
+
+Worker 建议复用 `main.go` 现有后台循环模式（参考 `runDataRetentionCleanupLoop`）：
+
+1. 启动独立 `runSearchIndexLoop(...)`
+2. 按 `next_run_at` 拉取任务
+3. 失败指数退避
+4. 记录结构化日志并更新 provider 状态
+
+### 13.10 索引更新事件范围（与现有代码映射）
+
+应触发索引更新的动作：
+
+1. 文档创建/保存：`workspaceHandler.CreateNode`（doc）与 `SaveDocument`
+2. 文档可见性变更：`accessHandler.UpdateDocumentVisibility`
+3. 文档删除/空间删除：`workspaceHandler.DeleteNode`、`adminDocumentHandler.DeleteDocument`、`adminSpaceHandler.DeleteSpace`
+4. 空间可见性变更：`accessHandler.UpdateSpaceVisibility`（建议触发 `purge_space + rebuild_space`）
+5. 文档/空间状态治理（封禁/删除/恢复）：后台对应 handler/service
+
+明确不触发：
+
+1. 用户角色变更本身不触发重建；查询时按实时角色计算过滤参数即可生效。
+
+### 13.11 读写路径与切换状态机
+
+切换必须遵循：
+
+1. 配置（configured）
+2. 校验（verified）
+3. 全量构建（building）
+4. 就绪（ready）
+5. 切 active（active）
+
+禁止“改配置立即切流量”。
+
+切换期间策略：
+
+1. 读路径：仅 active provider 对外；候选 provider 仅内部验证。
+2. 写路径：building/ready 阶段建议双写（active + target），窗口可配置。
+3. 回滚：一键切回 previous active，并保留失败原因审计。
+
+### 13.12 API 与后台操作建议
+
+业务检索 API（L1）：
+
+1. `GET /api/spaces/:spaceId/search?q=&page=&pageSize=&sort=`
+
+后台治理 API：
+
+1. `GET /api/admin/search/status`
+2. `POST /api/admin/search/providers/:provider/verify`
+3. `POST /api/admin/search/providers/:provider/rebuild`
+4. `POST /api/admin/search/providers/:provider/activate`
+5. `POST /api/admin/search/providers/:provider/rollback`
+
+高风险操作（activate/rollback）建议叠加 `RequireAdminOperationToken`，并记录 `AdminAuditModuleSystemConfig` 审计明细。
+
+### 13.13 安全验收清单（必须通过）
+
+1. Reader（1）不能检索到 `min_role > 1` 的成员内容。
+2. Collaborator（2）不能检索到 `min_role = 3` 内容。
+3. Owner（3）可见该空间全部可检索文档。
+4. 任意查询必须强制携带 `space_id`，不得跨空间返回。
+5. 文档权限变更后，短暂延迟可接受，但不得出现越权可读字段泄露。
+6. 外部引擎返回结果后仍做后端兜底校验（防索引漂移），但**主过滤必须在引擎侧完成**。
+
+### 13.14 可观测性与运维（按现阶段能力）
+
+当前仓库暂无统一 metrics 系统，首期建议：
+
+1. 结构化日志：搜索耗时、错误、provider、降级状态、任务重试。
+2. 管理接口：返回 active/ready provider、构建进度、队列堆积。
+3. 告警前置指标（可先日志聚合）：`p95/p99`、错误率、队列积压、失败重试次数。
+
+后续再接入统一 metrics（如 Prometheus）时复用同一指标语义。
+
+### 13.15 分阶段交付（建议）
+
+1. **Phase 1（L1 + Bleve）**  
+   完成模型/Provider 抽象、Bleve 实现、`/api/spaces/:spaceId/search`、基础权限过滤、分页排序、最小测试集。
+2. **Phase 2（任务系统 + 状态机）**  
+   完成 `search_index_jobs`、后台 worker、全量重建、ready/active 切换、回滚与审计。
+3. **Phase 3（外部 Provider）**  
+   接入 Meili/Typesense、能力探测、降级策略、后台联动操作。
+4. **Phase 4（L2 增强）**  
+   高亮、typo、同义词、facets、复杂排序与性能优化。
+
+> 结论：按上述路径，全文检索可在不破坏当前分层与权限体系的前提下逐步上线，且支持可控切换与回滚。

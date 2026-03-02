@@ -10,6 +10,7 @@ import {
   Paperclip,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   type LucideIcon,
   Palette,
   Settings2,
@@ -44,6 +45,7 @@ import { AdminThemesPage } from "./pages/AdminThemesPage";
 import { AdminSystemConfigsPage } from "./pages/AdminSystemConfigsPage";
 import { AdminAuditsPage } from "./pages/AdminAuditsPage";
 import { AdminProfilePage } from "./pages/AdminProfilePage";
+import { AdminSearchAnalyzersPage } from "./pages/AdminSearchAnalyzersPage";
 
 type AdminMenuKey =
   | "dashboard"
@@ -55,6 +57,7 @@ type AdminMenuKey =
   | "images"
   | "themes"
   | "system"
+  | "search-analyzers"
   | "audits";
 
 interface AdminMenuItem {
@@ -165,6 +168,16 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
 
   if (hasPlatformAdminRole) {
     items.push({
+      key: "search-analyzers",
+      label: "分词治理",
+      description: "维护全文检索分词器与词典词条",
+      path: "/admin/search-analyzers",
+      icon: Search
+    });
+  }
+
+  if (hasPlatformAdminRole) {
+    items.push({
       key: "audits",
       label: "审计日志",
       description: "检索关键管理操作轨迹",
@@ -247,6 +260,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         title: "系统配置",
         description: "系统级参数配置与校验。",
         todo: ["配置项列表", "JSON schema 校验", "配置变更审计"]
+      };
+    case "search-analyzers":
+      return {
+        title: "分词治理",
+        description: "全文检索分词器状态、词典与预览治理。",
+        todo: ["查看分词器状态", "维护词典词条", "执行分词预览与重载"]
       };
     case "audits":
       return {
@@ -341,7 +360,7 @@ const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
   { label: "账号", keys: ["profile"] },
   { label: "内容管理", keys: ["users", "spaces", "documents", "attachments", "images"] },
-  { label: "系统治理", keys: ["themes", "system", "audits"] }
+  { label: "系统治理", keys: ["themes", "system", "search-analyzers", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
 const ADMIN_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
@@ -849,6 +868,8 @@ export function AdminApp({
                 <AdminThemesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "system" ? (
                 <AdminSystemConfigsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "search-analyzers" ? (
+                <AdminSearchAnalyzersPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "audits" ? (
                 <AdminAuditsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "dashboard" ? (
