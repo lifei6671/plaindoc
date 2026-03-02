@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ if .Title }}{{ .Title }} - {{ end }}PlainDoc - 一个适合中小团队文档在线管理系统</title>
+  <meta name="description" content="{{ .Description }}">
+  <link rel="canonical" href="{{ .CanonicalURL }}">
+  <link rel="icon" type="image/png" href="/assets/favicon-ico.png">
+  <link rel="apple-touch-icon" href="/assets/favicon-ico.png">
+  <link rel="preload" href="/assets/google-sans-code-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/font-google-sans-code.css?v=20260224">
+  <link rel="stylesheet" href="/assets/home-youtube.css?v=20260225">
+</head>
+<body class="yt-home-body">
+  {{ template "youtube_top_nav" . }}
+  <div class="yt-shell">
+    {{ template "youtube_sidebar" . }}
+
+    <main class="yt-main">
+      <header class="yt-page-header">
+        <p class="yt-page-kicker">Search</p>
+        <h1 class="yt-page-title">全文检索</h1>
+        <p class="yt-page-subtitle">按关键词检索你可访问的文档内容。</p>
+      </header>
+
+      {{ if not .SearchEnabled }}
+        <div class="yt-empty">当前未开启全文检索，请在后台系统配置中启用后再试。</div>
+      {{ else if not .SearchKeyword }}
+        <div class="yt-empty">请输入关键词开始检索。</div>
+      {{ else }}
+        <p class="yt-search-summary">关键词“{{ .SearchKeyword }}”，共 {{ .SearchTotal }} 条结果。</p>
+        <section class="yt-search-list" aria-label="全文检索结果列表">
+          {{ if .SearchResults }}
+            {{ range .SearchResults }}
+              <article class="yt-search-card">
+                <h2 class="yt-search-card-title">
+                  <a href="{{ .URL }}" class="yt-search-card-link" target="_blank">{{ if .Title }}{{ .Title }}{{ else }}未命名文档{{ end }}</a>
+                </h2>
+                <p class="yt-search-card-snippet">{{ if .Snippet }}{{ .Snippet }}{{ else }}暂无摘要{{ end }}</p>
+                <p class="yt-search-card-meta">
+                  <span>空间：{{ if .SpaceName }}{{ .SpaceName }}{{ else }}{{ .SpaceID }}{{ end }}</span>
+                  <span>更新时间：{{ formatFriendlyRelativeTime .UpdatedAt }}</span>
+                </p>
+              </article>
+            {{ end }}
+          {{ else }}
+            <div class="yt-empty">未检索到可见文档，请尝试更换关键词。</div>
+          {{ end }}
+        </section>
+      {{ end }}
+    </main>
+  </div>
+  <script src="/assets/home.js?v=20260224" defer></script>
+</body>
+</html>

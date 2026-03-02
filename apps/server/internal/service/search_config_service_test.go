@@ -84,7 +84,7 @@ func TestSearchConfigService_Refresh_WithJiebaDictLoader(t *testing.T) {
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"jieba",
@@ -151,7 +151,7 @@ func TestSearchConfigService_RefreshFailure_DoesNotReplaceCurrentSnapshot(t *tes
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"simple",
@@ -187,7 +187,7 @@ func TestSearchConfigService_RefreshFailure_DoesNotReplaceCurrentSnapshot(t *tes
 	repo.recordByKey[searchcfg.SystemConfigKey] = &models.SystemConfig{
 		ConfigKey: searchcfg.SystemConfigKey,
 		ConfigValueJSON: `{
-			"activeProvider":"bleve",
+			"enabled":true,"activeProvider":"bleve",
 			"fallbackPolicy":"degrade_to_bleve",
 			"analysis":{
 				"activeAnalyzer":"jieba",
@@ -229,7 +229,7 @@ func TestSearchConfigService_Refresh_JiebaDictLoaderError(t *testing.T) {
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"jieba",

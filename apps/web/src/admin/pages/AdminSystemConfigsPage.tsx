@@ -39,7 +39,7 @@ type SystemConfigKey = "site" | "editor" | "security" | "search" | "data-retenti
 type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
 type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
-type SearchProvider = "bleve" | "meili" | "typesense";
+type SearchProvider = "bleve" | "meili" | "typesense" | "database";
 type SearchFallbackPolicy = "degrade_to_bleve" | "return_error";
 type SearchAnalyzer = "simple" | "jieba";
 type SearchJiebaMode = "search";
@@ -68,6 +68,7 @@ interface SecuritySystemConfigValue {
 }
 
 interface SearchSystemConfigValue {
+  enabled: boolean;
   activeProvider: SearchProvider;
   fallbackPolicy: SearchFallbackPolicy;
   analysis: {
@@ -350,6 +351,7 @@ const SECURITY_TEMPLATE: SecuritySystemConfigValue = {
 };
 
 const SEARCH_PROVIDER_OPTIONS: Array<{ value: SearchProvider; label: string }> = [
+  { value: "database", label: "数据库（简单搜索）" },
   { value: "bleve", label: "Bleve（内置）" },
   { value: "meili", label: "Meilisearch" },
   { value: "typesense", label: "Typesense" }
@@ -381,6 +383,7 @@ const SEARCH_JIEBA_DICT_SOURCE_OPTIONS: Array<{ value: SearchJiebaDictSource; la
 const SEARCH_DICT_VERSION_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/;
 
 const SEARCH_TEMPLATE: SearchSystemConfigValue = {
+  enabled: false,
   activeProvider: "bleve",
   fallbackPolicy: "degrade_to_bleve",
   analysis: {
@@ -586,6 +589,7 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
 
 function cloneSearchConfig(value: SearchSystemConfigValue): SearchSystemConfigValue {
   return {
+    enabled: value.enabled,
     activeProvider: value.activeProvider,
     fallbackPolicy: value.fallbackPolicy,
     analysis: {
@@ -609,6 +613,9 @@ function cloneSearchConfig(value: SearchSystemConfigValue): SearchSystemConfigVa
 
 function parseSearchProvider(value: unknown, fallbackValue: SearchProvider): SearchProvider {
   const normalizedValue = parseString(value, fallbackValue).toLowerCase();
+  if (normalizedValue === "database") {
+    return "database";
+  }
   if (normalizedValue === "meili") {
     return "meili";
   }
@@ -675,6 +682,7 @@ function parseSearchConfig(value: unknown): SearchSystemConfigValue {
   const activeAnalyzer = parseSearchAnalyzer(analysis?.activeAnalyzer, SEARCH_TEMPLATE.analysis.activeAnalyzer);
 
   const parsed: SearchSystemConfigValue = {
+    enabled: typeof payload.enabled === "boolean" ? payload.enabled : SEARCH_TEMPLATE.enabled,
     activeProvider: parseSearchProvider(payload.activeProvider, SEARCH_TEMPLATE.activeProvider),
     fallbackPolicy: parseSearchFallbackPolicy(payload.fallbackPolicy, SEARCH_TEMPLATE.fallbackPolicy),
     analysis: {
@@ -1673,6 +1681,26 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
                 {selectedKey === "search" ? (
                   <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <Checkbox
+                        checked={searchDraft.enabled}
+                        onCheckedChange={(checked) => {
+                          setSearchDraft((previous) => ({
+                            ...previous,
+                            enabled: checked === true
+                          }));
+                          markDirty("search");
+                        }}
+                        disabled={saving}
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium text-slate-700">启用全文检索</span>
+                        <p className="text-xs text-slate-500">
+                          关闭后前台不展示检索入口，且检索请求不会执行。
+                        </p>
+                      </div>
+                    </label>
+
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="space-y-1.5">
                         <span className="text-xs font-semibold tracking-wide text-slate-600">活跃检索引擎</span>
@@ -1698,6 +1726,11 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-xs text-slate-500">
+                          {searchDraft.activeProvider === "database"
+                            ? "database 引擎为数据库 LIKE 检索，仅支持简单搜索（无倒排索引与高级排序）。"
+                            : "外部引擎模式需对应 provider 已部署并联通。"}
+                        </p>
                       </label>
 
                       <label className="space-y-1.5">

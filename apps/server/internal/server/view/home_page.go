@@ -137,6 +137,17 @@ type HomeSpaceViewData struct {
 	UpdatedAt   time.Time
 }
 
+// HomeSearchHitViewData 首页全文检索命中项。
+type HomeSearchHitViewData struct {
+	SpaceID    string
+	SpaceName  string
+	DocumentID string
+	Title      string
+	Snippet    string
+	UpdatedAt  time.Time
+	URL        string
+}
+
 // HomePageViewData 首页/分类页模板数据。
 type HomePageViewData struct {
 	Title                string
@@ -144,6 +155,7 @@ type HomePageViewData struct {
 	CanonicalURL         string
 	SiteName             string
 	IsExplore            bool
+	IsSearch             bool
 	IsAuthenticated      bool
 	CanManageSpace       bool
 	CurrentUserName      string
@@ -160,12 +172,21 @@ type HomePageViewData struct {
 	Page                 int
 	PageSize             int
 	Total                int64
+	SearchEnabled        bool
+	SearchActionURL      string
+	SearchKeyword        string
+	SearchResults        []HomeSearchHitViewData
+	SearchPage           int
+	SearchPageSize       int
+	SearchTotal          int64
 }
 
 // RenderHomePage 渲染首页或分类页 HTML。
 func RenderHomePage(data HomePageViewData) ([]byte, error) {
 	templateName := "home.tmpl"
-	if data.IsExplore {
+	if data.IsSearch {
+		templateName = "search.tmpl"
+	} else if data.IsExplore {
 		templateName = "explore.tmpl"
 	}
 

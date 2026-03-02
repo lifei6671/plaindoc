@@ -215,6 +215,7 @@ type AnalyzerProvider interface {
 
 ```json
 {
+  "enabled": false,
   "activeProvider": "bleve",
   "fallbackPolicy": "degrade_to_bleve",
   "analysis": {
@@ -235,6 +236,11 @@ type AnalyzerProvider interface {
   }
 }
 ```
+
+补充说明：
+
+1. `enabled=false` 时前台不显示检索入口，且检索请求不会执行。
+2. `activeProvider=database` 表示走数据库 `LIKE` 简单搜索，仅作为轻量/过渡方案（无倒排索引与高级排序能力）。
 
 校验要求：
 

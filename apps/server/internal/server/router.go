@@ -14,6 +14,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/captchastore"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
+	searchprovider "github.com/lifei6671/plaindoc/apps/server/internal/search/provider"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/handler"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
@@ -136,6 +137,12 @@ func newRouter(
 	if _, err := searchConfigService.Resolve(context.Background()); err != nil && logger != nil {
 		logger.Error("search config initialization failed", slog.String("error", err.Error()))
 	}
+	searchQueryService := service.NewSearchQueryService(
+		searchConfigService,
+		searchprovider.NewDatabaseProvider(db),
+	)
+	// 首页全文检索服务：负责首页落地页检索结果读取与可见性过滤。
+	homeSearchService := service.NewHomeSearchService(searchQueryService, db)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
 	visibilityService := service.NewVisibilityService(spaceRepo, documentRepo)
 	// 阅读页服务：聚合空间树与文档正文，供 SSR worker 渲染。
@@ -143,7 +150,14 @@ func newRouter(
 	// 阅读页 SSR 渲染缓存：仅缓存 Node 渲染结果，不缓存鉴权流程。
 	readerRenderCache := buildReaderRenderCache(cfg, logger, readerSSRDispatcher != nil)
 	// 首页 Handler：承接 SSR 渲染与登录态相关行为。
-	homeHandler := handler.NewHomeHandler(authService, homeService, adminAccessService, cfg.WebOrigin)
+	homeHandler := handler.NewHomeHandler(
+		authService,
+		homeService,
+		homeSearchService,
+		searchConfigService,
+		adminAccessService,
+		cfg.WebOrigin,
+	)
 	// sitemap Handler：承接 /sitemap.xml 输出。
 	sitemapHandler := handler.NewSitemapHandler(sitemapService, cfg.WebOrigin)
 	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
@@ -197,6 +211,8 @@ func newRouter(
 	router.GET("/", homeHandler.Home)
 	// 分类探索页：服务端渲染分类导航与分类空间列表。
 	router.GET("/explore/:categoryId", homeHandler.Explore)
+	// 首页全文检索落地页：显示可见文档检索结果。
+	router.GET("/search", homeHandler.Search)
 	// 空间阅读入口：自动跳转到首篇可读文档。
 	router.GET("/r/:spaceId", readerPageHandler.Space)
 	// 文档阅读页：优先走 SSR worker 渲染，失败时降级 HTML 壳页。

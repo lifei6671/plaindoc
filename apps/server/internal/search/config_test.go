@@ -7,6 +7,7 @@ import (
 
 func TestValidateConfigPayload_Success(t *testing.T) {
 	payload := map[string]any{
+		"enabled":        true,
 		"activeProvider": "bleve",
 		"fallbackPolicy": "degrade_to_bleve",
 		"analysis": map[string]any{
@@ -34,6 +35,7 @@ func TestValidateConfigPayload_Success(t *testing.T) {
 
 func TestValidateConfigPayload_ActiveAnalyzerMustBeEnabled(t *testing.T) {
 	payload := map[string]any{
+		"enabled":        true,
 		"activeProvider": "bleve",
 		"fallbackPolicy": "degrade_to_bleve",
 		"analysis": map[string]any{
@@ -65,6 +67,7 @@ func TestValidateConfigPayload_ActiveAnalyzerMustBeEnabled(t *testing.T) {
 
 func TestValidateConfigPayload_RejectsInvalidDictVersion(t *testing.T) {
 	payload := map[string]any{
+		"enabled":        true,
 		"activeProvider": "bleve",
 		"fallbackPolicy": "degrade_to_bleve",
 		"analysis": map[string]any{
@@ -96,6 +99,7 @@ func TestValidateConfigPayload_RejectsInvalidDictVersion(t *testing.T) {
 
 func TestNormalizeConfig_UsesDefaults(t *testing.T) {
 	config := NormalizeConfig(map[string]any{
+		"enabled": true,
 		"analysis": map[string]any{
 			"analyzers": map[string]any{
 				"jieba": map[string]any{
@@ -109,6 +113,9 @@ func TestNormalizeConfig_UsesDefaults(t *testing.T) {
 	if config.ActiveProvider != ProviderBleve {
 		t.Fatalf("expected default provider %q, got %q", ProviderBleve, config.ActiveProvider)
 	}
+	if !config.Enabled {
+		t.Fatalf("expected enabled=true from payload")
+	}
 	if config.Analysis.ActiveAnalyzer != AnalyzerSimple {
 		t.Fatalf("expected default active analyzer %q, got %q", AnalyzerSimple, config.Analysis.ActiveAnalyzer)
 	}
@@ -120,5 +127,32 @@ func TestNormalizeConfig_UsesDefaults(t *testing.T) {
 	}
 	if config.Analysis.Analyzers.Jieba.Mode != JiebaModeSearch {
 		t.Fatalf("expected default jieba mode %q, got %q", JiebaModeSearch, config.Analysis.Analyzers.Jieba.Mode)
+	}
+}
+
+func TestValidateConfigPayload_SupportsDatabaseProvider(t *testing.T) {
+	payload := map[string]any{
+		"enabled":        true,
+		"activeProvider": "database",
+		"fallbackPolicy": "degrade_to_bleve",
+		"analysis": map[string]any{
+			"activeAnalyzer": "simple",
+			"analyzers": map[string]any{
+				"simple": map[string]any{
+					"enabled": true,
+				},
+				"jieba": map[string]any{
+					"enabled":          false,
+					"mode":             "search",
+					"hmm":              true,
+					"stopwordsEnabled": false,
+					"dictSource":       "db",
+					"dictVersion":      "default",
+				},
+			},
+		},
+	}
+	if err := ValidateConfigPayload(payload); err != nil {
+		t.Fatalf("expected database provider valid, got err=%v", err)
 	}
 }

@@ -21,6 +21,7 @@ const (
 	ProviderBleve     ProviderName = "bleve"
 	ProviderMeili     ProviderName = "meili"
 	ProviderTypesense ProviderName = "typesense"
+	ProviderDatabase  ProviderName = "database"
 )
 
 // FallbackPolicy 定义 active provider 不可用时策略。
@@ -58,6 +59,7 @@ var dictVersionRegexp = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$`)
 
 // Config 定义全文检索系统配置。
 type Config struct {
+	Enabled        bool           `json:"enabled"`
 	ActiveProvider ProviderName   `json:"activeProvider"`
 	FallbackPolicy FallbackPolicy `json:"fallbackPolicy"`
 	Analysis       AnalysisConfig `json:"analysis"`
@@ -93,6 +95,7 @@ type JiebaAnalyzerConfig struct {
 // DefaultConfig 返回全文检索默认配置。
 func DefaultConfig() Config {
 	return Config{
+		Enabled:        false,
 		ActiveProvider: ProviderBleve,
 		FallbackPolicy: FallbackPolicyDegradeToBleve,
 		Analysis: AnalysisConfig{
@@ -121,6 +124,7 @@ func NormalizeConfig(payload map[string]any) Config {
 		return config
 	}
 
+	config.Enabled = readBool(payload, "enabled", config.Enabled)
 	if provider := normalizeProviderName(readString(payload, "activeProvider")); provider != "" {
 		config.ActiveProvider = provider
 	}
@@ -186,6 +190,7 @@ func ValidateConfigPayload(payload map[string]any) error {
 		return fmt.Errorf("search config is required")
 	}
 	if err := validateNoUnknownKeys(payload, map[string]struct{}{
+		"enabled":        {},
 		"activeProvider": {},
 		"fallbackPolicy": {},
 		"analysis":       {},
@@ -193,12 +198,18 @@ func ValidateConfigPayload(payload map[string]any) error {
 		return err
 	}
 
+	if rawEnabled, exists := payload["enabled"]; exists {
+		if _, ok := rawEnabled.(bool); !ok {
+			return fmt.Errorf("enabled must be boolean")
+		}
+	}
+
 	activeProvider, err := getRequiredString(payload, "activeProvider")
 	if err != nil {
 		return err
 	}
 	if normalizeProviderName(activeProvider) == "" {
-		return fmt.Errorf("activeProvider must be bleve/meili/typesense")
+		return fmt.Errorf("activeProvider must be bleve/meili/typesense/database")
 	}
 
 	fallbackPolicy, err := getRequiredString(payload, "fallbackPolicy")
@@ -338,6 +349,8 @@ func normalizeProviderName(value string) ProviderName {
 		return ProviderMeili
 	case string(ProviderTypesense):
 		return ProviderTypesense
+	case string(ProviderDatabase):
+		return ProviderDatabase
 	default:
 		return ""
 	}

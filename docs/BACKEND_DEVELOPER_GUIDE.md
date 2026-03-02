@@ -597,12 +597,15 @@
 
 `search` 配置建议结构：
 
-1. `activeProvider`: `bleve|meili|typesense`
-2. `fallbackPolicy`: `error|degrade_to_bleve`
-3. `providers.bleve`: `{ enabled, indexDir }`
-4. `providers.meili`: `{ enabled, endpoint, apiKey, indexName }`
-5. `providers.typesense`: `{ enabled, endpoint, apiKey, collectionName }`
-6. `switch`: `{ dualWriteEnabled, dualWriteWindowMinutes }`
+1. `enabled`: 全局开关；仅开启时前台显示检索入口并执行检索。
+2. `activeProvider`: `database|bleve|meili|typesense`
+3. `fallbackPolicy`: `error|degrade_to_bleve`
+4. `providers.bleve`: `{ enabled, indexDir }`
+5. `providers.meili`: `{ enabled, endpoint, apiKey, indexName }`
+6. `providers.typesense`: `{ enabled, endpoint, apiKey, collectionName }`
+7. `switch`: `{ dualWriteEnabled, dualWriteWindowMinutes }`
+
+说明：`database` provider 为数据库 `LIKE` 方案，仅支持简单搜索（不提供倒排索引与高级相关性排序）。
 
 状态机建议单独落表（避免高频进度更新冲突 `system_configs.version`）：
 

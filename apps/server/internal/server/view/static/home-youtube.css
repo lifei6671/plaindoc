@@ -77,6 +77,59 @@ pre {
   min-width: 0;
 }
 
+.yt-header-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  padding-inline: 20px;
+}
+
+.yt-header-search-form {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #d6d6d6;
+  border-radius: 999px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.yt-header-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  border: 0;
+  outline: 0;
+  padding: 0 14px;
+  color: #111111;
+  font-size: 14px;
+  font-family: inherit;
+  background: transparent;
+}
+
+.yt-header-search-input::placeholder {
+  color: #8f8f8f;
+}
+
+.yt-header-search-button {
+  width: 70px;
+  height: 38px;
+  border: 0;
+  border-left: 1px solid #e1e1e1;
+  background: #f8f8f8;
+  color: #252525;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.yt-header-search-button:hover {
+  background: #efefef;
+}
+
 .yt-brand {
   display: inline-flex;
   align-items: center;
@@ -532,6 +585,55 @@ pre {
   font-size: 14px;
 }
 
+.yt-search-summary {
+  margin: 8px 0 14px;
+  color: #616161;
+  font-size: 14px;
+}
+
+.yt-search-list {
+  display: grid;
+  gap: 12px;
+}
+
+.yt-search-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 14px 16px;
+}
+
+.yt-search-card-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.yt-search-card-link {
+  color: #0f172a;
+  text-decoration: none;
+}
+
+.yt-search-card-link:hover {
+  color: #cc1f3d;
+}
+
+.yt-search-card-snippet {
+  margin: 8px 0 0;
+  color: #505050;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.yt-search-card-meta {
+  margin: 10px 0 0;
+  color: #818181;
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
 @media (max-width: 1460px) {
   :root {
     --yt-sidebar-width: 208px;
@@ -608,6 +710,21 @@ pre {
     padding: 14px 12px 24px;
   }
 
+  .yt-header-center {
+    padding-inline: 10px;
+  }
+
+  .yt-header-search-input {
+    height: 34px;
+    font-size: 13px;
+  }
+
+  .yt-header-search-button {
+    width: 62px;
+    height: 34px;
+    font-size: 12px;
+  }
+
   .yt-grid {
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
     gap: 20px 12px;
@@ -615,6 +732,14 @@ pre {
 }
 
 @media (max-width: 680px) {
+  .yt-header-center {
+    padding-inline: 8px;
+  }
+
+  .yt-header-search-input {
+    padding-inline: 10px;
+  }
+
   .yt-brand-name,
   .yt-brand-badge {
     display: none;

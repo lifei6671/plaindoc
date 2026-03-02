@@ -270,7 +270,7 @@ func TestAdminSearchAnalyzerService_ReloadAnalyzer(t *testing.T) {
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"jieba",
@@ -332,7 +332,7 @@ func TestAdminSearchAnalyzerService_AnalyzePreview(t *testing.T) {
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"jieba",
@@ -393,7 +393,7 @@ func TestAdminSearchAnalyzerService_AnalyzePreviewInvalidMode(t *testing.T) {
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"jieba",
@@ -448,7 +448,7 @@ func TestAdminSearchAnalyzerService_AnalyzePreviewAnalyzerDisabled(t *testing.T)
 			searchcfg.SystemConfigKey: {
 				ConfigKey: searchcfg.SystemConfigKey,
 				ConfigValueJSON: `{
-					"activeProvider":"bleve",
+					"enabled":true,"activeProvider":"bleve",
 					"fallbackPolicy":"degrade_to_bleve",
 					"analysis":{
 						"activeAnalyzer":"simple",

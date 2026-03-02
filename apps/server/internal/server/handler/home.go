@@ -15,6 +15,8 @@ import (
 type homeHandler struct {
 	authService        *service.AuthService
 	homeService        *service.HomeService
+	homeSearchService  *service.HomeSearchService
+	searchConfig       *service.SearchConfigService
 	adminAccessService *service.AdminAccessService
 	webOrigin          string
 }
@@ -34,12 +36,16 @@ type homeViewerIdentity struct {
 func NewHomeHandler(
 	authService *service.AuthService,
 	homeService *service.HomeService,
+	homeSearchService *service.HomeSearchService,
+	searchConfigService *service.SearchConfigService,
 	adminAccessService *service.AdminAccessService,
 	webOrigin string,
 ) *homeHandler {
 	return &homeHandler{
 		authService:        authService,
 		homeService:        homeService,
+		homeSearchService:  homeSearchService,
+		searchConfig:       searchConfigService,
 		adminAccessService: adminAccessService,
 		webOrigin:          normalizeWebOrigin(webOrigin),
 	}
@@ -53,6 +59,85 @@ func (h *homeHandler) Home(c *gin.Context) {
 // Explore 渲染分类页（顶部分类导航 + 分类空间列表）。
 func (h *homeHandler) Explore(c *gin.Context) {
 	h.renderPage(c, true)
+}
+
+// Search 渲染首页全文检索落地页。
+func (h *homeHandler) Search(c *gin.Context) {
+	if h == nil || h.homeService == nil {
+		renderHomeFallback(c)
+		return
+	}
+
+	viewerIdentity := h.resolveOptionalViewerIdentity(c)
+	canManageSpace := h.resolveCanManageSpace(c, viewerIdentity)
+	searchEnabled := h.resolveHomepageSearchEnabled(c)
+
+	categoryRecord, err := h.homeService.GetPage(c.Request.Context(), service.HomepageQueryInput{
+		ViewerUserID: viewerIdentity.UserID,
+		Page:         1,
+		PageSize:     1,
+	})
+	if err != nil {
+		renderHomeFallback(c)
+		return
+	}
+
+	keyword := strings.TrimSpace(c.Query("q"))
+	page := parsePositiveInt(c.Query("page"), 1)
+	pageSize := parsePositiveInt(c.Query("pageSize"), 20)
+	searchResult := service.HomeSearchPageRecord{
+		Keyword:  keyword,
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if searchEnabled && h.homeSearchService != nil && keyword != "" {
+		result, searchErr := h.homeSearchService.Search(c.Request.Context(), service.HomeSearchInput{
+			ViewerUserID: viewerIdentity.UserID,
+			Keyword:      keyword,
+			Page:         page,
+			PageSize:     pageSize,
+		})
+		if searchErr != nil {
+			renderHomeFallback(c)
+			return
+		}
+		searchResult = result
+	}
+
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+	appendVaryHeader(c, "Authorization")
+	appendVaryHeader(c, "Cookie")
+
+	htmlBytes, err := view.RenderHomePage(view.HomePageViewData{
+		Title:                "全文检索",
+		Description:          "按关键词检索你可访问的文档内容。",
+		CanonicalURL:         "/search",
+		SiteName:             "PlainDoc",
+		IsSearch:             true,
+		IsAuthenticated:      viewerIdentity.Authenticated,
+		CanManageSpace:       canManageSpace,
+		CurrentUserName:      viewerIdentity.Name,
+		CurrentUserAvatar:    buildUserAvatarText(viewerIdentity.Name, viewerIdentity.Email),
+		CurrentUserAvatarURL: strings.TrimSpace(viewerIdentity.AvatarURL),
+		LoginURL:             h.buildWebAuthEntryURL(c, "/login"),
+		RegisterURL:          h.buildWebAuthEntryURL(c, "/register"),
+		AdminURL:             "/admin",
+		LogoutURL:            "/logout",
+		Categories:           buildHomeCategoryItems(categoryRecord, false, false, true),
+		SearchEnabled:        searchEnabled,
+		SearchActionURL:      "/search",
+		SearchKeyword:        keyword,
+		SearchTotal:          searchResult.Total,
+		SearchPage:           searchResult.Page,
+		SearchPageSize:       searchResult.PageSize,
+		SearchResults:        mapSearchResultHits(searchResult.Items),
+	})
+	if err != nil {
+		renderHomeFallback(c)
+		return
+	}
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", htmlBytes)
 }
 
 // Logout 处理首页导航发起的退出登录。
@@ -84,19 +169,8 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 	}
 
 	viewerIdentity := h.resolveOptionalViewerIdentity(c)
-	canManageSpace := false
-	if h != nil &&
-		h.adminAccessService != nil &&
-		viewerIdentity.Authenticated &&
-		strings.TrimSpace(viewerIdentity.UserID) != "" {
-		hasAdminRole, roleErr := h.adminAccessService.IsAdmin(
-			c.Request.Context(),
-			strings.TrimSpace(viewerIdentity.UserID),
-		)
-		if roleErr == nil {
-			canManageSpace = hasAdminRole
-		}
-	}
+	canManageSpace := h.resolveCanManageSpace(c, viewerIdentity)
+	searchEnabled := h.resolveHomepageSearchEnabled(c)
 	record, err := h.homeService.GetPage(c.Request.Context(), service.HomepageQueryInput{
 		ViewerUserID: viewerIdentity.UserID,
 		CategoryID:   categoryID,
@@ -127,41 +201,8 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 		}
 	}
 
-	categoryItems := make([]view.HomeCategoryViewData, 0, len(record.Categories)+1)
-	allCategoryURL := "/"
-	if explore {
-		allCategoryURL = "/explore/" + exploreAllCategoryRouteToken
-	}
-	categoryItems = append(categoryItems, view.HomeCategoryViewData{
-		CategoryID: "",
-		Name:       "全部",
-		IsDefault:  false,
-		IsActive:   (!explore) || isExploreAll,
-		URL:        allCategoryURL,
-	})
-	for _, item := range record.Categories {
-		normalizedCategoryID := strings.TrimSpace(item.CategoryID)
-		categoryItems = append(categoryItems, view.HomeCategoryViewData{
-			CategoryID: normalizedCategoryID,
-			Name:       strings.TrimSpace(item.Name),
-			IsDefault:  item.IsDefault,
-			IsActive:   explore && normalizedCategoryID == strings.TrimSpace(record.ActiveCategoryID),
-			URL:        "/explore/" + normalizedCategoryID,
-		})
-	}
-
-	spaceItems := make([]view.HomeSpaceViewData, 0, len(record.Spaces))
-	for _, item := range record.Spaces {
-		spaceItems = append(spaceItems, view.HomeSpaceViewData{
-			SpaceID:     strings.TrimSpace(item.SpaceID),
-			Name:        strings.TrimSpace(item.Name),
-			Description: strings.TrimSpace(item.Description),
-			CoverURL:    strings.TrimSpace(item.CoverURL),
-			OwnerName:   strings.TrimSpace(item.OwnerName),
-			OwnerAvatar: strings.TrimSpace(item.OwnerAvatar),
-			UpdatedAt:   item.UpdatedAt,
-		})
-	}
+	categoryItems := buildHomeCategoryItems(record, explore, isExploreAll, false)
+	spaceItems := mapHomepageSpaces(record.Spaces)
 	loginURL := h.buildWebAuthEntryURL(c, "/login")
 	registerURL := h.buildWebAuthEntryURL(c, "/register")
 	activeCategoryName := strings.TrimSpace(record.ActiveCategory)
@@ -191,6 +232,8 @@ func (h *homeHandler) renderPage(c *gin.Context, explore bool) {
 		Page:                 record.Pagination.Page,
 		PageSize:             record.Pagination.PageSize,
 		Total:                record.Pagination.Total,
+		SearchEnabled:        searchEnabled,
+		SearchActionURL:      "/search",
 	})
 	if err != nil {
 		renderHomeFallback(c)
@@ -230,6 +273,108 @@ func (h *homeHandler) resolveOptionalViewerIdentity(c *gin.Context) homeViewerId
 		AvatarURL:     strings.TrimSpace(session.User.AvatarURL),
 		Authenticated: strings.TrimSpace(session.User.ID) != "",
 	}
+}
+
+func (h *homeHandler) resolveCanManageSpace(
+	c *gin.Context,
+	viewerIdentity homeViewerIdentity,
+) bool {
+	if h == nil || h.adminAccessService == nil || c == nil {
+		return false
+	}
+	if !viewerIdentity.Authenticated || strings.TrimSpace(viewerIdentity.UserID) == "" {
+		return false
+	}
+	hasAdminRole, err := h.adminAccessService.IsAdmin(
+		c.Request.Context(),
+		strings.TrimSpace(viewerIdentity.UserID),
+	)
+	if err != nil {
+		return false
+	}
+	return hasAdminRole
+}
+
+func (h *homeHandler) resolveHomepageSearchEnabled(c *gin.Context) bool {
+	if h == nil || h.searchConfig == nil || c == nil {
+		return false
+	}
+	snapshot, err := h.searchConfig.Refresh(c.Request.Context())
+	if err != nil {
+		return false
+	}
+	if !snapshot.Config.Enabled {
+		return false
+	}
+	return snapshot.Config.IsAnalyzerEnabled(snapshot.Config.Analysis.ActiveAnalyzer)
+}
+
+func buildHomeCategoryItems(
+	record service.HomepagePageRecord,
+	explore bool,
+	isExploreAll bool,
+	forceNoActive bool,
+) []view.HomeCategoryViewData {
+	categoryItems := make([]view.HomeCategoryViewData, 0, len(record.Categories)+1)
+	allCategoryURL := "/"
+	if explore {
+		allCategoryURL = "/explore/" + exploreAllCategoryRouteToken
+	}
+	allCategoryActive := ((!explore) || isExploreAll) && !forceNoActive
+	categoryItems = append(categoryItems, view.HomeCategoryViewData{
+		CategoryID: "",
+		Name:       "全部",
+		IsDefault:  false,
+		IsActive:   allCategoryActive,
+		URL:        allCategoryURL,
+	})
+	for _, item := range record.Categories {
+		normalizedCategoryID := strings.TrimSpace(item.CategoryID)
+		categoryItems = append(categoryItems, view.HomeCategoryViewData{
+			CategoryID: normalizedCategoryID,
+			Name:       strings.TrimSpace(item.Name),
+			IsDefault:  item.IsDefault,
+			IsActive: !forceNoActive &&
+				explore &&
+				normalizedCategoryID == strings.TrimSpace(record.ActiveCategoryID),
+			URL: "/explore/" + normalizedCategoryID,
+		})
+	}
+	return categoryItems
+}
+
+func mapHomepageSpaces(items []service.HomepageSpaceRecord) []view.HomeSpaceViewData {
+	spaceItems := make([]view.HomeSpaceViewData, 0, len(items))
+	for _, item := range items {
+		spaceItems = append(spaceItems, view.HomeSpaceViewData{
+			SpaceID:     strings.TrimSpace(item.SpaceID),
+			Name:        strings.TrimSpace(item.Name),
+			Description: strings.TrimSpace(item.Description),
+			CoverURL:    strings.TrimSpace(item.CoverURL),
+			OwnerName:   strings.TrimSpace(item.OwnerName),
+			OwnerAvatar: strings.TrimSpace(item.OwnerAvatar),
+			UpdatedAt:   item.UpdatedAt,
+		})
+	}
+	return spaceItems
+}
+
+func mapSearchResultHits(items []service.HomeSearchHitRecord) []view.HomeSearchHitViewData {
+	hits := make([]view.HomeSearchHitViewData, 0, len(items))
+	for _, item := range items {
+		spaceID := strings.TrimSpace(item.SpaceID)
+		documentID := strings.TrimSpace(item.DocumentID)
+		hits = append(hits, view.HomeSearchHitViewData{
+			SpaceID:    spaceID,
+			SpaceName:  strings.TrimSpace(item.SpaceName),
+			DocumentID: documentID,
+			Title:      strings.TrimSpace(item.Title),
+			Snippet:    strings.TrimSpace(item.Snippet),
+			UpdatedAt:  item.UpdatedAt,
+			URL:        "/r/" + spaceID + "/" + documentID,
+		})
+	}
+	return hits
 }
 
 func parsePositiveInt(raw string, fallback int) int {

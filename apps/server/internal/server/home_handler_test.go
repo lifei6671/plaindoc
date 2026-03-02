@@ -114,6 +114,9 @@ func TestRouter_Home_AnonymousUsesPublicCacheAndVisibility(t *testing.T) {
 	}
 
 	body := rec.Body.String()
+	if strings.Contains(body, `class="yt-header-search-form"`) {
+		t.Fatalf("expected anonymous homepage hides search form when search is not configured, body=%s", body)
+	}
 	if !strings.Contains(body, `class="yt-signin-button"`) || !strings.Contains(body, ">登录<") {
 		t.Fatalf("expected anonymous nav has login button, body=%s", body)
 	}
@@ -277,6 +280,76 @@ func TestRouter_Explore_LoggedInUsesNoStoreAndCategoryFilter(t *testing.T) {
 	}
 }
 
+func TestRouter_HomeSearchEnabled_ShowsSearchBoxAndResults(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, _ := registerAccessUser(t, serve, "home-search-owner@example.com")
+	seedHomepageSearchConfig(t, database)
+
+	seedHomepageSpace(t, database, homepageSeedSpaceInput{
+		SpaceID:      "01homesearchspace000000000001",
+		Name:         "公开检索空间",
+		OwnerUserID:  ownerUserID,
+		Visibility:   "public",
+		CategoryID:   models.DefaultSpaceCategoryID,
+		CategoryName: models.DefaultSpaceCategoryName,
+	})
+	seedHomepageSpace(t, database, homepageSeedSpaceInput{
+		SpaceID:      "01homesearchspace000000000002",
+		Name:         "仅成员空间",
+		OwnerUserID:  ownerUserID,
+		Visibility:   "member",
+		CategoryID:   models.DefaultSpaceCategoryID,
+		CategoryName: models.DefaultSpaceCategoryName,
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homesearchspace000000000001",
+		NodeID:     "01homesearchdocnode000000000001",
+		DocumentID: "01homesearchdocument00000000001",
+		Title:      "检索命中文档",
+		Visibility: "public",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homesearchspace000000000002",
+		NodeID:     "01homesearchdocnode000000000002",
+		DocumentID: "01homesearchdocument00000000002",
+		Title:      "不应被匿名检索命中",
+		Visibility: "member",
+	})
+
+	homeReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	homeRec := serve(homeReq)
+	if homeRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", homeRec.Code, homeRec.Body.String())
+	}
+	homeBody := homeRec.Body.String()
+	if !strings.Contains(homeBody, `class="yt-header-search-form"`) {
+		t.Fatalf("expected homepage renders search form after enabling search config, body=%s", homeBody)
+	}
+	if !strings.Contains(homeBody, `action="/search"`) {
+		t.Fatalf("expected homepage search form action to /search, body=%s", homeBody)
+	}
+
+	searchReq := httptest.NewRequest(http.MethodGet, "/search?q=命中", nil)
+	searchRec := serve(searchReq)
+	if searchRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /search, got %d body=%s", searchRec.Code, searchRec.Body.String())
+	}
+	searchBody := searchRec.Body.String()
+	if !strings.Contains(searchBody, "检索命中文档") {
+		t.Fatalf("expected search page contains matched document title, body=%s", searchBody)
+	}
+	if !strings.Contains(searchBody, "/r/01homesearchspace000000000001/01homesearchdocument00000000001") {
+		t.Fatalf("expected search result links reader page, body=%s", searchBody)
+	}
+	if strings.Contains(searchBody, "不应被匿名检索命中") {
+		t.Fatalf("expected anonymous search result excludes member-only document, body=%s", searchBody)
+	}
+}
+
 func TestRouter_HomeLogoutRedirectsAndClearsCookie(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
@@ -418,5 +491,21 @@ func seedHomepageDocument(t *testing.T, database *storage.Database, input homepa
 		"updated_at":  now,
 	}).Error; err != nil {
 		t.Fatalf("insert homepage document failed: %v", err)
+	}
+}
+
+func seedHomepageSearchConfig(t *testing.T, database *storage.Database) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "search",
+		"config_value_json":  `{"enabled":true,"activeProvider":"database","fallbackPolicy":"degrade_to_bleve","analysis":{"activeAnalyzer":"simple","analyzers":{"simple":{"enabled":true},"jieba":{"enabled":false,"mode":"search","hmm":true,"stopwordsEnabled":false,"dictSource":"db","dictVersion":"default"}}}}`,
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert homepage search config failed: %v", err)
 	}
 }

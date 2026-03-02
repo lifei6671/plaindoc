@@ -17,6 +17,7 @@ func TestResolveSystemConfigValidator_Search(t *testing.T) {
 
 func TestValidateSearchConfig(t *testing.T) {
 	valid := map[string]any{
+		"enabled":        true,
 		"activeProvider": "bleve",
 		"fallbackPolicy": "degrade_to_bleve",
 		"analysis": map[string]any{
@@ -41,6 +42,7 @@ func TestValidateSearchConfig(t *testing.T) {
 	}
 
 	invalid := map[string]any{
+		"enabled":        true,
 		"activeProvider": "bleve",
 		"fallbackPolicy": "degrade_to_bleve",
 		"analysis": map[string]any{
