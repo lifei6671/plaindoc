@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -137,10 +138,25 @@ func newRouter(
 	if _, err := searchConfigService.Resolve(context.Background()); err != nil && logger != nil {
 		logger.Error("search config initialization failed", slog.String("error", err.Error()))
 	}
+	bleveProvider := searchprovider.NewBleveProvider(searchprovider.BleveProviderOptions{
+		DB:        db,
+		IndexPath: resolveBleveIndexPath(cfg),
+	})
+	databaseProvider := searchprovider.NewDatabaseProvider(db)
 	searchQueryService := service.NewSearchQueryService(
 		searchConfigService,
-		searchprovider.NewDatabaseProvider(db),
+		databaseProvider,
+		bleveProvider,
 	)
+	searchIndexService := service.NewSearchIndexService(
+		db,
+		searchConfigService,
+		databaseProvider,
+		bleveProvider,
+	)
+	if _, err := searchIndexService.Bootstrap(context.Background()); err != nil && logger != nil {
+		logger.Error("search index bootstrap failed", slog.String("error", err.Error()))
+	}
 	// 首页全文检索服务：负责首页落地页检索结果读取与可见性过滤。
 	homeSearchService := service.NewHomeSearchService(searchQueryService, db)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
@@ -433,6 +449,7 @@ func newRouter(
 			adminAccessService,
 			adminAuditService,
 			dataRetentionCleanupService,
+			searchIndexService,
 		)
 		adminSystemConfigHandler := handler.NewAdminSystemConfigHandler(adminSystemConfigService)
 
@@ -721,6 +738,24 @@ func newRouter(
 				adminSystemConfigHandler.RunDataRetentionCleanup,
 			)
 			adminAPI.POST(
+				"/system-configs/:key/rebuild/run",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "system_config.rebuild",
+						TargetType:    "system_config",
+						TargetIDParam: "key",
+					},
+				),
+				adminSystemConfigHandler.RunSearchIndexRebuild,
+			)
+			adminAPI.GET(
+				"/system-configs/:key/rebuild/status",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSystemConfigHandler.GetSearchIndexStatus,
+			)
+			adminAPI.POST(
 				"/system-configs/auth/providers/ldap/test",
 				middleware.RequirePlatformAdmin(adminAccessService),
 				adminSystemConfigHandler.TestLDAPConnection,
@@ -851,4 +886,15 @@ func buildReaderRenderCache(
 		return nil
 	}
 	return cache
+}
+
+func resolveBleveIndexPath(cfg config.Config) string {
+	configuredPath := strings.TrimSpace(os.Getenv("SEARCH_BLEVE_DIR"))
+	if configuredPath != "" {
+		return filepath.Clean(configuredPath)
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Env), "test") {
+		return filepath.Clean(filepath.Join(os.TempDir(), "plaindoc", "search", "bleve-test"))
+	}
+	return filepath.Clean(filepath.Join("data", "search", "bleve"))
 }

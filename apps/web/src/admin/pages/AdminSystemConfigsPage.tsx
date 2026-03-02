@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { showToast } from "../../components/ui/toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
-import { type AdminSystemConfig, type DataGateway } from "../../data-access";
+import { type AdminSearchIndexStatusResult, type AdminSystemConfig, type DataGateway } from "../../data-access";
 import { formatError } from "../../editor/status-utils";
 import {
   cloneImageHostingConfig,
@@ -519,6 +519,17 @@ function formatDateTime(value: string | null): string {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+function formatSearchRebuildSource(value: string): string {
+  const source = value.trim().toLowerCase();
+  if (source === "manual") {
+    return "手动触发";
+  }
+  if (source === "bootstrap") {
+    return "启动自检";
+  }
+  return source || "-";
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -996,6 +1007,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [saving, setSaving] = useState(false);
   const [testingLDAP, setTestingLDAP] = useState(false);
   const [runningCleanup, setRunningCleanup] = useState(false);
+  const [runningSearchRebuild, setRunningSearchRebuild] = useState(false);
+  const [searchIndexStatus, setSearchIndexStatus] = useState<AdminSearchIndexStatusResult | null>(null);
+  const [searchStatusLoading, setSearchStatusLoading] = useState(false);
   const imageHostingTemplateInputRefs = useRef<Record<ImageHostingProvider, HTMLInputElement | null>>({
     local: null,
     "cloudflare-r2": null,
@@ -1042,9 +1056,29 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     }
   }, [dataGateway, openToast]);
 
+  const loadSearchIndexStatus = useCallback(async () => {
+    setSearchStatusLoading(true);
+    try {
+      const statusResult = await dataGateway.admin.getSearchIndexStatus();
+      setSearchIndexStatus(statusResult);
+    } catch (error) {
+      openToast(`加载索引状态失败：${formatError(error)}`);
+      setSearchIndexStatus(null);
+    } finally {
+      setSearchStatusLoading(false);
+    }
+  }, [dataGateway.admin, openToast]);
+
   useEffect(() => {
     void loadConfigs();
   }, [loadConfigs]);
+
+  useEffect(() => {
+    if (selectedKey !== "search") {
+      return;
+    }
+    void loadSearchIndexStatus();
+  }, [loadSearchIndexStatus, selectedKey]);
 
   useEffect(() => {
     if (!dirtyKeys.site) {
@@ -1235,12 +1269,25 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       clearDirty(selectedKey);
       openToast(`配置已保存：${selectedTab.label}（v${result.version}）`, "success");
       await loadConfigs();
+      if (selectedKey === "search") {
+        await loadSearchIndexStatus();
+      }
     } catch (error) {
       openToast(`保存系统配置失败：${formatError(error)}`);
     } finally {
       setSaving(false);
     }
-  }, [buildSelectedPayload, clearDirty, dataGateway.admin, loadConfigs, openToast, selectedConfig?.version, selectedKey, selectedTab.label]);
+  }, [
+    buildSelectedPayload,
+    clearDirty,
+    dataGateway.admin,
+    loadConfigs,
+    loadSearchIndexStatus,
+    openToast,
+    selectedConfig?.version,
+    selectedKey,
+    selectedTab.label
+  ]);
 
   const setCloudflareField = useCallback((field: keyof CloudflareR2Config, value: string) => {
     setImageHostingDraft((previousConfig) => ({
@@ -1446,6 +1493,26 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     }
   }, [dataGateway.admin, dirtyKeys, openToast]);
 
+  const handleRunSearchIndexRebuild = useCallback(async () => {
+    if (dirtyKeys.search) {
+      openToast("请先保存当前全文检索配置，再执行索引重建", "info");
+      return;
+    }
+    setRunningSearchRebuild(true);
+    try {
+      const result = await dataGateway.admin.runSearchIndexRebuild();
+      openToast(
+        `索引重建完成：provider=${result.provider}，已写入 ${result.indexedDocuments} 条文档`,
+        "success"
+      );
+      await loadSearchIndexStatus();
+    } catch (error) {
+      openToast(`全文索引重建失败：${formatError(error)}`);
+    } finally {
+      setRunningSearchRebuild(false);
+    }
+  }, [dataGateway.admin, dirtyKeys.search, loadSearchIndexStatus, openToast]);
+
   return (
     <section aria-label="系统配置管理">
       <AdminPageCard>
@@ -1514,6 +1581,28 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                     >
                       <RefreshCw size={14} />
                       <span>{runningCleanup ? "清理中..." : "立即清理"}</span>
+                    </Button>
+                  ) : null}
+                  {selectedKey === "search" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading || saving || runningSearchRebuild}
+                      onClick={() => void handleRunSearchIndexRebuild()}
+                    >
+                      <RefreshCw size={14} />
+                      <span>{runningSearchRebuild ? "重建中..." : "重建索引"}</span>
+                    </Button>
+                  ) : null}
+                  {selectedKey === "search" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading || saving || searchStatusLoading}
+                      onClick={() => void loadSearchIndexStatus()}
+                    >
+                      <RefreshCw size={14} />
+                      <span>{searchStatusLoading ? "状态刷新中..." : "刷新索引状态"}</span>
                     </Button>
                   ) : null}
                   <Button type="button" disabled={loading || saving || !isSelectedDirty} onClick={() => void handleSave()}>
@@ -1681,6 +1770,43 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
                 {selectedKey === "search" ? (
                   <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold tracking-wide text-slate-700">索引运行状态</p>
+                        {searchStatusLoading ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                            <LoaderCircle size={12} className="animate-spin" />
+                            同步中
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                        <p>
+                          运行状态：
+                          <span className={searchIndexStatus?.providerHealthy ? "text-emerald-600" : "text-amber-600"}>
+                            {searchIndexStatus?.providerHealthy ? "健康" : "待检查/异常"}
+                          </span>
+                        </p>
+                        <p>当前生效引擎：{searchIndexStatus?.effectiveProvider || "-"}</p>
+                        <p>配置活跃引擎：{searchIndexStatus?.activeProvider || "-"}</p>
+                        <p>活跃分词器：{searchIndexStatus?.activeAnalyzer || "-"}</p>
+                        <p>
+                          索引文档数：
+                          {searchIndexStatus?.supportsDocCount
+                            ? String(searchIndexStatus.indexedDocuments)
+                            : "当前引擎不支持统计"}
+                        </p>
+                        <p>最近重建时间：{formatDateTime(searchIndexStatus?.lastRebuildAt ?? null)}</p>
+                        <p>最近重建来源：{formatSearchRebuildSource(searchIndexStatus?.lastRebuildSource ?? "")}</p>
+                        <p>最近重建文档数：{searchIndexStatus?.lastRebuildIndexedDocuments ?? 0}</p>
+                      </div>
+                      {searchIndexStatus?.providerMessage ? (
+                        <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+                          引擎提示：{searchIndexStatus.providerMessage}
+                        </p>
+                      ) : null}
+                    </div>
+
                     <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
                       <Checkbox
                         checked={searchDraft.enabled}

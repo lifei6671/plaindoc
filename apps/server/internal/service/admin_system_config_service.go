@@ -83,12 +83,26 @@ type RunDataRetentionCleanupInput struct {
 	ConfigKey   string
 }
 
+// RunSearchIndexRebuildInput 后台手动触发全文索引重建参数。
+type RunSearchIndexRebuildInput struct {
+	ActorUserID string
+	RequestID   string
+	ConfigKey   string
+}
+
+// GetSearchIndexStatusInput 查询全文索引状态参数。
+type GetSearchIndexStatusInput struct {
+	ActorUserID string
+	ConfigKey   string
+}
+
 // AdminSystemConfigService 封装后台系统配置读写。
 type AdminSystemConfigService struct {
 	systemConfigRepo            repository.SystemConfigRepository
 	adminAccessService          *AdminAccessService
 	adminAuditService           *AdminAuditService
 	dataRetentionCleanupService *DataRetentionCleanupService
+	searchIndexService          *SearchIndexService
 }
 
 // NewAdminSystemConfigService 创建后台系统配置服务。
@@ -97,12 +111,14 @@ func NewAdminSystemConfigService(
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
 	dataRetentionCleanupService *DataRetentionCleanupService,
+	searchIndexService *SearchIndexService,
 ) *AdminSystemConfigService {
 	return &AdminSystemConfigService{
 		systemConfigRepo:            systemConfigRepo,
 		adminAccessService:          adminAccessService,
 		adminAuditService:           adminAuditService,
 		dataRetentionCleanupService: dataRetentionCleanupService,
+		searchIndexService:          searchIndexService,
 	}
 }
 
@@ -425,6 +441,70 @@ func (s *AdminSystemConfigService) RunDataRetentionCleanup(
 	return result, nil
 }
 
+// RunSearchIndexRebuild 手动触发一次全文索引重建。
+func (s *AdminSystemConfigService) RunSearchIndexRebuild(
+	ctx context.Context,
+	input RunSearchIndexRebuildInput,
+) (result SearchIndexRebuildResult, err error) {
+	defer func() {
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
+	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil || s.searchIndexService == nil {
+		return SearchIndexRebuildResult{}, errors.New("admin system config service dependencies are nil")
+	}
+	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
+		return SearchIndexRebuildResult{}, err
+	}
+
+	configKey := strings.ToLower(strings.TrimSpace(input.ConfigKey))
+	if configKey == "" {
+		return SearchIndexRebuildResult{}, errcode.ErrAdminSystemConfigInvalidKey
+	}
+	if configKey != searchconfig.SystemConfigKey {
+		return SearchIndexRebuildResult{}, errcode.ErrAdminSystemConfigInvalidKey
+	}
+
+	rebuildResult, err := s.searchIndexService.RebuildActiveProvider(ctx)
+	if err != nil {
+		if errors.Is(err, ErrSearchDisabled) || errors.Is(err, ErrSearchProviderUnavailable) {
+			return SearchIndexRebuildResult{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+		}
+		return SearchIndexRebuildResult{}, err
+	}
+	if err := s.recordSearchIndexRebuildAudit(ctx, strings.TrimSpace(input.RequestID), rebuildResult); err != nil {
+		return SearchIndexRebuildResult{}, err
+	}
+	return rebuildResult, nil
+}
+
+// GetSearchIndexStatus 查询当前全文索引状态。
+func (s *AdminSystemConfigService) GetSearchIndexStatus(
+	ctx context.Context,
+	input GetSearchIndexStatusInput,
+) (result SearchIndexStatusResult, err error) {
+	defer func() {
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
+	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil || s.searchIndexService == nil {
+		return SearchIndexStatusResult{}, errors.New("admin system config service dependencies are nil")
+	}
+	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
+		return SearchIndexStatusResult{}, err
+	}
+
+	configKey := strings.ToLower(strings.TrimSpace(input.ConfigKey))
+	if configKey == "" {
+		return SearchIndexStatusResult{}, errcode.ErrAdminSystemConfigInvalidKey
+	}
+	if configKey != searchconfig.SystemConfigKey {
+		return SearchIndexStatusResult{}, errcode.ErrAdminSystemConfigInvalidKey
+	}
+
+	return s.searchIndexService.Status(ctx)
+}
+
 func (s *AdminSystemConfigService) ensurePlatformAdmin(ctx context.Context, actorUserID string) error {
 	userID := strings.TrimSpace(actorUserID)
 	if userID == "" {
@@ -538,6 +618,30 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 		TargetType: "system_config",
 		TargetID:   SystemConfigKeyDataRetention,
 		Summary:    "system config cleanup run: " + SystemConfigKeyDataRetention,
+		Detail:     detail,
+		RequestID:  requestID,
+	})
+}
+
+func (s *AdminSystemConfigService) recordSearchIndexRebuildAudit(
+	ctx context.Context,
+	requestID string,
+	result SearchIndexRebuildResult,
+) error {
+	if s == nil || s.adminAuditService == nil {
+		return nil
+	}
+
+	detail := map[string]any{
+		"provider":         string(result.Provider),
+		"indexedDocuments": result.IndexedDocuments,
+	}
+	return s.adminAuditService.Record(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSystemConfig,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "system_config",
+		TargetID:   searchconfig.SystemConfigKey,
+		Summary:    "search index rebuild run: " + searchconfig.SystemConfigKey,
 		Detail:     detail,
 		RequestID:  requestID,
 	})

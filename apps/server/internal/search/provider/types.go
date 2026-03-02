@@ -82,3 +82,13 @@ type Provider interface {
 	Search(ctx context.Context, request SearchRequest) (SearchResponse, error)
 	Capabilities() Capabilities
 }
+
+// ResettableProvider 定义支持“全量重建前清空索引”的可选能力。
+type ResettableProvider interface {
+	Reset(ctx context.Context) error
+}
+
+// IndexStatsProvider 定义索引统计能力（用于判断是否需要重建）。
+type IndexStatsProvider interface {
+	DocCount(ctx context.Context) (uint64, error)
+}

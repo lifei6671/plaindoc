@@ -19,6 +19,8 @@ import {
   type AdminSearchAnalyzerAnalyzePreviewResult,
   type AdminSearchAnalyzerDictEntry,
   type AdminSearchAnalyzerDictListResult,
+  type AdminSearchIndexRebuildResult,
+  type AdminSearchIndexStatusResult,
   type AdminSearchAnalyzerMode,
   type AdminSearchAnalyzerName,
   type AdminSearchAnalyzerRecord,
@@ -1858,6 +1860,20 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         method: "POST",
         headers: buildAdminOperationTokenHeaders(operationToken)
       });
+    },
+    async runSearchIndexRebuild() {
+      const operationToken = await issueAdminOperationToken({
+        operation: "system_config.rebuild",
+        targetType: "system_config",
+        targetId: "search"
+      });
+      return request<AdminSearchIndexRebuildResult>("/admin/system-configs/search/rebuild/run", {
+        method: "POST",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async getSearchIndexStatus() {
+      return request<AdminSearchIndexStatusResult>("/admin/system-configs/search/rebuild/status");
     },
     async testAuthLDAPConnection(input: { value: Record<string, unknown>; providerId?: string }) {
       const payload: { value: Record<string, unknown>; providerId?: string } = {

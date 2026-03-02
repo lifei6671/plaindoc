@@ -660,6 +660,26 @@ export interface AdminDataRetentionCleanupResult {
   totalDeleted: number;
 }
 
+export interface AdminSearchIndexRebuildResult {
+  provider: string;
+  indexedDocuments: number;
+}
+
+export interface AdminSearchIndexStatusResult {
+  enabled: boolean;
+  activeProvider: string;
+  effectiveProvider: string;
+  fallbackPolicy: string;
+  activeAnalyzer: string;
+  providerHealthy: boolean;
+  providerMessage: string;
+  supportsDocCount: boolean;
+  indexedDocuments: number;
+  lastRebuildAt?: string | null;
+  lastRebuildSource: string;
+  lastRebuildIndexedDocuments: number;
+}
+
 export type AdminAuditModule = "user" | "space" | "document" | "theme" | "system_config";
 export type AdminAuditAction = "create" | "update" | "delete";
 
@@ -847,6 +867,8 @@ export interface AdminGateway {
     spaceId?: string;
   }): Promise<AdminSearchAnalyzerAnalyzePreviewResult>;
   runDataRetentionCleanup(): Promise<AdminDataRetentionCleanupResult>;
+  runSearchIndexRebuild(): Promise<AdminSearchIndexRebuildResult>;
+  getSearchIndexStatus(): Promise<AdminSearchIndexStatusResult>;
   testAuthLDAPConnection(input: {
     value: Record<string, unknown>;
     providerId?: string;

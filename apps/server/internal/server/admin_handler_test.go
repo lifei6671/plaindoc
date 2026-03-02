@@ -2631,6 +2631,220 @@ func TestRouter_AdminSystemConfig_RunDataRetentionCleanup(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminSystemConfig_RunSearchIndexRebuild(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(
+		t,
+		serve,
+		"config-search-rebuild-platform-admin@example.com",
+	)
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(
+		t,
+		serve,
+		"config-search-rebuild-space-admin@example.com",
+	)
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+
+	now := time.Now().UTC()
+	searchConfigJSON, err := json.Marshal(map[string]any{
+		"enabled":        true,
+		"activeProvider": "database",
+		"fallbackPolicy": "degrade_to_bleve",
+		"analysis": map[string]any{
+			"activeAnalyzer": "simple",
+			"analyzers": map[string]any{
+				"simple": map[string]any{
+					"enabled": true,
+				},
+				"jieba": map[string]any{
+					"enabled":          false,
+					"mode":             "search",
+					"hmm":              true,
+					"stopwordsEnabled": false,
+					"dictSource":       "db",
+					"dictVersion":      "default",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal search config failed: %v", err)
+	}
+	if err := database.ORM.Table("system_configs").Where("config_key = ?", "search").Delete(nil).Error; err != nil {
+		t.Fatalf("clear search config failed: %v", err)
+	}
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "search",
+		"config_value_json":  string(searchConfigJSON),
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("seed search config failed: %v", err)
+	}
+
+	spaceAdminRunReq := httptest.NewRequest(http.MethodPost, "/api/admin/system-configs/search/rebuild/run", nil)
+	spaceAdminRunReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminRunRec := serve(spaceAdminRunReq)
+	if spaceAdminRunRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin run search rebuild status 403, got %d body=%s",
+			spaceAdminRunRec.Code,
+			spaceAdminRunRec.Body.String(),
+		)
+	}
+
+	noTokenRunReq := httptest.NewRequest(http.MethodPost, "/api/admin/system-configs/search/rebuild/run", nil)
+	noTokenRunReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	noTokenRunRec := serve(noTokenRunReq)
+	if noTokenRunRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected run search rebuild without operation token status 200, got %d body=%s",
+			noTokenRunRec.Code,
+			noTokenRunRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, noTokenRunRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenRequired) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeOperationTokenRequired),
+			decodeJSONResultCode(t, noTokenRunRec.Body.Bytes()),
+			noTokenRunRec.Body.String(),
+		)
+	}
+
+	runReq := httptest.NewRequest(http.MethodPost, "/api/admin/system-configs/search/rebuild/run", nil)
+	runReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		runReq,
+		platformAdminToken,
+		"system_config.rebuild",
+		"system_config",
+		"search",
+	)
+	runRec := serve(runReq)
+	if runRec.Code != http.StatusOK {
+		t.Fatalf("expected run search rebuild status 200, got %d body=%s", runRec.Code, runRec.Body.String())
+	}
+	runPayload := decodeJSONResultData[struct {
+		Provider         string `json:"provider"`
+		IndexedDocuments int    `json:"indexedDocuments"`
+	}](t, runRec.Body.Bytes())
+	if runPayload.Provider != "database" {
+		t.Fatalf("expected provider database, got %q", runPayload.Provider)
+	}
+	if runPayload.IndexedDocuments < 0 {
+		t.Fatalf("expected indexed documents >= 0, got %d", runPayload.IndexedDocuments)
+	}
+}
+
+func TestRouter_AdminSystemConfig_GetSearchIndexStatus(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(
+		t,
+		serve,
+		"config-search-status-platform-admin@example.com",
+	)
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(
+		t,
+		serve,
+		"config-search-status-space-admin@example.com",
+	)
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+
+	now := time.Now().UTC()
+	searchConfigJSON, err := json.Marshal(map[string]any{
+		"enabled":        true,
+		"activeProvider": "database",
+		"fallbackPolicy": "degrade_to_bleve",
+		"analysis": map[string]any{
+			"activeAnalyzer": "simple",
+			"analyzers": map[string]any{
+				"simple": map[string]any{
+					"enabled": true,
+				},
+				"jieba": map[string]any{
+					"enabled":          false,
+					"mode":             "search",
+					"hmm":              true,
+					"stopwordsEnabled": false,
+					"dictSource":       "db",
+					"dictVersion":      "default",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal search config failed: %v", err)
+	}
+	if err := database.ORM.Table("system_configs").Where("config_key = ?", "search").Delete(nil).Error; err != nil {
+		t.Fatalf("clear search config failed: %v", err)
+	}
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "search",
+		"config_value_json":  string(searchConfigJSON),
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("seed search config failed: %v", err)
+	}
+
+	spaceAdminReq := httptest.NewRequest(http.MethodGet, "/api/admin/system-configs/search/rebuild/status", nil)
+	spaceAdminReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminRec := serve(spaceAdminReq)
+	if spaceAdminRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin get search status status 403, got %d body=%s",
+			spaceAdminRec.Code,
+			spaceAdminRec.Body.String(),
+		)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/system-configs/search/rebuild/status", nil)
+	req.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	rec := serve(req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected get search status status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	payload := decodeJSONResultData[struct {
+		Enabled           bool   `json:"enabled"`
+		ActiveProvider    string `json:"activeProvider"`
+		EffectiveProvider string `json:"effectiveProvider"`
+		ActiveAnalyzer    string `json:"activeAnalyzer"`
+		ProviderHealthy   bool   `json:"providerHealthy"`
+	}](t, rec.Body.Bytes())
+	if !payload.Enabled {
+		t.Fatal("expected enabled=true")
+	}
+	if payload.ActiveProvider != "database" {
+		t.Fatalf("expected active provider database, got %q", payload.ActiveProvider)
+	}
+	if payload.EffectiveProvider != "database" {
+		t.Fatalf("expected effective provider database, got %q", payload.EffectiveProvider)
+	}
+	if payload.ActiveAnalyzer != "simple" {
+		t.Fatalf("expected active analyzer simple, got %q", payload.ActiveAnalyzer)
+	}
+	if !payload.ProviderHealthy {
+		t.Fatalf("expected provider healthy=true, got false body=%s", rec.Body.String())
+	}
+}
+
 func TestRouter_AdminSystemConfig_AuthConfigValidationAndSecretMasking(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

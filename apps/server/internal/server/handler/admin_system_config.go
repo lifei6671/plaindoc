@@ -59,6 +59,26 @@ type runDataRetentionCleanupResponse struct {
 	TotalDeleted                 int64                              `json:"totalDeleted"`
 }
 
+type runSearchIndexRebuildResponse struct {
+	Provider         string `json:"provider"`
+	IndexedDocuments int    `json:"indexedDocuments"`
+}
+
+type searchIndexStatusResponse struct {
+	Enabled                     bool       `json:"enabled"`
+	ActiveProvider              string     `json:"activeProvider"`
+	EffectiveProvider           string     `json:"effectiveProvider"`
+	FallbackPolicy              string     `json:"fallbackPolicy"`
+	ActiveAnalyzer              string     `json:"activeAnalyzer"`
+	ProviderHealthy             bool       `json:"providerHealthy"`
+	ProviderMessage             string     `json:"providerMessage"`
+	SupportsDocCount            bool       `json:"supportsDocCount"`
+	IndexedDocuments            int64      `json:"indexedDocuments"`
+	LastRebuildAt               *time.Time `json:"lastRebuildAt"`
+	LastRebuildSource           string     `json:"lastRebuildSource"`
+	LastRebuildIndexedDocuments int        `json:"lastRebuildIndexedDocuments"`
+}
+
 // NewAdminSystemConfigHandler 创建后台系统配置处理器。
 func NewAdminSystemConfigHandler(
 	adminSystemConfigService *service.AdminSystemConfigService,
@@ -211,6 +231,81 @@ func (h *adminSystemConfigHandler) RunDataRetentionCleanup(c *gin.Context) {
 	response.JSON(c, http.StatusOK, mapRunDataRetentionCleanupResponse(result))
 }
 
+// RunSearchIndexRebuild 手动触发一次全文索引重建。
+func (h *adminSystemConfigHandler) RunSearchIndexRebuild(c *gin.Context) {
+	if h == nil || h.adminSystemConfigService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
+		return
+	}
+
+	configKey := strings.TrimSpace(c.Param("key"))
+	if configKey == "" {
+		setRequestErrmsg(c, nil, "配置项不存在")
+		response.AdminSystemConfigErrConfigKeyRequired.Write(c)
+		return
+	}
+
+	result, err := h.adminSystemConfigService.RunSearchIndexRebuild(
+		c.Request.Context(),
+		service.RunSearchIndexRebuildInput{
+			ActorUserID: actorUserID,
+			RequestID:   response.RequestIDFromContext(c),
+			ConfigKey:   configKey,
+		},
+	)
+	if err != nil {
+		setRequestErrmsg(c, err, "运行全文索引重建失败")
+		response.FromError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapRunSearchIndexRebuildResponse(result))
+}
+
+// GetSearchIndexStatus 返回全文索引状态。
+func (h *adminSystemConfigHandler) GetSearchIndexStatus(c *gin.Context) {
+	if h == nil || h.adminSystemConfigService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
+		return
+	}
+
+	configKey := strings.TrimSpace(c.Param("key"))
+	if configKey == "" {
+		setRequestErrmsg(c, nil, "配置项不存在")
+		response.AdminSystemConfigErrConfigKeyRequired.Write(c)
+		return
+	}
+
+	statusResult, err := h.adminSystemConfigService.GetSearchIndexStatus(
+		c.Request.Context(),
+		service.GetSearchIndexStatusInput{
+			ActorUserID: actorUserID,
+			ConfigKey:   configKey,
+		},
+	)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询全文索引状态失败")
+		response.FromError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, mapSearchIndexStatusResponse(statusResult))
+}
+
 func mapAdminSystemConfigResponse(value service.AdminSystemConfigRecord) adminSystemConfigResponse {
 	return adminSystemConfigResponse{
 		ConfigKey:       value.ConfigKey,
@@ -254,5 +349,33 @@ func mapRunDataRetentionCleanupResponse(
 		DeletedAttachmentBlobs:       value.DeletedAttachmentBlobs,
 		DeletedDocumentImageAssets:   value.DeletedDocumentImageAssets,
 		TotalDeleted:                 totalDeleted,
+	}
+}
+
+func mapRunSearchIndexRebuildResponse(
+	value service.SearchIndexRebuildResult,
+) runSearchIndexRebuildResponse {
+	return runSearchIndexRebuildResponse{
+		Provider:         string(value.Provider),
+		IndexedDocuments: value.IndexedDocuments,
+	}
+}
+
+func mapSearchIndexStatusResponse(
+	value service.SearchIndexStatusResult,
+) searchIndexStatusResponse {
+	return searchIndexStatusResponse{
+		Enabled:                     value.Enabled,
+		ActiveProvider:              string(value.ActiveProvider),
+		EffectiveProvider:           string(value.EffectiveProvider),
+		FallbackPolicy:              string(value.FallbackPolicy),
+		ActiveAnalyzer:              string(value.ActiveAnalyzer),
+		ProviderHealthy:             value.ProviderHealthy,
+		ProviderMessage:             value.ProviderMessage,
+		SupportsDocCount:            value.SupportsDocCount,
+		IndexedDocuments:            value.IndexedDocuments,
+		LastRebuildAt:               value.LastRebuildAt,
+		LastRebuildSource:           value.LastRebuildSource,
+		LastRebuildIndexedDocuments: value.LastRebuildIndexedDocuments,
 	}
 }
