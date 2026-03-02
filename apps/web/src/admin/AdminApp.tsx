@@ -717,11 +717,11 @@ export function AdminApp({
             <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/80 bg-white shadow-sm">
               <img src={ADMIN_BRAND_LOGO_SRC} alt="PlainDoc logo" className="h-full w-full object-cover" />
             </span>
-            <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
               <p className="truncate text-sm font-semibold tracking-tight">PlainDoc 管理后台</p>
-              <span className="shrink-0 text-[11px] font-medium tracking-tight text-slate-500">
+              <Badge variant="outline" className="h-5 shrink-0 border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-600">
                 {ADMIN_BUILD_VERSION}
-              </span>
+              </Badge>
             </div>
           </div>
 
