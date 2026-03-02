@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/buildinfo"
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server"
@@ -27,6 +28,10 @@ import (
 )
 
 func main() {
+	if handleMetaCommand(os.Args[1:], os.Stdout) {
+		return
+	}
+
 	loadDotEnvCandidates()
 
 	cfg, err := config.Load()
@@ -142,6 +147,33 @@ func main() {
 		logger.Error("server exited unexpectedly", "error", err.Error())
 		log.Fatalf("server exited: %v", err)
 	}
+}
+
+// 处理轻量元信息命令（例如 version）：命中后直接打印并退出，不进入服务启动流程。
+func handleMetaCommand(args []string, output io.Writer) bool {
+	if len(args) == 0 {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "version", "--version", "-version", "-v":
+		printBuildInfo(output)
+		return true
+	default:
+		return false
+	}
+}
+
+func printBuildInfo(output io.Writer) {
+	currentBuildInfo := buildinfo.Current()
+	_, _ = fmt.Fprintf(
+		output,
+		"version: %s\ncommit_sha: %s\nbuild_time_utc: %s\ngo_version: %s\n",
+		currentBuildInfo.Version,
+		currentBuildInfo.CommitSHA,
+		currentBuildInfo.BuildTimeUTC,
+		currentBuildInfo.GoVersion,
+	)
 }
 
 func validateSSRWorkerRuntime(cfg config.Config) error {

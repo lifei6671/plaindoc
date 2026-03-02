@@ -7,6 +7,7 @@ import {
   Globe,
   Lock,
   LockOpen,
+  LoaderCircle,
   PencilLine,
   Plus,
   Trash2,
@@ -446,8 +447,14 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
   const [creatingDraftNodeIds, setCreatingDraftNodeIds] = useState<string[]>([]);
   const [isCreatingFirstDocument, setIsCreatingFirstDocument] = useState(false);
+  // 文档可见性更新中的节点：用于在树节点上展示细粒度 loading 状态。
+  const [updatingVisibilityNodeIds, setUpdatingVisibilityNodeIds] = useState<string[]>([]);
   const [isDesktopDragEnabled, setIsDesktopDragEnabled] = useState(false);
   const creatingDraftNodeIdSet = useMemo(() => new Set(creatingDraftNodeIds), [creatingDraftNodeIds]);
+  const updatingVisibilityNodeIdSet = useMemo(
+    () => new Set(updatingVisibilityNodeIds),
+    [updatingVisibilityNodeIds]
+  );
 
   // 拖拽排序仅在桌面端启用：依赖 hover + fine pointer 能力判断。
   useEffect(() => {
@@ -914,6 +921,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
 
   const handleUpdateNodeVisibility = useCallback(
     async (nodeId: string, visibility: Visibility): Promise<void> => {
+      if (updatingVisibilityNodeIdSet.has(nodeId)) {
+        return;
+      }
       const currentNode = nodeById.get(nodeId);
       if (!currentNode) {
         throw new Error("目录节点不存在");
@@ -925,9 +935,18 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (!documentID) {
         throw new Error("文档 ID 不存在");
       }
-      await onUpdateDocumentVisibility(documentID, visibility);
+      setUpdatingVisibilityNodeIds((previousNodeIds) =>
+        previousNodeIds.includes(nodeId) ? previousNodeIds : [...previousNodeIds, nodeId]
+      );
+      try {
+        await onUpdateDocumentVisibility(documentID, visibility);
+      } finally {
+        setUpdatingVisibilityNodeIds((previousNodeIds) =>
+          previousNodeIds.filter((candidateNodeID) => candidateNodeID !== nodeId)
+        );
+      }
     },
-    [nodeById, onUpdateDocumentVisibility]
+    [nodeById, onUpdateDocumentVisibility, updatingVisibilityNodeIdSet]
   );
 
   const handleCreateRootDocument = useCallback(async () => {
@@ -1087,6 +1106,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const isInlineEditing = editingNodeId === nodeId;
       const isDraftNode = draftNodeByID.has(nodeId);
       const isCreatingDraftNode = creatingDraftNodeIdSet.has(nodeId);
+      const isUpdatingVisibility = updatingVisibilityNodeIdSet.has(nodeId);
       const currentDocumentVisibility: Visibility =
         currentNode?.type === "doc" ? currentNode.visibility ?? "member" : "member";
       const nodeTitleText = (currentNode?.title ?? item.data.title ?? "").trim() || "未命名文档";
@@ -1203,6 +1223,21 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                   {currentNode?.type === "doc" ? (
                     (() => {
                       const marker = resolveVisibilityMarkerConfig(currentDocumentVisibility);
+                      if (isUpdatingVisibility) {
+                        return (
+                          <Tooltip delayDuration={120}>
+                            <TooltipTrigger asChild>
+                              <span
+                                className="mr-1 inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[#64748b]"
+                                aria-label="正在更新可见性"
+                              >
+                                <LoaderCircle size={14} className="animate-spin" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">正在更新可见性...</TooltipContent>
+                          </Tooltip>
+                        );
+                      }
                       return (
                         <Tooltip delayDuration={120}>
                           <TooltipTrigger asChild>
@@ -1243,6 +1278,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                       {nodeTitleText}
                     </TooltipContent>
                   </Tooltip>
+                  {isUpdatingVisibility ? (
+                    <span className="ml-2 shrink-0 text-[11px] text-[#64748b]">权限更新中...</span>
+                  ) : null}
                   {isDraftNode && isCreatingDraftNode ? (
                     <span className="ml-2 shrink-0 text-[11px] text-[#8a8d90]">创建中...</span>
                   ) : null}
@@ -1320,9 +1358,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                         <div className="my-1 h-px bg-[#eceff3]" />
                         <button
                           type="button"
-                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          className={mergeClassNames(
+                            "inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] focus-visible:outline-none",
+                            isUpdatingVisibility ? "cursor-not-allowed opacity-60" : "hover:bg-[#f0f2f4]"
+                          )}
                           role="menuitemradio"
                           aria-checked={currentDocumentVisibility === "public"}
+                          disabled={isUpdatingVisibility}
                           onMouseDown={stopTreeItemEvent}
                           onClick={(event) => {
                             stopTreeItemEvent(event);
@@ -1337,9 +1379,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                         </button>
                         <button
                           type="button"
-                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          className={mergeClassNames(
+                            "inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] focus-visible:outline-none",
+                            isUpdatingVisibility ? "cursor-not-allowed opacity-60" : "hover:bg-[#f0f2f4]"
+                          )}
                           role="menuitemradio"
                           aria-checked={currentDocumentVisibility === "authenticated"}
+                          disabled={isUpdatingVisibility}
                           onMouseDown={stopTreeItemEvent}
                           onClick={(event) => {
                             stopTreeItemEvent(event);
@@ -1354,9 +1400,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                         </button>
                         <button
                           type="button"
-                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          className={mergeClassNames(
+                            "inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] focus-visible:outline-none",
+                            isUpdatingVisibility ? "cursor-not-allowed opacity-60" : "hover:bg-[#f0f2f4]"
+                          )}
                           role="menuitemradio"
                           aria-checked={currentDocumentVisibility === "member"}
+                          disabled={isUpdatingVisibility}
                           onMouseDown={stopTreeItemEvent}
                           onClick={(event) => {
                             stopTreeItemEvent(event);
@@ -1432,7 +1482,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       openActionNodeId,
       runActionMenuTask,
       stopTreeItemPropagation,
-      stopTreeItemEvent
+      stopTreeItemEvent,
+      updatingVisibilityNodeIdSet
     ]
   );
 

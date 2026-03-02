@@ -159,3 +159,5 @@ dist/
 dist-ssr/
 
 .omx/
+
+release/

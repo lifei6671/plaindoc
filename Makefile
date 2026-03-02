@@ -17,6 +17,14 @@ SSR_WORKER_ENTRY_ABS := $(ROOT_DIR)/$(SSR_WORKER_ENTRY_REL)
 SSR_WORKER_EXEC ?= node
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+BUILD_VERSION ?= $(VERSION)
+BUILD_COMMIT ?= $(shell git rev-parse --verify HEAD 2>/dev/null || echo unknown)
+BUILD_TIME_UTC ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILD_GO_VERSION ?= $(shell cd "$(SERVER_DIR)" && go env GOVERSION 2>/dev/null || echo unknown)
+SERVER_LDFLAGS := -X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.Version=$(BUILD_VERSION) \
+	-X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.CommitSHA=$(BUILD_COMMIT) \
+	-X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.BuildTimeUTC=$(BUILD_TIME_UTC) \
+	-X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.GoVersion=$(BUILD_GO_VERSION)
 SERVER_BINARY := plaindoc-server-linux-amd64
 SERVER_BINARY_PATH := $(RELEASE_DIR)/$(SERVER_BINARY)
 
@@ -57,6 +65,10 @@ help:
 	@echo "Variables:"
 	@echo "  ENV_FILE=$(ENV_FILE)"
 	@echo "  VERSION=$(VERSION)"
+	@echo "  BUILD_VERSION=$(BUILD_VERSION)"
+	@echo "  BUILD_COMMIT=$(BUILD_COMMIT)"
+	@echo "  BUILD_TIME_UTC=$(BUILD_TIME_UTC)"
+	@echo "  BUILD_GO_VERSION=$(BUILD_GO_VERSION)"
 
 check-go-tools:
 	@command -v go >/dev/null 2>&1 || { echo "go is required but not found"; exit 1; }
@@ -129,7 +141,7 @@ web-build-ssr: check-web-tools
 server-build: check-go-tools
 	@mkdir -p "$(RELEASE_DIR)"
 	cd "$(SERVER_DIR)" && go mod download
-	cd "$(SERVER_DIR)" && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -o "$(SERVER_BINARY_PATH)" ./cmd/server
+	cd "$(SERVER_DIR)" && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(SERVER_LDFLAGS)" -o "$(SERVER_BINARY_PATH)" ./cmd/server
 	@echo "built: $(SERVER_BINARY_PATH)"
 
 build: web-build server-build
@@ -141,21 +153,30 @@ test: test-server
 
 package: build check-web-build check-web-ssr
 	@mkdir -p "$(RELEASE_DIR)"
+	@printf "version=%s\ncommit_sha=%s\nbuild_time_utc=%s\ngo_version=%s\n" \
+		"$(BUILD_VERSION)" \
+		"$(BUILD_COMMIT)" \
+		"$(BUILD_TIME_UTC)" \
+		"$(BUILD_GO_VERSION)" \
+		> "$(RELEASE_DIR)/build-metadata-$(VERSION).txt"
 	tar -C "$(WEB_DIR)" -czf "$(RELEASE_DIR)/plaindoc-web-$(VERSION).tar.gz" dist dist-ssr
 	@rm -rf "$(RELEASE_DIR)/plaindoc-bundle"
 	@mkdir -p "$(RELEASE_DIR)/plaindoc-bundle/apps/web"
 	cp "$(SERVER_BINARY_PATH)" "$(RELEASE_DIR)/plaindoc-bundle/$(SERVER_BINARY)"
+	cp "$(RELEASE_DIR)/build-metadata-$(VERSION).txt" "$(RELEASE_DIR)/plaindoc-bundle/build-metadata.txt"
 	cp -R "$(WEB_DIR)/dist" "$(RELEASE_DIR)/plaindoc-bundle/apps/web/"
 	cp -R "$(WEB_DIR)/dist-ssr" "$(RELEASE_DIR)/plaindoc-bundle/apps/web/"
 	tar -czf "$(RELEASE_DIR)/plaindoc-server-linux-amd64-$(VERSION).tar.gz" \
 		-C "$(RELEASE_DIR)/plaindoc-bundle" \
 		"$(SERVER_BINARY)" \
+		build-metadata.txt \
 		apps/web/dist \
 		apps/web/dist-ssr
 	sha256sum \
 		"$(SERVER_BINARY_PATH)" \
 		"$(RELEASE_DIR)/plaindoc-server-linux-amd64-$(VERSION).tar.gz" \
 		"$(RELEASE_DIR)/plaindoc-web-$(VERSION).tar.gz" \
+		"$(RELEASE_DIR)/build-metadata-$(VERSION).txt" \
 		> "$(RELEASE_DIR)/checksums-$(VERSION).txt"
 	@echo "release artifacts generated under $(RELEASE_DIR)"
 

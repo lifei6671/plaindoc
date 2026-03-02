@@ -33,6 +33,28 @@ jobs:
         with:
           go-version-file: apps/server/go.mod
 
+      - name: Resolve build metadata
+        id: build_meta
+        run: |
+          set -euo pipefail
+          build_version=""
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
+            build_version="${GITHUB_REF_NAME}"
+          else
+            build_version="$(git tag --points-at HEAD | head -n1)"
+          fi
+          if [ -z "$build_version" ]; then
+            echo "No git tag found for current commit; cannot resolve release version." >&2
+            exit 1
+          fi
+          build_commit="$(git rev-parse --verify HEAD)"
+          build_time_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          build_go_version="$(cd apps/server && go env GOVERSION)"
+          echo "version=$build_version" >> "$GITHUB_OUTPUT"
+          echo "commit=$build_commit" >> "$GITHUB_OUTPUT"
+          echo "time_utc=$build_time_utc" >> "$GITHUB_OUTPUT"
+          echo "go_version=$build_go_version" >> "$GITHUB_OUTPUT"
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -43,32 +65,55 @@ jobs:
         run: npm run web:build
 
       - name: Build backend binary
+        env:
+          BUILD_VERSION: ${{ steps.build_meta.outputs.version }}
+          BUILD_COMMIT: ${{ steps.build_meta.outputs.commit }}
+          BUILD_TIME_UTC: ${{ steps.build_meta.outputs.time_utc }}
+          BUILD_GO_VERSION: ${{ steps.build_meta.outputs.go_version }}
         run: |
           set -euo pipefail
           mkdir -p release
           pushd apps/server >/dev/null
           go mod download
+          LDFLAGS="-X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.Version=${BUILD_VERSION}"
+          LDFLAGS="${LDFLAGS} -X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.CommitSHA=${BUILD_COMMIT}"
+          LDFLAGS="${LDFLAGS} -X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.BuildTimeUTC=${BUILD_TIME_UTC}"
+          LDFLAGS="${LDFLAGS} -X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.GoVersion=${BUILD_GO_VERSION}"
           # github.com/chai2010/webp requires CGO; CGO_ENABLED=0 will fail with undefined webp symbols.
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../release/plaindoc-server-linux-amd64 ./cmd/server
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o ../../release/plaindoc-server-linux-amd64 ./cmd/server
           popd >/dev/null
 
       - name: Package release artifacts
+        env:
+          BUILD_VERSION: ${{ steps.build_meta.outputs.version }}
+          BUILD_COMMIT: ${{ steps.build_meta.outputs.commit }}
+          BUILD_TIME_UTC: ${{ steps.build_meta.outputs.time_utc }}
+          BUILD_GO_VERSION: ${{ steps.build_meta.outputs.go_version }}
         run: |
           set -euo pipefail
+          printf "version=%s\ncommit_sha=%s\nbuild_time_utc=%s\ngo_version=%s\n" \
+            "$BUILD_VERSION" \
+            "$BUILD_COMMIT" \
+            "$BUILD_TIME_UTC" \
+            "$BUILD_GO_VERSION" \
+            > "release/build-metadata-${GITHUB_REF_NAME}.txt"
           tar -C apps/web -czf "release/plaindoc-web-${GITHUB_REF_NAME}.tar.gz" dist dist-ssr
           mkdir -p "release/plaindoc-bundle/apps/web"
           cp "release/plaindoc-server-linux-amd64" "release/plaindoc-bundle/plaindoc-server-linux-amd64"
+          cp "release/build-metadata-${GITHUB_REF_NAME}.txt" "release/plaindoc-bundle/build-metadata.txt"
           cp -R "apps/web/dist" "release/plaindoc-bundle/apps/web/"
           cp -R "apps/web/dist-ssr" "release/plaindoc-bundle/apps/web/"
           tar -czf "release/plaindoc-server-linux-amd64-${GITHUB_REF_NAME}.tar.gz" \
             -C release/plaindoc-bundle \
             plaindoc-server-linux-amd64 \
+            build-metadata.txt \
             apps/web/dist \
             apps/web/dist-ssr
           sha256sum \
             "release/plaindoc-server-linux-amd64" \
             "release/plaindoc-server-linux-amd64-${GITHUB_REF_NAME}.tar.gz" \
             "release/plaindoc-web-${GITHUB_REF_NAME}.tar.gz" \
+            "release/build-metadata-${GITHUB_REF_NAME}.txt" \
             > "release/checksums-${GITHUB_REF_NAME}.txt"
 
       - name: Publish GitHub Release
@@ -80,6 +125,7 @@ jobs:
             release/plaindoc-server-linux-amd64
             release/plaindoc-server-linux-amd64-${{ github.ref_name }}.tar.gz
             release/plaindoc-web-${{ github.ref_name }}.tar.gz
+            release/build-metadata-${{ github.ref_name }}.txt
             release/checksums-${{ github.ref_name }}.txt
 
   docker_publish:
