@@ -346,6 +346,7 @@ const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
 const ADMIN_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
 const ADMIN_DEFAULT_PAGE_TITLE = "管理后台";
+const ADMIN_BUILD_VERSION = (import.meta.env.VITE_BUILD_VERSION ?? "").trim() || "dev";
 
 function composeAdminBrowserTitle(pageTitle: string): string {
   const normalizedTitle = pageTitle.trim() || ADMIN_DEFAULT_PAGE_TITLE;
@@ -716,7 +717,12 @@ export function AdminApp({
             <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/80 bg-white shadow-sm">
               <img src={ADMIN_BRAND_LOGO_SRC} alt="PlainDoc logo" className="h-full w-full object-cover" />
             </span>
-            <p className="text-sm font-semibold tracking-tight">PlainDoc 管理后台</p>
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <p className="truncate text-sm font-semibold tracking-tight">PlainDoc 管理后台</p>
+              <span className="shrink-0 text-[11px] font-medium tracking-tight text-slate-500">
+                {ADMIN_BUILD_VERSION}
+              </span>
+            </div>
           </div>
 
           <div className="mt-6 flex-1 space-y-5 overflow-auto px-1">

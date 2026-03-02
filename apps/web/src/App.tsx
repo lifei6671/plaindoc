@@ -2916,10 +2916,7 @@ export default function App() {
     return (
       <>
         <Toaster />
-        <EditorLoadingPage
-          description={editorLoadingDescription}
-          detail={activeSpaceName ? `目标空间：${activeSpaceName}` : "正在同步工作区上下文..."}
-        />
+        <EditorLoadingPage description={editorLoadingDescription} />
       </>
     );
   }

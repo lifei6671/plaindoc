@@ -6,80 +6,9 @@
     <link rel="icon" type="image/png" href="/assets/favicon.png" />
     <link rel="apple-touch-icon" href="/assets/favicon.png" />
     <title>PlainDoc - 一个适合中小团队文档在线管理系统</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-      }
-
-      .app-boot-loading {
-        min-height: 100vh;
-        min-height: 100dvh;
-        margin: 0;
-        padding: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background:
-          radial-gradient(circle at 10% 16%, rgba(14, 116, 144, 0.18), transparent 42%),
-          radial-gradient(circle at 88% 8%, rgba(20, 83, 45, 0.12), transparent 34%),
-          linear-gradient(160deg, #f5f7fb 0%, #ffffff 45%, #eef2ff 100%);
-        color: #0f172a;
-        font-family: "Google Sans Code", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-      }
-
-      .app-boot-loading__panel {
-        width: min(92vw, 460px);
-        border: 1px solid #dbe2ea;
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
-        padding: 20px;
-        display: grid;
-        gap: 10px;
-      }
-
-      .app-boot-loading__icon {
-        width: 20px;
-        height: 20px;
-        border: 2px solid #bfdbfe;
-        border-top-color: #2563eb;
-        border-radius: 9999px;
-        animation: app-boot-loading-spin 0.9s linear infinite;
-      }
-
-      .app-boot-loading__title {
-        margin: 0;
-        font-size: 19px;
-        line-height: 1.25;
-      }
-
-      .app-boot-loading__desc {
-        margin: 0;
-        font-size: 14px;
-        color: #475569;
-      }
-
-      @keyframes app-boot-loading-spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    </style>
   </head>
   <body>
-    <div id="root">
-      <div class="app-boot-loading" role="status" aria-live="polite" aria-busy="true">
-        <div class="app-boot-loading__panel">
-          <div class="app-boot-loading__icon" aria-hidden="true"></div>
-          <h1 class="app-boot-loading__title">正在加载 PlainDoc 编辑器</h1>
-          <p class="app-boot-loading__desc">首次加载资源较多，请稍候...</p>
-        </div>
-      </div>
-    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

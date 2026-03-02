@@ -62,6 +62,7 @@ jobs:
         env:
           VITE_DATA_DRIVER: http
           VITE_API_BASE_URL: /api
+          VITE_BUILD_VERSION: ${{ steps.build_meta.outputs.version }}
         run: npm run web:build
 
       - name: Build backend binary
@@ -189,5 +190,6 @@ jobs:
           build-args: |
             VITE_DATA_DRIVER=http
             VITE_API_BASE_URL=/api
+            VITE_BUILD_VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

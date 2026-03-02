@@ -133,10 +133,10 @@ dev:
 	@echo "  make web-build-ssr && make server-dev-ssr"
 
 web-build: check-web-tools
-	npm run web:build
+	VITE_BUILD_VERSION="$(BUILD_VERSION)" npm run web:build
 
 web-build-ssr: check-web-tools
-	npm run web:build-ssr
+	VITE_BUILD_VERSION="$(BUILD_VERSION)" npm run web:build-ssr
 
 server-build: check-go-tools
 	@mkdir -p "$(RELEASE_DIR)"

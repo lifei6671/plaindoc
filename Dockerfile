@@ -8,8 +8,10 @@ WORKDIR /workspace
 
 ARG VITE_DATA_DRIVER=http
 ARG VITE_API_BASE_URL=/api
+ARG VITE_BUILD_VERSION=dev
 ENV VITE_DATA_DRIVER=${VITE_DATA_DRIVER}
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_BUILD_VERSION=${VITE_BUILD_VERSION}
 
 # 先复制 workspace 依赖描述，利用 Docker layer cache 加速 npm ci。
 COPY package.json package-lock.json ./
