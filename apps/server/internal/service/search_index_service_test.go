@@ -68,6 +68,79 @@ func TestSearchIndexService_RebuildActiveProvider(t *testing.T) {
 	}
 }
 
+func TestSearchIndexService_Status(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-search-index-status?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	if err := storage.MigrateUp(context.Background(), database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+	if err := seedSearchIndexServiceFixture(database.ORM); err != nil {
+		t.Fatalf("seed fixture failed: %v", err)
+	}
+
+	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	bleveProvider := searchprovider.NewBleveProvider(searchprovider.BleveProviderOptions{
+		DB:        database.ORM,
+		IndexPath: t.TempDir() + "/bleve-status",
+	})
+	indexService := NewSearchIndexService(
+		database.ORM,
+		searchConfigService,
+		bleveProvider,
+	)
+
+	statusBeforeRebuild, err := indexService.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status before rebuild failed: %v", err)
+	}
+	if !statusBeforeRebuild.Enabled {
+		t.Fatal("expected enabled=true before rebuild")
+	}
+	if statusBeforeRebuild.ActiveProvider != "bleve" {
+		t.Fatalf("expected active provider bleve, got=%q", statusBeforeRebuild.ActiveProvider)
+	}
+	if statusBeforeRebuild.EffectiveProvider != "bleve" {
+		t.Fatalf("expected effective provider bleve, got=%q", statusBeforeRebuild.EffectiveProvider)
+	}
+	if !statusBeforeRebuild.SupportsDocCount {
+		t.Fatal("expected supportsDocCount=true before rebuild")
+	}
+	if !statusBeforeRebuild.ProviderHealthy {
+		t.Fatalf("expected provider healthy before rebuild, message=%q", statusBeforeRebuild.ProviderMessage)
+	}
+
+	if _, err := indexService.RebuildActiveProvider(context.Background()); err != nil {
+		t.Fatalf("rebuild active provider failed: %v", err)
+	}
+
+	statusAfterRebuild, err := indexService.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status after rebuild failed: %v", err)
+	}
+	if statusAfterRebuild.LastRebuildAt == nil {
+		t.Fatal("expected last rebuild time after rebuild")
+	}
+	if statusAfterRebuild.LastRebuildSource != "manual" {
+		t.Fatalf("expected last rebuild source manual, got=%q", statusAfterRebuild.LastRebuildSource)
+	}
+	if statusAfterRebuild.LastRebuildIndexedDocuments != 1 {
+		t.Fatalf("expected last rebuild indexed docs 1, got=%d", statusAfterRebuild.LastRebuildIndexedDocuments)
+	}
+	if statusAfterRebuild.IndexedDocuments != 1 {
+		t.Fatalf("expected indexed documents 1 after rebuild, got=%d", statusAfterRebuild.IndexedDocuments)
+	}
+}
+
 func seedSearchIndexServiceFixture(dbORM *gorm.DB) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
