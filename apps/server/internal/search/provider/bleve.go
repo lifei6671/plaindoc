@@ -262,7 +262,9 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 		return []SearchHit{}, nil
 	}
 
-	isAuthenticated := strings.TrimSpace(request.ActorUserID) != "" || request.IsAuthenticated
+	hasActorIdentity := strings.TrimSpace(request.ActorUserID) != ""
+	isAuthenticated := hasActorIdentity || request.IsAuthenticated
+	isSingleSpaceSearch := strings.TrimSpace(request.SpaceID) != ""
 	directVisibleDocIDs := make(map[string]struct{}, len(candidates))
 	needDBCheckDocIDs := make([]string, 0, len(candidates))
 	for _, item := range candidates {
@@ -279,7 +281,10 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 				directVisibleDocIDs[docID] = struct{}{}
 			}
 		case string(models.VisibilityMember):
-			if isAuthenticated {
+			// 单空间检索时，user_role_level 来源于该空间角色快照，满足 min_role 可直接放行。
+			if isSingleSpaceSearch && hasActorIdentity && request.UserRoleLevel >= item.MinRole {
+				directVisibleDocIDs[docID] = struct{}{}
+			} else if isAuthenticated {
 				needDBCheckDocIDs = append(needDBCheckDocIDs, docID)
 			}
 		default:
@@ -471,7 +476,7 @@ func (p *BleveProvider) searchCandidates(
 			from,
 			false,
 		)
-		searchRequest.Fields = []string{"doc_id", "body_plain", "updated_at_unix", "visibility_scope"}
+		searchRequest.Fields = []string{"doc_id", "body_plain", "updated_at_unix", "visibility_scope", "min_role"}
 		if sortMode == SortModeUpdatedAtDesc {
 			searchRequest.SortBy([]string{"-updated_at_unix"})
 		}
@@ -497,12 +502,17 @@ func (p *BleveProvider) searchCandidates(
 			bodyPlain := extractStringField(hit.Fields, "body_plain")
 			updatedAtUnix := extractInt64Field(hit.Fields, "updated_at_unix")
 			visibilityScope := extractStringField(hit.Fields, "visibility_scope")
+			minRole := int(extractInt64Field(hit.Fields, "min_role"))
+			if minRole < 1 {
+				minRole = 1
+			}
 			candidates = append(candidates, bleveSearchCandidate{
 				DocID:           docID,
 				Score:           hit.Score,
 				Snippet:         buildBleveSearchSnippet(bodyPlain),
 				UpdatedAt:       time.Unix(updatedAtUnix, 0).UTC(),
 				VisibilityScope: visibilityScope,
+				MinRole:         minRole,
 			})
 		}
 
@@ -798,4 +808,5 @@ type bleveSearchCandidate struct {
 	Snippet         string
 	UpdatedAt       time.Time
 	VisibilityScope string
+	MinRole         int
 }

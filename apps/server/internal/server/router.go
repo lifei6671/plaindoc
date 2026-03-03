@@ -109,6 +109,7 @@ func newRouter(
 	authRiskStateRepo := repository.NewGormAuthRiskStateRepository(db)
 	authCaptchaChallengeRepo := repository.NewGormAuthCaptchaChallengeRepository(db)
 	searchIndexJobRepo := repository.NewGormSearchIndexJobRepository(db)
+	searchVisibilityRepo := repository.NewGormSearchVisibilityRepository(db)
 	spaceRepo := repository.NewGormSpaceRepository(db, searchIndexJobRepo)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
 	documentRepo := repository.NewGormDocumentRepository(db, searchIndexJobRepo)
@@ -141,8 +142,9 @@ func newRouter(
 		logger.Error("search config initialization failed", slog.String("error", err.Error()))
 	}
 	bleveProvider := searchprovider.NewBleveProvider(searchprovider.BleveProviderOptions{
-		DB:        db,
-		IndexPath: resolveBleveIndexPath(cfg),
+		DB:             db,
+		VisibilityRepo: searchVisibilityRepo,
+		IndexPath:      resolveBleveIndexPath(cfg),
 	})
 	databaseProvider := searchprovider.NewDatabaseProvider(db)
 	searchQueryService := service.NewSearchQueryService(
@@ -150,6 +152,7 @@ func newRouter(
 		databaseProvider,
 		bleveProvider,
 	)
+	searchQueryService.SetSearchVisibilityRepository(searchVisibilityRepo)
 	searchIndexService := service.NewSearchIndexService(
 		db,
 		searchConfigService,

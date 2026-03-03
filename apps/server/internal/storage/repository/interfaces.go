@@ -200,6 +200,11 @@ type SearchVisibilityRepository interface {
 		ctx context.Context,
 		params SearchVisibleDocumentIDsByCandidatesParams,
 	) ([]string, error)
+	ResolveUserRoleLevel(
+		ctx context.Context,
+		spaceID string,
+		actorUserID string,
+	) (int, error)
 }
 
 // EnqueueSearchIndexJobParams 新增/合并检索索引任务参数。

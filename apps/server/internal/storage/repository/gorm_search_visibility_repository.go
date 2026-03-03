@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -88,6 +89,64 @@ func (r *gormSearchVisibilityRepository) FilterVisibleDocumentIDsByCandidates(
 		result = append(result, documentID)
 	}
 	return result, nil
+}
+
+func (r *gormSearchVisibilityRepository) ResolveUserRoleLevel(
+	ctx context.Context,
+	spaceID string,
+	actorUserID string,
+) (int, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("search visibility repository db is nil")
+	}
+
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedActorUserID := strings.TrimSpace(actorUserID)
+	if normalizedSpaceID == "" || normalizedActorUserID == "" {
+		return 0, nil
+	}
+
+	type spaceOwnerRow struct {
+		OwnerUserID string `gorm:"column:owner_user_id"`
+	}
+	var ownerRow spaceOwnerRow
+	if err := r.db.WithContext(ctx).
+		Table("spaces").
+		Select("owner_user_id").
+		Where("space_id = ?", normalizedSpaceID).
+		Take(&ownerRow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if strings.TrimSpace(ownerRow.OwnerUserID) == normalizedActorUserID {
+		return 3, nil
+	}
+
+	type memberRoleRow struct {
+		Role string `gorm:"column:role"`
+	}
+	var memberRow memberRoleRow
+	if err := r.db.WithContext(ctx).
+		Table("space_members").
+		Select("role").
+		Where("space_id = ? AND user_id = ?", normalizedSpaceID, normalizedActorUserID).
+		Take(&memberRow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	switch models.Role(strings.ToLower(strings.TrimSpace(memberRow.Role))) {
+	case models.RoleCollaborator:
+		return 2, nil
+	case models.RoleReader:
+		return 1, nil
+	default:
+		return 0, nil
+	}
 }
 
 func (r *gormSearchVisibilityRepository) baseVisibleDocumentsQuery(

@@ -10,7 +10,7 @@
 3. 已有全量重建与增量同步服务：`RebuildActiveProvider/SyncDocumentByID/DeleteDocumentByID/SyncSpaceByID/PurgeSpaceByID`。
 4. 已有索引状态面板字段：`RebuildInProgress/LastRebuildSource/LastRebuildIndexedDocuments`。
 5. 已接入持久化 Outbox（`search_index_jobs`）+ 定时 worker；`EnqueueSyncDocumentByID/EnqueueDeleteDocumentByID` 作为兼容入口，优先落 Outbox。
-6. 权限过滤目前是“索引粗过滤 + DB 二次过滤”混合模式；`min_role` 字段有写入，但查询路径未强制使用 `user_role_level`。
+6. 权限过滤目前是“索引粗过滤 + DB 二次过滤”混合模式；`min_role` 字段已写入，查询路径已在单空间检索计算 `user_role_level`，但尚未全 provider 强制 `min_role` 过滤。
 7. 已具备 `search_index_jobs` 持久化任务表、失败重试退避、基础去重合并；断点续跑与索引版本切换仍待实现。
 
 ## 2. 目标架构（本清单默认）
@@ -32,7 +32,7 @@
 |---|---|---|---|---|---|
 | A1 | 部分 | P0 | 收敛 L1/L2 能力清单并固化降级行为文档（以当前 Bleve/Database 为基线） | `docs/BACKEND_DEVELOPER_GUIDE.md` + 本文 | 能力矩阵与降级条件可直接指导实现 |
 | A2 | 部分 | P0 | 扩展 `IndexRecord`：补 `content_hash/source_version/index_version`（可选） | `internal/search/provider/types.go` | 结构覆盖幂等与版本切换所需字段 |
-| A3 | 部分 | P0 | 收敛 `SearchRequest` 的角色语义：明确 `user_role_level` 来源与取值映射 | `internal/service/search_query_service.go` | 查询不再固定传 `UserRoleLevel=0` |
+| A3 | 已完成 | P0 | 收敛 `SearchRequest` 的角色语义：明确 `user_role_level` 来源与取值映射 | `internal/service/search_query_service.go` | 查询不再固定传 `UserRoleLevel=0` |
 | A4 | 部分 | P0 | 定义“硬约束过滤”：`space_id` 必带，`min_role` 必过滤，不允许业务层后置过滤替代 | `internal/search/provider/*` | 所有 provider 的读路径都执行硬过滤 |
 | A5 | 待实现 | P1 | 定义一致性 SLO：延迟阈值、越权零容忍、权限收紧优先级最高 | `docs/` + `admin status` 返回结构 | 后台可见索引延迟与积压状态 |
 
@@ -95,7 +95,7 @@
 | 编号 | 状态 | 优先级 | 任务 | 主要落地位置 | 验收标准 |
 |---|---|---|---|---|---|
 | G1 | 部分 | P0 | 强制注入过滤：所有 provider 查询都必须包含 `space_id + min_role<=user_role_level` | `search_query_service + provider` | 无法通过调用绕过过滤 |
-| G2 | 待实现 | P0 | 查询前计算 `user_role_level`（owner/collaborator/reader/guest） | `search_query_service + repo` | `UserRoleLevel` 不再恒为 0 |
+| G2 | 已完成 | P0 | 查询前计算 `user_role_level`（owner/collaborator/reader/guest） | `search_query_service + repo` | `UserRoleLevel` 不再恒为 0 |
 | G3 | 部分 | P0 | 结果字段安全：仅返回已过滤命中的标题/片段，不做先召回后返回 | `provider.Search` | 不出现越权片段泄露 |
 | G4 | 部分 | P1 | 分页稳定性：`relevance`/`updated_at` 排序规则统一并写测试 | `provider.Search` | 分页翻页稳定 |
 

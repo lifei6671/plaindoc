@@ -9,6 +9,7 @@ import (
 	searchcfg "github.com/lifei6671/plaindoc/apps/server/internal/search"
 	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
 	searchprovider "github.com/lifei6671/plaindoc/apps/server/internal/search/provider"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 )
 
 const searchNormalizerVersion = "markdown_normalizer_v1"
@@ -40,8 +41,9 @@ type SearchQueryResult struct {
 
 // SearchQueryService 负责“配置解析 + 分词 + provider 路由 + 检索执行”。
 type SearchQueryService struct {
-	searchConfigService *SearchConfigService
-	providers           map[searchcfg.ProviderName]searchprovider.Provider
+	searchConfigService  *SearchConfigService
+	searchVisibilityRepo repository.SearchVisibilityRepository
+	providers            map[searchcfg.ProviderName]searchprovider.Provider
 }
 
 // NewSearchQueryService 创建统一检索查询服务。
@@ -64,6 +66,16 @@ func NewSearchQueryService(
 		searchConfigService: searchConfigService,
 		providers:           providerMap,
 	}
+}
+
+// SetSearchVisibilityRepository 注入检索可见性仓储，用于解析用户在空间内的角色级别。
+func (s *SearchQueryService) SetSearchVisibilityRepository(
+	searchVisibilityRepo repository.SearchVisibilityRepository,
+) {
+	if s == nil {
+		return
+	}
+	s.searchVisibilityRepo = searchVisibilityRepo
 }
 
 // Search 执行统一检索请求。
@@ -123,11 +135,18 @@ func (s *SearchQueryService) Search(
 		}, nil
 	}
 
+	normalizedSpaceID := strings.TrimSpace(input.SpaceID)
+	normalizedViewerUserID := strings.TrimSpace(input.ViewerUserID)
+	userRoleLevel, err := s.resolveUserRoleLevel(ctx, normalizedSpaceID, normalizedViewerUserID)
+	if err != nil {
+		return SearchQueryResult{}, err
+	}
+
 	request := searchprovider.SearchRequest{
-		SpaceID:           strings.TrimSpace(input.SpaceID),
-		ActorUserID:       strings.TrimSpace(input.ViewerUserID),
-		IsAuthenticated:   strings.TrimSpace(input.ViewerUserID) != "",
-		UserRoleLevel:     0,
+		SpaceID:           normalizedSpaceID,
+		ActorUserID:       normalizedViewerUserID,
+		IsAuthenticated:   normalizedViewerUserID != "",
+		UserRoleLevel:     userRoleLevel,
 		Query:             normalizedQuery,
 		Page:              input.Page,
 		PageSize:          input.PageSize,
@@ -145,6 +164,33 @@ func (s *SearchQueryService) Search(
 		Provider: providerName,
 		Response: response,
 	}, nil
+}
+
+func (s *SearchQueryService) resolveUserRoleLevel(
+	ctx context.Context,
+	spaceID string,
+	viewerUserID string,
+) (int, error) {
+	if s == nil || s.searchVisibilityRepo == nil {
+		return 0, nil
+	}
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedViewerUserID := strings.TrimSpace(viewerUserID)
+	if normalizedSpaceID == "" || normalizedViewerUserID == "" {
+		return 0, nil
+	}
+
+	roleLevel, err := s.searchVisibilityRepo.ResolveUserRoleLevel(ctx, normalizedSpaceID, normalizedViewerUserID)
+	if err != nil {
+		return 0, err
+	}
+	if roleLevel < 0 {
+		return 0, nil
+	}
+	if roleLevel > 3 {
+		return 3, nil
+	}
+	return roleLevel, nil
 }
 
 func (s *SearchQueryService) resolveProvider(
