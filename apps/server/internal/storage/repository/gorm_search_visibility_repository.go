@@ -26,7 +26,7 @@ func (r *gormSearchVisibilityRepository) SearchVisibleDocuments(
 		return nil, 0, fmt.Errorf("search visibility repository db is nil")
 	}
 
-	query := r.baseVisibleDocumentsQuery(ctx, params.ActorUserID, params.SpaceID)
+	query := r.baseVisibleDocumentsQuery(ctx, params.ActorUserID, params.SpaceID, params.ScopeSpaceIDs)
 	for _, item := range params.Terms {
 		normalizedTerm := strings.ToLower(strings.TrimSpace(item))
 		if normalizedTerm == "" {
@@ -81,7 +81,7 @@ func (r *gormSearchVisibilityRepository) FilterVisibleDocumentIDsByCandidates(
 		return []string{}, nil
 	}
 
-	query := r.baseVisibleDocumentsQuery(ctx, params.ActorUserID, params.SpaceID).
+	query := r.baseVisibleDocumentsQuery(ctx, params.ActorUserID, params.SpaceID, params.ScopeSpaceIDs).
 		Where("d.document_id IN ?", params.CandidateDocumentIDs)
 
 	type row struct {
@@ -99,6 +99,55 @@ func (r *gormSearchVisibilityRepository) FilterVisibleDocumentIDsByCandidates(
 			continue
 		}
 		result = append(result, documentID)
+	}
+	return result, nil
+}
+
+func (r *gormSearchVisibilityRepository) ResolveSearchScopeSpaceIDs(
+	ctx context.Context,
+	actorUserID string,
+) ([]string, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("search visibility repository db is nil")
+	}
+
+	normalizedActorUserID := strings.TrimSpace(actorUserID)
+	query := r.db.WithContext(ctx).
+		Table("spaces AS s").
+		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive)
+
+	if normalizedActorUserID == "" {
+		query = query.Where("s.visibility = ?", models.VisibilityPublic)
+	} else {
+		query = query.
+			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedActorUserID).
+			Where(
+				"("+
+					"s.owner_user_id = ? OR "+
+					"s.visibility IN (?,?) OR "+
+					"sm.id IS NOT NULL"+
+					")",
+				normalizedActorUserID,
+				models.VisibilityPublic,
+				models.VisibilityAuthenticated,
+			)
+	}
+
+	type row struct {
+		SpaceID string `gorm:"column:space_id"`
+	}
+	rows := make([]row, 0, 64)
+	if err := query.Distinct("s.space_id").Select("s.space_id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(rows))
+	for _, item := range rows {
+		spaceID := strings.TrimSpace(item.SpaceID)
+		if spaceID == "" {
+			continue
+		}
+		result = append(result, spaceID)
 	}
 	return result, nil
 }
@@ -221,6 +270,7 @@ func (r *gormSearchVisibilityRepository) baseVisibleDocumentsQuery(
 	ctx context.Context,
 	actorUserID string,
 	spaceID string,
+	scopeSpaceIDs []string,
 ) *gorm.DB {
 	query := r.db.WithContext(ctx).
 		Table("documents AS d").
@@ -232,6 +282,11 @@ func (r *gormSearchVisibilityRepository) baseVisibleDocumentsQuery(
 	normalizedSpaceID := strings.TrimSpace(spaceID)
 	if normalizedSpaceID != "" {
 		query = query.Where("s.space_id = ?", normalizedSpaceID)
+	} else {
+		normalizedScopeSpaceIDs := normalizeSearchVisibilitySpaceIDs(scopeSpaceIDs)
+		if len(normalizedScopeSpaceIDs) > 0 {
+			query = query.Where("s.space_id IN ?", normalizedScopeSpaceIDs)
+		}
 	}
 	return applySearchVisibilityMatrixFilter(query, actorUserID)
 }

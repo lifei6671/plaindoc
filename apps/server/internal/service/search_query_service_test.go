@@ -37,6 +37,13 @@ func TestSearchQueryService_SearchInjectsUserRoleLevel(t *testing.T) {
 				"outsider-1": 0,
 			},
 		},
+		scopeSpaceIDsByUser: map[string][]string{
+			"":           {"space-public"},
+			"reader-1":   {"space-1"},
+			"collab-1":   {"space-1"},
+			"owner-1":    {"space-1"},
+			"outsider-1": {"space-public"},
+		},
 	}
 	provider := &recordingSearchProvider{name: string(searchcfg.ProviderDatabase)}
 
@@ -49,42 +56,49 @@ func TestSearchQueryService_SearchInjectsUserRoleLevel(t *testing.T) {
 		spaceID           string
 		viewerUserID      string
 		expectedRoleLevel int
+		expectedScopes    []string
 	}{
 		{
 			name:              "anonymous",
 			spaceID:           "space-1",
 			viewerUserID:      "",
 			expectedRoleLevel: 0,
+			expectedScopes:    []string{"space-1"},
 		},
 		{
 			name:              "reader",
 			spaceID:           "space-1",
 			viewerUserID:      "reader-1",
 			expectedRoleLevel: 1,
+			expectedScopes:    []string{"space-1"},
 		},
 		{
 			name:              "collaborator",
 			spaceID:           "space-1",
 			viewerUserID:      "collab-1",
 			expectedRoleLevel: 2,
+			expectedScopes:    []string{"space-1"},
 		},
 		{
 			name:              "owner",
 			spaceID:           "space-1",
 			viewerUserID:      "owner-1",
 			expectedRoleLevel: 3,
+			expectedScopes:    []string{"space-1"},
 		},
 		{
 			name:              "non-member",
 			spaceID:           "space-1",
 			viewerUserID:      "outsider-1",
 			expectedRoleLevel: 0,
+			expectedScopes:    []string{"space-1"},
 		},
 		{
 			name:              "empty-space-id",
 			spaceID:           "",
 			viewerUserID:      "owner-1",
 			expectedRoleLevel: 0,
+			expectedScopes:    []string{"space-1"},
 		},
 	}
 
@@ -111,7 +125,62 @@ func TestSearchQueryService_SearchInjectsUserRoleLevel(t *testing.T) {
 			if request.SpaceID != item.spaceID {
 				t.Fatalf("expected space id=%q, got=%q", item.spaceID, request.SpaceID)
 			}
+			if len(request.ScopeSpaceIDs) != len(item.expectedScopes) {
+				t.Fatalf("expected scope size=%d, got=%d", len(item.expectedScopes), len(request.ScopeSpaceIDs))
+			}
+			scopeSet := make(map[string]struct{}, len(request.ScopeSpaceIDs))
+			for _, scopeSpaceID := range request.ScopeSpaceIDs {
+				scopeSet[scopeSpaceID] = struct{}{}
+			}
+			for _, expectedScope := range item.expectedScopes {
+				if _, exists := scopeSet[expectedScope]; !exists {
+					t.Fatalf("expected scope %q in request scopes=%v", expectedScope, request.ScopeSpaceIDs)
+				}
+			}
 		})
+	}
+}
+
+func TestSearchQueryService_SearchReturnsEmptyWhenScopeUnavailable(t *testing.T) {
+	configJSON, err := buildEnabledDatabaseSearchConfigJSON()
+	if err != nil {
+		t.Fatalf("build search config json failed: %v", err)
+	}
+	systemConfigRepo := &staticSystemConfigRepository{
+		record: &models.SystemConfig{
+			ConfigKey:       searchcfg.SystemConfigKey,
+			ConfigValueJSON: configJSON,
+			Version:         1,
+			CreatedAt:       time.Now().UTC(),
+			UpdatedAt:       time.Now().UTC(),
+		},
+	}
+	visibilityRepo := &roleAwareSearchVisibilityRepository{
+		roleLevelBySpace:    map[string]map[string]int{},
+		scopeSpaceIDsByUser: map[string][]string{},
+	}
+	provider := &recordingSearchProvider{name: string(searchcfg.ProviderDatabase)}
+
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	searchQueryService := NewSearchQueryService(searchConfigService, provider)
+	searchQueryService.SetSearchVisibilityRepository(visibilityRepo)
+
+	result, searchErr := searchQueryService.Search(context.Background(), SearchQueryInput{
+		ViewerUserID:  "no-scope-user",
+		Query:         "hello world",
+		Page:          1,
+		PageSize:      20,
+		Sort:          searchprovider.SortModeRelevance,
+		NeedHighlight: false,
+	})
+	if searchErr != nil {
+		t.Fatalf("search failed: %v", searchErr)
+	}
+	if result.Response.Total != 0 {
+		t.Fatalf("expected total=0, got=%d", result.Response.Total)
+	}
+	if provider.CallCount() != 0 {
+		t.Fatalf("expected provider call count=0, got=%d", provider.CallCount())
 	}
 }
 
@@ -159,7 +228,8 @@ func (r *staticSystemConfigRepository) UpdateByVersion(
 }
 
 type roleAwareSearchVisibilityRepository struct {
-	roleLevelBySpace map[string]map[string]int
+	roleLevelBySpace    map[string]map[string]int
+	scopeSpaceIDsByUser map[string][]string
 }
 
 func (r *roleAwareSearchVisibilityRepository) SearchVisibleDocuments(
@@ -193,6 +263,21 @@ func (r *roleAwareSearchVisibilityRepository) ResolveUserRoleLevelsBySpaces(
 	return result, nil
 }
 
+func (r *roleAwareSearchVisibilityRepository) ResolveSearchScopeSpaceIDs(
+	ctx context.Context,
+	actorUserID string,
+) ([]string, error) {
+	if r == nil {
+		return []string{}, nil
+	}
+	scopes := r.scopeSpaceIDsByUser[actorUserID]
+	result := make([]string, 0, len(scopes))
+	for _, item := range scopes {
+		result = append(result, item)
+	}
+	return result, nil
+}
+
 func (r *roleAwareSearchVisibilityRepository) ResolveUserRoleLevel(
 	ctx context.Context,
 	spaceID string,
@@ -210,6 +295,7 @@ func (r *roleAwareSearchVisibilityRepository) ResolveUserRoleLevel(
 type recordingSearchProvider struct {
 	name        string
 	lastRequest searchprovider.SearchRequest
+	callCount   int
 }
 
 func (p *recordingSearchProvider) Name() string {
@@ -249,6 +335,7 @@ func (p *recordingSearchProvider) Search(
 ) (searchprovider.SearchResponse, error) {
 	if p != nil {
 		p.lastRequest = request
+		p.callCount++
 	}
 	return searchprovider.SearchResponse{Total: 0, Hits: []searchprovider.SearchHit{}}, nil
 }
@@ -262,4 +349,11 @@ func (p *recordingSearchProvider) LastRequest() searchprovider.SearchRequest {
 		return searchprovider.SearchRequest{}
 	}
 	return p.lastRequest
+}
+
+func (p *recordingSearchProvider) CallCount() int {
+	if p == nil {
+		return 0
+	}
+	return p.callCount
 }

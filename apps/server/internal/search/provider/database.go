@@ -80,11 +80,12 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 
 	page, pageSize, _ := normalizeDatabaseSearchPagination(request.Page, request.PageSize)
 	rows, total, err := p.visibilityRepo.SearchVisibleDocuments(ctx, repository.SearchVisibleDocumentsParams{
-		ActorUserID: strings.TrimSpace(request.ActorUserID),
-		SpaceID:     strings.TrimSpace(request.SpaceID),
-		Terms:       terms,
-		Limit:       maxDatabaseSearchCandidate,
-		Offset:      0,
+		ActorUserID:   strings.TrimSpace(request.ActorUserID),
+		SpaceID:       strings.TrimSpace(request.SpaceID),
+		ScopeSpaceIDs: request.ScopeSpaceIDs,
+		Terms:         terms,
+		Limit:         maxDatabaseSearchCandidate,
+		Offset:        0,
 	})
 	if err != nil {
 		return SearchResponse{}, err
@@ -138,6 +139,17 @@ func (p *DatabaseProvider) filterRowsByRole(
 
 	hasActorIdentity := strings.TrimSpace(request.ActorUserID) != ""
 	isSingleSpaceSearch := strings.TrimSpace(request.SpaceID) != ""
+	scopeSpaceIDSet := make(map[string]struct{}, 0)
+	if !isSingleSpaceSearch {
+		scopeSpaceIDSet = make(map[string]struct{}, len(request.ScopeSpaceIDs))
+		for _, item := range request.ScopeSpaceIDs {
+			spaceID := strings.TrimSpace(item)
+			if spaceID == "" {
+				continue
+			}
+			scopeSpaceIDSet[spaceID] = struct{}{}
+		}
+	}
 	filtered := make([]repository.SearchVisibleDocumentRow, 0, len(rows))
 
 	if isSingleSpaceSearch {
@@ -146,6 +158,15 @@ func (p *DatabaseProvider) filterRowsByRole(
 			userRoleLevel = 0
 		}
 		for _, item := range rows {
+			if len(scopeSpaceIDSet) > 0 {
+				spaceID := strings.TrimSpace(item.SpaceID)
+				if spaceID == "" {
+					continue
+				}
+				if _, exists := scopeSpaceIDSet[spaceID]; !exists {
+					continue
+				}
+			}
 			scope := strings.ToLower(strings.TrimSpace(item.VisibilityScope))
 			switch scope {
 			case string(models.VisibilityPublic):
@@ -189,6 +210,15 @@ func (p *DatabaseProvider) filterRowsByRole(
 	}
 
 	for _, item := range rows {
+		if len(scopeSpaceIDSet) > 0 {
+			spaceID := strings.TrimSpace(item.SpaceID)
+			if spaceID == "" {
+				continue
+			}
+			if _, exists := scopeSpaceIDSet[spaceID]; !exists {
+				continue
+			}
+		}
 		scope := strings.ToLower(strings.TrimSpace(item.VisibilityScope))
 		switch scope {
 		case string(models.VisibilityPublic):

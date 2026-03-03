@@ -137,6 +137,17 @@ func (s *SearchQueryService) Search(
 
 	normalizedSpaceID := strings.TrimSpace(input.SpaceID)
 	normalizedViewerUserID := strings.TrimSpace(input.ViewerUserID)
+	scopeSpaceIDs, err := s.resolveScopeSpaceIDs(ctx, normalizedSpaceID, normalizedViewerUserID)
+	if err != nil {
+		return SearchQueryResult{}, err
+	}
+	if len(scopeSpaceIDs) == 0 {
+		return SearchQueryResult{
+			Provider: providerName,
+			Response: searchprovider.SearchResponse{Total: 0, Hits: []searchprovider.SearchHit{}},
+		}, nil
+	}
+
 	userRoleLevel, err := s.resolveUserRoleLevel(ctx, normalizedSpaceID, normalizedViewerUserID)
 	if err != nil {
 		return SearchQueryResult{}, err
@@ -144,6 +155,7 @@ func (s *SearchQueryService) Search(
 
 	request := searchprovider.SearchRequest{
 		SpaceID:           normalizedSpaceID,
+		ScopeSpaceIDs:     scopeSpaceIDs,
 		ActorUserID:       normalizedViewerUserID,
 		IsAuthenticated:   normalizedViewerUserID != "",
 		UserRoleLevel:     userRoleLevel,
@@ -164,6 +176,30 @@ func (s *SearchQueryService) Search(
 		Provider: providerName,
 		Response: response,
 	}, nil
+}
+
+func (s *SearchQueryService) resolveScopeSpaceIDs(
+	ctx context.Context,
+	spaceID string,
+	viewerUserID string,
+) ([]string, error) {
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID != "" {
+		return []string{normalizedSpaceID}, nil
+	}
+	if s == nil || s.searchVisibilityRepo == nil {
+		return []string{}, nil
+	}
+
+	spaceIDs, err := s.searchVisibilityRepo.ResolveSearchScopeSpaceIDs(ctx, strings.TrimSpace(viewerUserID))
+	if err != nil {
+		return nil, err
+	}
+	normalized := normalizeSearchScopeSpaceIDs(spaceIDs)
+	if len(normalized) == 0 {
+		return []string{}, nil
+	}
+	return normalized, nil
 }
 
 func (s *SearchQueryService) resolveUserRoleLevel(
@@ -216,4 +252,24 @@ func (s *SearchQueryService) resolveProvider(
 		ErrSearchProviderUnavailable,
 		activeProvider,
 	)
+}
+
+func normalizeSearchScopeSpaceIDs(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		spaceID := strings.TrimSpace(item)
+		if spaceID == "" {
+			continue
+		}
+		if _, exists := seen[spaceID]; exists {
+			continue
+		}
+		seen[spaceID] = struct{}{}
+		result = append(result, spaceID)
+	}
+	return result
 }

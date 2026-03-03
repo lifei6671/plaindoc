@@ -35,6 +35,7 @@ type IndexRecord struct {
 // SearchRequest 定义统一检索请求结构。
 type SearchRequest struct {
 	SpaceID           string
+	ScopeSpaceIDs     []string
 	ActorUserID       string
 	IsAuthenticated   bool
 	UserRoleLevel     int

@@ -33,7 +33,7 @@
 | A1 | 部分 | P0 | 收敛 L1/L2 能力清单并固化降级行为文档（以当前 Bleve/Database 为基线） | `docs/BACKEND_DEVELOPER_GUIDE.md` + 本文 | 能力矩阵与降级条件可直接指导实现 |
 | A2 | 部分 | P0 | 扩展 `IndexRecord`：补 `content_hash/source_version/index_version`（可选） | `internal/search/provider/types.go` | 结构覆盖幂等与版本切换所需字段 |
 | A3 | 已完成 | P0 | 收敛 `SearchRequest` 的角色语义：明确 `user_role_level` 来源与取值映射 | `internal/service/search_query_service.go` | 查询不再固定传 `UserRoleLevel=0` |
-| A4 | 部分 | P0 | 定义“硬约束过滤”：`space_id` 必带，`min_role` 必过滤，不允许业务层后置过滤替代 | `internal/search/provider/*` | 所有 provider 的读路径都执行硬过滤 |
+| A4 | 已完成 | P0 | 定义“硬约束过滤”：`space_id` 或服务端 `scope_space_ids` 必带，`min_role` 必过滤，不允许业务层后置过滤替代 | `internal/search/provider/*` | 所有 provider 的读路径都执行硬过滤 |
 | A5 | 待实现 | P1 | 定义一致性 SLO：延迟阈值、越权零容忍、权限收紧优先级最高 | `docs/` + `admin status` 返回结构 | 后台可见索引延迟与积压状态 |
 
 ### B. Outbox / Job 系统

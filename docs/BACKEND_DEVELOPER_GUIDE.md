@@ -507,6 +507,44 @@
 
 ### 13.3 权限模型映射（检索统一口径）
 
+```mermaid
+flowchart TD
+  A[请求进入搜索接口] --> B{是否有登录态 viewerUserID}
+  B -- 否 --> C[actor=anonymous]
+  B -- 是 --> D[actor=logged-in]
+
+  C --> E[SearchQueryService.Search]
+  D --> E
+
+  E --> F[加载 search 配置与 analyzer]
+  F --> G[分词/归一化 query]
+  G --> H{是否指定 space_id}
+  H -- 是 --> I[scope_space_ids = [space_id]]
+  H -- 否 --> J[从仓储解析可见空间 scope_space_ids]
+  J --> K{scope 为空?}
+  K -- 是 --> Z[直接返回空结果]
+  K -- 否 --> L[继续]
+
+  I --> M{有 space_id 且已登录?}
+  L --> M
+  M -- 是 --> N[解析该空间 user_role_level]
+  M -- 否 --> O[user_role_level = 0]
+
+  N --> P[构建 SearchRequest]
+  O --> P
+
+  P --> Q{Provider}
+  Q -- Bleve --> R[倒排召回候选]
+  Q -- Database --> S[SQL召回候选]
+
+  R --> T[硬过滤: scope + visibility_scope + min_role + 状态]
+  S --> U[硬过滤: scope + visibility_scope + min_role + 状态]
+
+  T --> V[分页]
+  U --> V
+  V --> W[返回命中]
+
+```
 当前项目内容权限核心来自：
 
 1. `spaces.visibility` 与 `documents.visibility`（`public/authenticated/member`）。

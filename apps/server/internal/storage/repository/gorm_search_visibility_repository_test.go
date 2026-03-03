@@ -81,6 +81,38 @@ func TestGormSearchVisibilityRepository_ResolveUserRoleLevel(t *testing.T) {
 	if err := database.ORM.WithContext(ctx).Create(&space).Error; err != nil {
 		t.Fatalf("seed space failed: %v", err)
 	}
+	extraSpaces := []models.Space{
+		{
+			SpaceID:     "space-public",
+			Name:        "space-public",
+			OwnerUserID: "owner-1",
+			Visibility:  models.VisibilityPublic,
+			Status:      models.EntityStatusActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			SpaceID:     "space-authenticated",
+			Name:        "space-authenticated",
+			OwnerUserID: "owner-1",
+			Visibility:  models.VisibilityAuthenticated,
+			Status:      models.EntityStatusActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			SpaceID:     "space-member-2",
+			Name:        "space-member-2",
+			OwnerUserID: "owner-1",
+			Visibility:  models.VisibilityMember,
+			Status:      models.EntityStatusActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+	}
+	if err := database.ORM.WithContext(ctx).Create(&extraSpaces).Error; err != nil {
+		t.Fatalf("seed extra spaces failed: %v", err)
+	}
 
 	spaceMembers := []models.SpaceMember{
 		{
@@ -93,6 +125,13 @@ func TestGormSearchVisibilityRepository_ResolveUserRoleLevel(t *testing.T) {
 		{
 			SpaceID:   "space-1",
 			UserID:    "reader-1",
+			Role:      models.RoleReader,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		{
+			SpaceID:   "space-member-2",
+			UserID:    "collab-1",
 			Role:      models.RoleReader,
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -176,4 +215,44 @@ func TestGormSearchVisibilityRepository_ResolveUserRoleLevel(t *testing.T) {
 			t.Fatalf("unexpected role level for non-existing space")
 		}
 	})
+
+	t.Run("resolve-search-scope-space-ids-anonymous", func(t *testing.T) {
+		scopeSpaceIDs, scopeErr := repo.ResolveSearchScopeSpaceIDs(ctx, "")
+		if scopeErr != nil {
+			t.Fatalf("resolve search scope space ids failed: %v", scopeErr)
+		}
+		assertScopeContains(t, scopeSpaceIDs, "space-public")
+		assertScopeNotContains(t, scopeSpaceIDs, "space-authenticated")
+		assertScopeNotContains(t, scopeSpaceIDs, "space-member-2")
+	})
+
+	t.Run("resolve-search-scope-space-ids-collaborator", func(t *testing.T) {
+		scopeSpaceIDs, scopeErr := repo.ResolveSearchScopeSpaceIDs(ctx, "collab-1")
+		if scopeErr != nil {
+			t.Fatalf("resolve search scope space ids failed: %v", scopeErr)
+		}
+		assertScopeContains(t, scopeSpaceIDs, "space-public")
+		assertScopeContains(t, scopeSpaceIDs, "space-authenticated")
+		assertScopeContains(t, scopeSpaceIDs, "space-1")
+		assertScopeContains(t, scopeSpaceIDs, "space-member-2")
+	})
+}
+
+func assertScopeContains(t *testing.T, scopes []string, expected string) {
+	t.Helper()
+	for _, item := range scopes {
+		if item == expected {
+			return
+		}
+	}
+	t.Fatalf("expected scope to contain %q, got=%v", expected, scopes)
+}
+
+func assertScopeNotContains(t *testing.T, scopes []string, unexpected string) {
+	t.Helper()
+	for _, item := range scopes {
+		if item == unexpected {
+			t.Fatalf("expected scope not to contain %q, got=%v", unexpected, scopes)
+		}
+	}
 }

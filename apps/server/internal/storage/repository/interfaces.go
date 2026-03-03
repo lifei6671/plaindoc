@@ -179,17 +179,19 @@ type SearchVisibleDocumentRow struct {
 
 // SearchVisibleDocumentsParams 检索可见文档分页查询参数。
 type SearchVisibleDocumentsParams struct {
-	ActorUserID string
-	SpaceID     string
-	Terms       []string
-	Limit       int
-	Offset      int
+	ActorUserID   string
+	SpaceID       string
+	ScopeSpaceIDs []string
+	Terms         []string
+	Limit         int
+	Offset        int
 }
 
 // SearchVisibleDocumentIDsByCandidatesParams 候选文档可见性过滤参数。
 type SearchVisibleDocumentIDsByCandidatesParams struct {
 	ActorUserID          string
 	SpaceID              string
+	ScopeSpaceIDs        []string
 	CandidateDocumentIDs []string
 }
 
@@ -208,6 +210,10 @@ type SearchVisibilityRepository interface {
 		actorUserID string,
 		spaceIDs []string,
 	) (map[string]int, error)
+	ResolveSearchScopeSpaceIDs(
+		ctx context.Context,
+		actorUserID string,
+	) ([]string, error)
 	ResolveUserRoleLevel(
 		ctx context.Context,
 		spaceID string,

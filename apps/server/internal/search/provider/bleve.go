@@ -27,6 +27,7 @@ const (
 	maxBleveSearchPageSize       = 200
 	defaultBleveSearchChunkSize  = 200
 	maxBleveSearchCandidateCount = 5000
+	maxBleveSearchScopeFilterIDs = 512
 )
 
 // BleveProviderOptions 定义 BleveProvider 初始化参数。
@@ -265,6 +266,7 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 	hasActorIdentity := strings.TrimSpace(request.ActorUserID) != ""
 	isAuthenticated := hasActorIdentity || request.IsAuthenticated
 	isSingleSpaceSearch := strings.TrimSpace(request.SpaceID) != ""
+	scopeSpaceIDSet := buildBleveScopeSpaceIDSet(request.SpaceID, request.ScopeSpaceIDs)
 	directVisibleDocIDs := make(map[string]struct{}, len(candidates))
 	needDBCheckDocIDs := make([]string, 0, len(candidates))
 	memberCandidateByDocID := make(map[string]bleveSearchCandidate, len(candidates))
@@ -272,6 +274,15 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 		docID := strings.TrimSpace(item.DocID)
 		if docID == "" {
 			continue
+		}
+		if len(scopeSpaceIDSet) > 0 {
+			spaceID := strings.TrimSpace(item.SpaceID)
+			if spaceID == "" {
+				continue
+			}
+			if _, exists := scopeSpaceIDSet[spaceID]; !exists {
+				continue
+			}
 		}
 
 		switch strings.ToLower(strings.TrimSpace(item.VisibilityScope)) {
@@ -638,6 +649,7 @@ func (p *BleveProvider) filterVisibleDocIDs(
 		repository.SearchVisibleDocumentIDsByCandidatesParams{
 			ActorUserID:          strings.TrimSpace(request.ActorUserID),
 			SpaceID:              strings.TrimSpace(request.SpaceID),
+			ScopeSpaceIDs:        request.ScopeSpaceIDs,
 			CandidateDocumentIDs: documentIDs,
 		},
 	)
@@ -746,6 +758,17 @@ func buildBleveSearchQuery(request SearchRequest) query.Query {
 		spaceQuery := bleve.NewTermQuery(spaceID)
 		spaceQuery.SetField("space_id")
 		filterQueries = append(filterQueries, spaceQuery)
+	} else {
+		scopeSpaceIDs := normalizeBleveScopeSpaceIDs(request.ScopeSpaceIDs)
+		if len(scopeSpaceIDs) > 0 && len(scopeSpaceIDs) <= maxBleveSearchScopeFilterIDs {
+			spaceQueries := make([]query.Query, 0, len(scopeSpaceIDs))
+			for _, item := range scopeSpaceIDs {
+				spaceQuery := bleve.NewTermQuery(item)
+				spaceQuery.SetField("space_id")
+				spaceQueries = append(spaceQueries, spaceQuery)
+			}
+			filterQueries = append(filterQueries, bleve.NewDisjunctionQuery(spaceQueries...))
+		}
 	}
 
 	filterQueries = append(filterQueries, bleve.NewConjunctionQuery(tokenQueries...))
@@ -772,6 +795,44 @@ func splitTerms(value string) []string {
 		}
 		seen[term] = struct{}{}
 		result = append(result, term)
+	}
+	return result
+}
+
+func buildBleveScopeSpaceIDSet(spaceID string, scopeSpaceIDs []string) map[string]struct{} {
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID != "" {
+		return map[string]struct{}{
+			normalizedSpaceID: struct{}{},
+		}
+	}
+	normalizedScopeSpaceIDs := normalizeBleveScopeSpaceIDs(scopeSpaceIDs)
+	if len(normalizedScopeSpaceIDs) == 0 {
+		return map[string]struct{}{}
+	}
+	result := make(map[string]struct{}, len(normalizedScopeSpaceIDs))
+	for _, item := range normalizedScopeSpaceIDs {
+		result[item] = struct{}{}
+	}
+	return result
+}
+
+func normalizeBleveScopeSpaceIDs(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		spaceID := strings.TrimSpace(item)
+		if spaceID == "" {
+			continue
+		}
+		if _, exists := seen[spaceID]; exists {
+			continue
+		}
+		seen[spaceID] = struct{}{}
+		result = append(result, spaceID)
 	}
 	return result
 }
