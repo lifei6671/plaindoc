@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
@@ -14,6 +15,7 @@ const (
 	defaultDatabaseSearchPage     = 1
 	defaultDatabaseSearchPageSize = 20
 	maxDatabaseSearchPageSize     = 200
+	maxDatabaseSearchCandidate    = 5000
 )
 
 // DatabaseProvider 基于数据库 LIKE 的简易检索 Provider。
@@ -76,13 +78,13 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
 
-	_, pageSize, offset := normalizeDatabaseSearchPagination(request.Page, request.PageSize)
+	page, pageSize, _ := normalizeDatabaseSearchPagination(request.Page, request.PageSize)
 	rows, total, err := p.visibilityRepo.SearchVisibleDocuments(ctx, repository.SearchVisibleDocumentsParams{
 		ActorUserID: strings.TrimSpace(request.ActorUserID),
 		SpaceID:     strings.TrimSpace(request.SpaceID),
 		Terms:       terms,
-		Limit:       pageSize,
-		Offset:      offset,
+		Limit:       maxDatabaseSearchCandidate,
+		Offset:      0,
 	})
 	if err != nil {
 		return SearchResponse{}, err
@@ -91,9 +93,27 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
 
-	hits := make([]SearchHit, 0, len(rows))
+	filteredRows, err := p.filterRowsByRole(ctx, request, rows)
+	if err != nil {
+		return SearchResponse{}, err
+	}
+	if len(filteredRows) == 0 {
+		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(filteredRows) {
+		return SearchResponse{Total: int64(len(filteredRows)), Hits: []SearchHit{}}, nil
+	}
+	end := start + pageSize
+	if end > len(filteredRows) {
+		end = len(filteredRows)
+	}
+	pageRows := filteredRows[start:end]
+
+	hits := make([]SearchHit, 0, len(pageRows))
 	baseScore := float64(len(terms))
-	for index, row := range rows {
+	for index, row := range pageRows {
 		hits = append(hits, SearchHit{
 			DocID:   strings.TrimSpace(row.DocumentID),
 			Score:   baseScore - (float64(index) * 0.001),
@@ -102,9 +122,93 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 	}
 
 	return SearchResponse{
-		Total: total,
+		Total: int64(len(filteredRows)),
 		Hits:  hits,
 	}, nil
+}
+
+func (p *DatabaseProvider) filterRowsByRole(
+	ctx context.Context,
+	request SearchRequest,
+	rows []repository.SearchVisibleDocumentRow,
+) ([]repository.SearchVisibleDocumentRow, error) {
+	if len(rows) == 0 {
+		return []repository.SearchVisibleDocumentRow{}, nil
+	}
+
+	hasActorIdentity := strings.TrimSpace(request.ActorUserID) != ""
+	isSingleSpaceSearch := strings.TrimSpace(request.SpaceID) != ""
+	filtered := make([]repository.SearchVisibleDocumentRow, 0, len(rows))
+
+	if isSingleSpaceSearch {
+		userRoleLevel := request.UserRoleLevel
+		if userRoleLevel < 0 {
+			userRoleLevel = 0
+		}
+		for _, item := range rows {
+			scope := strings.ToLower(strings.TrimSpace(item.VisibilityScope))
+			switch scope {
+			case string(models.VisibilityPublic):
+				filtered = append(filtered, item)
+			case string(models.VisibilityAuthenticated):
+				if hasActorIdentity {
+					filtered = append(filtered, item)
+				}
+			case string(models.VisibilityMember):
+				minRole := item.MinRole
+				if minRole <= 0 {
+					minRole = 1
+				}
+				if hasActorIdentity && userRoleLevel >= minRole {
+					filtered = append(filtered, item)
+				}
+			}
+		}
+		return filtered, nil
+	}
+
+	roleLevelBySpaceID := map[string]int{}
+	if hasActorIdentity {
+		spaceIDs := make([]string, 0, len(rows))
+		for _, item := range rows {
+			if strings.EqualFold(strings.TrimSpace(item.VisibilityScope), string(models.VisibilityMember)) {
+				spaceIDs = append(spaceIDs, strings.TrimSpace(item.SpaceID))
+			}
+		}
+		if len(spaceIDs) > 0 {
+			resolvedRoleLevels, err := p.visibilityRepo.ResolveUserRoleLevelsBySpaces(
+				ctx,
+				strings.TrimSpace(request.ActorUserID),
+				spaceIDs,
+			)
+			if err != nil {
+				return nil, err
+			}
+			roleLevelBySpaceID = resolvedRoleLevels
+		}
+	}
+
+	for _, item := range rows {
+		scope := strings.ToLower(strings.TrimSpace(item.VisibilityScope))
+		switch scope {
+		case string(models.VisibilityPublic):
+			filtered = append(filtered, item)
+		case string(models.VisibilityAuthenticated):
+			if hasActorIdentity {
+				filtered = append(filtered, item)
+			}
+		case string(models.VisibilityMember):
+			minRole := item.MinRole
+			if minRole <= 0 {
+				minRole = 1
+			}
+			spaceID := strings.TrimSpace(item.SpaceID)
+			if hasActorIdentity && roleLevelBySpaceID[spaceID] >= minRole {
+				filtered = append(filtered, item)
+			}
+		}
+	}
+	return filtered, nil
 }
 
 func (p *DatabaseProvider) Capabilities() Capabilities {

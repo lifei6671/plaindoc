@@ -220,6 +220,105 @@ func TestBleveProvider_SearchEnforcesMinRoleForMemberDocsInSingleSpace(t *testin
 	}
 }
 
+func TestBleveProvider_SearchEnforcesMinRoleForMemberDocsAcrossSpaces(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:test-bleve-provider-cross-space-min-role?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	if err := prepareBleveProviderTestSchema(db); err != nil {
+		t.Fatalf("prepare schema failed: %v", err)
+	}
+	if err := seedBleveProviderCrossSpaceMinRoleData(db); err != nil {
+		t.Fatalf("seed cross space data failed: %v", err)
+	}
+
+	provider := NewBleveProvider(BleveProviderOptions{
+		DB:        db,
+		IndexPath: filepath.Join(t.TempDir(), "bleve-index-cross-space-min-role"),
+	})
+	ctx := context.Background()
+	if err := provider.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema failed: %v", err)
+	}
+
+	now := time.Now().UTC().Unix()
+	if err := provider.Upsert(ctx, []IndexRecord{
+		{
+			SpaceID:         "space-a",
+			DocID:           "doc-space-a-min-role-1",
+			NodeID:          "node-space-a-min-role-1",
+			Title:           "跨空间权限文档 A1",
+			BodyPlain:       "cross space min role A1",
+			Terms:           "cross space min role",
+			TitleTerms:      "cross space min role",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         1,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+		{
+			SpaceID:         "space-a",
+			DocID:           "doc-space-a-min-role-2",
+			NodeID:          "node-space-a-min-role-2",
+			Title:           "跨空间权限文档 A2",
+			BodyPlain:       "cross space min role A2",
+			Terms:           "cross space min role",
+			TitleTerms:      "cross space min role",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         2,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+		{
+			SpaceID:         "space-b",
+			DocID:           "doc-space-b-min-role-1",
+			NodeID:          "node-space-b-min-role-1",
+			Title:           "跨空间权限文档 B1",
+			BodyPlain:       "cross space min role B1",
+			Terms:           "cross space min role",
+			TitleTerms:      "cross space min role",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         1,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+		{
+			SpaceID:         "space-b",
+			DocID:           "doc-space-b-min-role-2",
+			NodeID:          "node-space-b-min-role-2",
+			Title:           "跨空间权限文档 B2",
+			BodyPlain:       "cross space min role B2",
+			Terms:           "cross space min role",
+			TitleTerms:      "cross space min role",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         2,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+	}); err != nil {
+		t.Fatalf("upsert failed: %v", err)
+	}
+
+	result, searchErr := provider.Search(ctx, SearchRequest{
+		Query:       "cross space min role",
+		Page:        1,
+		PageSize:    20,
+		ActorUserID: "member-cross",
+	})
+	if searchErr != nil {
+		t.Fatalf("search failed: %v", searchErr)
+	}
+	assertBleveSearchDocIDs(t, result, []string{
+		"doc-space-a-min-role-1",
+		"doc-space-b-min-role-1",
+		"doc-space-b-min-role-2",
+	})
+}
+
 func prepareBleveProviderTestSchema(db *gorm.DB) error {
 	if err := db.Exec(`
 CREATE TABLE spaces (
@@ -257,7 +356,8 @@ CREATE TABLE documents (
 CREATE TABLE space_members (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   space_id TEXT,
-  user_id TEXT
+  user_id TEXT,
+  role TEXT
 )`).Error; err != nil {
 		return err
 	}
@@ -290,8 +390,48 @@ INSERT INTO documents(document_id, node_id, title, content_md, visibility, statu
 		return err
 	}
 	if err := db.Exec(`
-INSERT INTO space_members(space_id, user_id) VALUES
-  ('space-1', 'member-1')
+INSERT INTO space_members(space_id, user_id, role) VALUES
+  ('space-1', 'member-1', 'reader')
+`).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func seedBleveProviderCrossSpaceMinRoleData(db *gorm.DB) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := db.Exec(`
+INSERT INTO spaces(space_id, owner_user_id, visibility, status, deleted_at, name) VALUES
+  ('space-a', 'owner-a', 'member', 'active', NULL, 'Space A'),
+  ('space-b', 'owner-b', 'member', 'active', NULL, 'Space B')
+`).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+INSERT INTO nodes(node_id, space_id) VALUES
+  ('node-space-a-min-role-1', 'space-a'),
+  ('node-space-a-min-role-2', 'space-a'),
+  ('node-space-b-min-role-1', 'space-b'),
+  ('node-space-b-min-role-2', 'space-b')
+`).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+INSERT INTO documents(document_id, node_id, title, content_md, visibility, status, deleted_at, updated_at) VALUES
+  ('doc-space-a-min-role-1', 'node-space-a-min-role-1', '跨空间权限文档 A1', 'cross space min role A1', 'member', 'active', NULL, ?),
+  ('doc-space-a-min-role-2', 'node-space-a-min-role-2', '跨空间权限文档 A2', 'cross space min role A2', 'member', 'active', NULL, ?),
+  ('doc-space-b-min-role-1', 'node-space-b-min-role-1', '跨空间权限文档 B1', 'cross space min role B1', 'member', 'active', NULL, ?),
+  ('doc-space-b-min-role-2', 'node-space-b-min-role-2', '跨空间权限文档 B2', 'cross space min role B2', 'member', 'active', NULL, ?)
+`, now, now, now, now).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+INSERT INTO space_members(space_id, user_id, role) VALUES
+  ('space-a', 'member-cross', 'reader'),
+  ('space-b', 'member-cross', 'collaborator')
 `).Error; err != nil {
 		return err
 	}

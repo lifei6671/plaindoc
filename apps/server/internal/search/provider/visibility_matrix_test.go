@@ -60,6 +60,67 @@ func TestBleveProvider_SearchMatchesVisibilityMatrix(t *testing.T) {
 	})
 }
 
+func TestDatabaseProvider_SearchEnforcesMemberMinRoleInSingleSpace(t *testing.T) {
+	db := openVisibilityMatrixTestDB(t, "file:test-database-provider-min-role-single-space?mode=memory&cache=shared")
+	seedVisibilityMatrixTestData(t, db)
+
+	provider := NewDatabaseProvider(db)
+	ctx := context.Background()
+
+	noMemberRoleResult, err := provider.Search(ctx, SearchRequest{
+		SpaceID:       "space-member",
+		Query:         "matrix hit",
+		Page:          1,
+		PageSize:      100,
+		ActorUserID:   "member-1",
+		UserRoleLevel: 0,
+	})
+	if err != nil {
+		t.Fatalf("database search with role_level=0 failed: %v", err)
+	}
+	assertSearchDocSet(t, noMemberRoleResult, []string{})
+
+	readerRoleResult, err := provider.Search(ctx, SearchRequest{
+		SpaceID:       "space-member",
+		Query:         "matrix hit",
+		Page:          1,
+		PageSize:      100,
+		ActorUserID:   "member-1",
+		UserRoleLevel: 1,
+	})
+	if err != nil {
+		t.Fatalf("database search with role_level=1 failed: %v", err)
+	}
+	assertSearchDocSet(t, readerRoleResult, []string{
+		"doc-member-public",
+		"doc-member-authenticated",
+		"doc-member-member",
+	})
+}
+
+func TestDatabaseProvider_SearchDoesNotTrustCrossSpaceInjectedRoleLevel(t *testing.T) {
+	db := openVisibilityMatrixTestDB(t, "file:test-database-provider-cross-space-injected-role?mode=memory&cache=shared")
+	seedVisibilityMatrixTestData(t, db)
+
+	provider := NewDatabaseProvider(db)
+	result, err := provider.Search(context.Background(), SearchRequest{
+		Query:         "matrix hit",
+		Page:          1,
+		PageSize:      100,
+		ActorUserID:   "user-1",
+		UserRoleLevel: 3,
+	})
+	if err != nil {
+		t.Fatalf("database cross-space search failed: %v", err)
+	}
+	assertSearchDocSet(t, result, []string{
+		"doc-public-public",
+		"doc-public-authenticated",
+		"doc-authenticated-public",
+		"doc-authenticated-authenticated",
+	})
+}
+
 func runVisibilityMatrixAssertions(
 	t *testing.T,
 	providerName string,
@@ -198,7 +259,8 @@ CREATE TABLE documents (
 CREATE TABLE space_members (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   space_id TEXT,
-  user_id TEXT
+  user_id TEXT,
+  role TEXT
 )`).Error; err != nil {
 		return err
 	}
@@ -257,9 +319,10 @@ INSERT INTO spaces(space_id, owner_user_id, visibility, status, deleted_at, name
 	}
 
 	if err := db.Exec(
-		`INSERT INTO space_members(space_id, user_id) VALUES (?, ?)`,
+		`INSERT INTO space_members(space_id, user_id, role) VALUES (?, ?, ?)`,
 		"space-member",
 		"member-1",
+		"reader",
 	).Error; err != nil {
 		t.Fatalf("seed space member failed: %v", err)
 	}

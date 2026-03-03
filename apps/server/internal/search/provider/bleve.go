@@ -267,6 +267,7 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 	isSingleSpaceSearch := strings.TrimSpace(request.SpaceID) != ""
 	directVisibleDocIDs := make(map[string]struct{}, len(candidates))
 	needDBCheckDocIDs := make([]string, 0, len(candidates))
+	memberCandidateByDocID := make(map[string]bleveSearchCandidate, len(candidates))
 	for _, item := range candidates {
 		docID := strings.TrimSpace(item.DocID)
 		if docID == "" {
@@ -290,6 +291,7 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 			}
 			if isAuthenticated {
 				needDBCheckDocIDs = append(needDBCheckDocIDs, docID)
+				memberCandidateByDocID[docID] = item
 			}
 		default:
 			// 索引字段缺失或未知时退回 DB 权限校验，保证不越权。
@@ -309,6 +311,32 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 		visibleByDBDocIDs[docID] = struct{}{}
 	}
 
+	roleLevelBySpaceID := map[string]int{}
+	if !isSingleSpaceSearch && hasActorIdentity && len(memberCandidateByDocID) > 0 && len(visibleByDBDocIDs) > 0 {
+		memberSpaceIDs := make([]string, 0, len(memberCandidateByDocID))
+		for docID, item := range memberCandidateByDocID {
+			if _, exists := visibleByDBDocIDs[docID]; !exists {
+				continue
+			}
+			spaceID := strings.TrimSpace(item.SpaceID)
+			if spaceID == "" {
+				continue
+			}
+			memberSpaceIDs = append(memberSpaceIDs, spaceID)
+		}
+		if len(memberSpaceIDs) > 0 {
+			resolvedRoleLevels, resolveErr := p.visibilityRepo.ResolveUserRoleLevelsBySpaces(
+				ctx,
+				strings.TrimSpace(request.ActorUserID),
+				memberSpaceIDs,
+			)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			roleLevelBySpaceID = resolvedRoleLevels
+		}
+	}
+
 	filtered := make([]SearchHit, 0, len(candidates))
 	for _, item := range candidates {
 		docID := strings.TrimSpace(item.DocID)
@@ -318,6 +346,16 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 		if _, exists := directVisibleDocIDs[docID]; !exists {
 			if _, exists := visibleByDBDocIDs[docID]; !exists {
 				continue
+			}
+			if !isSingleSpaceSearch &&
+				strings.EqualFold(strings.TrimSpace(item.VisibilityScope), string(models.VisibilityMember)) {
+				spaceID := strings.TrimSpace(item.SpaceID)
+				if spaceID == "" {
+					continue
+				}
+				if roleLevelBySpaceID[spaceID] < item.MinRole {
+					continue
+				}
 			}
 		}
 		filtered = append(filtered, SearchHit{
@@ -480,7 +518,14 @@ func (p *BleveProvider) searchCandidates(
 			from,
 			false,
 		)
-		searchRequest.Fields = []string{"doc_id", "body_plain", "updated_at_unix", "visibility_scope", "min_role"}
+		searchRequest.Fields = []string{
+			"doc_id",
+			"space_id",
+			"body_plain",
+			"updated_at_unix",
+			"visibility_scope",
+			"min_role",
+		}
 		if sortMode == SortModeUpdatedAtDesc {
 			searchRequest.SortBy([]string{"-updated_at_unix"})
 		}
@@ -504,6 +549,7 @@ func (p *BleveProvider) searchCandidates(
 			seen[docID] = struct{}{}
 
 			bodyPlain := extractStringField(hit.Fields, "body_plain")
+			spaceID := extractStringField(hit.Fields, "space_id")
 			updatedAtUnix := extractInt64Field(hit.Fields, "updated_at_unix")
 			visibilityScope := extractStringField(hit.Fields, "visibility_scope")
 			minRole := int(extractInt64Field(hit.Fields, "min_role"))
@@ -512,6 +558,7 @@ func (p *BleveProvider) searchCandidates(
 			}
 			candidates = append(candidates, bleveSearchCandidate{
 				DocID:           docID,
+				SpaceID:         spaceID,
 				Score:           hit.Score,
 				Snippet:         buildBleveSearchSnippet(bodyPlain),
 				UpdatedAt:       time.Unix(updatedAtUnix, 0).UTC(),
@@ -638,7 +685,7 @@ func buildBleveIndexMapping() *mapping.IndexMappingImpl {
 	}
 
 	documentMapping.AddFieldMappingsAt("doc_id", keywordField(true))
-	documentMapping.AddFieldMappingsAt("space_id", keywordField(false))
+	documentMapping.AddFieldMappingsAt("space_id", keywordField(true))
 	documentMapping.AddFieldMappingsAt("node_id", keywordField(false))
 	documentMapping.AddFieldMappingsAt("visibility_scope", keywordField(true))
 	documentMapping.AddFieldMappingsAt("space_status", keywordField(false))
@@ -808,6 +855,7 @@ type bleveIndexDocument struct {
 
 type bleveSearchCandidate struct {
 	DocID           string
+	SpaceID         string
 	Score           float64
 	Snippet         string
 	UpdatedAt       time.Time

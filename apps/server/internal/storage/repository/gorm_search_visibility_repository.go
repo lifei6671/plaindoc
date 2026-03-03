@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -47,7 +46,20 @@ func (r *gormSearchVisibilityRepository) SearchVisibleDocuments(
 
 	rows := make([]SearchVisibleDocumentRow, 0, params.Limit)
 	err := query.Session(&gorm.Session{}).
-		Select("d.document_id", "d.content_md").
+		Select(
+			"s.space_id AS space_id",
+			"d.document_id",
+			"d.content_md",
+			"CASE "+
+				"WHEN (s.visibility = 'member' OR d.visibility = 'member') THEN 'member' "+
+				"WHEN (s.visibility = 'authenticated' OR d.visibility = 'authenticated') THEN 'authenticated' "+
+				"ELSE 'public' "+
+				"END AS visibility_scope",
+			"CASE "+
+				"WHEN (s.visibility = 'member' OR d.visibility = 'member') THEN 1 "+
+				"ELSE 0 "+
+				"END AS min_role",
+		).
 		Order("d.updated_at DESC, d.id DESC").
 		Limit(params.Limit).
 		Offset(params.Offset).
@@ -96,56 +108,112 @@ func (r *gormSearchVisibilityRepository) ResolveUserRoleLevel(
 	spaceID string,
 	actorUserID string,
 ) (int, error) {
-	if r == nil || r.db == nil {
-		return 0, fmt.Errorf("search visibility repository db is nil")
-	}
-
-	normalizedSpaceID := strings.TrimSpace(spaceID)
-	normalizedActorUserID := strings.TrimSpace(actorUserID)
-	if normalizedSpaceID == "" || normalizedActorUserID == "" {
-		return 0, nil
-	}
-
-	type spaceOwnerRow struct {
-		OwnerUserID string `gorm:"column:owner_user_id"`
-	}
-	var ownerRow spaceOwnerRow
-	if err := r.db.WithContext(ctx).
-		Table("spaces").
-		Select("owner_user_id").
-		Where("space_id = ?", normalizedSpaceID).
-		Take(&ownerRow).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return 0, nil
-		}
+	roleLevels, err := r.ResolveUserRoleLevelsBySpaces(ctx, actorUserID, []string{spaceID})
+	if err != nil {
 		return 0, err
 	}
-	if strings.TrimSpace(ownerRow.OwnerUserID) == normalizedActorUserID {
-		return 3, nil
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID == "" {
+		return 0, nil
+	}
+	return roleLevels[normalizedSpaceID], nil
+}
+
+func (r *gormSearchVisibilityRepository) ResolveUserRoleLevelsBySpaces(
+	ctx context.Context,
+	actorUserID string,
+	spaceIDs []string,
+) (map[string]int, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("search visibility repository db is nil")
+	}
+
+	normalizedActorUserID := strings.TrimSpace(actorUserID)
+	normalizedSpaceIDs := normalizeSearchVisibilitySpaceIDs(spaceIDs)
+	if normalizedActorUserID == "" || len(normalizedSpaceIDs) == 0 {
+		return map[string]int{}, nil
+	}
+
+	roleLevels := make(map[string]int, len(normalizedSpaceIDs))
+
+	type ownerRow struct {
+		SpaceID string `gorm:"column:space_id"`
+	}
+	ownerRows := make([]ownerRow, 0, len(normalizedSpaceIDs))
+	if err := r.db.WithContext(ctx).
+		Table("spaces").
+		Select("space_id").
+		Where("space_id IN ? AND owner_user_id = ?", normalizedSpaceIDs, normalizedActorUserID).
+		Find(&ownerRows).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range ownerRows {
+		spaceID := strings.TrimSpace(item.SpaceID)
+		if spaceID == "" {
+			continue
+		}
+		roleLevels[spaceID] = 3
 	}
 
 	type memberRoleRow struct {
-		Role string `gorm:"column:role"`
+		SpaceID string `gorm:"column:space_id"`
+		Role    string `gorm:"column:role"`
 	}
-	var memberRow memberRoleRow
+	memberRows := make([]memberRoleRow, 0, len(normalizedSpaceIDs))
 	if err := r.db.WithContext(ctx).
 		Table("space_members").
-		Select("role").
-		Where("space_id = ? AND user_id = ?", normalizedSpaceID, normalizedActorUserID).
-		Take(&memberRow).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return 0, nil
+		Select("space_id", "role").
+		Where("space_id IN ? AND user_id = ?", normalizedSpaceIDs, normalizedActorUserID).
+		Find(&memberRows).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range memberRows {
+		spaceID := strings.TrimSpace(item.SpaceID)
+		if spaceID == "" {
+			continue
 		}
-		return 0, err
+		level := roleLevelFromMemberRole(item.Role)
+		if level <= 0 {
+			continue
+		}
+		if level > roleLevels[spaceID] {
+			roleLevels[spaceID] = level
+		}
 	}
 
-	switch models.Role(strings.ToLower(strings.TrimSpace(memberRow.Role))) {
+	return roleLevels, nil
+}
+
+func normalizeSearchVisibilitySpaceIDs(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		spaceID := strings.TrimSpace(item)
+		if spaceID == "" {
+			continue
+		}
+		if _, exists := seen[spaceID]; exists {
+			continue
+		}
+		seen[spaceID] = struct{}{}
+		result = append(result, spaceID)
+	}
+	return result
+}
+
+func roleLevelFromMemberRole(role string) int {
+	switch models.Role(strings.ToLower(strings.TrimSpace(role))) {
+	case models.RoleOwner:
+		return 3
 	case models.RoleCollaborator:
-		return 2, nil
+		return 2
 	case models.RoleReader:
-		return 1, nil
+		return 1
 	default:
-		return 0, nil
+		return 0
 	}
 }
 

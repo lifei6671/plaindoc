@@ -170,8 +170,11 @@ type SpaceRepository interface {
 
 // SearchVisibleDocumentRow 检索可见文档查询行。
 type SearchVisibleDocumentRow struct {
-	DocumentID string
-	ContentMD  string
+	SpaceID         string
+	DocumentID      string
+	ContentMD       string
+	VisibilityScope string
+	MinRole         int
 }
 
 // SearchVisibleDocumentsParams 检索可见文档分页查询参数。
@@ -200,6 +203,11 @@ type SearchVisibilityRepository interface {
 		ctx context.Context,
 		params SearchVisibleDocumentIDsByCandidatesParams,
 	) ([]string, error)
+	ResolveUserRoleLevelsBySpaces(
+		ctx context.Context,
+		actorUserID string,
+		spaceIDs []string,
+	) (map[string]int, error)
 	ResolveUserRoleLevel(
 		ctx context.Context,
 		spaceID string,

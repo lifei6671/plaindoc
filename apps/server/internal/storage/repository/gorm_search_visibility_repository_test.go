@@ -160,4 +160,20 @@ func TestGormSearchVisibilityRepository_ResolveUserRoleLevel(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("resolve-role-levels-by-spaces", func(t *testing.T) {
+		roleLevels, roleErr := repo.ResolveUserRoleLevelsBySpaces(ctx, "collab-1", []string{
+			"space-1",
+			"space-not-exists",
+		})
+		if roleErr != nil {
+			t.Fatalf("resolve role levels by spaces failed: %v", roleErr)
+		}
+		if roleLevels["space-1"] != 2 {
+			t.Fatalf("expected role level of space-1 = 2, got=%d", roleLevels["space-1"])
+		}
+		if _, exists := roleLevels["space-not-exists"]; exists {
+			t.Fatalf("unexpected role level for non-existing space")
+		}
+	})
 }
