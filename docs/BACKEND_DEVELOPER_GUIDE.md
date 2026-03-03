@@ -505,7 +505,7 @@
 1. 跨空间一次性聚合搜索（先做单空间检索，降低权限泄露风险）。
 2. 基于向量/语义检索的复杂召回（留到后续专题）。
 
-### 13.3 权限模型映射（贴合当前实现）
+### 13.3 权限模型映射（检索统一口径）
 
 当前项目内容权限核心来自：
 
@@ -519,20 +519,50 @@
 2. `collaborator=2`（对应通用方案的 Editor）
 3. `owner=3`（对应通用方案的 Admin）
 
-同时保留 `visibility_scope`（因为仅靠 `min_role` 无法表达 `authenticated`）：
+可见性等级定义：
 
-1. `public`
-2. `authenticated`
-3. `member`
+1. `public=1`
+2. `authenticated=2`
+3. `member=3`
 
-检索过滤规则必须同时满足：
+文档实际可见等级：
 
-1. `space_id = ?`
-2. 文档与空间状态有效（非 `deleted/banned`）
-3. 可见性过滤：
-   - `public`：任意请求可见
-   - `authenticated`：登录用户可见
-   - `member`：`role_level >= min_role`
+1. `effective_visibility = max(space_visibility, document_visibility)`（取更严格一侧）。
+
+检索权限必须满足“单调性”：
+
+1. 登录用户结果集必须包含匿名用户结果集。
+2. 即 `VisibleDocs(logged_in) ⊇ VisibleDocs(anonymous)`。
+
+空间可见性矩阵：
+
+| 空间可见性 | 未登录 | 已登录非成员 | 已登录成员（owner/collaborator/reader） |
+| --- | --- | --- | --- |
+| `public` | 是 | 是 | 是 |
+| `authenticated` | 否 | 是 | 是 |
+| `member` | 否 | 否 | 是 |
+
+空间/文档组合矩阵（检索是否可见）：
+
+1. 该矩阵对“单空间检索”和“跨空间聚合检索”都成立；跨空间场景按每条文档所属空间独立判定。
+
+| 空间可见性 | 文档可见性 | 未登录 | 已登录非成员 | 已登录成员（该空间） |
+| --- | --- | --- | --- | --- |
+| `public` | `public` | 是 | 是 | 是 |
+| `public` | `authenticated` | 否 | 是 | 是 |
+| `public` | `member` | 否 | 否 | 是 |
+| `authenticated` | `public` | 否 | 是 | 是 |
+| `authenticated` | `authenticated` | 否 | 是 | 是 |
+| `authenticated` | `member` | 否 | 否 | 是 |
+| `member` | `public` | 否 | 否 | 是 |
+| `member` | `authenticated` | 否 | 否 | 是 |
+| `member` | `member` | 否 | 否 | 是 |
+
+索引/查询映射建议：
+
+1. 保留 `visibility_scope`（`public/authenticated/member`）与 `min_role`，分别表达“登录态门槛”和“成员角色门槛”。
+2. 查询过滤始终包含“空间/文档状态有效（非 `deleted/banned`）”。
+3. `visibility_scope=member` 时再校验 `role_level >= min_role`。
 
 > 说明：现阶段 `member` 下默认 `min_role=1`；后续若启用 `node_permissions/document_permissions` 细粒度策略，再提升 `min_role` 或扩展 `acl_hash/allow_list`。
 
@@ -569,7 +599,7 @@
 
 ### 13.5 Provider 抽象（可插拔框架）
 
-建议新增 `apps/server/internal/search/provider` 抽象层，契约如下（伪接口）：
+`apps/server/internal/search/provider` 抽象层，契约如下（伪接口）：
 
 1. `Health(ctx) error`
 2. `Verify(ctx, cfg) error`

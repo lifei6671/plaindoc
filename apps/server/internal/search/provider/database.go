@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
-	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
@@ -22,12 +22,14 @@ const (
 // 1) 仅适用于轻量场景，不提供倒排索引能力；
 // 2) 作为可配置检索引擎中的一种，便于在外部引擎未接入时快速落地。
 type DatabaseProvider struct {
-	db *gorm.DB
+	visibilityRepo repository.SearchVisibilityRepository
 }
 
 // NewDatabaseProvider 创建 DatabaseProvider。
 func NewDatabaseProvider(db *gorm.DB) *DatabaseProvider {
-	return &DatabaseProvider{db: db}
+	return &DatabaseProvider{
+		visibilityRepo: repository.NewGormSearchVisibilityRepository(db),
+	}
 }
 
 func (p *DatabaseProvider) Name() string {
@@ -38,8 +40,8 @@ func (p *DatabaseProvider) Health(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if p == nil || p.db == nil {
-		return errors.New("database search provider db is nil")
+	if p == nil || p.visibilityRepo == nil {
+		return errors.New("database search provider visibility repository is nil")
 	}
 	return nil
 }
@@ -75,71 +77,18 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 	}
 
 	_, pageSize, offset := normalizeDatabaseSearchPagination(request.Page, request.PageSize)
-	actorUserID := strings.TrimSpace(request.ActorUserID)
-	spaceID := strings.TrimSpace(request.SpaceID)
-
-	baseQuery := p.db.WithContext(ctx).
-		Table("documents AS d").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive)
-
-	if spaceID != "" {
-		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
-	}
-
-	if actorUserID == "" {
-		baseQuery = baseQuery.Where(
-			"s.visibility = ? AND d.visibility = ?",
-			models.VisibilityPublic,
-			models.VisibilityPublic,
-		)
-	} else {
-		baseQuery = baseQuery.
-			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", actorUserID).
-			Where(
-				"("+
-					"s.owner_user_id = ? OR "+
-					"((s.visibility IN (?,?)) AND (d.visibility IN (?,?))) OR "+
-					"((s.visibility = ? OR d.visibility = ?) AND sm.id IS NOT NULL)"+
-					")",
-				actorUserID,
-				models.VisibilityPublic,
-				models.VisibilityAuthenticated,
-				models.VisibilityPublic,
-				models.VisibilityAuthenticated,
-				models.VisibilityMember,
-				models.VisibilityMember,
-			)
-	}
-
-	for _, term := range terms {
-		likePattern := "%" + strings.ToLower(strings.TrimSpace(term)) + "%"
-		baseQuery = baseQuery.Where("(LOWER(d.title) LIKE ? OR LOWER(d.content_md) LIKE ?)", likePattern, likePattern)
-	}
-
-	var total int64
-	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	rows, total, err := p.visibilityRepo.SearchVisibleDocuments(ctx, repository.SearchVisibleDocumentsParams{
+		ActorUserID: strings.TrimSpace(request.ActorUserID),
+		SpaceID:     strings.TrimSpace(request.SpaceID),
+		Terms:       terms,
+		Limit:       pageSize,
+		Offset:      offset,
+	})
+	if err != nil {
 		return SearchResponse{}, err
 	}
 	if total <= 0 {
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
-	}
-
-	type searchRow struct {
-		DocumentID string `gorm:"column:document_id"`
-		ContentMD  string `gorm:"column:content_md"`
-	}
-
-	rows := make([]searchRow, 0, pageSize)
-	query := baseQuery.Session(&gorm.Session{}).
-		Select("d.document_id", "d.content_md")
-	if request.Sort == SortModeUpdatedAtDesc || request.Sort == SortModeRelevance {
-		query = query.Order("d.updated_at DESC, d.id DESC")
-	}
-	if err := query.Limit(pageSize).Offset(offset).Find(&rows).Error; err != nil {
-		return SearchResponse{}, err
 	}
 
 	hits := make([]SearchHit, 0, len(rows))

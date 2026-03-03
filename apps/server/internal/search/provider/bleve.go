@@ -17,6 +17,7 @@ import (
 	"github.com/blevesearch/bleve/v2/search/query"
 	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
@@ -30,14 +31,15 @@ const (
 
 // BleveProviderOptions 定义 BleveProvider 初始化参数。
 type BleveProviderOptions struct {
-	DB        *gorm.DB
-	IndexPath string
+	DB             *gorm.DB
+	VisibilityRepo repository.SearchVisibilityRepository
+	IndexPath      string
 }
 
 // BleveProvider 基于 Bleve 的内置检索引擎。
 type BleveProvider struct {
-	db        *gorm.DB
-	indexPath string
+	visibilityRepo repository.SearchVisibilityRepository
+	indexPath      string
 
 	mu    sync.RWMutex
 	index bleve.Index
@@ -45,9 +47,13 @@ type BleveProvider struct {
 
 // NewBleveProvider 创建 BleveProvider。
 func NewBleveProvider(options BleveProviderOptions) *BleveProvider {
+	visibilityRepo := options.VisibilityRepo
+	if visibilityRepo == nil && options.DB != nil {
+		visibilityRepo = repository.NewGormSearchVisibilityRepository(options.DB)
+	}
 	return &BleveProvider{
-		db:        options.DB,
-		indexPath: strings.TrimSpace(options.IndexPath),
+		visibilityRepo: visibilityRepo,
+		indexPath:      strings.TrimSpace(options.IndexPath),
 	}
 }
 
@@ -62,8 +68,8 @@ func (p *BleveProvider) Health(ctx context.Context) error {
 	if p == nil {
 		return errors.New("bleve search provider is nil")
 	}
-	if p.db == nil {
-		return errors.New("bleve search provider db is nil")
+	if p.visibilityRepo == nil {
+		return errors.New("bleve search provider visibility repository is nil")
 	}
 	if strings.TrimSpace(p.indexPath) == "" {
 		return errors.New("bleve index path is empty")
@@ -492,64 +498,28 @@ func (p *BleveProvider) filterVisibleDocIDs(
 	request SearchRequest,
 	documentIDs []string,
 ) (map[string]struct{}, error) {
-	if p == nil || p.db == nil {
-		return nil, errors.New("bleve search provider db is nil")
+	if p == nil || p.visibilityRepo == nil {
+		return nil, errors.New("bleve search provider visibility repository is nil")
 	}
 	if len(documentIDs) == 0 {
 		return map[string]struct{}{}, nil
 	}
 
-	actorUserID := strings.TrimSpace(request.ActorUserID)
-	spaceID := strings.TrimSpace(request.SpaceID)
-	query := p.db.WithContext(ctx).
-		Table("documents AS d").
-		Select("d.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("d.document_id IN ?", documentIDs).
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive)
-
-	if spaceID != "" {
-		query = query.Where("s.space_id = ?", spaceID)
-	}
-
-	if actorUserID == "" {
-		query = query.Where(
-			"s.visibility = ? AND d.visibility = ?",
-			models.VisibilityPublic,
-			models.VisibilityPublic,
-		)
-	} else {
-		query = query.
-			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", actorUserID).
-			Where(
-				"("+
-					"s.owner_user_id = ? OR "+
-					"((s.visibility IN (?,?)) AND (d.visibility IN (?,?))) OR "+
-					"((s.visibility = ? OR d.visibility = ?) AND sm.id IS NOT NULL)"+
-					")",
-				actorUserID,
-				models.VisibilityPublic,
-				models.VisibilityAuthenticated,
-				models.VisibilityPublic,
-				models.VisibilityAuthenticated,
-				models.VisibilityMember,
-				models.VisibilityMember,
-			)
-	}
-
-	type row struct {
-		DocumentID string `gorm:"column:document_id"`
-	}
-	rows := make([]row, 0, len(documentIDs))
-	if err := query.Find(&rows).Error; err != nil {
+	visibleDocumentIDs, err := p.visibilityRepo.FilterVisibleDocumentIDsByCandidates(
+		ctx,
+		repository.SearchVisibleDocumentIDsByCandidatesParams{
+			ActorUserID:          strings.TrimSpace(request.ActorUserID),
+			SpaceID:              strings.TrimSpace(request.SpaceID),
+			CandidateDocumentIDs: documentIDs,
+		},
+	)
+	if err != nil {
 		return nil, err
 	}
 
-	visible := make(map[string]struct{}, len(rows))
-	for _, item := range rows {
-		docID := strings.TrimSpace(item.DocumentID)
+	visible := make(map[string]struct{}, len(visibleDocumentIDs))
+	for _, item := range visibleDocumentIDs {
+		docID := strings.TrimSpace(item)
 		if docID == "" {
 			continue
 		}

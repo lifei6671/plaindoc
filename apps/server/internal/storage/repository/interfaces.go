@@ -167,6 +167,40 @@ type SpaceRepository interface {
 	HasWriterAccess(ctx context.Context, spaceID string, userID string) (bool, error)
 }
 
+// SearchVisibleDocumentRow 检索可见文档查询行。
+type SearchVisibleDocumentRow struct {
+	DocumentID string
+	ContentMD  string
+}
+
+// SearchVisibleDocumentsParams 检索可见文档分页查询参数。
+type SearchVisibleDocumentsParams struct {
+	ActorUserID string
+	SpaceID     string
+	Terms       []string
+	Limit       int
+	Offset      int
+}
+
+// SearchVisibleDocumentIDsByCandidatesParams 候选文档可见性过滤参数。
+type SearchVisibleDocumentIDsByCandidatesParams struct {
+	ActorUserID          string
+	SpaceID              string
+	CandidateDocumentIDs []string
+}
+
+// SearchVisibilityRepository 检索可见性仓储接口。
+type SearchVisibilityRepository interface {
+	SearchVisibleDocuments(
+		ctx context.Context,
+		params SearchVisibleDocumentsParams,
+	) ([]SearchVisibleDocumentRow, int64, error)
+	FilterVisibleDocumentIDsByCandidates(
+		ctx context.Context,
+		params SearchVisibleDocumentIDsByCandidatesParams,
+	) ([]string, error)
+}
+
 // WorkspaceSpaceListRecord 编辑器工作区空间列表项。
 type WorkspaceSpaceListRecord struct {
 	SpaceID      string

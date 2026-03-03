@@ -976,9 +976,9 @@ func resolveSearchVisibilityAndRole(
 	case 1:
 		return string(models.VisibilityPublic), 1
 	case 2:
-		return string(models.VisibilityAuthenticated), 2
+		return string(models.VisibilityAuthenticated), 1
 	default:
-		return string(models.VisibilityMember), 3
+		return string(models.VisibilityMember), 1
 	}
 }
 
