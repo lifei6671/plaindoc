@@ -414,6 +414,41 @@ a {
   display: inline-flex;
   align-items: center;
 }
+.reader-article-actions {
+  margin-top: 14px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.reader-article-action {
+  min-height: 34px;
+  border-radius: 9px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.reader-article-action:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.reader-article-action--primary {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.reader-article-action--busy,
+.reader-article-action:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
 .reader-access-denied {
   padding: 30px 24px 34px;
 }
@@ -590,6 +625,79 @@ a {
 .reader-attachment__action:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff;
+  }
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .reader-progress,
+  .reader-sidebar,
+  .reader-outline,
+  .reader-article-actions,
+  .reader-attachment__actions,
+  .reader-floating-tooltip {
+    display: none !important;
+  }
+  .reader-layout {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+  .reader-main {
+    height: auto;
+    overflow: visible;
+    padding: 0;
+  }
+  .reader-main[data-reader-outline="1"] {
+    display: block;
+    width: auto;
+    max-width: none;
+  }
+  .reader-article-shell {
+    max-width: none;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .reader-article-header {
+    padding: 0 0 12px;
+  }
+  #plaindoc-preview-body {
+    padding: 16px 0 0;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .markdown-body,
+  .reader-article-shell {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .reader-attachments {
+    margin: 20px 0 0;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  pre,
+  blockquote,
+  table,
+  img,
+  .katex-display {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
 @media (max-width: 1480px) {
   .reader-main[data-reader-outline="1"] {

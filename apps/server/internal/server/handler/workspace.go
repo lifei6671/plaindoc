@@ -185,7 +185,7 @@ func NewWorkspaceHandler(
 	}
 }
 
-// ListSpaces 返回当前登录用户可进入编辑器的空间列表。
+// ListSpaces 返回当前登录用户可进入编辑器（具备写权限）的空间列表。
 func (h *workspaceHandler) ListSpaces(c *gin.Context) {
 	actorUserID, ok := h.requireActorUserID(c)
 	if !ok {
@@ -282,7 +282,7 @@ func (h *workspaceHandler) CreateSpace(c *gin.Context) {
 	})
 }
 
-// GetTree 返回空间目录树。
+// GetTree 返回空间目录树（仅对具备写权限的用户开放编辑器入口）。
 func (h *workspaceHandler) GetTree(c *gin.Context) {
 	actorUserID, ok := h.requireActorUserID(c)
 	if !ok {
@@ -299,12 +299,10 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 		return
 	}
 
-	if err := h.ensureSpaceReadable(c.Request.Context(), spaceID, actorUserID); err != nil {
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSpaceNotFound):
 			response.WorkspaceErrSpaceNotFound.Write(c)
-		case errors.Is(err, service.ErrViewerLoginRequired):
-			response.WorkspaceErrLoginRequired.Write(c)
 		case errors.Is(err, service.ErrSpaceAccessDenied):
 			response.WorkspaceErrInsufficientSpacePermission.Write(c)
 		default:

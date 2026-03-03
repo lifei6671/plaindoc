@@ -60,14 +60,15 @@ func (r *gormWorkspaceRepository) ListSpacesByActor(
 			"("+
 				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
 				"s.owner_user_id = ? OR "+
-				"EXISTS (SELECT 1 FROM space_members AS sm WHERE sm.space_id = s.space_id AND sm.user_id = ?) OR "+
-				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?)"+
+				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM space_members AS sm WHERE sm.space_id = s.space_id AND sm.user_id = ? AND sm.role IN ?)"+
 				")",
 			userID,
 			models.AdminRolePlatformAdmin,
 			userID,
 			userID,
 			userID,
+			[]models.Role{models.RoleOwner, models.RoleCollaborator},
 		).
 		Order("s.updated_at DESC, s.id DESC").
 		Find(&rows).Error; err != nil {

@@ -1,5 +1,5 @@
 import katexStyleText from "katex/dist/katex.min.css?inline";
-import { ChevronDown, Download, Eye, Lock, LockOpen, Paperclip } from "lucide-react";
+import { ChevronDown, Download, Eye, FileText, Lock, LockOpen, Paperclip, Printer } from "lucide-react";
 import MarkdownIt from "markdown-it";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
@@ -474,6 +474,24 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                   <div className="reader-article-meta">
                     {documentVisibilityMarker}
                     <span className="reader-article-meta__text">{documentMeta}</span>
+                  </div>
+                  <div className="reader-article-actions" role="group" aria-label="导出操作">
+                    <button
+                      type="button"
+                      className="reader-article-action"
+                      data-reader-export-action="markdown"
+                    >
+                      <FileText size={14} aria-hidden="true" />
+                      <span>导出 Markdown</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="reader-article-action reader-article-action--primary"
+                      data-reader-export-action="pdf"
+                    >
+                      <Printer size={14} aria-hidden="true" />
+                      <span>导出 PDF</span>
+                    </button>
                   </div>
                 </header>
               ) : null}

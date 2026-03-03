@@ -28,6 +28,8 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const ATTACHMENT_ACTION_SELECTOR = "button[data-reader-attachment-action='1']";
   const ATTACHMENT_STATUS_SELECTOR = "[data-reader-hook='attachment-status']";
   const ATTACHMENT_ACTION_BUSY_CLASS = "reader-attachment__action--busy";
+  const EXPORT_ACTION_SELECTOR = "button[data-reader-export-action]";
+  const EXPORT_ACTION_BUSY_CLASS = "reader-article-action--busy";
   const PREVIEW_HEADING_SELECTOR =
     "#plaindoc-preview-body h1, #plaindoc-preview-body h2, #plaindoc-preview-body h3, #plaindoc-preview-body h4, #plaindoc-preview-body h5, #plaindoc-preview-body h6";
   const OUTLINE_SCROLL_OFFSET = 16;
@@ -88,6 +90,338 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     }
     statusNode.textContent = text;
     statusNode.classList.toggle("reader-attachments__hint--error", isError === true);
+  };
+
+  const resolveReaderStatePayload = () => {
+    const stateNode = document.querySelector(STATE_SCRIPT_SELECTOR);
+    if (!(stateNode instanceof HTMLScriptElement)) {
+      return null;
+    }
+    return resolveJSONPayload(stateNode.textContent || "");
+  };
+
+  const resolveExportBaseURL = (payload) => {
+    const fallbackOrigin =
+      typeof window.location.origin === "string" && window.location.origin.trim()
+        ? window.location.origin
+        : window.location.href;
+    if (!payload || typeof payload !== "object") {
+      return fallbackOrigin;
+    }
+    const requestOrigin = typeof payload.requestOrigin === "string" ? payload.requestOrigin.trim() : "";
+    const rawBase = requestOrigin || fallbackOrigin;
+    try {
+      return new URL(rawBase, window.location.href).toString();
+    } catch {
+      return fallbackOrigin;
+    }
+  };
+
+  const sanitizeExportFileNameSegment = (value, fallback) => {
+    const normalized =
+      typeof value === "string"
+        ? value.replace(/[\\\\/:*?"<>|]+/g, " ").replace(/\\s+/g, " ").trim()
+        : "";
+    return normalized || fallback;
+  };
+
+  const formatExportTimestampSegment = () => {
+    const now = new Date();
+    const padTwoDigits = (value) => String(Math.max(0, value)).padStart(2, "0");
+    return (
+      String(now.getFullYear()) +
+      padTwoDigits(now.getMonth() + 1) +
+      padTwoDigits(now.getDate()) +
+      "-" +
+      padTwoDigits(now.getHours()) +
+      padTwoDigits(now.getMinutes())
+    );
+  };
+
+  const buildMarkdownExportFileName = (title) => {
+    const safeTitle = sanitizeExportFileNameSegment(title, "未命名文档");
+    return safeTitle + "-" + formatExportTimestampSegment() + ".md";
+  };
+
+  const triggerTextFileDownload = (content, fileName, contentType) => {
+    const blob = new Blob([content], { type: contentType });
+    const objectURL = URL.createObjectURL(blob);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = objectURL;
+      anchor.download = fileName;
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    } finally {
+      window.setTimeout(() => {
+        URL.revokeObjectURL(objectURL);
+      }, 15000);
+    }
+  };
+
+  const toAbsoluteResourceURL = (rawURL, baseURL) => {
+    const normalizedURL = typeof rawURL === "string" ? rawURL.trim() : "";
+    if (!normalizedURL) {
+      return normalizedURL;
+    }
+    if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(normalizedURL)) {
+      return normalizedURL;
+    }
+    if (normalizedURL.startsWith("//")) {
+      try {
+        return new URL(window.location.protocol + normalizedURL).toString();
+      } catch {
+        return normalizedURL;
+      }
+    }
+    try {
+      return new URL(normalizedURL, baseURL).toString();
+    } catch {
+      return normalizedURL;
+    }
+  };
+
+  const rewriteMarkdownLinkDestination = (rawDestination, baseURL) => {
+    const input = typeof rawDestination === "string" ? rawDestination : "";
+    const leadingWhitespaceMatch = /^\\s*/.exec(input);
+    const trailingWhitespaceMatch = /\\s*$/.exec(input);
+    const leadingWhitespace = leadingWhitespaceMatch ? leadingWhitespaceMatch[0] : "";
+    const trailingWhitespace = trailingWhitespaceMatch ? trailingWhitespaceMatch[0] : "";
+    const core = input.slice(leadingWhitespace.length, input.length - trailingWhitespace.length);
+    if (!core) {
+      return input;
+    }
+
+    if (core.startsWith("<")) {
+      const rightBracketIndex = core.indexOf(">");
+      if (rightBracketIndex > 0) {
+        const innerURL = core.slice(1, rightBracketIndex).trim();
+        const suffix = core.slice(rightBracketIndex + 1);
+        if (!innerURL) {
+          return input;
+        }
+        return (
+          leadingWhitespace +
+          "<" +
+          toAbsoluteResourceURL(innerURL, baseURL) +
+          ">" +
+          suffix +
+          trailingWhitespace
+        );
+      }
+    }
+
+    const whitespaceIndex = core.search(/\\s/);
+    const resourceURL = whitespaceIndex >= 0 ? core.slice(0, whitespaceIndex) : core;
+    const suffix = whitespaceIndex >= 0 ? core.slice(whitespaceIndex) : "";
+    if (!resourceURL) {
+      return input;
+    }
+    return leadingWhitespace + toAbsoluteResourceURL(resourceURL, baseURL) + suffix + trailingWhitespace;
+  };
+
+  const rewriteMarkdownInlineLinks = (input, baseURL) =>
+    input.replace(/(!?\\[[^\\]\\n]*\\]\\()([^)\\n]+)(\\))/g, (fullMatch, prefix, destination, suffix) => {
+      const rewrittenDestination = rewriteMarkdownLinkDestination(destination, baseURL);
+      return prefix + rewrittenDestination + suffix;
+    });
+
+  const rewriteMarkdownReferenceDefinition = (input, baseURL) =>
+    input.replace(/^(\\s*\\[[^\\]\\r\\n]+\\]:\\s*)(\\S+)(.*)$/, (fullMatch, prefix, urlToken, suffix) => {
+      const normalizedToken = typeof urlToken === "string" ? urlToken.trim() : "";
+      if (!normalizedToken) {
+        return fullMatch;
+      }
+      if (normalizedToken.startsWith("<") && normalizedToken.endsWith(">") && normalizedToken.length > 2) {
+        const innerURL = normalizedToken.slice(1, -1).trim();
+        if (!innerURL) {
+          return fullMatch;
+        }
+        return prefix + "<" + toAbsoluteResourceURL(innerURL, baseURL) + ">" + suffix;
+      }
+      return prefix + toAbsoluteResourceURL(normalizedToken, baseURL) + suffix;
+    });
+
+  const rewriteHtmlResourceAttributes = (input, baseURL) =>
+    input.replace(
+      /(<(?:img|a)\\b[^>]*?\\b(?:src|href)\\s*=\\s*)(["'])([^"']+)(\\2)/gi,
+      (fullMatch, prefix, quote, urlValue, suffix) => {
+        const rewrittenURL = toAbsoluteResourceURL(urlValue, baseURL);
+        return prefix + quote + rewrittenURL + suffix;
+      }
+    );
+
+  const MARKDOWN_BACKTICK = String.fromCharCode(96);
+
+  const rewriteOutsideInlineCode = (line, rewriteSegment) => {
+    if (typeof line !== "string" || line.indexOf(MARKDOWN_BACKTICK) < 0) {
+      return rewriteSegment(line);
+    }
+    let output = "";
+    let cursor = 0;
+    let activeTickSize = 0;
+
+    while (cursor < line.length) {
+      if (activeTickSize === 0) {
+        const nextTickIndex = line.indexOf(MARKDOWN_BACKTICK, cursor);
+        if (nextTickIndex < 0) {
+          output += rewriteSegment(line.slice(cursor));
+          break;
+        }
+        output += rewriteSegment(line.slice(cursor, nextTickIndex));
+        let tickEndIndex = nextTickIndex;
+        while (tickEndIndex < line.length && line.charAt(tickEndIndex) === MARKDOWN_BACKTICK) {
+          tickEndIndex += 1;
+        }
+        activeTickSize = tickEndIndex - nextTickIndex;
+        output += line.slice(nextTickIndex, tickEndIndex);
+        cursor = tickEndIndex;
+        continue;
+      }
+
+      const closingToken = MARKDOWN_BACKTICK.repeat(activeTickSize);
+      const closingIndex = line.indexOf(closingToken, cursor);
+      if (closingIndex < 0) {
+        output += line.slice(cursor);
+        break;
+      }
+      output += line.slice(cursor, closingIndex + activeTickSize);
+      cursor = closingIndex + activeTickSize;
+      activeTickSize = 0;
+    }
+
+    return output;
+  };
+
+  const resolveFenceMarker = (line) => {
+    const normalizedLine = typeof line === "string" ? line : "";
+    const trimmedLeftLine = normalizedLine.replace(/^\\s{0,3}/, "");
+    if (!trimmedLeftLine) {
+      return null;
+    }
+    const markerChar = trimmedLeftLine.charAt(0);
+    if (markerChar !== MARKDOWN_BACKTICK && markerChar !== "~") {
+      return null;
+    }
+    let markerLength = 0;
+    while (markerLength < trimmedLeftLine.length && trimmedLeftLine.charAt(markerLength) === markerChar) {
+      markerLength += 1;
+    }
+    if (markerLength < 3) {
+      return null;
+    }
+    return { markerChar, markerLength };
+  };
+
+  const rewriteMarkdownForExport = (markdownText, baseURL) => {
+    const normalizedText = typeof markdownText === "string" ? markdownText : "";
+    if (!normalizedText) {
+      return "";
+    }
+
+    const hasTrailingLineBreak = /\\r?\\n$/.test(normalizedText);
+    const sourceLines = normalizedText.replace(/\\r\\n/g, "\\n").split("\\n");
+    const rewrittenLines = [];
+    let activeFenceMarker = null;
+
+    for (const sourceLine of sourceLines) {
+      const fenceMarker = resolveFenceMarker(sourceLine);
+      if (fenceMarker) {
+        if (!activeFenceMarker) {
+          activeFenceMarker = fenceMarker;
+          rewrittenLines.push(sourceLine);
+          continue;
+        }
+        if (
+          fenceMarker.markerChar === activeFenceMarker.markerChar &&
+          fenceMarker.markerLength >= activeFenceMarker.markerLength
+        ) {
+          activeFenceMarker = null;
+          rewrittenLines.push(sourceLine);
+          continue;
+        }
+      }
+
+      if (activeFenceMarker) {
+        rewrittenLines.push(sourceLine);
+        continue;
+      }
+
+      let rewrittenLine = rewriteOutsideInlineCode(sourceLine, (segment) => {
+        let output = rewriteMarkdownInlineLinks(segment, baseURL);
+        output = rewriteHtmlResourceAttributes(output, baseURL);
+        return output;
+      });
+      rewrittenLine = rewriteMarkdownReferenceDefinition(rewrittenLine, baseURL);
+      rewrittenLines.push(rewrittenLine);
+    }
+
+    let output = rewrittenLines.join("\\n");
+    if (hasTrailingLineBreak && !output.endsWith("\\n")) {
+      output += "\\n";
+    }
+    return output;
+  };
+
+  const handleMarkdownExport = (actionButton) => {
+    if (!(actionButton instanceof HTMLButtonElement)) {
+      return;
+    }
+    actionButton.disabled = true;
+    actionButton.classList.add(EXPORT_ACTION_BUSY_CLASS);
+    try {
+      const payload = resolveReaderStatePayload();
+      if (!payload || typeof payload !== "object") {
+        throw new Error("页面状态读取失败，请刷新页面后重试。");
+      }
+      const documentData = payload.document && typeof payload.document === "object" ? payload.document : null;
+      if (!documentData) {
+        throw new Error("文档数据缺失，请刷新页面后重试。");
+      }
+      const markdownContent = typeof documentData.contentMd === "string" ? documentData.contentMd : "";
+      const baseURL = resolveExportBaseURL(payload);
+      const rewrittenMarkdown = rewriteMarkdownForExport(markdownContent, baseURL);
+      const documentTitle = typeof documentData.title === "string" ? documentData.title : "";
+      const exportFileName = buildMarkdownExportFileName(documentTitle);
+      triggerTextFileDownload(rewrittenMarkdown, exportFileName, "text/markdown;charset=utf-8");
+    } catch (error) {
+      console.error("[reader][export] markdown export failed", error);
+    } finally {
+      actionButton.disabled = false;
+      actionButton.classList.remove(EXPORT_ACTION_BUSY_CLASS);
+    }
+  };
+
+  const handlePdfExport = (actionButton) => {
+    if (!(actionButton instanceof HTMLButtonElement)) {
+      return;
+    }
+    actionButton.disabled = true;
+    actionButton.classList.add(EXPORT_ACTION_BUSY_CLASS);
+    try {
+      window.print();
+    } catch (error) {
+      console.error("[reader][export] pdf print failed", error);
+    } finally {
+      actionButton.disabled = false;
+      actionButton.classList.remove(EXPORT_ACTION_BUSY_CLASS);
+    }
+  };
+
+  const handleExportAction = (actionButton) => {
+    if (!(actionButton instanceof HTMLButtonElement)) {
+      return;
+    }
+    const exportAction = (actionButton.getAttribute("data-reader-export-action") || "").trim().toLowerCase();
+    if (exportAction === "markdown") {
+      handleMarkdownExport(actionButton);
+      return;
+    }
+    if (exportAction === "pdf") {
+      handlePdfExport(actionButton);
+    }
   };
 
   const triggerAttachmentNavigation = (targetURL, purpose) => {
@@ -634,6 +968,17 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       "click",
       (event) => {
         if (!(event.target instanceof Element)) {
+          return;
+        }
+
+        const exportActionButton = event.target.closest(EXPORT_ACTION_SELECTOR);
+        if (exportActionButton instanceof HTMLButtonElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          handleExportAction(exportActionButton);
           return;
         }
 
