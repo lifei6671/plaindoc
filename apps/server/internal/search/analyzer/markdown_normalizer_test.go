@@ -70,3 +70,19 @@ func TestNormalizeMarkdownToPlainText_EmptyInput(t *testing.T) {
 		t.Fatalf("expected empty normalized output, got %q", normalized)
 	}
 }
+
+func TestNormalizeMarkdownToPlainText_PreservesCompoundIdentifier(t *testing.T) {
+	input := strings.Join([]string{
+		"字段名是 doc_visibility_level，需要参与检索。",
+		"",
+		"`doc_visibility_level_in_code`",
+	}, "\n")
+
+	normalized := NormalizeMarkdownToPlainText(input)
+	if !strings.Contains(normalized, "doc_visibility_level") {
+		t.Fatalf("expected normalized content to contain %q, got %q", "doc_visibility_level", normalized)
+	}
+	if strings.Contains(normalized, "doc_visibility_level_in_code") {
+		t.Fatalf("expected normalized content not to contain inline code token, got %q", normalized)
+	}
+}

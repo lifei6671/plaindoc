@@ -11,6 +11,7 @@ import (
 
 	searchcfg "github.com/lifei6671/plaindoc/apps/server/internal/search"
 	"github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
@@ -83,7 +84,24 @@ func (s *SearchConfigService) Refresh(ctx context.Context) (SearchRuntimeSnapsho
 		return SearchRuntimeSnapshot{}, errors.New("search config service is nil")
 	}
 
-	config, sourceVersion, err := s.loadConfig(ctx)
+	configRecord, err := s.loadConfigRecord(ctx)
+	if err != nil {
+		return SearchRuntimeSnapshot{}, err
+	}
+	sourceVersion := 0
+	if configRecord != nil {
+		sourceVersion = configRecord.Version
+	}
+
+	s.mu.RLock()
+	if s.initialized && s.snapshot.SourceVersion == sourceVersion {
+		current := s.snapshot
+		s.mu.RUnlock()
+		return current, nil
+	}
+	s.mu.RUnlock()
+
+	config, err := s.parseConfigFromRecord(configRecord)
 	if err != nil {
 		return SearchRuntimeSnapshot{}, err
 	}
@@ -117,6 +135,11 @@ func (s *SearchConfigService) Refresh(ctx context.Context) (SearchRuntimeSnapsho
 	}
 
 	s.mu.Lock()
+	if s.initialized && s.snapshot.SourceVersion == sourceVersion {
+		current := s.snapshot
+		s.mu.Unlock()
+		return current, nil
+	}
 	s.snapshot = nextSnapshot
 	s.initialized = true
 	s.mu.Unlock()
@@ -124,34 +147,42 @@ func (s *SearchConfigService) Refresh(ctx context.Context) (SearchRuntimeSnapsho
 	return nextSnapshot, nil
 }
 
-func (s *SearchConfigService) loadConfig(ctx context.Context) (searchcfg.Config, int, error) {
-	defaultConfig := searchcfg.DefaultConfig()
+func (s *SearchConfigService) loadConfigRecord(
+	ctx context.Context,
+) (*models.SystemConfig, error) {
 	if s == nil || s.systemConfigRepo == nil {
-		return defaultConfig, 0, nil
+		return nil, nil
 	}
 
 	configRecord, err := s.systemConfigRepo.GetByConfigKey(ctx, searchcfg.SystemConfigKey)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return defaultConfig, 0, nil
+			return nil, nil
 		}
-		return defaultConfig, 0, err
+		return nil, err
 	}
+	return configRecord, nil
+}
+
+func (s *SearchConfigService) parseConfigFromRecord(
+	configRecord *models.SystemConfig,
+) (searchcfg.Config, error) {
+	defaultConfig := searchcfg.DefaultConfig()
 	if configRecord == nil || strings.TrimSpace(configRecord.ConfigValueJSON) == "" {
-		return defaultConfig, 0, nil
+		return defaultConfig, nil
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(configRecord.ConfigValueJSON), &payload); err != nil {
-		return defaultConfig, 0, err
+		return defaultConfig, err
 	}
 	if payload == nil {
 		payload = map[string]any{}
 	}
 
 	if err := searchcfg.ValidateConfigPayload(payload); err != nil {
-		return defaultConfig, 0, err
+		return defaultConfig, err
 	}
 	normalized := searchcfg.NormalizeConfig(payload)
-	return normalized, configRecord.Version, nil
+	return normalized, nil
 }

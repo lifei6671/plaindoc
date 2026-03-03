@@ -11,11 +11,14 @@ import (
 )
 
 var (
-	frontMatterRegexp = regexp.MustCompile(`(?s)\A---\s*\n.*?\n---\s*`)
-	blockMathRegexp   = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
-	inlineMathRegexp  = regexp.MustCompile(`\$(?:\\.|[^$\n])+\$`)
-	whitespaceRegexp  = regexp.MustCompile(`\s+`)
+	frontMatterRegexp   = regexp.MustCompile(`(?s)\A---\s*\n.*?\n---\s*`)
+	blockMathRegexp     = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
+	inlineMathRegexp    = regexp.MustCompile(`\$(?:\\.|[^$\n])+\$`)
+	compoundIdentRegexp = regexp.MustCompile(`[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+`)
+	whitespaceRegexp    = regexp.MustCompile(`\s+`)
 )
+
+const protectedUnderscoreRune = '\uFF3F'
 
 // NormalizeMarkdownToPlainText 将 Markdown 清洗为可检索纯文本。
 //
@@ -60,7 +63,7 @@ func NormalizeMarkdownToPlainText(markdown string) string {
 	})
 
 	joined := strings.Join(segments, " ")
-	return normalizeWhitespace(joined)
+	return restoreCompoundIdentifiers(normalizeWhitespace(joined))
 }
 
 func preprocessMarkdown(markdown string) string {
@@ -68,6 +71,7 @@ func preprocessMarkdown(markdown string) string {
 	normalized = frontMatterRegexp.ReplaceAllString(normalized, "")
 	normalized = blockMathRegexp.ReplaceAllString(normalized, " ")
 	normalized = inlineMathRegexp.ReplaceAllString(normalized, " ")
+	normalized = protectCompoundIdentifiers(normalized)
 	return normalized
 }
 
@@ -87,6 +91,23 @@ func normalizeWhitespace(value string) string {
 	}
 	trimmed = whitespaceRegexp.ReplaceAllString(trimmed, " ")
 	return strings.TrimSpace(trimmed)
+}
+
+func protectCompoundIdentifiers(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return value
+	}
+	replacement := string(protectedUnderscoreRune)
+	return compoundIdentRegexp.ReplaceAllStringFunc(value, func(token string) string {
+		return strings.ReplaceAll(token, "_", replacement)
+	})
+}
+
+func restoreCompoundIdentifiers(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, string(protectedUnderscoreRune), "_")
 }
 
 func isHanRune(r rune) bool {

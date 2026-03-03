@@ -211,11 +211,11 @@ pre {
   position: relative;
 }
 
-.yt-user-dropdown > summary {
+.yt-user-dropdown>summary {
   list-style: none;
 }
 
-.yt-user-dropdown > summary::-webkit-details-marker {
+.yt-user-dropdown>summary::-webkit-details-marker {
   display: none;
 }
 
@@ -633,8 +633,7 @@ pre {
 }
 
 .yt-search-highlight {
-  background: #fff3bf;
-  color: inherit;
+  color: #d93025;
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -776,6 +775,7 @@ pre {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {

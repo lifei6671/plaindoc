@@ -159,6 +159,7 @@ func (s *SearchQueryService) Search(
 		ActorUserID:       normalizedViewerUserID,
 		IsAuthenticated:   normalizedViewerUserID != "",
 		UserRoleLevel:     userRoleLevel,
+		RawQuery:          queryText,
 		Query:             normalizedQuery,
 		Page:              input.Page,
 		PageSize:          input.PageSize,
@@ -168,7 +169,13 @@ func (s *SearchQueryService) Search(
 		NormalizerVersion: searchNormalizerVersion,
 	}
 
-	response, err := providerInstance.Search(ctx, request)
+	providerName, response, err := s.searchWithRuntimeFallback(
+		ctx,
+		snapshot.Config,
+		providerName,
+		providerInstance,
+		request,
+	)
 	if err != nil {
 		return SearchQueryResult{}, err
 	}
@@ -252,6 +259,69 @@ func (s *SearchQueryService) resolveProvider(
 		ErrSearchProviderUnavailable,
 		activeProvider,
 	)
+}
+
+func (s *SearchQueryService) searchWithRuntimeFallback(
+	ctx context.Context,
+	config searchcfg.Config,
+	providerName searchcfg.ProviderName,
+	providerInstance searchprovider.Provider,
+	request searchprovider.SearchRequest,
+) (searchcfg.ProviderName, searchprovider.SearchResponse, error) {
+	response, err := providerInstance.Search(ctx, request)
+	if err == nil {
+		return providerName, response, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return providerName, searchprovider.SearchResponse{}, err
+	}
+
+	fallbackProviderName, fallbackProvider := s.resolveRuntimeFallbackProvider(config, providerName)
+	if fallbackProvider == nil {
+		return providerName, searchprovider.SearchResponse{}, fmt.Errorf(
+			"%w: provider %q search failed: %v",
+			ErrSearchProviderUnavailable,
+			providerName,
+			err,
+		)
+	}
+
+	fallbackResponse, fallbackErr := fallbackProvider.Search(ctx, request)
+	if fallbackErr != nil {
+		if errors.Is(fallbackErr, context.Canceled) || errors.Is(fallbackErr, context.DeadlineExceeded) {
+			return fallbackProviderName, searchprovider.SearchResponse{}, fallbackErr
+		}
+		return fallbackProviderName, searchprovider.SearchResponse{}, fmt.Errorf(
+			"%w: provider %q search failed: %v; fallback provider %q search failed: %v",
+			ErrSearchProviderUnavailable,
+			providerName,
+			err,
+			fallbackProviderName,
+			fallbackErr,
+		)
+	}
+	return fallbackProviderName, fallbackResponse, nil
+}
+
+func (s *SearchQueryService) resolveRuntimeFallbackProvider(
+	config searchcfg.Config,
+	providerName searchcfg.ProviderName,
+) (searchcfg.ProviderName, searchprovider.Provider) {
+	if s == nil {
+		return "", nil
+	}
+	if config.FallbackPolicy != searchcfg.FallbackPolicyDegradeToDatabase {
+		return "", nil
+	}
+	if providerName == searchcfg.ProviderDatabase {
+		return "", nil
+	}
+
+	fallbackProvider := s.providers[searchcfg.ProviderDatabase]
+	if fallbackProvider == nil {
+		return "", nil
+	}
+	return searchcfg.ProviderDatabase, fallbackProvider
 }
 
 func normalizeSearchScopeSpaceIDs(items []string) []string {

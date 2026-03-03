@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"unicode"
-	"unicode/utf8"
+
+	"github.com/go-ego/gse"
 )
 
 const jiebaAnalyzerName = "jieba"
@@ -30,16 +30,23 @@ type JiebaAnalyzer struct {
 	mu          sync.RWMutex
 	dictVersion string
 	userEntries []string
-	dictTerms   []string
 	enableHMM   bool
+	segmenter   *gse.Segmenter
 }
 
 // NewJiebaAnalyzer 创建 jieba analyzer。
 func NewJiebaAnalyzer(options JiebaOptions) (*JiebaAnalyzer, error) {
+	normalizedEntries := normalizeDictEntries(options.UserDictEntries)
+	segmenter, err := buildJiebaSegmenter(normalizedEntries)
+	if err != nil {
+		return nil, err
+	}
+
 	analyzer := &JiebaAnalyzer{
 		dictVersion: strings.TrimSpace(options.DictVersion),
-		userEntries: normalizeDictEntries(options.UserDictEntries),
+		userEntries: normalizedEntries,
 		enableHMM:   options.EnableHMM,
+		segmenter:   segmenter,
 	}
 	if analyzer.dictVersion == "" {
 		analyzer.dictVersion = "default"
@@ -49,7 +56,6 @@ func NewJiebaAnalyzer(options JiebaOptions) (*JiebaAnalyzer, error) {
 	} else {
 		analyzer.enableHMM = true
 	}
-	analyzer.dictTerms = parseAndSortDictTerms(analyzer.userEntries)
 	return analyzer, nil
 }
 
@@ -82,6 +88,15 @@ func (a *JiebaAnalyzer) Reload(ctx context.Context, dictVersion string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	a.mu.RLock()
+	entries := append([]string(nil), a.userEntries...)
+	a.mu.RUnlock()
+	segmenter, err := buildJiebaSegmenter(entries)
+	if err != nil {
+		return err
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	normalizedVersion := strings.TrimSpace(dictVersion)
@@ -89,7 +104,7 @@ func (a *JiebaAnalyzer) Reload(ctx context.Context, dictVersion string) error {
 		normalizedVersion = "default"
 	}
 	a.dictVersion = normalizedVersion
-	a.dictTerms = parseAndSortDictTerms(a.userEntries)
+	a.segmenter = segmenter
 	return nil
 }
 
@@ -104,10 +119,14 @@ func (a *JiebaAnalyzer) UpdateUserDictEntries(ctx context.Context, entries []str
 	if normalizedVersion == "" {
 		normalizedVersion = "default"
 	}
+	segmenter, err := buildJiebaSegmenter(normalizedEntries)
+	if err != nil {
+		return err
+	}
 
 	a.mu.Lock()
 	a.userEntries = normalizedEntries
-	a.dictTerms = parseAndSortDictTerms(normalizedEntries)
+	a.segmenter = segmenter
 	a.dictVersion = normalizedVersion
 	a.mu.Unlock()
 	return nil
@@ -126,13 +145,24 @@ func (a *JiebaAnalyzer) Capabilities() Capabilities {
 func (a *JiebaAnalyzer) analyze(input AnalyzeInput) (AnalyzeOutput, error) {
 	a.mu.RLock()
 	dictVersion := a.dictVersion
-	dictTerms := append([]string(nil), a.dictTerms...)
 	enableHMM := a.enableHMM
+	segmenter := a.segmenter
 	a.mu.RUnlock()
+	if segmenter == nil {
+		return AnalyzeOutput{}, errors.New("jieba segmenter is nil")
+	}
 
 	normalizedText := NormalizeMarkdownToPlainText(input.Text)
-	rawTokens := tokenizeJiebaStyle(normalizedText, dictTerms, enableHMM)
-	tokens := dedupeAndTrimTokens(rawTokens)
+	if strings.TrimSpace(normalizedText) == "" {
+		return AnalyzeOutput{
+			Tokens:         []string{},
+			NormalizedText: normalizedText,
+			TokenCount:     0,
+			DictVersion:    dictVersion,
+		}, nil
+	}
+	rawTokens := segmenter.CutSearch(normalizedText, enableHMM)
+	tokens := normalizeJiebaTokens(rawTokens)
 
 	return AnalyzeOutput{
 		Tokens:         tokens,
@@ -142,109 +172,56 @@ func (a *JiebaAnalyzer) analyze(input AnalyzeInput) (AnalyzeOutput, error) {
 	}, nil
 }
 
-func tokenizeJiebaStyle(text string, dictTerms []string, enableHMM bool) []string {
-	if strings.TrimSpace(text) == "" {
-		return []string{}
+func buildJiebaSegmenter(entries []string) (*gse.Segmenter, error) {
+	segmenter := &gse.Segmenter{
+		SkipLog:  true,
+		AlphaNum: true,
+	}
+	if err := segmenter.LoadDictEmbed("zh"); err != nil {
+		return nil, fmt.Errorf("load gse default dictionary: %w", err)
+	}
+	if len(entries) == 0 {
+		return segmenter, nil
 	}
 
-	tokens := make([]string, 0, 32)
-	var current strings.Builder
-
-	flushCurrent := func() {
-		if current.Len() == 0 {
-			return
-		}
-		word := strings.TrimSpace(current.String())
-		current.Reset()
-		if word != "" {
-			tokens = append(tokens, strings.ToLower(word))
-		}
+	dictPayload := strings.Join(entries, "\n")
+	if err := segmenter.LoadDictStr(dictPayload); err != nil {
+		return nil, fmt.Errorf("load gse user dictionary: %w", err)
 	}
-
-	for index := 0; index < len(text); {
-		r, size := utf8.DecodeRuneInString(text[index:])
-		if r == utf8.RuneError && size == 1 {
-			flushCurrent()
-			index += size
-			continue
-		}
-
-		if isHanRune(r) {
-			flushCurrent()
-
-			matched := ""
-			for _, term := range dictTerms {
-				if strings.HasPrefix(text[index:], term) {
-					matched = term
-					break
-				}
-			}
-			if matched != "" {
-				tokens = append(tokens, matched)
-				index += len(matched)
-				continue
-			}
-
-			if enableHMM {
-				// HMM 开启时，连续汉字段做二元切分，提升短语命中概率。
-				nextIndex := index + size
-				nextRune, nextSize := utf8.DecodeRuneInString(text[nextIndex:])
-				if nextRune != utf8.RuneError && isHanRune(nextRune) {
-					bigram := text[index : nextIndex+nextSize]
-					tokens = append(tokens, bigram)
-				}
-			}
-			tokens = append(tokens, string(r))
-			index += size
-			continue
-		}
-
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			current.WriteRune(r)
-			index += size
-			continue
-		}
-
-		flushCurrent()
-		index += size
-	}
-	flushCurrent()
-
-	return tokens
+	return segmenter, nil
 }
 
-func parseAndSortDictTerms(entries []string) []string {
-	if len(entries) == 0 {
+func normalizeJiebaTokens(input []string) []string {
+	if len(input) == 0 {
 		return []string{}
 	}
 
-	terms := make([]string, 0, len(entries))
-	seen := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		fields := strings.Fields(entry)
-		if len(fields) == 0 {
+	result := make([]string, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for _, token := range input {
+		normalized := strings.ToLower(strings.TrimSpace(token))
+		if normalized == "" {
 			continue
 		}
-		term := strings.TrimSpace(fields[0])
-		if term == "" {
+		if !containsWordRune(normalized) {
 			continue
 		}
-		if _, exists := seen[term]; exists {
+		if _, exists := seen[normalized]; exists {
 			continue
 		}
-		seen[term] = struct{}{}
-		terms = append(terms, term)
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
 	}
+	return result
+}
 
-	sort.SliceStable(terms, func(i, j int) bool {
-		leftLength := utf8.RuneCountInString(terms[i])
-		rightLength := utf8.RuneCountInString(terms[j])
-		if leftLength == rightLength {
-			return terms[i] < terms[j]
+func containsWordRune(value string) bool {
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
 		}
-		return leftLength > rightLength
-	})
-	return terms
+	}
+	return false
 }
 
 func normalizeDictEntries(entries []string) []string {

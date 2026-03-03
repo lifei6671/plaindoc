@@ -32,3 +32,38 @@ func TestResolveTokenMinShouldMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSearchQueryTermsWithRaw_IncludesCompoundLiteral(t *testing.T) {
+	terms := buildSearchQueryTermsWithRaw("doc visibility level", "doc_visibility_level")
+	expected := []string{"doc", "visibility", "level", "doc_visibility_level"}
+	if !reflect.DeepEqual(expected, terms) {
+		t.Fatalf("expected terms=%v, got=%v", expected, terms)
+	}
+}
+
+func TestExtractCompoundLiteralTokens(t *testing.T) {
+	terms := ExtractCompoundLiteralTokens(" [doc_visibility_level], abc x-y-z test ")
+	expected := []string{"doc_visibility_level", "x-y-z"}
+	if !reflect.DeepEqual(expected, terms) {
+		t.Fatalf("expected terms=%v, got=%v", expected, terms)
+	}
+}
+
+func TestBuildSearchSnippetKeywords_PrioritizesCompoundLiteral(t *testing.T) {
+	terms := buildSearchSnippetKeywords("doc visibility level", "doc_visibility_level")
+	expected := []string{
+		"doc_visibility_level",
+		"doc visibility level",
+		"doc-visibility-level",
+		"doc.visibility.level",
+		"doc/visibility/level",
+		"doc:visibility:level",
+		"docvisibilitylevel",
+		"doc",
+		"visibility",
+		"level",
+	}
+	if !reflect.DeepEqual(expected, terms) {
+		t.Fatalf("expected terms=%v, got=%v", expected, terms)
+	}
+}

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
@@ -72,7 +73,13 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 		return SearchResponse{}, err
 	}
 
-	terms := buildSearchQueryTerms(request.Query)
+	terms := buildSearchQueryTermsWithRaw(request.Query, request.RawQuery)
+	snippetKeywords := buildSearchSnippetKeywords(request.Query, request.RawQuery)
+	boostedTerms := extractCompoundLiteralTokens(request.RawQuery)
+	boostedSet := make(map[string]struct{}, len(boostedTerms))
+	for _, item := range boostedTerms {
+		boostedSet[item] = struct{}{}
+	}
 	if len(terms) == 0 {
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
@@ -102,28 +109,32 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
 
+	scoredRows := scoreRowsByTerms(filteredRows, terms, boostedSet)
+	if len(scoredRows) == 0 {
+		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
+	}
+
 	start := (page - 1) * pageSize
-	if start >= len(filteredRows) {
-		return SearchResponse{Total: int64(len(filteredRows)), Hits: []SearchHit{}}, nil
+	if start >= len(scoredRows) {
+		return SearchResponse{Total: int64(len(scoredRows)), Hits: []SearchHit{}}, nil
 	}
 	end := start + pageSize
-	if end > len(filteredRows) {
-		end = len(filteredRows)
+	if end > len(scoredRows) {
+		end = len(scoredRows)
 	}
-	pageRows := filteredRows[start:end]
+	pageRows := scoredRows[start:end]
 
 	hits := make([]SearchHit, 0, len(pageRows))
-	baseScore := float64(len(terms))
 	for index, row := range pageRows {
 		hits = append(hits, SearchHit{
-			DocID:   strings.TrimSpace(row.DocumentID),
-			Score:   baseScore - (float64(index) * 0.001),
-			Snippet: buildDatabaseSearchSnippet(row.Title, row.ContentMD, terms),
+			DocID:   strings.TrimSpace(row.Row.DocumentID),
+			Score:   row.Score - (float64(index) * 0.0001),
+			Snippet: buildDatabaseSearchSnippet(row.Row.Title, row.Row.ContentMD, snippetKeywords),
 		})
 	}
 
 	return SearchResponse{
-		Total: int64(len(filteredRows)),
+		Total: int64(len(scoredRows)),
 		Hits:  hits,
 	}, nil
 }
@@ -283,6 +294,53 @@ func filterRowsByTokenMatch(
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+type databaseScoredRow struct {
+	Row   repository.SearchVisibleDocumentRow
+	Score float64
+}
+
+func scoreRowsByTerms(
+	rows []repository.SearchVisibleDocumentRow,
+	terms []string,
+	boostedSet map[string]struct{},
+) []databaseScoredRow {
+	if len(rows) == 0 || len(terms) == 0 {
+		return []databaseScoredRow{}
+	}
+
+	scored := make([]databaseScoredRow, 0, len(rows))
+	for _, item := range rows {
+		content := strings.ToLower(strings.TrimSpace(item.Title + "\n" + item.ContentMD))
+		if content == "" {
+			continue
+		}
+
+		score := 0.0
+		for _, term := range terms {
+			if !strings.Contains(content, term) {
+				continue
+			}
+			weight := 1.0
+			if _, exists := boostedSet[term]; exists {
+				weight = 3.0
+			}
+			score += weight
+		}
+		if score <= 0 {
+			continue
+		}
+		scored = append(scored, databaseScoredRow{
+			Row:   item,
+			Score: score,
+		})
+	}
+
+	sort.SliceStable(scored, func(left int, right int) bool {
+		return scored[left].Score > scored[right].Score
+	})
+	return scored
 }
 
 func normalizeDatabaseSearchPagination(page int, pageSize int) (int, int, int) {

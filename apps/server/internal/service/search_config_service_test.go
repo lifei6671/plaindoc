@@ -306,3 +306,68 @@ func TestSearchConfigService_Refresh_JiebaDictLoaderError(t *testing.T) {
 		t.Fatal("expected no snapshot when first refresh failed")
 	}
 }
+
+func TestSearchConfigService_Refresh_SkipsRebuildWhenSourceVersionUnchanged(t *testing.T) {
+	repo := &stubSystemConfigRepository{
+		recordByKey: map[string]*models.SystemConfig{
+			searchcfg.SystemConfigKey: {
+				ConfigKey: searchcfg.SystemConfigKey,
+				ConfigValueJSON: `{
+					"enabled":true,"activeProvider":"bleve",
+					"fallbackPolicy":"degrade_to_database",
+					"analysis":{
+						"activeAnalyzer":"jieba",
+						"analyzers":{
+							"simple":{"enabled":false},
+							"jieba":{
+								"enabled":true,
+								"mode":"search",
+								"hmm":true,
+								"stopwordsEnabled":false,
+								"dictSource":"db",
+								"dictVersion":"v1"
+							}
+						}
+					}
+				}`,
+				Version: 7,
+			},
+		},
+		errByKey: map[string]error{},
+	}
+
+	dictLoadCount := 0
+	service := NewSearchConfigService(repo, SearchConfigServiceOptions{
+		JiebaDictLoader: func(ctx context.Context, config searchcfg.Config) ([]string, error) {
+			dictLoadCount++
+			return []string{"微服务架构 200 n"}, nil
+		},
+	})
+
+	firstSnapshot, err := service.Refresh(context.Background())
+	if err != nil {
+		t.Fatalf("first refresh failed: %v", err)
+	}
+	secondSnapshot, err := service.Refresh(context.Background())
+	if err != nil {
+		t.Fatalf("second refresh failed: %v", err)
+	}
+
+	if dictLoadCount != 1 {
+		t.Fatalf("expected dict loader called once, got %d", dictLoadCount)
+	}
+	if firstSnapshot.SourceVersion != secondSnapshot.SourceVersion {
+		t.Fatalf(
+			"expected same source version on unchanged config, first=%d second=%d",
+			firstSnapshot.SourceVersion,
+			secondSnapshot.SourceVersion,
+		)
+	}
+	if !firstSnapshot.LoadedAt.Equal(secondSnapshot.LoadedAt) {
+		t.Fatalf(
+			"expected same loadedAt when reusing snapshot, first=%s second=%s",
+			firstSnapshot.LoadedAt,
+			secondSnapshot.LoadedAt,
+		)
+	}
+}

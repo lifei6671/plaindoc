@@ -41,3 +41,21 @@ func TestBuildKeywordWindowSnippetFromTitleAndBody_CoversTitleHit(t *testing.T) 
 		t.Fatalf("expected snippet contains title keyword alpha, got=%q", snippet)
 	}
 }
+
+func TestBuildKeywordWindowSnippet_PrioritizesCompoundKeyword(t *testing.T) {
+	plain := strings.Repeat("doc ", 90) + "doc_visibility_level marker"
+	keywords := []string{"doc_visibility_level", "doc"}
+	snippet := buildKeywordWindowSnippet(plain, keywords)
+	if !strings.Contains(strings.ToLower(snippet), "doc_visibility_level") {
+		t.Fatalf("expected snippet prefers compound token window, got=%q", snippet)
+	}
+}
+
+func TestBuildKeywordWindowSnippet_PrioritizesCompoundVariantKeyword(t *testing.T) {
+	plain := strings.Repeat("doc ", 90) + "doc-visibility-level marker"
+	keywords := buildSearchSnippetKeywords("doc visibility level", "doc_visibility_level")
+	snippet := buildKeywordWindowSnippet(plain, keywords)
+	if !strings.Contains(strings.ToLower(snippet), "doc-visibility-level") {
+		t.Fatalf("expected snippet prefers compound variant window, got=%q", snippet)
+	}
+}

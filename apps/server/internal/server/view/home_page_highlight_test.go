@@ -41,3 +41,17 @@ func TestHighlightSearchText_SupportsChineseBigrams(t *testing.T) {
 		t.Fatalf("expected output contains highlighted 权限, got=%q", output)
 	}
 }
+
+func TestHighlightSearchText_SupportsUnderscoreSeparatedEnglishTerm(t *testing.T) {
+	output := string(highlightSearchText("this field is doc visibility level", "doc_visibility_level"))
+	if !strings.Contains(output, `<mark class="yt-search-highlight">doc visibility level</mark>`) {
+		t.Fatalf("expected output contains highlighted full phrase, got=%q", output)
+	}
+}
+
+func TestHighlightSearchText_SupportsCompoundVariantPriority(t *testing.T) {
+	output := string(highlightSearchText("this field is doc-visibility-level", "doc_visibility_level"))
+	if !strings.Contains(output, `<mark class="yt-search-highlight">doc-visibility-level</mark>`) {
+		t.Fatalf("expected output contains highlighted compound variant, got=%q", output)
+	}
+}

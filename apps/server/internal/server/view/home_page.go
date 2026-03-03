@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -182,10 +183,113 @@ func buildHighlightKeywords(keyword string) []string {
 	for _, item := range strings.Fields(normalizedKeyword) {
 		appendKeyword(item)
 	}
+	for _, item := range extractCompoundHighlightVariants(normalizedKeyword) {
+		appendKeyword(item)
+	}
+	for _, item := range splitHighlightKeywordsBySeparators(normalizedKeyword) {
+		appendKeyword(item)
+	}
 	for _, item := range extractCJKBigrams(normalizedKeyword) {
 		appendKeyword(item)
 	}
 	return result
+}
+
+func splitHighlightKeywordsBySeparators(value string) []string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return []string{}
+	}
+	return strings.FieldsFunc(trimmed, func(r rune) bool {
+		if unicode.IsSpace(r) {
+			return true
+		}
+		switch r {
+		case '_', '-', '.', '/', '\\', ':':
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func extractCompoundHighlightVariants(value string) []string {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(value)))
+	if len(fields) == 0 {
+		return []string{}
+	}
+
+	result := make([]string, 0, len(fields)*8)
+	seen := make(map[string]struct{}, len(fields)*8)
+	appendUnique := func(item string) {
+		term := strings.TrimSpace(strings.ToLower(item))
+		if term == "" {
+			return
+		}
+		if _, exists := seen[term]; exists {
+			return
+		}
+		seen[term] = struct{}{}
+		result = append(result, term)
+	}
+
+	for _, item := range fields {
+		if !strings.ContainsAny(item, "_-./\\:") {
+			continue
+		}
+		segments := splitHighlightCompoundSegments(item)
+		if len(segments) < 2 {
+			continue
+		}
+
+		appendUnique(strings.Join(segments, " "))
+		appendUnique(strings.Join(segments, "-"))
+		appendUnique(strings.Join(segments, "."))
+		appendUnique(strings.Join(segments, "/"))
+		appendUnique(strings.Join(segments, ":"))
+		appendUnique(strings.Join(segments, ""))
+	}
+	return result
+}
+
+func splitHighlightCompoundSegments(value string) []string {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "" {
+		return []string{}
+	}
+
+	segments := make([]string, 0, 8)
+	var current strings.Builder
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		part := strings.TrimSpace(current.String())
+		current.Reset()
+		if part == "" {
+			return
+		}
+		segments = append(segments, part)
+	}
+
+	for _, r := range trimmed {
+		if isHighlightSeparator(r) {
+			flush()
+			continue
+		}
+		current.WriteRune(r)
+	}
+	flush()
+	return segments
+}
+
+func isHighlightSeparator(r rune) bool {
+	switch r {
+	case '_', '-', '.', '/', '\\', ':':
+		return true
+	default:
+		return false
+	}
 }
 
 func extractCJKBigrams(value string) []string {

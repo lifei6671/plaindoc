@@ -848,6 +848,8 @@ func buildSearchIndexRecord(
 	spaceID := strings.TrimSpace(row.SpaceID)
 	title := strings.TrimSpace(row.Title)
 	bodyPlain := strings.TrimSpace(searchanalyzer.NormalizeMarkdownToPlainText(row.ContentMD))
+	titleCompoundTokens := searchprovider.ExtractCompoundLiteralTokens(title)
+	bodyCompoundTokens := searchprovider.ExtractCompoundLiteralTokens(bodyPlain)
 
 	titleOutput, err := snapshot.ActiveAnalyzer.AnalyzeForIndex(ctx, searchanalyzer.AnalyzeInput{
 		Text:    title,
@@ -880,16 +882,19 @@ func buildSearchIndexRecord(
 	}
 
 	return searchprovider.IndexRecord{
-		SpaceID:         spaceID,
-		DocID:           strings.TrimSpace(row.DocumentID),
-		NodeID:          strings.TrimSpace(row.NodeID),
-		Title:           title,
-		BodyPlain:       bodyPlain,
-		Terms:           strings.Join(mergeSearchTokens(titleOutput.Tokens, bodyOutput.Tokens), " "),
-		TitleTerms:      strings.Join(mergeSearchTokens(titleOutput.Tokens), " "),
+		SpaceID:   spaceID,
+		DocID:     strings.TrimSpace(row.DocumentID),
+		NodeID:    strings.TrimSpace(row.NodeID),
+		Title:     title,
+		BodyPlain: bodyPlain,
+		Terms: strings.Join(
+			mergeSearchTokens(titleOutput.Tokens, bodyOutput.Tokens, titleCompoundTokens, bodyCompoundTokens),
+			" ",
+		),
+		TitleTerms:      strings.Join(mergeSearchTokens(titleOutput.Tokens, titleCompoundTokens), " "),
 		VisibilityScope: visibilityScope,
 		MinRole:         minRole,
-		UpdatedAtUnix:   parseSearchIndexUnix(row.UpdatedAt),
+		UpdatedAtUnix:   parseSearchIndexUnix(row.UpdatedAt.Time),
 		IsDeleted:       false,
 		SpaceStatus:     string(models.EntityStatusActive),
 		DocStatus:       string(models.EntityStatusActive),
@@ -1009,12 +1014,12 @@ func resolveSearchVisibilityAndRole(
 }
 
 type searchIndexRebuildRow struct {
-	SpaceID         string `gorm:"column:space_id"`
-	DocumentID      string `gorm:"column:document_id"`
-	NodeID          string `gorm:"column:node_id"`
-	Title           string `gorm:"column:title"`
-	ContentMD       string `gorm:"column:content_md"`
-	SpaceVisibility string `gorm:"column:space_visibility"`
-	DocVisibility   string `gorm:"column:doc_visibility"`
-	UpdatedAt       any    `gorm:"column:updated_at"`
+	SpaceID         string         `gorm:"column:space_id"`
+	DocumentID      string         `gorm:"column:document_id"`
+	NodeID          string         `gorm:"column:node_id"`
+	Title           string         `gorm:"column:title"`
+	ContentMD       string         `gorm:"column:content_md"`
+	SpaceVisibility string         `gorm:"column:space_visibility"`
+	DocVisibility   string         `gorm:"column:doc_visibility"`
+	UpdatedAt       searchScanTime `gorm:"column:updated_at"`
 }

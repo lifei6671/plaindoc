@@ -93,13 +93,17 @@ func locateFirstKeywordRuneRange(plain string, keywords []string) (int, int, boo
 	lowerPlain := strings.ToLower(plain)
 	matchedStartByte := -1
 	matchedEndByte := -1
-	for _, keyword := range normalizedKeywords {
+	matchedPriority := -1
+	for priority, keyword := range normalizedKeywords {
 		startByte := strings.Index(lowerPlain, keyword)
 		if startByte < 0 {
 			continue
 		}
 		endByte := startByte + len(keyword)
-		if matchedStartByte < 0 || startByte < matchedStartByte {
+		if matchedPriority < 0 ||
+			priority < matchedPriority ||
+			(priority == matchedPriority && startByte < matchedStartByte) {
+			matchedPriority = priority
 			matchedStartByte = startByte
 			matchedEndByte = endByte
 		}

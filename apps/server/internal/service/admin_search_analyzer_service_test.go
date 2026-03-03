@@ -468,6 +468,64 @@ func TestAdminSearchAnalyzerService_AnalyzePreview(t *testing.T) {
 	}
 }
 
+func TestAdminSearchAnalyzerService_AnalyzePreview_CompoundLiteralToken(t *testing.T) {
+	ctx := context.Background()
+	dictRepo := newInMemorySearchAnalyzerDictEntryRepo()
+	weight := 500
+	if err := dictRepo.Create(ctx, &models.SearchAnalyzerDictEntry{
+		Analyzer: "jieba",
+		Term:     "doc_visibility_level",
+		Weight:   &weight,
+		Status:   models.SearchAnalyzerDictEntryStatusActive,
+	}); err != nil {
+		t.Fatalf("create dict entry failed: %v", err)
+	}
+
+	systemConfigRepo := &stubSystemConfigRepository{
+		recordByKey: map[string]*models.SystemConfig{
+			searchcfg.SystemConfigKey: {
+				ConfigKey: searchcfg.SystemConfigKey,
+				ConfigValueJSON: `{
+					"enabled":true,"activeProvider":"bleve",
+					"fallbackPolicy":"degrade_to_bleve",
+					"analysis":{
+						"activeAnalyzer":"jieba",
+						"analyzers":{
+							"simple":{"enabled":false},
+							"jieba":{
+								"enabled":true,
+								"mode":"search",
+								"hmm":true,
+								"stopwordsEnabled":false,
+								"dictSource":"db",
+								"dictVersion":"v2026-03-03-001"
+							}
+						}
+					}
+				}`,
+				Version: 6,
+			},
+		},
+		errByKey: map[string]error{},
+	}
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
+	service := NewAdminSearchAnalyzerService(dictRepo, nil, adminAccessService, nil, searchConfigService)
+
+	result, err := service.AnalyzePreview(ctx, AnalyzePreviewAdminSearchAnalyzerInput{
+		ActorUserID: "admin-user-id",
+		Analyzer:    "jieba",
+		Mode:        "query",
+		Text:        "doc_visibility_level",
+	})
+	if err != nil {
+		t.Fatalf("analyze preview failed: %v", err)
+	}
+	if !slices.Contains(result.Tokens, "doc_visibility_level") {
+		t.Fatalf("expected token list to contain doc_visibility_level, got %v", result.Tokens)
+	}
+}
+
 func TestAdminSearchAnalyzerService_AnalyzePreviewInvalidMode(t *testing.T) {
 	ctx := context.Background()
 	dictRepo := newInMemorySearchAnalyzerDictEntryRepo()

@@ -39,6 +39,7 @@ type SearchRequest struct {
 	ActorUserID       string
 	IsAuthenticated   bool
 	UserRoleLevel     int
+	RawQuery          string
 	Query             string
 	Page              int
 	PageSize          int

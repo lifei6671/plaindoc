@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -184,10 +185,137 @@ func TestSearchQueryService_SearchReturnsEmptyWhenScopeUnavailable(t *testing.T)
 	}
 }
 
+func TestSearchQueryService_SearchFallsBackToDatabaseWhenActiveProviderSearchFailed(t *testing.T) {
+	configJSON, err := buildEnabledSearchConfigJSON(
+		searchcfg.ProviderBleve,
+		searchcfg.FallbackPolicyDegradeToDatabase,
+	)
+	if err != nil {
+		t.Fatalf("build search config json failed: %v", err)
+	}
+	systemConfigRepo := &staticSystemConfigRepository{
+		record: &models.SystemConfig{
+			ConfigKey:       searchcfg.SystemConfigKey,
+			ConfigValueJSON: configJSON,
+			Version:         1,
+			CreatedAt:       time.Now().UTC(),
+			UpdatedAt:       time.Now().UTC(),
+		},
+	}
+
+	bleveProvider := &recordingSearchProvider{
+		name:      string(searchcfg.ProviderBleve),
+		searchErr: errors.New("bleve index is not ready"),
+	}
+	databaseProvider := &recordingSearchProvider{
+		name: string(searchcfg.ProviderDatabase),
+		searchResponse: searchprovider.SearchResponse{
+			Total: 1,
+			Hits: []searchprovider.SearchHit{
+				{DocID: "doc-1", Score: 1.23, Snippet: "fallback-hit"},
+			},
+		},
+	}
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	searchQueryService := NewSearchQueryService(searchConfigService, bleveProvider, databaseProvider)
+	searchQueryService.SetSearchVisibilityRepository(&roleAwareSearchVisibilityRepository{
+		scopeSpaceIDsByUser: map[string][]string{
+			"": {"space-public"},
+		},
+	})
+
+	result, searchErr := searchQueryService.Search(context.Background(), SearchQueryInput{
+		Query:         "hello world",
+		Page:          1,
+		PageSize:      20,
+		Sort:          searchprovider.SortModeRelevance,
+		NeedHighlight: false,
+	})
+	if searchErr != nil {
+		t.Fatalf("search failed: %v", searchErr)
+	}
+	if result.Provider != searchcfg.ProviderDatabase {
+		t.Fatalf("expected provider=%q, got=%q", searchcfg.ProviderDatabase, result.Provider)
+	}
+	if result.Response.Total != 1 {
+		t.Fatalf("expected total=1, got=%d", result.Response.Total)
+	}
+	if bleveProvider.CallCount() != 1 {
+		t.Fatalf("expected bleve provider call count=1, got=%d", bleveProvider.CallCount())
+	}
+	if databaseProvider.CallCount() != 1 {
+		t.Fatalf("expected database provider call count=1, got=%d", databaseProvider.CallCount())
+	}
+}
+
+func TestSearchQueryService_SearchDoesNotFallbackWhenPolicyIsReturnError(t *testing.T) {
+	configJSON, err := buildEnabledSearchConfigJSON(
+		searchcfg.ProviderBleve,
+		searchcfg.FallbackPolicyReturnError,
+	)
+	if err != nil {
+		t.Fatalf("build search config json failed: %v", err)
+	}
+	systemConfigRepo := &staticSystemConfigRepository{
+		record: &models.SystemConfig{
+			ConfigKey:       searchcfg.SystemConfigKey,
+			ConfigValueJSON: configJSON,
+			Version:         1,
+			CreatedAt:       time.Now().UTC(),
+			UpdatedAt:       time.Now().UTC(),
+		},
+	}
+
+	bleveProvider := &recordingSearchProvider{
+		name:      string(searchcfg.ProviderBleve),
+		searchErr: errors.New("bleve open index failed"),
+	}
+	databaseProvider := &recordingSearchProvider{name: string(searchcfg.ProviderDatabase)}
+
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	searchQueryService := NewSearchQueryService(searchConfigService, bleveProvider, databaseProvider)
+	searchQueryService.SetSearchVisibilityRepository(&roleAwareSearchVisibilityRepository{
+		scopeSpaceIDsByUser: map[string][]string{
+			"": {"space-public"},
+		},
+	})
+
+	_, searchErr := searchQueryService.Search(context.Background(), SearchQueryInput{
+		Query:         "hello world",
+		Page:          1,
+		PageSize:      20,
+		Sort:          searchprovider.SortModeRelevance,
+		NeedHighlight: false,
+	})
+	if searchErr == nil {
+		t.Fatalf("expected search error, got nil")
+	}
+	if !errors.Is(searchErr, ErrSearchProviderUnavailable) {
+		t.Fatalf("expected ErrSearchProviderUnavailable, got %v", searchErr)
+	}
+	if bleveProvider.CallCount() != 1 {
+		t.Fatalf("expected bleve provider call count=1, got=%d", bleveProvider.CallCount())
+	}
+	if databaseProvider.CallCount() != 0 {
+		t.Fatalf("expected database provider call count=0, got=%d", databaseProvider.CallCount())
+	}
+}
+
 func buildEnabledDatabaseSearchConfigJSON() (string, error) {
+	return buildEnabledSearchConfigJSON(
+		searchcfg.ProviderDatabase,
+		searchcfg.FallbackPolicyDegradeToDatabase,
+	)
+}
+
+func buildEnabledSearchConfigJSON(
+	activeProvider searchcfg.ProviderName,
+	fallbackPolicy searchcfg.FallbackPolicy,
+) (string, error) {
 	config := searchcfg.DefaultConfig()
 	config.Enabled = true
-	config.ActiveProvider = searchcfg.ProviderDatabase
+	config.ActiveProvider = activeProvider
+	config.FallbackPolicy = fallbackPolicy
 	payload, err := json.Marshal(config)
 	if err != nil {
 		return "", err
@@ -293,9 +421,11 @@ func (r *roleAwareSearchVisibilityRepository) ResolveUserRoleLevel(
 }
 
 type recordingSearchProvider struct {
-	name        string
-	lastRequest searchprovider.SearchRequest
-	callCount   int
+	name           string
+	searchResponse searchprovider.SearchResponse
+	searchErr      error
+	lastRequest    searchprovider.SearchRequest
+	callCount      int
 }
 
 func (p *recordingSearchProvider) Name() string {
@@ -336,6 +466,15 @@ func (p *recordingSearchProvider) Search(
 	if p != nil {
 		p.lastRequest = request
 		p.callCount++
+	}
+	if p == nil {
+		return searchprovider.SearchResponse{Total: 0, Hits: []searchprovider.SearchHit{}}, nil
+	}
+	if p.searchErr != nil {
+		return searchprovider.SearchResponse{}, p.searchErr
+	}
+	if p.searchResponse.Hits != nil {
+		return p.searchResponse, nil
 	}
 	return searchprovider.SearchResponse{Total: 0, Hits: []searchprovider.SearchHit{}}, nil
 }

@@ -222,7 +222,7 @@ func (p *BleveProvider) Search(ctx context.Context, request SearchRequest) (Sear
 	}
 
 	query := buildBleveSearchQuery(request)
-	searchSnippetTerms := buildSearchQueryTerms(request.Query)
+	searchSnippetTerms := buildSearchSnippetKeywords(request.Query, request.RawQuery)
 	searchResults, err := p.searchCandidates(ctx, indexInstance, query, request.Sort, searchSnippetTerms)
 	if err != nil {
 		return SearchResponse{}, err
@@ -735,13 +735,24 @@ func buildBleveIndexMapping() *mapping.IndexMappingImpl {
 }
 
 func buildBleveSearchQuery(request SearchRequest) query.Query {
-	queryTerms := buildSearchQueryTerms(request.Query)
+	queryTerms := buildSearchQueryTermsWithRaw(request.Query, request.RawQuery)
+	boostedQueryTerms := extractCompoundLiteralTokens(request.RawQuery)
+	boostedSet := make(map[string]struct{}, len(boostedQueryTerms))
+	for _, item := range boostedQueryTerms {
+		boostedSet[item] = struct{}{}
+	}
+
 	tokenQueries := make([]query.Query, 0, len(queryTerms))
 	for _, token := range queryTerms {
 		termsQuery := bleve.NewTermQuery(token)
 		termsQuery.SetField("terms")
 		titleTermsQuery := bleve.NewTermQuery(token)
 		titleTermsQuery.SetField("title_terms")
+
+		if _, exists := boostedSet[token]; exists {
+			termsQuery.SetBoost(3.0)
+			titleTermsQuery.SetBoost(4.0)
+		}
 		tokenQueries = append(tokenQueries, bleve.NewDisjunctionQuery(termsQuery, titleTermsQuery))
 	}
 	if len(tokenQueries) == 0 {

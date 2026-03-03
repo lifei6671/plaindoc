@@ -73,6 +73,32 @@ func TestJiebaAnalyzer_UpdateUserDictEntries_RebuildsTerms(t *testing.T) {
 	}
 }
 
+func TestJiebaAnalyzer_AnalyzeForQuery_MatchesASCIICompoundDictTerm(t *testing.T) {
+	provider, err := NewJiebaAnalyzer(JiebaOptions{
+		DictVersion:     "dict-v3",
+		UserDictEntries: []string{"doc_visibility_level 500 nz"},
+		EnableHMM:       true,
+	})
+	if err != nil {
+		t.Fatalf("create jieba analyzer failed: %v", err)
+	}
+
+	output, err := provider.AnalyzeForQuery(context.Background(), AnalyzeInput{
+		Text: "字段 doc_visibility_level 需要排序",
+		Mode: ModeQuery,
+	})
+	if err != nil {
+		t.Fatalf("analyze for query failed: %v", err)
+	}
+
+	if !slices.Contains(output.Tokens, "doc_visibility_level") {
+		t.Fatalf("expected token doc_visibility_level in %v", output.Tokens)
+	}
+	if slices.Contains(output.Tokens, "doc") || slices.Contains(output.Tokens, "visibility") || slices.Contains(output.Tokens, "level") {
+		t.Fatalf("expected compound token prioritized, got split tokens %v", output.Tokens)
+	}
+}
+
 func TestFormatJiebaDictEntry(t *testing.T) {
 	line, err := FormatJiebaDictEntry("微服务", 200, "n")
 	if err != nil {
