@@ -161,4 +161,5 @@ dist-ssr/
 .omx/
 
 release/
-/apps/server/data/
+apps/server/data/
+*.bolt

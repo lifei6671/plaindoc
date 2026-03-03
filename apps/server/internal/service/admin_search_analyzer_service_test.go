@@ -11,6 +11,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	searchcfg "github.com/lifei6671/plaindoc/apps/server/internal/search"
+	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -217,6 +218,59 @@ func (r *inMemorySearchAnalyzerDictEntryRepo) UpdateByID(
 	}
 	r.items[id] = current
 	return true, nil
+}
+
+type stubPreviewAnalyzerProvider struct {
+	dictVersion string
+}
+
+func (p *stubPreviewAnalyzerProvider) Name() string {
+	return "jieba"
+}
+
+func (p *stubPreviewAnalyzerProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *stubPreviewAnalyzerProvider) AnalyzeForIndex(
+	ctx context.Context,
+	input searchanalyzer.AnalyzeInput,
+) (searchanalyzer.AnalyzeOutput, error) {
+	return p.analyze(input), nil
+}
+
+func (p *stubPreviewAnalyzerProvider) AnalyzeForQuery(
+	ctx context.Context,
+	input searchanalyzer.AnalyzeInput,
+) (searchanalyzer.AnalyzeOutput, error) {
+	return p.analyze(input), nil
+}
+
+func (p *stubPreviewAnalyzerProvider) Reload(ctx context.Context, dictVersion string) error {
+	return nil
+}
+
+func (p *stubPreviewAnalyzerProvider) Capabilities() searchanalyzer.Capabilities {
+	return searchanalyzer.Capabilities{
+		SupportsUserDict:  true,
+		SupportsHotReload: true,
+	}
+}
+
+func (p *stubPreviewAnalyzerProvider) analyze(
+	input searchanalyzer.AnalyzeInput,
+) searchanalyzer.AnalyzeOutput {
+	normalized := strings.TrimSpace(input.Text)
+	tokens := []string{}
+	if normalized != "" {
+		tokens = append(tokens, normalized)
+	}
+	return searchanalyzer.AnalyzeOutput{
+		Tokens:         tokens,
+		NormalizedText: normalized,
+		TokenCount:     len(tokens),
+		DictVersion:    p.dictVersion,
+	}
 }
 
 func TestAdminSearchAnalyzerService_CreateAndDeleteDictEntry(t *testing.T) {
@@ -523,6 +577,98 @@ func TestAdminSearchAnalyzerService_AnalyzePreview_CompoundLiteralToken(t *testi
 	}
 	if !slices.Contains(result.Tokens, "doc_visibility_level") {
 		t.Fatalf("expected token list to contain doc_visibility_level, got %v", result.Tokens)
+	}
+}
+
+func TestAdminSearchAnalyzerService_AnalyzePreview_ReusesJiebaProviderByCacheKey(t *testing.T) {
+	ctx := context.Background()
+	dictRepo := newInMemorySearchAnalyzerDictEntryRepo()
+	weight := 200
+	if err := dictRepo.Create(ctx, &models.SearchAnalyzerDictEntry{
+		Analyzer: "jieba",
+		Term:     "技术术语",
+		Weight:   &weight,
+		Status:   models.SearchAnalyzerDictEntryStatusActive,
+	}); err != nil {
+		t.Fatalf("create dict entry failed: %v", err)
+	}
+
+	systemConfigRepo := &stubSystemConfigRepository{
+		recordByKey: map[string]*models.SystemConfig{
+			searchcfg.SystemConfigKey: {
+				ConfigKey: searchcfg.SystemConfigKey,
+				ConfigValueJSON: `{
+					"enabled":true,"activeProvider":"bleve",
+					"fallbackPolicy":"degrade_to_bleve",
+					"analysis":{
+						"activeAnalyzer":"simple",
+						"analyzers":{
+							"simple":{"enabled":true},
+							"jieba":{
+								"enabled":false,
+								"mode":"search",
+								"hmm":true,
+								"stopwordsEnabled":false,
+								"dictSource":"db",
+								"dictVersion":"v2026-03-03-010"
+							}
+						}
+					}
+				}`,
+				Version: 10,
+			},
+		},
+		errByKey: map[string]error{},
+	}
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	adminAccessService := NewAdminAccessService(&stubAdminRoleRepository{isPlatformAdmin: true}, nil, nil)
+	service := NewAdminSearchAnalyzerService(dictRepo, nil, adminAccessService, nil, searchConfigService)
+
+	buildCount := 0
+	service.buildJiebaAnalyzer = func(
+		options searchanalyzer.JiebaOptions,
+	) (searchanalyzer.Provider, error) {
+		buildCount++
+		return &stubPreviewAnalyzerProvider{dictVersion: options.DictVersion}, nil
+	}
+
+	input := AnalyzePreviewAdminSearchAnalyzerInput{
+		ActorUserID: "admin-user-id",
+		Analyzer:    "jieba",
+		Mode:        "query",
+		Text:        "技术术语",
+	}
+
+	first, err := service.AnalyzePreview(ctx, input)
+	if err != nil {
+		t.Fatalf("first analyze preview failed: %v", err)
+	}
+	second, err := service.AnalyzePreview(ctx, input)
+	if err != nil {
+		t.Fatalf("second analyze preview failed: %v", err)
+	}
+	if buildCount != 1 {
+		t.Fatalf("expected jieba provider to be built once, got %d", buildCount)
+	}
+	if first.DictVersion != "v2026-03-03-010" || second.DictVersion != "v2026-03-03-010" {
+		t.Fatalf("expected dict version v2026-03-03-010, got first=%q second=%q", first.DictVersion, second.DictVersion)
+	}
+
+	newWeight := 300
+	if err := dictRepo.Create(ctx, &models.SearchAnalyzerDictEntry{
+		Analyzer: "jieba",
+		Term:     "术语治理",
+		Weight:   &newWeight,
+		Status:   models.SearchAnalyzerDictEntryStatusActive,
+	}); err != nil {
+		t.Fatalf("create second dict entry failed: %v", err)
+	}
+
+	if _, err := service.AnalyzePreview(ctx, input); err != nil {
+		t.Fatalf("third analyze preview failed: %v", err)
+	}
+	if buildCount != 2 {
+		t.Fatalf("expected jieba provider to rebuild after dict changes, got %d", buildCount)
 	}
 }
 

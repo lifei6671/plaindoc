@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
@@ -151,6 +154,11 @@ type AdminSearchAnalyzerService struct {
 	adminAccessService  *AdminAccessService
 	adminAuditService   *AdminAuditService
 	searchConfigService *SearchConfigService
+
+	previewJiebaMu       sync.Mutex
+	previewJiebaCacheKey string
+	previewJiebaProvider searchanalyzer.Provider
+	buildJiebaAnalyzer   func(options searchanalyzer.JiebaOptions) (searchanalyzer.Provider, error)
 }
 
 // NewAdminSearchAnalyzerService 创建后台分词器治理服务。
@@ -167,6 +175,7 @@ func NewAdminSearchAnalyzerService(
 		adminAccessService:  adminAccessService,
 		adminAuditService:   adminAuditService,
 		searchConfigService: searchConfigService,
+		buildJiebaAnalyzer:  defaultAdminSearchJiebaAnalyzerBuilder,
 	}
 }
 
@@ -710,11 +719,11 @@ func (s *AdminSearchAnalyzerService) AnalyzePreview(
 	if dictVersion == "" {
 		dictVersion = searchcfg.DefaultDictVersion
 	}
-	provider, err := searchanalyzer.NewJiebaAnalyzer(searchanalyzer.JiebaOptions{
-		DictVersion:     dictVersion,
-		UserDictEntries: userDictEntries,
-		EnableHMM:       snapshot.Config.Analysis.Analyzers.Jieba.HMM,
-	})
+	provider, err := s.loadJiebaPreviewProvider(
+		dictVersion,
+		snapshot.Config.Analysis.Analyzers.Jieba.HMM,
+		userDictEntries,
+	)
 	if err != nil {
 		return AnalyzePreviewAdminSearchAnalyzerResult{}, err
 	}
@@ -745,6 +754,78 @@ func (s *AdminSearchAnalyzerService) AnalyzePreview(
 		TokenCount:     output.TokenCount,
 		DictVersion:    output.DictVersion,
 	}, nil
+}
+
+func defaultAdminSearchJiebaAnalyzerBuilder(
+	options searchanalyzer.JiebaOptions,
+) (searchanalyzer.Provider, error) {
+	return searchanalyzer.NewJiebaAnalyzer(options)
+}
+
+func (s *AdminSearchAnalyzerService) loadJiebaPreviewProvider(
+	dictVersion string,
+	enableHMM bool,
+	userDictEntries []string,
+) (searchanalyzer.Provider, error) {
+	if s == nil {
+		return nil, errors.New("admin search analyzer service is nil")
+	}
+
+	builder := s.buildJiebaAnalyzer
+	if builder == nil {
+		builder = defaultAdminSearchJiebaAnalyzerBuilder
+	}
+
+	cacheKey := buildAdminSearchAnalyzerPreviewCacheKey(dictVersion, enableHMM, userDictEntries)
+
+	s.previewJiebaMu.Lock()
+	defer s.previewJiebaMu.Unlock()
+
+	if s.previewJiebaProvider != nil && s.previewJiebaCacheKey == cacheKey {
+		return s.previewJiebaProvider, nil
+	}
+
+	provider, err := builder(searchanalyzer.JiebaOptions{
+		DictVersion:     dictVersion,
+		UserDictEntries: userDictEntries,
+		EnableHMM:       enableHMM,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.previewJiebaProvider = provider
+	s.previewJiebaCacheKey = cacheKey
+	return provider, nil
+}
+
+func buildAdminSearchAnalyzerPreviewCacheKey(
+	dictVersion string,
+	enableHMM bool,
+	userDictEntries []string,
+) string {
+	normalizedVersion := strings.TrimSpace(dictVersion)
+	if normalizedVersion == "" {
+		normalizedVersion = searchcfg.DefaultDictVersion
+	}
+
+	sum := sha256.New()
+	_, _ = sum.Write([]byte(normalizedVersion))
+	if enableHMM {
+		_, _ = sum.Write([]byte{1})
+	} else {
+		_, _ = sum.Write([]byte{0})
+	}
+	_, _ = sum.Write([]byte{0})
+	for _, entry := range userDictEntries {
+		normalized := strings.TrimSpace(entry)
+		if normalized == "" {
+			continue
+		}
+		_, _ = sum.Write([]byte(normalized))
+		_, _ = sum.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
 func (s *AdminSearchAnalyzerService) loadJiebaPreviewEntries(
