@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -34,28 +35,32 @@ func TestBleveProvider_SearchAndPurgeBySpace(t *testing.T) {
 	now := time.Now().UTC().Unix()
 	if err := provider.Upsert(ctx, []IndexRecord{
 		{
-			SpaceID:       "space-1",
-			DocID:         "doc-1",
-			NodeID:        "node-1",
-			Title:         "检索命中文档",
-			BodyPlain:     "这是公开文档",
-			Terms:         "检 索 命 中 文 档",
-			TitleTerms:    "检 索 命 中 文 档",
-			UpdatedAtUnix: now,
-			SpaceStatus:   "active",
-			DocStatus:     "active",
+			SpaceID:         "space-1",
+			DocID:           "doc-1",
+			NodeID:          "node-1",
+			Title:           "检索命中文档",
+			BodyPlain:       "这是公开文档",
+			Terms:           "检 索 命 中 文 档",
+			TitleTerms:      "检 索 命 中 文 档",
+			VisibilityScope: string(models.VisibilityPublic),
+			MinRole:         1,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
 		},
 		{
-			SpaceID:       "space-1",
-			DocID:         "doc-2",
-			NodeID:        "node-2",
-			Title:         "成员命中文档",
-			BodyPlain:     "这是成员文档",
-			Terms:         "成 员 命 中 文 档",
-			TitleTerms:    "成 员 命 中 文 档",
-			UpdatedAtUnix: now,
-			SpaceStatus:   "active",
-			DocStatus:     "active",
+			SpaceID:         "space-1",
+			DocID:           "doc-2",
+			NodeID:          "node-2",
+			Title:           "成员命中文档",
+			BodyPlain:       "这是成员文档",
+			Terms:           "成 员 命 中 文 档",
+			TitleTerms:      "成 员 命 中 文 档",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         1,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
 		},
 	}); err != nil {
 		t.Fatalf("upsert failed: %v", err)

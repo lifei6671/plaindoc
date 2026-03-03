@@ -267,29 +267,37 @@ INSERT INTO spaces(space_id, owner_user_id, visibility, status, deleted_at, name
 
 func buildVisibilityMatrixIndexRecords(updatedAtUnix int64) []IndexRecord {
 	return []IndexRecord{
-		buildVisibilityIndexRecord("space-public", "doc-public-public", "node-public-public", updatedAtUnix),
-		buildVisibilityIndexRecord("space-public", "doc-public-authenticated", "node-public-authenticated", updatedAtUnix),
-		buildVisibilityIndexRecord("space-public", "doc-public-member", "node-public-member", updatedAtUnix),
-		buildVisibilityIndexRecord("space-authenticated", "doc-authenticated-public", "node-authenticated-public", updatedAtUnix),
-		buildVisibilityIndexRecord("space-authenticated", "doc-authenticated-authenticated", "node-authenticated-authenticated", updatedAtUnix),
-		buildVisibilityIndexRecord("space-authenticated", "doc-authenticated-member", "node-authenticated-member", updatedAtUnix),
-		buildVisibilityIndexRecord("space-member", "doc-member-public", "node-member-public", updatedAtUnix),
-		buildVisibilityIndexRecord("space-member", "doc-member-authenticated", "node-member-authenticated", updatedAtUnix),
-		buildVisibilityIndexRecord("space-member", "doc-member-member", "node-member-member", updatedAtUnix),
+		buildVisibilityIndexRecord("space-public", "doc-public-public", "node-public-public", "public", updatedAtUnix),
+		buildVisibilityIndexRecord("space-public", "doc-public-authenticated", "node-public-authenticated", "authenticated", updatedAtUnix),
+		buildVisibilityIndexRecord("space-public", "doc-public-member", "node-public-member", "member", updatedAtUnix),
+		buildVisibilityIndexRecord("space-authenticated", "doc-authenticated-public", "node-authenticated-public", "authenticated", updatedAtUnix),
+		buildVisibilityIndexRecord("space-authenticated", "doc-authenticated-authenticated", "node-authenticated-authenticated", "authenticated", updatedAtUnix),
+		buildVisibilityIndexRecord("space-authenticated", "doc-authenticated-member", "node-authenticated-member", "member", updatedAtUnix),
+		buildVisibilityIndexRecord("space-member", "doc-member-public", "node-member-public", "member", updatedAtUnix),
+		buildVisibilityIndexRecord("space-member", "doc-member-authenticated", "node-member-authenticated", "member", updatedAtUnix),
+		buildVisibilityIndexRecord("space-member", "doc-member-member", "node-member-member", "member", updatedAtUnix),
 	}
 }
 
-func buildVisibilityIndexRecord(spaceID string, docID string, nodeID string, updatedAtUnix int64) IndexRecord {
+func buildVisibilityIndexRecord(
+	spaceID string,
+	docID string,
+	nodeID string,
+	visibilityScope string,
+	updatedAtUnix int64,
+) IndexRecord {
 	return IndexRecord{
-		SpaceID:       spaceID,
-		DocID:         docID,
-		NodeID:        nodeID,
-		Title:         "matrix hit " + docID,
-		BodyPlain:     "matrix hit body " + docID,
-		Terms:         "matrix hit",
-		TitleTerms:    "matrix hit",
-		UpdatedAtUnix: updatedAtUnix,
-		SpaceStatus:   "active",
-		DocStatus:     "active",
+		SpaceID:         spaceID,
+		DocID:           docID,
+		NodeID:          nodeID,
+		Title:           "matrix hit " + docID,
+		BodyPlain:       "matrix hit body " + docID,
+		Terms:           "matrix hit",
+		TitleTerms:      "matrix hit",
+		VisibilityScope: visibilityScope,
+		MinRole:         1,
+		UpdatedAtUnix:   updatedAtUnix,
+		SpaceStatus:     "active",
+		DocStatus:       "active",
 	}
 }

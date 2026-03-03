@@ -229,31 +229,12 @@ func (p *BleveProvider) Search(ctx context.Context, request SearchRequest) (Sear
 	if len(searchResults) == 0 {
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
-
-	candidateDocIDs := make([]string, 0, len(searchResults))
-	for _, item := range searchResults {
-		candidateDocIDs = append(candidateDocIDs, item.DocID)
-	}
-
-	visibleDocIDs, err := p.filterVisibleDocIDs(ctx, request, candidateDocIDs)
+	filteredHits, err := p.filterCandidatesByVisibility(ctx, request, searchResults)
 	if err != nil {
 		return SearchResponse{}, err
 	}
-	if len(visibleDocIDs) == 0 {
+	if len(filteredHits) == 0 {
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
-	}
-
-	filteredHits := make([]SearchHit, 0, len(searchResults))
-	for _, item := range searchResults {
-		if _, exists := visibleDocIDs[item.DocID]; !exists {
-			continue
-		}
-		filteredHits = append(filteredHits, SearchHit{
-			DocID:     item.DocID,
-			Score:     item.Score,
-			Snippet:   item.Snippet,
-			UpdatedAt: item.UpdatedAt,
-		})
 	}
 
 	total := int64(len(filteredHits))
@@ -270,6 +251,90 @@ func (p *BleveProvider) Search(ctx context.Context, request SearchRequest) (Sear
 		Total: total,
 		Hits:  filteredHits[start:end],
 	}, nil
+}
+
+func (p *BleveProvider) filterCandidatesByVisibility(
+	ctx context.Context,
+	request SearchRequest,
+	candidates []bleveSearchCandidate,
+) ([]SearchHit, error) {
+	if len(candidates) == 0 {
+		return []SearchHit{}, nil
+	}
+
+	isAuthenticated := strings.TrimSpace(request.ActorUserID) != "" || request.IsAuthenticated
+	directVisibleDocIDs := make(map[string]struct{}, len(candidates))
+	needDBCheckDocIDs := make([]string, 0, len(candidates))
+	for _, item := range candidates {
+		docID := strings.TrimSpace(item.DocID)
+		if docID == "" {
+			continue
+		}
+
+		switch strings.ToLower(strings.TrimSpace(item.VisibilityScope)) {
+		case string(models.VisibilityPublic):
+			directVisibleDocIDs[docID] = struct{}{}
+		case string(models.VisibilityAuthenticated):
+			if isAuthenticated {
+				directVisibleDocIDs[docID] = struct{}{}
+			}
+		case string(models.VisibilityMember):
+			if isAuthenticated {
+				needDBCheckDocIDs = append(needDBCheckDocIDs, docID)
+			}
+		default:
+			// 索引字段缺失或未知时退回 DB 权限校验，保证不越权。
+			needDBCheckDocIDs = append(needDBCheckDocIDs, docID)
+		}
+	}
+
+	visibleByDBDocIDs := make(map[string]struct{}, 0)
+	if len(needDBCheckDocIDs) > 0 {
+		visibleByDBDocIDs = make(map[string]struct{}, len(needDBCheckDocIDs))
+	}
+	visibleCandidateDocIDs, err := p.filterVisibleDocIDs(ctx, request, needDBCheckDocIDs)
+	if err != nil {
+		return nil, err
+	}
+	for docID := range visibleCandidateDocIDs {
+		visibleByDBDocIDs[docID] = struct{}{}
+	}
+
+	filtered := make([]SearchHit, 0, len(candidates))
+	for _, item := range candidates {
+		docID := strings.TrimSpace(item.DocID)
+		if docID == "" {
+			continue
+		}
+		if _, exists := directVisibleDocIDs[docID]; !exists {
+			if _, exists := visibleByDBDocIDs[docID]; !exists {
+				continue
+			}
+		}
+		filtered = append(filtered, SearchHit{
+			DocID:     docID,
+			Score:     item.Score,
+			Snippet:   item.Snippet,
+			UpdatedAt: item.UpdatedAt,
+		})
+	}
+	return filtered, nil
+}
+
+func toSearchHits(candidates []bleveSearchCandidate) []SearchHit {
+	if len(candidates) == 0 {
+		return []SearchHit{}
+	}
+	result := make([]SearchHit, 0, len(candidates))
+	for _, item := range candidates {
+		result = append(result, SearchHit{
+			DocID:     item.DocID,
+			Score:     item.Score,
+			Snippet:   item.Snippet,
+			UpdatedAt: item.UpdatedAt,
+		})
+	}
+	return result
 }
 
 func (p *BleveProvider) Capabilities() Capabilities {
@@ -406,7 +471,7 @@ func (p *BleveProvider) searchCandidates(
 			from,
 			false,
 		)
-		searchRequest.Fields = []string{"doc_id", "body_plain", "updated_at_unix"}
+		searchRequest.Fields = []string{"doc_id", "body_plain", "updated_at_unix", "visibility_scope"}
 		if sortMode == SortModeUpdatedAtDesc {
 			searchRequest.SortBy([]string{"-updated_at_unix"})
 		}
@@ -431,11 +496,13 @@ func (p *BleveProvider) searchCandidates(
 
 			bodyPlain := extractStringField(hit.Fields, "body_plain")
 			updatedAtUnix := extractInt64Field(hit.Fields, "updated_at_unix")
+			visibilityScope := extractStringField(hit.Fields, "visibility_scope")
 			candidates = append(candidates, bleveSearchCandidate{
-				DocID:     docID,
-				Score:     hit.Score,
-				Snippet:   buildBleveSearchSnippet(bodyPlain),
-				UpdatedAt: time.Unix(updatedAtUnix, 0).UTC(),
+				DocID:           docID,
+				Score:           hit.Score,
+				Snippet:         buildBleveSearchSnippet(bodyPlain),
+				UpdatedAt:       time.Unix(updatedAtUnix, 0).UTC(),
+				VisibilityScope: visibilityScope,
 			})
 		}
 
@@ -559,7 +626,7 @@ func buildBleveIndexMapping() *mapping.IndexMappingImpl {
 	documentMapping.AddFieldMappingsAt("doc_id", keywordField(true))
 	documentMapping.AddFieldMappingsAt("space_id", keywordField(false))
 	documentMapping.AddFieldMappingsAt("node_id", keywordField(false))
-	documentMapping.AddFieldMappingsAt("visibility_scope", keywordField(false))
+	documentMapping.AddFieldMappingsAt("visibility_scope", keywordField(true))
 	documentMapping.AddFieldMappingsAt("space_status", keywordField(false))
 	documentMapping.AddFieldMappingsAt("doc_status", keywordField(false))
 	documentMapping.AddFieldMappingsAt("analyzer_name", keywordField(false))
@@ -726,8 +793,9 @@ type bleveIndexDocument struct {
 }
 
 type bleveSearchCandidate struct {
-	DocID     string
-	Score     float64
-	Snippet   string
-	UpdatedAt time.Time
+	DocID           string
+	Score           float64
+	Snippet         string
+	UpdatedAt       time.Time
+	VisibilityScope string
 }
