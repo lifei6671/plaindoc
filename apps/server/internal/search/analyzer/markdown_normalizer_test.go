@@ -11,7 +11,7 @@ func TestNormalizeMarkdownToPlainText_RemovesCodeMathAndSyntax(t *testing.T) {
 		"",
 		"这是 **正文**，包含 [链接文本](https://example.com) 和 ![图片说明](https://example.com/image.png)。",
 		"",
-		"`inline_code_should_not_appear`",
+		"`inline_identifier_kept`",
 		"",
 		"```go",
 		"fmt.Println(\"code_should_not_appear\")",
@@ -37,6 +37,7 @@ func TestNormalizeMarkdownToPlainText_RemovesCodeMathAndSyntax(t *testing.T) {
 		"正文",
 		"链接文本",
 		"图片说明",
+		"inline_identifier_kept",
 		"不应进入索引",
 	}
 	for _, expected := range mustContain {
@@ -46,7 +47,6 @@ func TestNormalizeMarkdownToPlainText_RemovesCodeMathAndSyntax(t *testing.T) {
 	}
 
 	mustNotContain := []string{
-		"inline_code_should_not_appear",
 		"code_should_not_appear",
 		"graph TD",
 		"A-->B",
@@ -82,7 +82,7 @@ func TestNormalizeMarkdownToPlainText_PreservesCompoundIdentifier(t *testing.T) 
 	if !strings.Contains(normalized, "doc_visibility_level") {
 		t.Fatalf("expected normalized content to contain %q, got %q", "doc_visibility_level", normalized)
 	}
-	if strings.Contains(normalized, "doc_visibility_level_in_code") {
-		t.Fatalf("expected normalized content not to contain inline code token, got %q", normalized)
+	if !strings.Contains(normalized, "doc_visibility_level_in_code") {
+		t.Fatalf("expected normalized content to contain inline code token, got %q", normalized)
 	}
 }

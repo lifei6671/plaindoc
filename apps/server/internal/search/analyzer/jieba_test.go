@@ -3,6 +3,7 @@ package analyzer
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -23,14 +24,14 @@ func TestJiebaAnalyzer_AnalyzeForIndex_UsesNormalizedMarkdown(t *testing.T) {
 		t.Fatalf("analyze for index failed: %v", err)
 	}
 
-	if output.NormalizedText != "Hello World" {
-		t.Fatalf("expected normalized text %q, got %q", "Hello World", output.NormalizedText)
+	if output.NormalizedText != "Hello World drop_me" {
+		t.Fatalf("expected normalized text %q, got %q", "Hello World drop_me", output.NormalizedText)
+	}
+	if !strings.Contains(output.NormalizedText, "drop_me") {
+		t.Fatalf("expected normalized text to preserve inline code token, got %q", output.NormalizedText)
 	}
 	if output.DictVersion != "dict-v1" {
 		t.Fatalf("expected dict version dict-v1, got %q", output.DictVersion)
-	}
-	if slices.Contains(output.Tokens, "drop_me") {
-		t.Fatalf("unexpected token drop_me in %v", output.Tokens)
 	}
 	if len(output.Tokens) == 0 {
 		t.Fatalf("expected non-empty tokens")

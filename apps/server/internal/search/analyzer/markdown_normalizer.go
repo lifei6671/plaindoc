@@ -24,7 +24,7 @@ const protectedUnderscoreRune = '\uFF3F'
 //
 // 清洗规则：
 // 1) 删除 front matter、块级/行内公式；
-// 2) 解析 Markdown AST，忽略代码块、行内代码、HTML 块；
+// 2) 解析 Markdown AST，忽略块级代码与 HTML，保留行内代码文本；
 // 3) 仅提取自然语言文本节点，并做空白归一化。
 func NormalizeMarkdownToPlainText(markdown string) string {
 	source := preprocessMarkdown(markdown)
@@ -77,7 +77,7 @@ func preprocessMarkdown(markdown string) string {
 
 func shouldIgnoreNode(node ast.Node) bool {
 	switch node.(type) {
-	case *ast.CodeBlock, *ast.FencedCodeBlock, *ast.CodeSpan, *ast.HTMLBlock, *ast.RawHTML:
+	case *ast.CodeBlock, *ast.FencedCodeBlock, *ast.HTMLBlock, *ast.RawHTML:
 		return true
 	default:
 		return false
