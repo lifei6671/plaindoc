@@ -17,6 +17,7 @@ type authHandler struct {
 	authLoginOrchestrator         *service.AuthLoginOrchestrator
 	authRegistrationPolicyService *service.AuthRegistrationPolicyService
 	authRiskControlService        *service.AuthRiskControlService
+	passwordResetService          *service.PasswordResetService
 	accessTokenTTL                time.Duration
 	refreshTokenTTL               time.Duration
 }
@@ -47,6 +48,20 @@ type refreshCaptchaRequest struct {
 
 type refreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
+}
+
+type passwordResetRequestRequest struct {
+	Email string `json:"email"`
+}
+
+type passwordResetVerifyRequest struct {
+	Token string `json:"token"`
+}
+
+type passwordResetConfirmRequest struct {
+	Token           string `json:"token"`
+	NewPassword     string `json:"newPassword"`
+	ConfirmPassword string `json:"confirmPassword"`
 }
 
 type authLoginProviderOptionResponse struct {
@@ -126,6 +141,64 @@ var (
 			Template: response.AuthErrAccessToken,
 		},
 	}
+	authPasswordResetRequestErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrPasswordResetEmailDisabled,
+			Template: response.AuthErrPasswordResetUnavailable,
+		},
+		{
+			Target:   service.ErrPasswordResetRateLimited,
+			Template: response.AuthErrPasswordResetRateLimited,
+		},
+		{
+			Target:   service.ErrPasswordResetEmailSendFailed,
+			Template: response.AuthErrPasswordResetSendFailed,
+		},
+	}
+	authPasswordResetVerifyErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrPasswordResetTokenInvalid,
+			Template: response.AuthErrPasswordResetTokenInvalid,
+		},
+		{
+			Target:   service.ErrPasswordResetTokenExpired,
+			Template: response.AuthErrPasswordResetTokenExpired,
+		},
+		{
+			Target:   service.ErrPasswordResetTokenConsumed,
+			Template: response.AuthErrPasswordResetTokenConsumed,
+		},
+	}
+	authPasswordResetConfirmErrorMappings = []response.ErrorTemplateMapping{
+		{
+			Target:   service.ErrPasswordResetTokenInvalid,
+			Template: response.AuthErrPasswordResetTokenInvalid,
+		},
+		{
+			Target:   service.ErrPasswordResetTokenExpired,
+			Template: response.AuthErrPasswordResetTokenExpired,
+		},
+		{
+			Target:   service.ErrPasswordResetTokenConsumed,
+			Template: response.AuthErrPasswordResetTokenConsumed,
+		},
+		{
+			Target:   service.ErrPasswordResetPasswordTooShort,
+			Template: response.AuthErrPasswordLeast6Characters,
+		},
+		{
+			Target:   service.ErrPasswordResetConfirmMismatch,
+			Template: response.AuthErrPasswordConfirmMismatch,
+		},
+		{
+			Target:   service.ErrPasswordResetPasswordUnchanged,
+			Template: response.AuthErrPasswordUnchanged,
+		},
+		{
+			Target:   service.ErrPasswordResetUserNotSupported,
+			Template: response.AuthErrPasswordResetUnsupported,
+		},
+	}
 )
 
 // NewAuthHandler 创建认证处理器，负责注册、登录、会话校验和 token 刷新。
@@ -134,6 +207,7 @@ func NewAuthHandler(
 	authRegistrationPolicyService *service.AuthRegistrationPolicyService,
 	authLoginOrchestrator *service.AuthLoginOrchestrator,
 	authRiskControlService *service.AuthRiskControlService,
+	passwordResetService *service.PasswordResetService,
 	jwtConfig config.JWTConfig,
 ) *authHandler {
 	if authLoginOrchestrator == nil {
@@ -147,6 +221,7 @@ func NewAuthHandler(
 		authLoginOrchestrator:         authLoginOrchestrator,
 		authRegistrationPolicyService: authRegistrationPolicyService,
 		authRiskControlService:        authRiskControlService,
+		passwordResetService:          passwordResetService,
 		accessTokenTTL:                jwtConfig.AccessTokenTTL,
 		refreshTokenTTL:               jwtConfig.RefreshTokenTTL,
 	}
@@ -506,6 +581,90 @@ func (h *authHandler) Logout(c *gin.Context) {
 	accessToken, ok := bearerTokenFromRequest(c)
 	if ok {
 		_ = h.authService.Logout(c.Request.Context(), accessToken)
+	}
+	clearSessionCookies(c)
+	response.JSON(c, http.StatusOK, struct{}{})
+}
+
+// RequestPasswordReset 接收邮箱并发送密码重置邮件（防枚举：不存在邮箱同样返回成功）。
+func (h *authHandler) RequestPasswordReset(c *gin.Context) {
+	if h == nil || h.passwordResetService == nil {
+		response.AuthErrPasswordResetUnavailable.Write(c)
+		return
+	}
+
+	var req passwordResetRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
+		response.AuthErrRequestBody.Write(c)
+		return
+	}
+
+	if err := h.passwordResetService.RequestByEmail(c.Request.Context(), service.RequestPasswordResetByEmailInput{
+		Email:    req.Email,
+		ClientIP: strings.TrimSpace(c.ClientIP()),
+	}); err != nil {
+		setRequestErrmsg(c, err, "发送密码重置邮件失败")
+		if !response.WriteMappedError(c, err, authPasswordResetRequestErrorMappings...) {
+			response.InternalError(c)
+		}
+		return
+	}
+	response.JSON(c, http.StatusOK, struct{}{})
+}
+
+// VerifyPasswordResetToken 校验密码重置令牌有效性。
+func (h *authHandler) VerifyPasswordResetToken(c *gin.Context) {
+	if h == nil || h.passwordResetService == nil {
+		response.AuthErrPasswordResetUnavailable.Write(c)
+		return
+	}
+
+	var req passwordResetVerifyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
+		response.AuthErrRequestBody.Write(c)
+		return
+	}
+
+	result, err := h.passwordResetService.VerifyToken(c.Request.Context(), strings.TrimSpace(req.Token))
+	if err != nil {
+		setRequestErrmsg(c, err, "校验密码重置令牌失败")
+		if !response.WriteMappedError(c, err, authPasswordResetVerifyErrorMappings...) {
+			response.InternalError(c)
+		}
+		return
+	}
+	response.JSON(c, http.StatusOK, map[string]any{
+		"valid":     true,
+		"expiresAt": result.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// ConfirmPasswordReset 使用重置令牌更新密码。
+func (h *authHandler) ConfirmPasswordReset(c *gin.Context) {
+	if h == nil || h.passwordResetService == nil {
+		response.AuthErrPasswordResetUnavailable.Write(c)
+		return
+	}
+
+	var req passwordResetConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
+		response.AuthErrRequestBody.Write(c)
+		return
+	}
+
+	if err := h.passwordResetService.Confirm(c.Request.Context(), service.ConfirmPasswordResetInput{
+		Token:           strings.TrimSpace(req.Token),
+		NewPassword:     req.NewPassword,
+		ConfirmPassword: req.ConfirmPassword,
+	}); err != nil {
+		setRequestErrmsg(c, err, "重置密码失败")
+		if !response.WriteMappedError(c, err, authPasswordResetConfirmErrorMappings...) {
+			response.InternalError(c)
+		}
+		return
 	}
 	clearSessionCookies(c)
 	response.JSON(c, http.StatusOK, struct{}{})

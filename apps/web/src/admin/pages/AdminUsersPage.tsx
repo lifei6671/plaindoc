@@ -1,4 +1,4 @@
-import { LoaderCircle, PencilLine, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { LoaderCircle, Mail, PencilLine, RefreshCw, Search, ShieldBan, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -407,6 +407,34 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
     [confirm, currentUserID, dataGateway.admin, openToast, runUserAction]
   );
 
+  const handleSendPasswordResetEmail = useCallback(
+    async (user: AdminUser) => {
+      if (user.status === "deleted") {
+        openToast("已删除用户不支持发送重置密码邮件");
+        return;
+      }
+      if (user.userId === currentUserID) {
+        openToast("不允许给当前登录管理员账号发送重置密码邮件");
+        return;
+      }
+
+      const confirmed = await confirm({
+        title: `发送重置邮件：${user.email}`,
+        description: "将向该用户邮箱发送一次性密码重置链接。",
+        confirmText: "确认发送"
+      });
+      if (!confirmed) {
+        return;
+      }
+
+      await runUserAction(user.userId, async () => {
+        await dataGateway.admin.sendUserPasswordResetEmail({ userId: user.userId });
+        openToast(`重置密码邮件已发送：${user.email}`, "success");
+      });
+    },
+    [confirm, currentUserID, dataGateway.admin, openToast, runUserAction]
+  );
+
   return (
     <section aria-label="用户管理">
       {dialogs}
@@ -552,6 +580,16 @@ export function AdminUsersPage({ currentUserID, dataGateway }: AdminUsersPagePro
                               ) : (
                                 <span className="text-xs font-medium text-slate-400">-</span>
                               )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={isActioning || user.status === "deleted" || user.userId === currentUserID}
+                                onClick={() => void handleSendPasswordResetEmail(user)}
+                              >
+                                <Mail size={14} />
+                                <span>重置邮件</span>
+                              </Button>
                               <Button
                                 type="button"
                                 size="sm"

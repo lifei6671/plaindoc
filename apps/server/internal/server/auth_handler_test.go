@@ -3,6 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,6 +18,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/oklog/ulid/v2"
 )
 
 func setupAuthTestRouter(t *testing.T) (*storage.Database, func(*http.Request) *httptest.ResponseRecorder) {
@@ -244,6 +248,217 @@ func TestRouter_AuthLogoutRevokesSession(t *testing.T) {
 	}
 }
 
+func TestRouter_AuthPasswordReset_RequestUnavailableAndValidation(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	requestReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/request",
+		bytes.NewReader([]byte(`{"email":"reset-unavailable@example.com"}`)),
+	)
+	requestReq.Header.Set("Content-Type", "application/json")
+	requestRec := serve(requestReq)
+	if requestRec.Code != http.StatusOK {
+		t.Fatalf("expected password reset request status 200, got %d body=%s", requestRec.Code, requestRec.Body.String())
+	}
+	if decodeJSONResultCode(t, requestRec.Body.Bytes()) != response.ResolveErrorCode(response.CodePasswordResetUnavailable) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodePasswordResetUnavailable),
+			decodeJSONResultCode(t, requestRec.Body.Bytes()),
+			requestRec.Body.String(),
+		)
+	}
+
+	verifyReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/verify",
+		bytes.NewReader([]byte(`{"token":"invalid-token"}`)),
+	)
+	verifyReq.Header.Set("Content-Type", "application/json")
+	verifyRec := serve(verifyReq)
+	if verifyRec.Code != http.StatusOK {
+		t.Fatalf("expected password reset verify status 200, got %d body=%s", verifyRec.Code, verifyRec.Body.String())
+	}
+	if decodeJSONResultCode(t, verifyRec.Body.Bytes()) != response.ResolveErrorCode(response.CodePasswordResetTokenInvalid) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodePasswordResetTokenInvalid),
+			decodeJSONResultCode(t, verifyRec.Body.Bytes()),
+			verifyRec.Body.String(),
+		)
+	}
+
+	confirmMismatchReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/confirm",
+		bytes.NewReader([]byte(`{"token":"invalid-token","newPassword":"123456","confirmPassword":"654321"}`)),
+	)
+	confirmMismatchReq.Header.Set("Content-Type", "application/json")
+	confirmMismatchRec := serve(confirmMismatchReq)
+	if confirmMismatchRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected password reset confirm mismatch status 200, got %d body=%s",
+			confirmMismatchRec.Code,
+			confirmMismatchRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, confirmMismatchRec.Body.Bytes()) != response.ResolveErrorCode(response.CodePasswordConfirmMismatch) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodePasswordConfirmMismatch),
+			decodeJSONResultCode(t, confirmMismatchRec.Body.Bytes()),
+			confirmMismatchRec.Body.String(),
+		)
+	}
+
+	confirmShortReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/confirm",
+		bytes.NewReader([]byte(`{"token":"invalid-token","newPassword":"123","confirmPassword":"123"}`)),
+	)
+	confirmShortReq.Header.Set("Content-Type", "application/json")
+	confirmShortRec := serve(confirmShortReq)
+	if confirmShortRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected password reset confirm short password status 200, got %d body=%s",
+			confirmShortRec.Code,
+			confirmShortRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, confirmShortRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidPassword) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeInvalidPassword),
+			decodeJSONResultCode(t, confirmShortRec.Body.Bytes()),
+			confirmShortRec.Body.String(),
+		)
+	}
+}
+
+func TestRouter_AuthPasswordReset_ConfirmSuccessAndConsumed(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	registerReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/register",
+		bytes.NewReader([]byte(`{"email":"password-reset-confirm@example.com","password":"123456","name":"Reset Confirm User"}`)),
+	)
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := serve(registerReq)
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register failed, status=%d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	registerPayload := decodeJSONResultData[struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}](t, registerRec.Body.Bytes())
+	if strings.TrimSpace(registerPayload.User.ID) == "" {
+		t.Fatalf("expected register payload user id, body=%s", registerRec.Body.String())
+	}
+
+	rawToken := seedPasswordResetTokenForTest(t, database, registerPayload.User.ID, time.Now().UTC().Add(30*time.Minute))
+
+	verifyReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/verify",
+		bytes.NewReader([]byte(`{"token":"`+rawToken+`"}`)),
+	)
+	verifyReq.Header.Set("Content-Type", "application/json")
+	verifyRec := serve(verifyReq)
+	if verifyRec.Code != http.StatusOK {
+		t.Fatalf("expected verify token status 200, got %d body=%s", verifyRec.Code, verifyRec.Body.String())
+	}
+	verifyPayload := decodeJSONResultData[struct {
+		Valid     bool   `json:"valid"`
+		ExpiresAt string `json:"expiresAt"`
+	}](t, verifyRec.Body.Bytes())
+	if !verifyPayload.Valid || strings.TrimSpace(verifyPayload.ExpiresAt) == "" {
+		t.Fatalf("expected valid verify payload, got %+v", verifyPayload)
+	}
+
+	confirmReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/confirm",
+		bytes.NewReader([]byte(`{"token":"`+rawToken+`","newPassword":"654321","confirmPassword":"654321"}`)),
+	)
+	confirmReq.Header.Set("Content-Type", "application/json")
+	confirmRec := serve(confirmReq)
+	if confirmRec.Code != http.StatusOK {
+		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRec.Code, confirmRec.Body.String())
+	}
+	if decodeJSONResultCode(t, confirmRec.Body.Bytes()) != 0 {
+		t.Fatalf("expected confirm business code 0, got %d body=%s", decodeJSONResultCode(t, confirmRec.Body.Bytes()), confirmRec.Body.String())
+	}
+	assertSessionCookiesCleared(t, confirmRec)
+
+	verifyConsumedReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password-reset/verify",
+		bytes.NewReader([]byte(`{"token":"`+rawToken+`"}`)),
+	)
+	verifyConsumedReq.Header.Set("Content-Type", "application/json")
+	verifyConsumedRec := serve(verifyConsumedReq)
+	if verifyConsumedRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected verify consumed token status 200, got %d body=%s",
+			verifyConsumedRec.Code,
+			verifyConsumedRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, verifyConsumedRec.Body.Bytes()) != response.ResolveErrorCode(response.CodePasswordResetTokenConsumed) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodePasswordResetTokenConsumed),
+			decodeJSONResultCode(t, verifyConsumedRec.Body.Bytes()),
+			verifyConsumedRec.Body.String(),
+		)
+	}
+
+	oldLoginReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"password-reset-confirm@example.com","password":"123456"}`)),
+	)
+	oldLoginReq.Header.Set("Content-Type", "application/json")
+	oldLoginRec := serve(oldLoginReq)
+	if oldLoginRec.Code != http.StatusForbidden {
+		t.Fatalf("expected old password login status 403, got %d body=%s", oldLoginRec.Code, oldLoginRec.Body.String())
+	}
+
+	newLoginReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"password-reset-confirm@example.com","password":"654321"}`)),
+	)
+	newLoginReq.Header.Set("Content-Type", "application/json")
+	newLoginRec := serve(newLoginReq)
+	if newLoginRec.Code != http.StatusOK {
+		t.Fatalf("expected new password login status 200, got %d body=%s", newLoginRec.Code, newLoginRec.Body.String())
+	}
+	if decodeJSONResultCode(t, newLoginRec.Body.Bytes()) != 0 {
+		t.Fatalf("expected new password login code 0, got %d body=%s", decodeJSONResultCode(t, newLoginRec.Body.Bytes()), newLoginRec.Body.String())
+	}
+
+	var revokedSessionCount int64
+	if err := database.ORM.WithContext(context.Background()).
+		Table("user_sessions").
+		Where("user_id = ? AND revoked_at IS NOT NULL", registerPayload.User.ID).
+		Count(&revokedSessionCount).Error; err != nil {
+		t.Fatalf("count revoked sessions failed: %v", err)
+	}
+	if revokedSessionCount == 0 {
+		t.Fatalf("expected revoked sessions after password reset, got %d", revokedSessionCount)
+	}
+}
+
 func extractCookieByName(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Cookie {
 	t.Helper()
 
@@ -280,6 +495,38 @@ func assertSessionCookiesCleared(t *testing.T, rec *httptest.ResponseRecorder) {
 	if refreshCookie.MaxAge >= 0 {
 		t.Fatalf("expected cleared refreshToken cookie max-age < 0, got %d", refreshCookie.MaxAge)
 	}
+}
+
+func seedPasswordResetTokenForTest(
+	t *testing.T,
+	database *storage.Database,
+	userID string,
+	expiresAt time.Time,
+) string {
+	t.Helper()
+
+	tokenID := strings.ToLower(ulid.Make().String())
+	secretPart := "test-password-reset-token-secret"
+	rawToken := tokenID + "." + secretPart
+
+	mac := hmac.New(sha256.New, []byte(testConfig().JWT.Secret))
+	_, _ = mac.Write([]byte(rawToken))
+	tokenSecretHash := hex.EncodeToString(mac.Sum(nil))
+
+	now := time.Now().UTC()
+	record := models.PasswordResetToken{
+		TokenID:         tokenID,
+		TokenSecretHash: tokenSecretHash,
+		UserID:          strings.TrimSpace(userID),
+		Source:          "self_service",
+		ExpiresAt:       expiresAt.UTC(),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := database.ORM.WithContext(context.Background()).Create(&record).Error; err != nil {
+		t.Fatalf("seed password reset token failed: %v", err)
+	}
+	return rawToken
 }
 
 func TestRouter_AuthRegisterDisabledBySiteConfig(t *testing.T) {

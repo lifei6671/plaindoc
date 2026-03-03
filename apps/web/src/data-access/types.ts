@@ -62,6 +62,25 @@ export interface AuthCaptchaRefreshInput {
   captchaId?: string;
 }
 
+export interface AuthPasswordResetRequestInput {
+  email: string;
+}
+
+export interface AuthPasswordResetVerifyInput {
+  token: string;
+}
+
+export interface AuthPasswordResetVerifyResult {
+  valid: boolean;
+  expiresAt: string;
+}
+
+export interface AuthPasswordResetConfirmInput {
+  token: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export interface Space {
   id: string;
   name: string;
@@ -208,6 +227,9 @@ export interface AuthGateway {
   login(input: AuthLoginInput): Promise<AuthSession>;
   register(input: AuthRegisterInput): Promise<AuthSession>;
   refreshCaptcha(input: AuthCaptchaRefreshInput): Promise<AuthCaptchaChallenge>;
+  requestPasswordReset(input: AuthPasswordResetRequestInput): Promise<void>;
+  verifyPasswordResetToken(input: AuthPasswordResetVerifyInput): Promise<AuthPasswordResetVerifyResult>;
+  confirmPasswordReset(input: AuthPasswordResetConfirmInput): Promise<void>;
   logout(): Promise<void>;
 }
 
@@ -734,6 +756,7 @@ export interface AdminGateway {
   updateUserRole(input: { userId: string; role: "user" | AdminRole }): Promise<AdminUser>;
   updateUserStatus(input: { userId: string; status: "active" | "banned"; reason?: string }): Promise<AdminUser>;
   deleteUser(userId: string): Promise<void>;
+  sendUserPasswordResetEmail(input: { userId: string }): Promise<void>;
   createSpace(input: {
     spaceId?: string;
     name: string;
@@ -829,7 +852,16 @@ export interface AdminGateway {
   deleteTheme(themeId: string): Promise<void>;
   listSystemConfigs(): Promise<AdminSystemConfig[]>;
   upsertSystemConfig(input: {
-    configKey: "site" | "editor" | "security" | "search" | "auth" | "image-hosting" | "sitemap" | "data-retention";
+    configKey:
+      | "site"
+      | "editor"
+      | "security"
+      | "search"
+      | "auth"
+      | "email"
+      | "image-hosting"
+      | "sitemap"
+      | "data-retention";
     value: Record<string, unknown>;
     expectedVersion?: number;
   }): Promise<AdminSystemConfig>;
@@ -873,6 +905,10 @@ export interface AdminGateway {
   testAuthLDAPConnection(input: {
     value: Record<string, unknown>;
     providerId?: string;
+  }): Promise<{ ok: boolean }>;
+  testSystemEmailSend(input: {
+    value: Record<string, unknown>;
+    toEmail: string;
   }): Promise<{ ok: boolean }>;
   listAudits(input?: AdminAuditListInput): Promise<AdminAuditListResult>;
 }

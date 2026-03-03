@@ -94,6 +94,36 @@ type UserSessionRepository interface {
 	RevokeAllByUserID(ctx context.Context, userID string, revokedAt time.Time) error
 }
 
+// CountPasswordResetTokensParams 密码重置令牌计数参数。
+type CountPasswordResetTokensParams struct {
+	UserID        string
+	RequestIPHash string
+	Since         time.Time
+}
+
+// InvalidatePasswordResetTokensParams 批量失效密码重置令牌参数。
+type InvalidatePasswordResetTokensParams struct {
+	UserID        string
+	InvalidatedAt time.Time
+}
+
+// ConsumePasswordResetTokenParams 消费密码重置令牌参数。
+type ConsumePasswordResetTokenParams struct {
+	TokenID         string
+	TokenSecretHash string
+	ConsumedAt      time.Time
+	Now             time.Time
+}
+
+// PasswordResetTokenRepository 密码重置令牌仓储接口。
+type PasswordResetTokenRepository interface {
+	Create(ctx context.Context, token *models.PasswordResetToken) error
+	GetByTokenID(ctx context.Context, tokenID string) (*models.PasswordResetToken, error)
+	CountRecent(ctx context.Context, params CountPasswordResetTokensParams) (int64, error)
+	InvalidateActiveByUserID(ctx context.Context, params InvalidatePasswordResetTokensParams) (int64, error)
+	Consume(ctx context.Context, params ConsumePasswordResetTokenParams) (*models.PasswordResetToken, error)
+}
+
 // AuthRiskStateRepository 认证风控状态仓储接口。
 type AuthRiskStateRepository interface {
 	GetByKey(ctx context.Context, scene string, subjectType string, subjectHash string) (*models.AuthRiskState, error)

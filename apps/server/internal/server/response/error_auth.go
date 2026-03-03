@@ -113,4 +113,58 @@ var (
 		Code:    CodeUnauthorized,
 		Message: "访问令牌无效",
 	}
+	// AuthErrPasswordResetUnavailable 对应场景：password reset feature is unavailable.
+	AuthErrPasswordResetUnavailable = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordResetUnavailable,
+		Message: "密码找回功能暂不可用",
+	}
+	// AuthErrPasswordResetRateLimited 对应场景：password reset request rate limited.
+	AuthErrPasswordResetRateLimited = ErrorTemplate{
+		Status:  http.StatusTooManyRequests,
+		Code:    CodePasswordResetRateLimited,
+		Message: "请求过于频繁，请稍后再试",
+	}
+	// AuthErrPasswordResetSendFailed 对应场景：password reset mail send failed.
+	AuthErrPasswordResetSendFailed = ErrorTemplate{
+		Status:  http.StatusBadGateway,
+		Code:    CodePasswordResetSendFailed,
+		Message: "发送重置邮件失败，请稍后再试",
+	}
+	// AuthErrPasswordResetTokenInvalid 对应场景：password reset token invalid.
+	AuthErrPasswordResetTokenInvalid = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordResetTokenInvalid,
+		Message: "重置链接无效",
+	}
+	// AuthErrPasswordResetTokenExpired 对应场景：password reset token expired.
+	AuthErrPasswordResetTokenExpired = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordResetTokenExpired,
+		Message: "重置链接已过期",
+	}
+	// AuthErrPasswordResetTokenConsumed 对应场景：password reset token consumed.
+	AuthErrPasswordResetTokenConsumed = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordResetTokenConsumed,
+		Message: "重置链接已使用",
+	}
+	// AuthErrPasswordResetUnsupported 对应场景：password reset not supported for current user.
+	AuthErrPasswordResetUnsupported = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordResetUnsupported,
+		Message: "当前账号不支持密码重置",
+	}
+	// AuthErrPasswordConfirmMismatch 对应场景：new password and confirm password mismatch.
+	AuthErrPasswordConfirmMismatch = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordConfirmMismatch,
+		Message: "两次输入的密码不一致",
+	}
+	// AuthErrPasswordUnchanged 对应场景：new password is unchanged.
+	AuthErrPasswordUnchanged = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodePasswordUnchanged,
+		Message: "新密码不能与旧密码相同",
+	}
 )

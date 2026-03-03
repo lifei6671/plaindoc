@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/mail"
 	"regexp"
 	"slices"
 	"strings"
@@ -24,6 +25,7 @@ var systemConfigValidators = map[string]func(map[string]any) error{
 	"editor":                        validateEditorConfig,
 	"security":                      validateSecurityConfig,
 	SystemConfigKeyAuth:             validateAuthConfig,
+	SystemConfigKeyEmail:            validateEmailConfig,
 	SystemConfigKeyDataRetention:    validateDataRetentionConfig,
 	"image-hosting":                 validateImageHostingConfig,
 	searchconfig.SystemConfigKey:    validateSearchConfig,
@@ -35,6 +37,7 @@ const (
 	SystemConfigKeyAuth          = "auth"
 	SystemConfigKeyDataRetention = "data-retention"
 	authConfigSecretMask         = "********"
+	emailConfigSecretMask        = "********"
 
 	minDataRetentionScheduleMinutes = 5
 	maxDataRetentionScheduleMinutes = 24 * 60
@@ -76,6 +79,14 @@ type TestAdminSystemConfigLDAPConnectionInput struct {
 	ProviderID  string
 }
 
+// TestAdminSystemConfigEmailSendInput 后台邮箱配置测试发送参数。
+type TestAdminSystemConfigEmailSendInput struct {
+	ActorUserID string
+	RequestID   string
+	Value       any
+	ToEmail     string
+}
+
 // RunDataRetentionCleanupInput 后台手动执行一次数据清理参数。
 type RunDataRetentionCleanupInput struct {
 	ActorUserID string
@@ -103,6 +114,7 @@ type AdminSystemConfigService struct {
 	adminAuditService           *AdminAuditService
 	dataRetentionCleanupService *DataRetentionCleanupService
 	searchIndexService          *SearchIndexService
+	mailSender                  MailSender
 }
 
 // NewAdminSystemConfigService 创建后台系统配置服务。
@@ -113,12 +125,14 @@ func NewAdminSystemConfigService(
 	dataRetentionCleanupService *DataRetentionCleanupService,
 	searchIndexService *SearchIndexService,
 ) *AdminSystemConfigService {
+	mailSender := NewSMTPMailSender()
 	return &AdminSystemConfigService{
 		systemConfigRepo:            systemConfigRepo,
 		adminAccessService:          adminAccessService,
 		adminAuditService:           adminAuditService,
 		dataRetentionCleanupService: dataRetentionCleanupService,
 		searchIndexService:          searchIndexService,
+		mailSender:                  mailSender,
 	}
 }
 
@@ -193,6 +207,12 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	}
 	if configKey == SystemConfigKeyAuth {
 		valueMap, err = normalizeAuthConfigSecretsForPersist(valueMap, existing)
+		if err != nil {
+			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+		}
+	}
+	if configKey == SystemConfigKeyEmail {
+		valueMap, err = normalizeEmailConfigSecretsForPersist(valueMap, existing)
 		if err != nil {
 			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 		}
@@ -407,6 +427,77 @@ func (s *AdminSystemConfigService) TestLDAPConnection(
 	return nil
 }
 
+// TestEmailSend 使用传入的 email 草稿配置发送测试邮件，不落库存储。
+func (s *AdminSystemConfigService) TestEmailSend(
+	ctx context.Context,
+	input TestAdminSystemConfigEmailSendInput,
+) (err error) {
+	defer func() {
+		logit.SetRequestAttrs(ctx, logit.Error("errmsg", err))
+		err = errcode.MapAdminSystemConfigError(err)
+	}()
+
+	if s == nil || s.systemConfigRepo == nil || s.adminAccessService == nil || s.mailSender == nil {
+		return errors.New("admin system config service dependencies are nil")
+	}
+	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
+		return err
+	}
+
+	valueMap, ok := input.Value.(map[string]any)
+	if !ok || valueMap == nil {
+		return errcode.ErrAdminSystemConfigInvalidValue
+	}
+
+	toEmail := normalizeEmail(input.ToEmail)
+	if toEmail == "" {
+		return fmt.Errorf("%w: toEmail is required", errcode.ErrAdminSystemConfigInvalidValue)
+	}
+	if _, parseErr := mail.ParseAddress(toEmail); parseErr != nil {
+		return fmt.Errorf("%w: toEmail is invalid", errcode.ErrAdminSystemConfigInvalidValue)
+	}
+
+	existing, err := s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyEmail)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	normalizedValue, err := normalizeEmailConfigSecretsForPersist(valueMap, existing)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+	testPayload, err := cloneMapAny(normalizedValue)
+	if err != nil {
+		return err
+	}
+	// 测试发送强制按启用配置校验，确保 SMTP 与发件信息完整。
+	testPayload["enabled"] = true
+	if err := validateEmailConfig(testPayload); err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+	emailConfig := NormalizeEmailConfig(testPayload)
+	if err := s.mailSender.Send(ctx, emailConfig, MailMessage{
+		To:       []string{toEmail},
+		Subject:  "PlainDoc 邮件配置测试",
+		TextBody: "这是一封来自 PlainDoc 的测试邮件，用于验证 SMTP 配置是否可用。",
+	}); err != nil {
+		return fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+	}
+
+	return s.recordEmailTestSendAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleSystemConfig,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "system_config",
+		TargetID:   SystemConfigKeyEmail,
+		Summary:    "system config email test send: " + SystemConfigKeyEmail,
+		Detail: map[string]any{
+			"toEmail": toEmail,
+			"value":   maskEmailConfigSecrets(testPayload),
+		},
+		RequestID: strings.TrimSpace(input.RequestID),
+	})
+}
+
 // RunDataRetentionCleanup 手动执行一次数据清理。
 func (s *AdminSystemConfigService) RunDataRetentionCleanup(
 	ctx context.Context,
@@ -554,6 +645,9 @@ func (s *AdminSystemConfigService) recordSystemConfigAudit(
 	if strings.EqualFold(strings.TrimSpace(record.ConfigKey), SystemConfigKeyAuth) {
 		detailValue = maskAuthConfigSecrets(valueMap)
 	}
+	if strings.EqualFold(strings.TrimSpace(record.ConfigKey), SystemConfigKeyEmail) {
+		detailValue = maskEmailConfigSecrets(valueMap)
+	}
 
 	detail := map[string]any{
 		"configKey": record.ConfigKey,
@@ -649,6 +743,16 @@ func (s *AdminSystemConfigService) recordSearchIndexRebuildAudit(
 	})
 }
 
+func (s *AdminSystemConfigService) recordEmailTestSendAudit(
+	ctx context.Context,
+	input RecordAdminAuditInput,
+) error {
+	if s == nil || s.adminAuditService == nil {
+		return nil
+	}
+	return s.adminAuditService.Record(ctx, input)
+}
+
 func mapSystemConfigToRecord(value models.SystemConfig) (AdminSystemConfigRecord, error) {
 	var payload map[string]any
 	if strings.TrimSpace(value.ConfigValueJSON) == "" {
@@ -663,6 +767,9 @@ func mapSystemConfigToRecord(value models.SystemConfig) (AdminSystemConfigRecord
 	}
 	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyAuth) {
 		payload = maskAuthConfigSecrets(payload)
+	}
+	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyEmail) {
+		payload = maskEmailConfigSecrets(payload)
 	}
 
 	return AdminSystemConfigRecord{
@@ -867,6 +974,149 @@ func validateDataRetentionConfig(payload map[string]any) error {
 			minUserSessionRetentionDays,
 			maxUserSessionRetentionDays,
 		)
+	}
+	return nil
+}
+
+func validateEmailConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"enabled":       {},
+		"fromName":      {},
+		"fromEmail":     {},
+		"replyTo":       {},
+		"appBaseUrl":    {},
+		"passwordReset": {},
+		"smtp":          {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+
+	if _, err := getRequiredBool(payload, "enabled"); err != nil {
+		return err
+	}
+	fromName, err := getRequiredStringAllowEmpty(payload, "fromName")
+	if err != nil {
+		return err
+	}
+	fromEmail, err := getRequiredStringAllowEmpty(payload, "fromEmail")
+	if err != nil {
+		return err
+	}
+	if _, err := getRequiredStringAllowEmpty(payload, "replyTo"); err != nil {
+		return err
+	}
+	if _, err := getRequiredStringAllowEmpty(payload, "appBaseUrl"); err != nil {
+		return err
+	}
+	enabled, _ := getRequiredBool(payload, "enabled")
+	if enabled {
+		if strings.TrimSpace(fromName) == "" {
+			return fmt.Errorf("fromName must not be empty when email is enabled")
+		}
+		if strings.TrimSpace(fromEmail) == "" || !strings.Contains(fromEmail, "@") {
+			return fmt.Errorf("fromEmail must be valid email when email is enabled")
+		}
+	}
+
+	passwordReset, err := getRequiredObject(payload, "passwordReset")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(passwordReset, map[string]struct{}{
+		"tokenTTLMinutes":            {},
+		"minRequestIntervalSeconds":  {},
+		"maxRequestsPerHourPerEmail": {},
+		"maxRequestsPerHourPerIP":    {},
+	}); err != nil {
+		return fmt.Errorf("passwordReset %w", err)
+	}
+	tokenTTLMinutes, err := getRequiredInt(passwordReset, "tokenTTLMinutes")
+	if err != nil {
+		return fmt.Errorf("passwordReset %w", err)
+	}
+	if tokenTTLMinutes < 5 || tokenTTLMinutes > 1440 {
+		return fmt.Errorf("passwordReset.tokenTTLMinutes must be between 5 and 1440")
+	}
+	minRequestIntervalSeconds, err := getRequiredInt(passwordReset, "minRequestIntervalSeconds")
+	if err != nil {
+		return fmt.Errorf("passwordReset %w", err)
+	}
+	if minRequestIntervalSeconds < 0 || minRequestIntervalSeconds > 3600 {
+		return fmt.Errorf("passwordReset.minRequestIntervalSeconds must be between 0 and 3600")
+	}
+	maxRequestsPerHourPerEmail, err := getRequiredInt(passwordReset, "maxRequestsPerHourPerEmail")
+	if err != nil {
+		return fmt.Errorf("passwordReset %w", err)
+	}
+	if maxRequestsPerHourPerEmail < 1 || maxRequestsPerHourPerEmail > 1000 {
+		return fmt.Errorf("passwordReset.maxRequestsPerHourPerEmail must be between 1 and 1000")
+	}
+	maxRequestsPerHourPerIP, err := getRequiredInt(passwordReset, "maxRequestsPerHourPerIP")
+	if err != nil {
+		return fmt.Errorf("passwordReset %w", err)
+	}
+	if maxRequestsPerHourPerIP < 1 || maxRequestsPerHourPerIP > 5000 {
+		return fmt.Errorf("passwordReset.maxRequestsPerHourPerIP must be between 1 and 5000")
+	}
+
+	smtpConfig, err := getRequiredObject(payload, "smtp")
+	if err != nil {
+		return err
+	}
+	if err := validateNoUnknownKeys(smtpConfig, map[string]struct{}{
+		"host":               {},
+		"port":               {},
+		"username":           {},
+		"passwordCiphertext": {},
+		"security":           {},
+		"connectTimeoutMs":   {},
+		"sendTimeoutMs":      {},
+	}); err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	smtpHost, err := getRequiredStringAllowEmpty(smtpConfig, "host")
+	if err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	port, err := getRequiredInt(smtpConfig, "port")
+	if err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("smtp.port must be between 1 and 65535")
+	}
+	if _, err := getRequiredStringAllowEmpty(smtpConfig, "username"); err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	if _, err := getRequiredStringAllowEmpty(smtpConfig, "passwordCiphertext"); err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	security, err := getRequiredString(smtpConfig, "security")
+	if err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	switch security {
+	case "plain", "starttls", "tls":
+	default:
+		return fmt.Errorf("smtp.security must be plain/starttls/tls")
+	}
+	connectTimeoutMS, err := getRequiredInt(smtpConfig, "connectTimeoutMs")
+	if err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	if connectTimeoutMS < 100 || connectTimeoutMS > 30000 {
+		return fmt.Errorf("smtp.connectTimeoutMs must be between 100 and 30000")
+	}
+	sendTimeoutMS, err := getRequiredInt(smtpConfig, "sendTimeoutMs")
+	if err != nil {
+		return fmt.Errorf("smtp %w", err)
+	}
+	if sendTimeoutMS < 100 || sendTimeoutMS > 30000 {
+		return fmt.Errorf("smtp.sendTimeoutMs must be between 100 and 30000")
+	}
+	if enabled && strings.TrimSpace(smtpHost) == "" {
+		return fmt.Errorf("smtp.host must not be empty when email is enabled")
 	}
 	return nil
 }
@@ -1809,6 +2059,45 @@ func normalizeAuthConfigSecretsForPersist(
 	return normalizedValue, nil
 }
 
+func normalizeEmailConfigSecretsForPersist(
+	value map[string]any,
+	existing *models.SystemConfig,
+) (map[string]any, error) {
+	normalizedValue, err := cloneMapAny(value)
+	if err != nil {
+		return nil, err
+	}
+
+	smtpConfig, err := getRequiredObject(normalizedValue, "smtp")
+	if err != nil {
+		return nil, err
+	}
+	passwordCiphertext, err := getRequiredStringAllowEmpty(smtpConfig, "passwordCiphertext")
+	if err != nil {
+		return nil, err
+	}
+	if passwordCiphertext != emailConfigSecretMask {
+		return normalizedValue, nil
+	}
+
+	normalizedExisting := map[string]any{}
+	if existing != nil && strings.TrimSpace(existing.ConfigValueJSON) != "" {
+		if err := json.Unmarshal([]byte(existing.ConfigValueJSON), &normalizedExisting); err != nil {
+			return nil, err
+		}
+	}
+	existingSMTPConfig, err := getRequiredObject(normalizedExisting, "smtp")
+	if err != nil {
+		return nil, fmt.Errorf("smtp.passwordCiphertext is masked but no stored secret exists")
+	}
+	existingPasswordCiphertext, err := getRequiredStringAllowEmpty(existingSMTPConfig, "passwordCiphertext")
+	if err != nil || strings.TrimSpace(existingPasswordCiphertext) == "" {
+		return nil, fmt.Errorf("smtp.passwordCiphertext is masked but no stored secret exists")
+	}
+	smtpConfig["passwordCiphertext"] = existingPasswordCiphertext
+	return normalizedValue, nil
+}
+
 func maskAuthConfigSecrets(value map[string]any) map[string]any {
 	clonedValue, err := cloneMapAny(value)
 	if err != nil {
@@ -1835,6 +2124,23 @@ func maskAuthConfigSecrets(value map[string]any) map[string]any {
 		ldapConfig["bindPasswordCiphertext"] = authConfigSecretMask
 	}
 
+	return clonedValue
+}
+
+func maskEmailConfigSecrets(value map[string]any) map[string]any {
+	clonedValue, err := cloneMapAny(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	smtpConfig, err := getRequiredObject(clonedValue, "smtp")
+	if err != nil {
+		return clonedValue
+	}
+	passwordCiphertext, err := getRequiredStringAllowEmpty(smtpConfig, "passwordCiphertext")
+	if err != nil || strings.TrimSpace(passwordCiphertext) == "" {
+		return clonedValue
+	}
+	smtpConfig["passwordCiphertext"] = emailConfigSecretMask
 	return clonedValue
 }
 

@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+	id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+	token_id VARCHAR(26) NOT NULL COMMENT '令牌业务ID（ULID）',
+	token_secret_hash VARCHAR(128) NOT NULL COMMENT '令牌密文哈希',
+	user_id VARCHAR(26) NOT NULL COMMENT '目标用户ID',
+	source VARCHAR(32) NOT NULL DEFAULT 'self_service' COMMENT '来源：self_service/admin_initiated',
+	requested_by_user_id VARCHAR(26) NULL COMMENT '管理员触发人用户ID',
+	request_ip_hash VARCHAR(128) NOT NULL DEFAULT '' COMMENT '请求IP哈希',
+	expires_at DATETIME(3) NOT NULL COMMENT '过期时间',
+	consumed_at DATETIME(3) NULL COMMENT '消费时间',
+	invalidated_at DATETIME(3) NULL COMMENT '失效时间',
+	created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+	updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+	UNIQUE KEY uk_password_reset_tokens_token_id (token_id),
+	KEY idx_password_reset_tokens_user_active (user_id, consumed_at, invalidated_at, expires_at),
+	KEY idx_password_reset_tokens_expires_at (expires_at),
+	KEY idx_password_reset_tokens_request_ip_created (request_ip_hash, created_at),
+	CONSTRAINT chk_password_reset_tokens_source CHECK (source IN ('self_service', 'admin_initiated')),
+	CONSTRAINT fk_password_reset_tokens_user_id FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+	CONSTRAINT fk_password_reset_tokens_requested_by_user_id FOREIGN KEY (requested_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='密码重置令牌表';

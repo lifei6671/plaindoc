@@ -21,6 +21,7 @@ const CAPTCHA_REFRESH_DEBOUNCE_MS = 800;
 interface AuthPanelProps {
   mode: AuthMode;
   switchPath: string;
+  forgotPasswordPath: string;
   redirectTarget: string | null;
   checking: boolean;
   submitting: boolean;
@@ -38,6 +39,7 @@ interface AuthPanelProps {
 export function AuthPanel({
   mode,
   switchPath,
+  forgotPasswordPath,
   redirectTarget,
   checking,
   submitting,
@@ -154,6 +156,12 @@ export function AuthPanel({
     }
     return `${switchPath}?redirect=${encodeURIComponent(redirectTarget)}`;
   }, [redirectTarget, switchPath]);
+  const forgotPasswordHref = useMemo(() => {
+    if (!redirectTarget) {
+      return forgotPasswordPath;
+    }
+    return `${forgotPasswordPath}?redirect=${encodeURIComponent(redirectTarget)}`;
+  }, [forgotPasswordPath, redirectTarget]);
 
   const handleSubmit = useCallback(async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -301,6 +309,13 @@ export function AuthPanel({
                 disabled={checking || submitting}
               />
             </label>
+            {mode === "login" ? (
+              <p className="text-right text-xs text-slate-600">
+                <a href={forgotPasswordHref} className="font-medium text-cyan-700 hover:text-cyan-800 hover:underline">
+                  忘记密码？
+                </a>
+              </p>
+            ) : null}
 
             {mode === "register" ? (
               <label className="admin-auth-form__field">

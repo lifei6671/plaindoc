@@ -55,6 +55,8 @@ func registerWebSPARoutes(router *gin.Engine, cfg config.Config, logger *slog.Lo
 
 	router.GET("/login", serveIndex)
 	router.GET("/register", serveIndex)
+	router.GET("/forgot-password", serveIndex)
+	router.GET("/reset-password", serveIndex)
 	router.GET("/editor", serveIndex)
 	router.GET("/editor/*path", serveIndex)
 	router.GET("/admin", serveIndex)

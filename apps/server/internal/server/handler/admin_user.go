@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,6 +59,8 @@ type updateAdminUserStatusRequest struct {
 type updateAdminUserRoleRequest struct {
 	Role string `json:"role"`
 }
+
+type sendAdminUserPasswordResetEmailRequest struct{}
 
 // NewAdminUserHandler 创建后台用户管理处理器。
 func NewAdminUserHandler(adminUserService *service.AdminUserService) *adminUserHandler {
@@ -271,6 +274,48 @@ func (h *adminUserHandler) DeleteUser(c *gin.Context) {
 		response.RequestIDFromContext(c),
 	); err != nil {
 		setRequestErrmsg(c, err, "删除用户失败")
+		response.FromError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, struct{}{})
+}
+
+// SendPasswordResetEmail 发送后台目标用户密码重置邮件。
+func (h *adminUserHandler) SendPasswordResetEmail(c *gin.Context) {
+	if h == nil || h.adminUserService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
+		response.AdminUserErrAdminActorMissing.Write(c)
+		return
+	}
+
+	targetUserID := strings.TrimSpace(c.Param("userId"))
+	if targetUserID == "" {
+		setRequestErrmsg(c, nil, "用户 ID 不能为空")
+		response.AdminUserErrUserIDRequired.Write(c)
+		return
+	}
+
+	var req sendAdminUserPasswordResetEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		setRequestErrmsg(c, err, "解析请求体失败")
+		response.AdminUserErrRequestBody.Write(c)
+		return
+	}
+
+	if err := h.adminUserService.SendPasswordResetEmail(c.Request.Context(), service.SendAdminUserPasswordResetEmailInput{
+		ActorUserID: actorUserID,
+		RequestID:   response.RequestIDFromContext(c),
+		UserID:      targetUserID,
+		ClientIP:    strings.TrimSpace(c.ClientIP()),
+	}); err != nil {
+		setRequestErrmsg(c, err, "发送密码重置邮件失败")
 		response.FromError(c, err)
 		return
 	}

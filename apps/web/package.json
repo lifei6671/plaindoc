@@ -9,7 +9,9 @@
     "build:client": "vite build",
     "build:ssr-worker": "vite build --config vite.ssr.config.ts",
     "build": "npm run check:dropdown-menu && tsc -b && npm run build:client && npm run build:ssr-worker",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.3.3",
@@ -52,6 +54,9 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^25.3.0",
     "@types/react": "^19.1.10",
@@ -59,8 +64,10 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^28.1.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.2",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "vitest": "^4.0.18"
   }
 }

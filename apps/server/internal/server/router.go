@@ -106,6 +106,7 @@ func newRouter(
 	userRepo := repository.NewGormUserRepository(db)
 	userIdentityRepo := repository.NewGormUserIdentityRepository(db)
 	userSessionRepo := repository.NewGormUserSessionRepository(db)
+	passwordResetTokenRepo := repository.NewGormPasswordResetTokenRepository(db)
 	authRiskStateRepo := repository.NewGormAuthRiskStateRepository(db)
 	authCaptchaChallengeRepo := repository.NewGormAuthCaptchaChallengeRepository(db)
 	searchIndexJobRepo := repository.NewGormSearchIndexJobRepository(db)
@@ -128,6 +129,15 @@ func newRouter(
 	// ---- 基础服务与页面 Handler 装配 ----
 	// authService 是鉴权基石，后续 API/后台中间件都会复用。
 	authService := service.NewAuthService(userRepo, userSessionRepo, cfg.JWT)
+	emailConfigService := service.NewEmailConfigService(systemConfigRepo)
+	passwordResetService := service.NewPasswordResetService(
+		userRepo,
+		userSessionRepo,
+		passwordResetTokenRepo,
+		emailConfigService,
+		service.NewSMTPMailSender(),
+		cfg.JWT.Secret,
+	)
 	// 首页 SSR 服务：负责首页/分类页可见性过滤、分类导航和缓存策略配置读取。
 	homeService := service.NewHomeService(spaceRepo, spaceCategoryRepo, systemConfigRepo)
 	// sitemap 服务：负责公开空间/文档 URL 的收敛输出。
@@ -168,7 +178,7 @@ func newRouter(
 		}
 	}()
 	go runSearchIndexJobLoop(context.Background(), logger, searchIndexJobService)
-	
+
 	// 首页全文检索服务：负责首页落地页检索结果读取与可见性过滤。
 	homeSearchService := service.NewHomeSearchService(searchQueryService, db)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
@@ -330,6 +340,7 @@ func newRouter(
 			authRegistrationPolicyService,
 			authLoginOrchestrator,
 			authRiskControlService,
+			passwordResetService,
 			cfg.JWT,
 		)
 
@@ -347,6 +358,12 @@ func newRouter(
 		api.GET("/auth/me", authHandler.Me)
 		// 主动退出当前会话（含服务端会话吊销语义）。
 		api.POST("/auth/logout", authHandler.Logout)
+		// 发送密码重置邮件（防枚举）。
+		api.POST("/auth/password-reset/request", authHandler.RequestPasswordReset)
+		// 校验密码重置令牌。
+		api.POST("/auth/password-reset/verify", authHandler.VerifyPasswordResetToken)
+		// 提交新密码完成重置。
+		api.POST("/auth/password-reset/confirm", authHandler.ConfirmPasswordReset)
 
 		// 读取图床配置（用于前端展示上传能力与限制）。
 		api.GET("/image-hosting", imageHostingHandler.GetConfig)
@@ -411,7 +428,14 @@ func newRouter(
 		adminAuditHandler := handler.NewAdminAuditHandler(adminAuditService)
 		adminProfileService := service.NewAdminProfileService(userRepo, adminAccessService, adminAuditService)
 		adminProfileHandler := handler.NewAdminProfileHandler(adminProfileService, imageHostingService)
-		adminUserService := service.NewAdminUserService(userRepo, userSessionRepo, adminRoleRepo, adminAccessService, adminAuditService)
+		adminUserService := service.NewAdminUserService(
+			userRepo,
+			userSessionRepo,
+			adminRoleRepo,
+			adminAccessService,
+			adminAuditService,
+			passwordResetService,
+		)
 		adminUserHandler := handler.NewAdminUserHandler(adminUserService)
 		adminSpaceService := service.NewAdminSpaceService(
 			spaceRepo,
@@ -543,6 +567,19 @@ func newRouter(
 					},
 				),
 				adminUserHandler.DeleteUser,
+			)
+			adminAPI.POST(
+				"/users/:userId/password-reset-email",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "user.password_reset_email",
+						TargetType:    "user",
+						TargetIDParam: "userId",
+					},
+				),
+				adminUserHandler.SendPasswordResetEmail,
 			)
 
 			// ---- 空间治理（platform_admin 全量 / space_admin 按 scope）----
@@ -773,6 +810,11 @@ func newRouter(
 				"/system-configs/auth/providers/ldap/test",
 				middleware.RequirePlatformAdmin(adminAccessService),
 				adminSystemConfigHandler.TestLDAPConnection,
+			)
+			adminAPI.POST(
+				"/system-configs/email/test-send",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminSystemConfigHandler.TestEmailSend,
 			)
 
 			// ---- 全文检索分词治理（仅平台管理员）----

@@ -50,8 +50,10 @@ import {
 import ReactMarkdown from "react-markdown";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthPanel } from "./components/AuthPanel";
+import { ForgotPasswordPanel } from "./components/ForgotPasswordPanel";
 import { EditorAccessErrorPage } from "./components/EditorAccessErrorPage";
 import { EditorLoadingPage } from "./components/EditorLoadingPage";
+import { ResetPasswordPanel } from "./components/ResetPasswordPanel";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
@@ -145,6 +147,8 @@ const WORKSPACE_ACTIVE_DOC_ID_STORAGE_KEY = "workspace.activeDocId";
 const PREVIEW_LINK_RENDER_MODE_STORAGE_KEY = "plaindoc.preview.link-render-mode";
 const LOGIN_ROUTE_PATH = "/login";
 const REGISTER_ROUTE_PATH = "/register";
+const FORGOT_PASSWORD_ROUTE_PATH = "/forgot-password";
+const RESET_PASSWORD_ROUTE_PATH = "/reset-password";
 const EDITOR_ROUTE_BASE_PATH = "/editor";
 const ADMIN_SPACES_ROUTE_PATH = `${ADMIN_ROUTE_BASE_PATH}/spaces`;
 const AUTO_SAVE_DEBOUNCE_MS = 800;
@@ -163,6 +167,8 @@ const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
 export type AppRoute =
   | { kind: "login" }
   | { kind: "register" }
+  | { kind: "forgot-password" }
+  | { kind: "reset-password" }
   | { kind: "editor-root" }
   | { kind: "editor-space"; spaceId: string }
   | { kind: "editor-doc"; spaceId: string; docId: string }
@@ -280,6 +286,12 @@ function parseAppRoute(pathname: string): AppRoute {
   }
   if (normalizedPathname === REGISTER_ROUTE_PATH) {
     return { kind: "register" };
+  }
+  if (normalizedPathname === FORGOT_PASSWORD_ROUTE_PATH) {
+    return { kind: "forgot-password" };
+  }
+  if (normalizedPathname === RESET_PASSWORD_ROUTE_PATH) {
+    return { kind: "reset-password" };
   }
   if (normalizedPathname === ADMIN_LOGIN_ROUTE_PATH) {
     return { kind: "admin-login" };
@@ -924,7 +936,12 @@ export default function App() {
   const routeSpaceId = route.kind === "editor-space" || route.kind === "editor-doc" ? route.spaceId : null;
   const routeDocId = route.kind === "editor-doc" ? route.docId : null;
   const authRedirectTarget = useMemo(() => {
-    if (route.kind !== "login" && route.kind !== "register") {
+    if (
+      route.kind !== "login" &&
+      route.kind !== "register" &&
+      route.kind !== "forgot-password" &&
+      route.kind !== "reset-password"
+    ) {
       return null;
     }
     return resolveAuthRedirectTarget(new URLSearchParams(location.search).get("redirect"));
@@ -1237,7 +1254,12 @@ export default function App() {
         }
         return;
       }
-      if (route.kind !== "login" && route.kind !== "register") {
+      if (
+        route.kind !== "login" &&
+        route.kind !== "register" &&
+        route.kind !== "forgot-password" &&
+        route.kind !== "reset-password"
+      ) {
         const currentPathWithSearch =
           `${location.pathname}${location.search}${location.hash}` || "/";
         navigate(buildAuthEntryPath(LOGIN_ROUTE_PATH, currentPathWithSearch), { replace: true });
@@ -1249,7 +1271,12 @@ export default function App() {
     }
 
     // 登录/注册页在已登录态下不应渲染编辑器，直接跳转到目标页或首页。
-    if (route.kind === "login" || route.kind === "register") {
+    if (
+      route.kind === "login" ||
+      route.kind === "register" ||
+      route.kind === "forgot-password" ||
+      route.kind === "reset-password"
+    ) {
       if (authRedirectTarget) {
         window.location.replace(authRedirectTarget);
         return;
@@ -2820,6 +2847,46 @@ export default function App() {
     [dataGateway]
   );
 
+  const handleRequestPasswordReset = useCallback(
+    async (email: string) => {
+      setIsAuthSubmitting(true);
+      setAuthErrorMessage(null);
+      try {
+        await dataGateway.auth.requestPasswordReset({ email });
+      } catch (error) {
+        setAuthErrorMessage(`发送重置邮件失败：${formatError(error)}`);
+        throw error;
+      } finally {
+        setIsAuthSubmitting(false);
+      }
+    },
+    [dataGateway]
+  );
+
+  const handleVerifyPasswordResetToken = useCallback(
+    async (token: string) => {
+      return dataGateway.auth.verifyPasswordResetToken({ token });
+    },
+    [dataGateway]
+  );
+
+  const handleConfirmPasswordReset = useCallback(
+    async (input: { token: string; newPassword: string; confirmPassword: string }) => {
+      setIsAuthSubmitting(true);
+      setAuthErrorMessage(null);
+      try {
+        await dataGateway.auth.confirmPasswordReset(input);
+        window.location.assign(buildAuthEntryPath(LOGIN_ROUTE_PATH, authRedirectTarget));
+      } catch (error) {
+        setAuthErrorMessage(`重置密码失败：${formatError(error)}`);
+        throw error;
+      } finally {
+        setIsAuthSubmitting(false);
+      }
+    },
+    [authRedirectTarget, dataGateway]
+  );
+
   // 退出登录：清除会话并返回登录页。
   const handleAuthLogout = useCallback(async () => {
     setIsAuthSubmitting(true);
@@ -2874,12 +2941,42 @@ export default function App() {
 
   // 未登录时展示认证面板，不渲染编辑器布局。
   if (!activeUser) {
+    if (route.kind === "forgot-password") {
+      return (
+        <>
+          <Toaster />
+          <ForgotPasswordPanel
+            submitting={isAuthSubmitting}
+            errorMessage={authErrorMessage}
+            loginPath={buildAuthEntryPath(LOGIN_ROUTE_PATH, authRedirectTarget)}
+            onSubmit={handleRequestPasswordReset}
+          />
+        </>
+      );
+    }
+
+    if (route.kind === "reset-password") {
+      return (
+        <>
+          <Toaster />
+          <ResetPasswordPanel
+            submitting={isAuthSubmitting}
+            errorMessage={authErrorMessage}
+            loginPath={buildAuthEntryPath(LOGIN_ROUTE_PATH, authRedirectTarget)}
+            onVerifyToken={handleVerifyPasswordResetToken}
+            onSubmit={handleConfirmPasswordReset}
+          />
+        </>
+      );
+    }
+
     return (
       <>
         <Toaster />
         <AuthPanel
           mode={route.kind === "register" ? "register" : "login"}
           switchPath={route.kind === "register" ? LOGIN_ROUTE_PATH : REGISTER_ROUTE_PATH}
+          forgotPasswordPath={FORGOT_PASSWORD_ROUTE_PATH}
           redirectTarget={authRedirectTarget}
           checking={isAuthChecking}
           submitting={isAuthSubmitting}
@@ -2896,8 +2993,13 @@ export default function App() {
     );
   }
 
-  // 已登录但仍停留在登录/注册路由时，展示过渡占位，避免编辑器闪屏。
-  if (route.kind === "login" || route.kind === "register") {
+  // 已登录但仍停留在认证路由时，展示过渡占位，避免编辑器闪屏。
+  if (
+    route.kind === "login" ||
+    route.kind === "register" ||
+    route.kind === "forgot-password" ||
+    route.kind === "reset-password"
+  ) {
     return (
       <>
         <Toaster />

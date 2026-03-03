@@ -17,6 +17,13 @@ const (
 	CodeCaptchaRequired       = "CAPTCHA_REQUIRED"
 	CodeCaptchaInvalid        = "CAPTCHA_INVALID"
 	CodeAuthTemporarilyLocked = "AUTH_TEMPORARILY_LOCKED"
+	CodePasswordResetUnavailable = "PASSWORD_RESET_UNAVAILABLE"
+	CodePasswordResetRateLimited = "PASSWORD_RESET_RATE_LIMITED"
+	CodePasswordResetSendFailed  = "PASSWORD_RESET_SEND_FAILED"
+	CodePasswordResetTokenInvalid = "PASSWORD_RESET_TOKEN_INVALID"
+	CodePasswordResetTokenExpired = "PASSWORD_RESET_TOKEN_EXPIRED"
+	CodePasswordResetTokenConsumed = "PASSWORD_RESET_TOKEN_CONSUMED"
+	CodePasswordResetUnsupported = "PASSWORD_RESET_UNSUPPORTED"
 
 	// 2000 段：请求参数与输入校验。
 	CodeInvalidRequest          = "INVALID_REQUEST"
@@ -121,6 +128,13 @@ var errorCodeRegistry = map[string]int{
 	CodeCaptchaRequired:       1008,
 	CodeCaptchaInvalid:        1009,
 	CodeAuthTemporarilyLocked: 1010,
+	CodePasswordResetUnavailable: 1011,
+	CodePasswordResetRateLimited: 1012,
+	CodePasswordResetSendFailed:  1013,
+	CodePasswordResetTokenInvalid: 1014,
+	CodePasswordResetTokenExpired: 1015,
+	CodePasswordResetTokenConsumed: 1016,
+	CodePasswordResetUnsupported: 1017,
 
 	// 2000 段：请求参数与输入校验。
 	CodeInvalidRequest:          2001,

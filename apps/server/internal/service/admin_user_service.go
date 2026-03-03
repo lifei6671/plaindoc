@@ -98,6 +98,14 @@ type UpdateAdminUserRoleInput struct {
 	Role        AdminUserRole
 }
 
+// SendAdminUserPasswordResetEmailInput 定义后台发送密码重置邮件参数。
+type SendAdminUserPasswordResetEmailInput struct {
+	ActorUserID string
+	RequestID   string
+	UserID      string
+	ClientIP    string
+}
+
 // AdminUserService 封装后台用户管理业务。
 type AdminUserService struct {
 	userRepo           repository.UserRepository
@@ -105,6 +113,7 @@ type AdminUserService struct {
 	adminRoleRepo      repository.AdminRoleRepository
 	adminAccessService *AdminAccessService
 	adminAuditService  *AdminAuditService
+	passwordResetService *PasswordResetService
 }
 
 // NewAdminUserService 创建后台用户管理服务。
@@ -114,13 +123,19 @@ func NewAdminUserService(
 	adminRoleRepo repository.AdminRoleRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
+	passwordResetServices ...*PasswordResetService,
 ) *AdminUserService {
+	var passwordResetService *PasswordResetService
+	if len(passwordResetServices) > 0 {
+		passwordResetService = passwordResetServices[0]
+	}
 	return &AdminUserService{
 		userRepo:           userRepo,
 		userSessionRepo:    userSessionRepo,
 		adminRoleRepo:      adminRoleRepo,
 		adminAccessService: adminAccessService,
 		adminAuditService:  adminAuditService,
+		passwordResetService: passwordResetService,
 	}
 }
 
@@ -554,6 +569,76 @@ func (s *AdminUserService) DeleteUser(
 	}
 
 	return nil
+}
+
+// SendPasswordResetEmail 后台向目标用户发送密码重置邮件。
+func (s *AdminUserService) SendPasswordResetEmail(
+	ctx context.Context,
+	input SendAdminUserPasswordResetEmailInput,
+) (err error) {
+	defer func() {
+		err = errcode.MapAdminUserError(err)
+	}()
+
+	if err := s.ensurePlatformAdmin(ctx, input.ActorUserID); err != nil {
+		return err
+	}
+	if s == nil || s.passwordResetService == nil {
+		return errcode.ErrAdminUserPasswordResetUnavailable
+	}
+
+	actorUserID := strings.TrimSpace(input.ActorUserID)
+	targetUserID := strings.TrimSpace(input.UserID)
+	if targetUserID == "" {
+		return errcode.ErrAdminUserInvalidUserID
+	}
+	if actorUserID == targetUserID {
+		return errcode.ErrAdminUserSelfOperationBlocked
+	}
+
+	targetUser, err := s.userRepo.GetByUserID(ctx, targetUserID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errcode.ErrAdminUserNotFound
+		}
+		return err
+	}
+	if normalizeEntityStatus(targetUser.Status) == models.EntityStatusDeleted || targetUser.DeletedAt != nil {
+		return errcode.ErrAdminUserAlreadyDeleted
+	}
+
+	_, err = s.passwordResetService.RequestByAdmin(ctx, RequestPasswordResetByAdminInput{
+		TargetUserID:      targetUserID,
+		RequestedByUserID: actorUserID,
+		ClientIP:          strings.TrimSpace(input.ClientIP),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPasswordResetEmailDisabled):
+			return errcode.ErrAdminUserPasswordResetUnavailable
+		case errors.Is(err, ErrPasswordResetRateLimited):
+			return errcode.ErrAdminUserPasswordResetRateLimited
+		case errors.Is(err, ErrPasswordResetUserNotSupported):
+			return errcode.ErrAdminUserPasswordResetUnsupported
+		case errors.Is(err, ErrPasswordResetEmailSendFailed):
+			return errcode.ErrAdminUserPasswordResetEmailSendFailed
+		default:
+			return err
+		}
+	}
+
+	return s.recordUserAudit(ctx, RecordAdminAuditInput{
+		Module:     AdminAuditModuleUser,
+		Action:     AdminAuditActionUpdate,
+		TargetType: "user_password_reset_email",
+		TargetID:   targetUserID,
+		Summary:    "password reset email sent: " + targetUserID,
+		Detail: map[string]any{
+			"userId": targetUserID,
+			"email":  targetUser.Email,
+		},
+		RequestID: input.RequestID,
+	})
 }
 
 func (s *AdminUserService) ensurePlatformAdmin(ctx context.Context, actorUserID string) error {

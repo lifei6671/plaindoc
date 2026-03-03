@@ -602,6 +602,98 @@ func TestRouter_AdminUserSelfOperationBlocked(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminUserSendPasswordResetEmailPermissionAndOperationToken(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "reset-mail-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "reset-mail-platform-admin@example.com")
+	targetUserID, _, _ := registerAccessUser(t, serve, "reset-mail-target@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	noTokenReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/users/"+targetUserID+"/password-reset-email",
+		nil,
+	)
+	noTokenReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	noTokenRec := serve(noTokenReq)
+	if noTokenRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected send password reset email without operation token status 400, got %d body=%s",
+			noTokenRec.Code,
+			noTokenRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, noTokenRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeOperationTokenRequired) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeOperationTokenRequired),
+			decodeJSONResultCode(t, noTokenRec.Body.Bytes()),
+			noTokenRec.Body.String(),
+		)
+	}
+
+	spaceAdminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/users/"+targetUserID+"/password-reset-email",
+		nil,
+	)
+	spaceAdminReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		spaceAdminReq,
+		spaceAdminToken,
+		"user.password_reset_email",
+		"user",
+		targetUserID,
+	)
+	spaceAdminRec := serve(spaceAdminReq)
+	if spaceAdminRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin send password reset email status 403, got %d body=%s",
+			spaceAdminRec.Code,
+			spaceAdminRec.Body.String(),
+		)
+	}
+
+	sendReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/users/"+targetUserID+"/password-reset-email",
+		nil,
+	)
+	sendReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	attachAdminOperationToken(
+		t,
+		serve,
+		sendReq,
+		platformAdminToken,
+		"user.password_reset_email",
+		"user",
+		targetUserID,
+	)
+	sendRec := serve(sendReq)
+	if sendRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected platform admin send password reset email unavailable status 400, got %d body=%s",
+			sendRec.Code,
+			sendRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, sendRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidOperation) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeInvalidOperation),
+			decodeJSONResultCode(t, sendRec.Body.Bytes()),
+			sendRec.Body.String(),
+		)
+	}
+}
+
 func TestRouter_AdminSpaceListRespectsScope(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
@@ -3094,6 +3186,58 @@ func TestRouter_AdminSystemConfig_TestLDAPConnectionPermissionAndValidation(t *t
 	if invalidRec.Code != http.StatusOK {
 		t.Fatalf(
 			"expected invalid ldap test config status 400, got %d body=%s",
+			invalidRec.Code,
+			invalidRec.Body.String(),
+		)
+	}
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidConfigValue) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeInvalidConfigValue),
+			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
+			invalidRec.Body.String(),
+		)
+	}
+}
+
+func TestRouter_AdminSystemConfig_TestEmailSendPermissionAndValidation(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "config-email-test-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-email-test-platform-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	spaceAdminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/system-configs/email/test-send",
+		bytes.NewReader([]byte(`{"toEmail":"target@example.com","value":{}}`)),
+	)
+	spaceAdminReq.Header.Set("Authorization", "Bearer "+spaceAdminToken)
+	spaceAdminReq.Header.Set("Content-Type", "application/json")
+	spaceAdminRec := serve(spaceAdminReq)
+	if spaceAdminRec.Code != http.StatusForbidden {
+		t.Fatalf(
+			"expected space admin test email send status 403, got %d body=%s",
+			spaceAdminRec.Code,
+			spaceAdminRec.Body.String(),
+		)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/system-configs/email/test-send",
+		bytes.NewReader([]byte(`{"toEmail":"invalid-email","value":{}}`)),
+	)
+	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidRec := serve(invalidReq)
+	if invalidRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected invalid email test send status 400, got %d body=%s",
 			invalidRec.Code,
 			invalidRec.Body.String(),
 		)

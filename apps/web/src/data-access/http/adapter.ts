@@ -628,6 +628,71 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       );
       return normalizeAuthCaptchaChallenge(challenge);
     },
+    async requestPasswordReset(input) {
+      const email = typeof input.email === "string" ? input.email.trim() : "";
+      if (!email) {
+        throw new Error("邮箱不能为空");
+      }
+      await request<void>(
+        "/auth/password-reset/request",
+        {
+          method: "POST",
+          body: JSON.stringify({ email })
+        },
+        {
+          skipAuth: true,
+          retryOnUnauthorized: false
+        }
+      );
+    },
+    async verifyPasswordResetToken(input) {
+      const token = typeof input.token === "string" ? input.token.trim() : "";
+      if (!token) {
+        throw new Error("重置令牌不能为空");
+      }
+      const payload = await request<{ valid?: boolean; expiresAt?: string }>(
+        "/auth/password-reset/verify",
+        {
+          method: "POST",
+          body: JSON.stringify({ token })
+        },
+        {
+          skipAuth: true,
+          retryOnUnauthorized: false
+        }
+      );
+      return {
+        valid: payload.valid === true,
+        expiresAt: typeof payload.expiresAt === "string" ? payload.expiresAt : ""
+      };
+    },
+    async confirmPasswordReset(input) {
+      const token = typeof input.token === "string" ? input.token.trim() : "";
+      const newPassword = typeof input.newPassword === "string" ? input.newPassword : "";
+      const confirmPassword = typeof input.confirmPassword === "string" ? input.confirmPassword : "";
+      if (!token) {
+        throw new Error("重置令牌不能为空");
+      }
+      if (!newPassword) {
+        throw new Error("新密码不能为空");
+      }
+      await request<void>(
+        "/auth/password-reset/confirm",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            token,
+            newPassword,
+            confirmPassword
+          })
+        },
+        {
+          skipAuth: true,
+          retryOnUnauthorized: false
+        }
+      );
+      clearStoredTokens();
+    },
     async logout() {
       try {
         await request<void>("/auth/logout", {
@@ -1018,6 +1083,22 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       await request<void>(`/admin/users/${encodeURIComponent(targetUserID)}`, {
         method: "DELETE",
         headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
+    async sendUserPasswordResetEmail(input: { userId: string }) {
+      const targetUserID = (input.userId ?? "").trim();
+      if (!targetUserID) {
+        throw new Error("用户 ID 不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "user.password_reset_email",
+        targetType: "user",
+        targetId: targetUserID
+      });
+      await request<void>(`/admin/users/${encodeURIComponent(targetUserID)}/password-reset-email`, {
+        method: "POST",
+        headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify({})
       });
     },
     async createSpace(input: {
@@ -1885,6 +1966,19 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<{ ok: boolean }>("/admin/system-configs/auth/providers/ldap/test", {
         method: "POST",
         body: JSON.stringify(payload)
+      });
+    },
+    async testSystemEmailSend(input: { value: Record<string, unknown>; toEmail: string }) {
+      const toEmail = typeof input.toEmail === "string" ? input.toEmail.trim() : "";
+      if (!toEmail) {
+        throw new Error("测试收件邮箱不能为空");
+      }
+      return request<{ ok: boolean }>("/admin/system-configs/email/test-send", {
+        method: "POST",
+        body: JSON.stringify({
+          value: input.value ?? {},
+          toEmail
+        })
       });
     },
     async listAudits(input: AdminAuditListInput = {}) {

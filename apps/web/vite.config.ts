@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
   const backendOrigin = (env.VITE_DEV_PROXY_TARGET || "http://localhost:8080").trim();
   // 仅 Web 路由由 Vite + React Router 处理，其余路径统一转发给后端 SSR。
-  const fallbackToBackendPattern = "^/(?!api(?:[/?]|$)|login(?:[/?]|$)|register(?:[/?]|$)|editor(?:[/?]|$)|admin(?:[/?]|$)|@vite(?:/|$)|@react-refresh(?:$|\\?)|@fs(?:/|$)|@id(?:/|$)|__vite_ping(?:$|\\?)|src(?:/|$)|node_modules(?:/|$)).*";
+  const fallbackToBackendPattern = "^/(?!api(?:[/?]|$)|login(?:[/?]|$)|register(?:[/?]|$)|forgot-password(?:[/?]|$)|reset-password(?:[/?]|$)|editor(?:[/?]|$)|admin(?:[/?]|$)|@vite(?:/|$)|@react-refresh(?:$|\\?)|@fs(?:/|$)|@id(?:/|$)|__vite_ping(?:$|\\?)|src(?:/|$)|node_modules(?:/|$)).*";
 
   return {
     plugins: [tailwindcss(), react()],
@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
           xfwd: true,
           secure: false
         },
-        "/r": {
+        "^/r(?:[/?]|$)": {
           target: backendOrigin,
           changeOrigin: true,
           xfwd: true,

@@ -34,6 +34,11 @@ type testAdminLDAPConnectionRequest struct {
 	ProviderID string `json:"providerId"`
 }
 
+type testAdminEmailSendRequest struct {
+	Value   any    `json:"value"`
+	ToEmail string `json:"toEmail"`
+}
+
 type dataRetentionCleanupPolicyResponse struct {
 	Enabled                    bool     `json:"enabled"`
 	ScheduleMinutes            int      `json:"scheduleMinutes"`
@@ -187,6 +192,44 @@ func (h *adminSystemConfigHandler) TestLDAPConnection(c *gin.Context) {
 		},
 	); err != nil {
 		setRequestErrmsg(c, err, "测试 LDAP 连接失败")
+		response.FromError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// TestEmailSend 测试 email 配置发送能力（不落库）。
+func (h *adminSystemConfigHandler) TestEmailSend(c *gin.Context) {
+	if h == nil || h.adminSystemConfigService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	actorUserID, err := middleware.AdminActorUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析管理员身份失败")
+		response.AdminSystemConfigErrAdminActorMissing.Write(c)
+		return
+	}
+
+	var req testAdminEmailSendRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析请求体失败")
+		response.AdminSystemConfigErrRequestBody.Write(c)
+		return
+	}
+
+	if err := h.adminSystemConfigService.TestEmailSend(
+		c.Request.Context(),
+		service.TestAdminSystemConfigEmailSendInput{
+			ActorUserID: actorUserID,
+			RequestID:   response.RequestIDFromContext(c),
+			Value:       req.Value,
+			ToEmail:     strings.TrimSpace(req.ToEmail),
+		},
+	); err != nil {
+		setRequestErrmsg(c, err, "测试邮件发送失败")
 		response.FromError(c, err)
 		return
 	}

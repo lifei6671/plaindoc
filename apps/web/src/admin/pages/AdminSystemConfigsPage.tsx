@@ -5,6 +5,7 @@ import {
   Keyboard,
   LoaderCircle,
   Lock,
+  Mail,
   Map,
   RefreshCw,
   Search,
@@ -35,10 +36,20 @@ import {
 } from "../../settings/image-hosting";
 import { AdminPageCard, AdminToolbarActions } from "../components/AdminPageLayout";
 
-type SystemConfigKey = "site" | "editor" | "security" | "search" | "data-retention" | "auth" | "image-hosting" | "sitemap";
+type SystemConfigKey =
+  | "site"
+  | "editor"
+  | "security"
+  | "search"
+  | "data-retention"
+  | "auth"
+  | "email"
+  | "image-hosting"
+  | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
 type SitemapGenerationMode = "all_public" | "updated_within_days";
 type AuthLoginMode = "local_only" | "ldap_only" | "mixed";
+type EmailSMTPSecurity = "plain" | "starttls" | "tls";
 type SearchProvider = "bleve" | "meili" | "typesense" | "database";
 type SearchFallbackPolicy = "degrade_to_database" | "return_error";
 type SearchAnalyzer = "simple" | "jieba";
@@ -65,6 +76,29 @@ interface EditorSystemConfigValue {
 interface SecuritySystemConfigValue {
   accessTokenTTLMinutes: number;
   refreshTokenTTLMinutes: number;
+}
+
+interface EmailSystemConfigValue {
+  enabled: boolean;
+  fromName: string;
+  fromEmail: string;
+  replyTo: string;
+  appBaseUrl: string;
+  passwordReset: {
+    tokenTTLMinutes: number;
+    minRequestIntervalSeconds: number;
+    maxRequestsPerHourPerEmail: number;
+    maxRequestsPerHourPerIP: number;
+  };
+  smtp: {
+    host: string;
+    port: number;
+    username: string;
+    passwordCiphertext: string;
+    security: EmailSMTPSecurity;
+    connectTimeoutMs: number;
+    sendTimeoutMs: number;
+  };
 }
 
 interface SearchSystemConfigValue {
@@ -190,6 +224,12 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     label: "认证设置",
     description: "登录模式与 LDAP",
     icon: Lock
+  },
+  {
+    key: "email",
+    label: "邮箱设置",
+    description: "SMTP 与密码找回邮件",
+    icon: Mail
   },
   {
     key: "image-hosting",
@@ -332,8 +372,15 @@ const AUTH_LOGIN_MODE_OPTIONS: Array<{ value: AuthLoginMode; label: string }> = 
   { value: "mixed", label: "本地 + LDAP（mixed）" }
 ];
 
+const EMAIL_SMTP_SECURITY_OPTIONS: Array<{ value: EmailSMTPSecurity; label: string }> = [
+  { value: "plain", label: "Plain（无加密）" },
+  { value: "starttls", label: "STARTTLS（推荐）" },
+  { value: "tls", label: "TLS（SMTPS）" }
+];
+
 const AUTH_LOCAL_PROVIDER_ID = "local";
 const AUTH_SECRET_MASK = "********";
+const EMAIL_SECRET_MASK = "********";
 
 const SITE_TEMPLATE: SiteSystemConfigValue = {
   allowRegistration: true,
@@ -348,6 +395,29 @@ const EDITOR_TEMPLATE: EditorSystemConfigValue = {
 const SECURITY_TEMPLATE: SecuritySystemConfigValue = {
   accessTokenTTLMinutes: 120,
   refreshTokenTTLMinutes: 10080
+};
+
+const EMAIL_TEMPLATE: EmailSystemConfigValue = {
+  enabled: false,
+  fromName: "PlainDoc",
+  fromEmail: "",
+  replyTo: "",
+  appBaseUrl: "",
+  passwordReset: {
+    tokenTTLMinutes: 30,
+    minRequestIntervalSeconds: 60,
+    maxRequestsPerHourPerEmail: 5,
+    maxRequestsPerHourPerIP: 20
+  },
+  smtp: {
+    host: "",
+    port: 587,
+    username: "",
+    passwordCiphertext: "",
+    security: "starttls",
+    connectTimeoutMs: 3000,
+    sendTimeoutMs: 5000
+  }
 };
 
 const SEARCH_PROVIDER_OPTIONS: Array<{ value: SearchProvider; label: string }> = [
@@ -608,6 +678,84 @@ function parseSecurityConfig(value: unknown): SecuritySystemConfigValue {
     accessTokenTTLMinutes: parseInteger(payload.accessTokenTTLMinutes, SECURITY_TEMPLATE.accessTokenTTLMinutes),
     refreshTokenTTLMinutes: parseInteger(payload.refreshTokenTTLMinutes, SECURITY_TEMPLATE.refreshTokenTTLMinutes)
   };
+}
+
+function parseEmailSMTPSecurity(value: unknown): EmailSMTPSecurity {
+  const normalized = parseString(value, EMAIL_TEMPLATE.smtp.security).toLowerCase();
+  if (normalized === "plain" || normalized === "starttls" || normalized === "tls") {
+    return normalized;
+  }
+  return EMAIL_TEMPLATE.smtp.security;
+}
+
+function cloneEmailConfig(value: EmailSystemConfigValue): EmailSystemConfigValue {
+  return {
+    ...value,
+    passwordReset: { ...value.passwordReset },
+    smtp: { ...value.smtp }
+  };
+}
+
+function parseEmailConfig(value: unknown): EmailSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return cloneEmailConfig(EMAIL_TEMPLATE);
+  }
+  const passwordReset = asRecord(payload.passwordReset);
+  const smtp = asRecord(payload.smtp);
+
+  const parsed: EmailSystemConfigValue = {
+    enabled: typeof payload.enabled === "boolean" ? payload.enabled : EMAIL_TEMPLATE.enabled,
+    fromName: parseString(payload.fromName, EMAIL_TEMPLATE.fromName),
+    fromEmail: parseString(payload.fromEmail, EMAIL_TEMPLATE.fromEmail),
+    replyTo: parseString(payload.replyTo, EMAIL_TEMPLATE.replyTo),
+    appBaseUrl: parseString(payload.appBaseUrl, EMAIL_TEMPLATE.appBaseUrl),
+    passwordReset: {
+      tokenTTLMinutes: parseInteger(passwordReset?.tokenTTLMinutes, EMAIL_TEMPLATE.passwordReset.tokenTTLMinutes),
+      minRequestIntervalSeconds: parseInteger(
+        passwordReset?.minRequestIntervalSeconds,
+        EMAIL_TEMPLATE.passwordReset.minRequestIntervalSeconds
+      ),
+      maxRequestsPerHourPerEmail: parseInteger(
+        passwordReset?.maxRequestsPerHourPerEmail,
+        EMAIL_TEMPLATE.passwordReset.maxRequestsPerHourPerEmail
+      ),
+      maxRequestsPerHourPerIP: parseInteger(
+        passwordReset?.maxRequestsPerHourPerIP,
+        EMAIL_TEMPLATE.passwordReset.maxRequestsPerHourPerIP
+      )
+    },
+    smtp: {
+      host: parseString(smtp?.host, EMAIL_TEMPLATE.smtp.host),
+      port: parseInteger(smtp?.port, EMAIL_TEMPLATE.smtp.port),
+      username: parseString(smtp?.username, EMAIL_TEMPLATE.smtp.username),
+      passwordCiphertext: parseString(smtp?.passwordCiphertext, EMAIL_TEMPLATE.smtp.passwordCiphertext),
+      security: parseEmailSMTPSecurity(smtp?.security),
+      connectTimeoutMs: parseInteger(smtp?.connectTimeoutMs, EMAIL_TEMPLATE.smtp.connectTimeoutMs),
+      sendTimeoutMs: parseInteger(smtp?.sendTimeoutMs, EMAIL_TEMPLATE.smtp.sendTimeoutMs)
+    }
+  };
+
+  if (parsed.smtp.port < 1 || parsed.smtp.port > 65535) {
+    parsed.smtp.port = EMAIL_TEMPLATE.smtp.port;
+  }
+  parsed.passwordReset.tokenTTLMinutes = Math.min(1440, Math.max(5, parsed.passwordReset.tokenTTLMinutes));
+  parsed.passwordReset.minRequestIntervalSeconds = Math.min(
+    3600,
+    Math.max(0, parsed.passwordReset.minRequestIntervalSeconds)
+  );
+  parsed.passwordReset.maxRequestsPerHourPerEmail = Math.min(
+    1000,
+    Math.max(1, parsed.passwordReset.maxRequestsPerHourPerEmail)
+  );
+  parsed.passwordReset.maxRequestsPerHourPerIP = Math.min(
+    5000,
+    Math.max(1, parsed.passwordReset.maxRequestsPerHourPerIP)
+  );
+  parsed.smtp.connectTimeoutMs = Math.min(30000, Math.max(100, parsed.smtp.connectTimeoutMs));
+  parsed.smtp.sendTimeoutMs = Math.min(30000, Math.max(100, parsed.smtp.sendTimeoutMs));
+
+  return parsed;
 }
 
 function cloneSearchConfig(value: SearchSystemConfigValue): SearchSystemConfigValue {
@@ -995,6 +1143,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [siteDraft, setSiteDraft] = useState<SiteSystemConfigValue>({ ...SITE_TEMPLATE });
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
+  const [emailDraft, setEmailDraft] = useState<EmailSystemConfigValue>(cloneEmailConfig(EMAIL_TEMPLATE));
   const [searchDraft, setSearchDraft] = useState<SearchSystemConfigValue>(cloneSearchConfig(SEARCH_TEMPLATE));
   const [dataRetentionDraft, setDataRetentionDraft] = useState<DataRetentionSystemConfigValue>({
     ...cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE)
@@ -1012,12 +1161,15 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     search: false,
     "data-retention": false,
     auth: false,
+    email: false,
     sitemap: false,
     "image-hosting": false
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingLDAP, setTestingLDAP] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [emailTestRecipient, setEmailTestRecipient] = useState("");
   const [runningCleanup, setRunningCleanup] = useState(false);
   const [runningSearchRebuild, setRunningSearchRebuild] = useState(false);
   const [searchIndexStatus, setSearchIndexStatus] = useState<AdminSearchIndexStatusResult | null>(null);
@@ -1126,6 +1278,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       setAuthDraft(parsedConfig);
       setSelectedAuthProviderID(parsedConfig.providers[0]?.id ?? parsedConfig.defaultProviderId);
     }
+    if (!dirtyKeys.email) {
+      setEmailDraft(parseEmailConfig(findConfigValue("email")));
+    }
     if (!dirtyKeys.sitemap) {
       setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
     }
@@ -1184,6 +1339,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setSelectedAuthProviderID(AUTH_TEMPLATE.defaultProviderId);
         markDirty("auth");
         return;
+      case "email":
+        setEmailDraft(cloneEmailConfig(EMAIL_TEMPLATE));
+        markDirty("email");
+        return;
       case "sitemap":
         setSitemapDraft({ ...SITEMAP_TEMPLATE });
         markDirty("sitemap");
@@ -1227,6 +1386,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         clearDirty("auth");
         return;
       }
+      case "email":
+        setEmailDraft(parseEmailConfig(findConfigValue("email")));
+        clearDirty("email");
+        return;
       case "sitemap":
         setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
         clearDirty("sitemap");
@@ -1275,6 +1438,8 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         };
       case "auth":
         return cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
+      case "email":
+        return cloneEmailConfig(emailDraft) as unknown as Record<string, unknown>;
       case "sitemap":
         return {
           generationMode: sitemapDraft.generationMode,
@@ -1285,7 +1450,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return {};
     }
-  }, [authDraft, dataRetentionDraft, editorDraft, imageHostingDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
+  }, [authDraft, dataRetentionDraft, editorDraft, emailDraft, imageHostingDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -1500,6 +1665,31 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     }
   }, [authDraft, dataGateway.admin, openToast, selectedAuthProvider]);
 
+  const handleTestEmailSend = useCallback(async () => {
+    const toEmail = emailTestRecipient.trim();
+    if (!toEmail) {
+      openToast("请先填写测试收件邮箱", "info");
+      return;
+    }
+    setTestingEmail(true);
+    try {
+      const payload = cloneEmailConfig(emailDraft) as unknown as Record<string, unknown>;
+      const result = await dataGateway.admin.testSystemEmailSend({
+        value: payload,
+        toEmail
+      });
+      if (result.ok) {
+        openToast(`测试邮件发送成功：${toEmail}`, "success");
+      } else {
+        openToast(`测试邮件发送失败：${toEmail}`);
+      }
+    } catch (error) {
+      openToast(`测试邮件发送失败：${formatError(error)}`);
+    } finally {
+      setTestingEmail(false);
+    }
+  }, [dataGateway.admin, emailDraft, emailTestRecipient, openToast]);
+
   const handleRunDataRetentionCleanup = useCallback(async () => {
     if (dirtyKeys["data-retention"]) {
       openToast("请先保存当前数据清理配置，再执行立即清理", "info");
@@ -1600,6 +1790,17 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                     >
                       <RefreshCw size={14} />
                       <span>{testingLDAP ? "测试中..." : "测试 LDAP 连接"}</span>
+                    </Button>
+                  ) : null}
+                  {selectedKey === "email" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading || saving || testingEmail}
+                      onClick={() => void handleTestEmailSend()}
+                    >
+                      <Mail size={14} />
+                      <span>{testingEmail ? "测试中..." : "测试发送邮件"}</span>
                     </Button>
                   ) : null}
                   {selectedKey === "data-retention" ? (
@@ -1801,6 +2002,366 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                           disabled={saving}
                         />
                       </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "email" ? (
+                  <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold tracking-wide text-slate-700">发送测试邮件</p>
+                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">测试收件邮箱</span>
+                          <Input
+                            value={emailTestRecipient}
+                            onChange={(event) => setEmailTestRecipient(event.target.value)}
+                            placeholder="qa@example.com"
+                            autoComplete="email"
+                            disabled={saving || testingEmail}
+                          />
+                          <p className="text-xs text-slate-500">点击顶部“测试发送邮件”按钮将使用当前草稿配置发送，不会保存配置。</p>
+                        </label>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <Checkbox
+                        checked={emailDraft.enabled}
+                        onCheckedChange={(checked) => {
+                          setEmailDraft((previous) => ({
+                            ...previous,
+                            enabled: checked === true
+                          }));
+                          markDirty("email");
+                        }}
+                        disabled={saving}
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium text-slate-700">启用邮箱服务</span>
+                        <p className="text-xs text-slate-500">关闭时将禁用前台找回密码与后台发送重置邮件。</p>
+                      </div>
+                    </label>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">发件人名称</span>
+                        <Input
+                          value={emailDraft.fromName}
+                          onChange={(event) => {
+                            setEmailDraft((previous) => ({
+                              ...previous,
+                              fromName: event.target.value
+                            }));
+                            markDirty("email");
+                          }}
+                          placeholder="PlainDoc"
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">发件邮箱</span>
+                        <Input
+                          value={emailDraft.fromEmail}
+                          onChange={(event) => {
+                            setEmailDraft((previous) => ({
+                              ...previous,
+                              fromEmail: event.target.value
+                            }));
+                            markDirty("email");
+                          }}
+                          placeholder="no-reply@example.com"
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">回复邮箱（可选）</span>
+                        <Input
+                          value={emailDraft.replyTo}
+                          onChange={(event) => {
+                            setEmailDraft((previous) => ({
+                              ...previous,
+                              replyTo: event.target.value
+                            }));
+                            markDirty("email");
+                          }}
+                          placeholder="support@example.com"
+                          disabled={saving}
+                        />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">应用访问地址</span>
+                        <Input
+                          value={emailDraft.appBaseUrl}
+                          onChange={(event) => {
+                            setEmailDraft((previous) => ({
+                              ...previous,
+                              appBaseUrl: event.target.value
+                            }));
+                            markDirty("email");
+                          }}
+                          placeholder="https://docs.example.com"
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">用于拼接密码重置链接，建议填写前端可访问域名。</p>
+                      </label>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold tracking-wide text-slate-700">SMTP 配置</p>
+                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">SMTP Host</span>
+                          <Input
+                            value={emailDraft.smtp.host}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  host: event.target.value
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            placeholder="smtp.example.com"
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">SMTP Port</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={String(emailDraft.smtp.port)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  port: normalizeIntegerInput(event.target.value, previous.smtp.port)
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">加密方式</span>
+                          <Select
+                            value={emailDraft.smtp.security}
+                            onValueChange={(value) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  security: value as EmailSMTPSecurity
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {EMAIL_SMTP_SECURITY_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">SMTP 用户名（可选）</span>
+                          <Input
+                            value={emailDraft.smtp.username}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  username: event.target.value
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            placeholder="smtp-user"
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5 sm:col-span-2">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">SMTP 密码（可选）</span>
+                          <Input
+                            type="password"
+                            value={emailDraft.smtp.passwordCiphertext}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  passwordCiphertext: event.target.value
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            placeholder="留空表示不变"
+                            autoComplete="new-password"
+                            disabled={saving}
+                          />
+                          {emailDraft.smtp.passwordCiphertext === EMAIL_SECRET_MASK ? (
+                            <p className="text-xs text-slate-500">当前为已掩码值，保持不改可直接保存。</p>
+                          ) : null}
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">连接超时（毫秒）</span>
+                          <Input
+                            type="number"
+                            min={100}
+                            max={30000}
+                            value={String(emailDraft.smtp.connectTimeoutMs)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  connectTimeoutMs: normalizeIntegerInput(
+                                    event.target.value,
+                                    previous.smtp.connectTimeoutMs
+                                  )
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">发送超时（毫秒）</span>
+                          <Input
+                            type="number"
+                            min={100}
+                            max={30000}
+                            value={String(emailDraft.smtp.sendTimeoutMs)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                smtp: {
+                                  ...previous.smtp,
+                                  sendTimeoutMs: normalizeIntegerInput(
+                                    event.target.value,
+                                    previous.smtp.sendTimeoutMs
+                                  )
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold tracking-wide text-slate-700">密码找回策略</p>
+                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">令牌有效期（分钟）</span>
+                          <Input
+                            type="number"
+                            min={5}
+                            max={1440}
+                            value={String(emailDraft.passwordReset.tokenTTLMinutes)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                passwordReset: {
+                                  ...previous.passwordReset,
+                                  tokenTTLMinutes: normalizeIntegerInput(
+                                    event.target.value,
+                                    previous.passwordReset.tokenTTLMinutes
+                                  )
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">最小请求间隔（秒）</span>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={3600}
+                            value={String(emailDraft.passwordReset.minRequestIntervalSeconds)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                passwordReset: {
+                                  ...previous.passwordReset,
+                                  minRequestIntervalSeconds: normalizeIntegerInput(
+                                    event.target.value,
+                                    previous.passwordReset.minRequestIntervalSeconds
+                                  )
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">单邮箱每小时上限</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={String(emailDraft.passwordReset.maxRequestsPerHourPerEmail)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                passwordReset: {
+                                  ...previous.passwordReset,
+                                  maxRequestsPerHourPerEmail: normalizeIntegerInput(
+                                    event.target.value,
+                                    previous.passwordReset.maxRequestsPerHourPerEmail
+                                  )
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-semibold tracking-wide text-slate-600">单 IP 每小时上限</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={5000}
+                            value={String(emailDraft.passwordReset.maxRequestsPerHourPerIP)}
+                            onChange={(event) => {
+                              setEmailDraft((previous) => ({
+                                ...previous,
+                                passwordReset: {
+                                  ...previous.passwordReset,
+                                  maxRequestsPerHourPerIP: normalizeIntegerInput(
+                                    event.target.value,
+                                    previous.passwordReset.maxRequestsPerHourPerIP
+                                  )
+                                }
+                              }));
+                              markDirty("email");
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                      </div>
                     </div>
                   </div>
                 ) : null}

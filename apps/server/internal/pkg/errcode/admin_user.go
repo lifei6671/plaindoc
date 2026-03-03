@@ -22,6 +22,10 @@ type AdminUserErrorTargets struct {
 	EmailAlreadyExists   error
 	InvalidRole          error
 	RoleForbidden        error
+	PasswordResetUnavailable   error
+	PasswordResetUnsupported   error
+	PasswordResetRateLimited   error
+	PasswordResetEmailSendFailed error
 }
 
 var (
@@ -38,6 +42,10 @@ var (
 	ErrAdminUserEmailAlreadyExists   = errors.New("admin user email already exists")
 	ErrAdminUserInvalidRole          = errors.New("admin user role is invalid")
 	ErrAdminUserRoleForbidden        = errors.New("admin user role operation forbidden")
+	ErrAdminUserPasswordResetUnavailable = errors.New("admin user password reset is unavailable")
+	ErrAdminUserPasswordResetUnsupported = errors.New("admin user password reset is unsupported")
+	ErrAdminUserPasswordResetRateLimited = errors.New("admin user password reset is rate limited")
+	ErrAdminUserPasswordResetEmailSendFailed = errors.New("admin user password reset email send failed")
 )
 
 var defaultAdminUserErrorTargets = AdminUserErrorTargets{
@@ -55,6 +63,10 @@ var defaultAdminUserErrorTargets = AdminUserErrorTargets{
 	EmailAlreadyExists:   ErrAdminUserEmailAlreadyExists,
 	InvalidRole:          ErrAdminUserInvalidRole,
 	RoleForbidden:        ErrAdminUserRoleForbidden,
+	PasswordResetUnavailable:   ErrAdminUserPasswordResetUnavailable,
+	PasswordResetUnsupported:   ErrAdminUserPasswordResetUnsupported,
+	PasswordResetRateLimited:   ErrAdminUserPasswordResetRateLimited,
+	PasswordResetEmailSendFailed: ErrAdminUserPasswordResetEmailSendFailed,
 }
 
 // MapAdminUserError 统一映射管理员用户管理相关错误。
@@ -149,6 +161,30 @@ func MapAdminUserError(err error, targets ...AdminUserErrorTargets) error {
 			Status:  http.StatusForbidden,
 			Code:    response.CodeRoleForbidden,
 			Message: "can not edit higher role user",
+		},
+		AppErrorMapping{
+			Target:  resolvedTargets.PasswordResetUnavailable,
+			Status:  http.StatusBadRequest,
+			Code:    response.CodeInvalidOperation,
+			Message: "password reset email service is unavailable",
+		},
+		AppErrorMapping{
+			Target:  resolvedTargets.PasswordResetUnsupported,
+			Status:  http.StatusBadRequest,
+			Code:    response.CodeInvalidOperation,
+			Message: "target user does not support password reset",
+		},
+		AppErrorMapping{
+			Target:  resolvedTargets.PasswordResetRateLimited,
+			Status:  http.StatusTooManyRequests,
+			Code:    response.CodeAuthTemporarilyLocked,
+			Message: "password reset request is rate limited",
+		},
+		AppErrorMapping{
+			Target:  resolvedTargets.PasswordResetEmailSendFailed,
+			Status:  http.StatusBadGateway,
+			Code:    response.CodeInternalError,
+			Message: "password reset email send failed",
 		},
 	)
 }
