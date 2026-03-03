@@ -413,6 +413,11 @@ func newRouter(
 			"/docs/:docId/attachments/:attachmentId/access-link",
 			workspaceHandler.CreateDocumentAttachmentAccessLink,
 		)
+		// 文档附件直接下载入口（适配无脚本场景，如导出 PDF 内的静态链接）。
+		api.GET(
+			"/docs/:docId/attachments/:attachmentId/download",
+			workspaceHandler.RedirectDocumentAttachmentDownload,
+		)
 		// 更新文档可见性。
 		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
 		// 使用签名链接下载或预览文档附件。

@@ -569,6 +569,92 @@ func (h *workspaceHandler) DeleteDocumentAttachment(c *gin.Context) {
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 
+// RedirectDocumentAttachmentDownload 提供可直接访问的附件下载入口。
+// 用于静态链接场景（例如阅读页导出 PDF 后点击附件名称下载）。
+func (h *workspaceHandler) RedirectDocumentAttachmentDownload(c *gin.Context) {
+	if h == nil || h.documentAttachmentRepo == nil || h.visibilityService == nil || h.attachmentTokenService == nil {
+		setRequestErrmsgText(c, "初始化失败: handler or dependencies is nil")
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+	attachmentID := strings.TrimSpace(c.Param("attachmentId"))
+	if attachmentID == "" {
+		response.DocumentAttachmentErrAttachmentIDRequired.Write(c)
+		return
+	}
+
+	viewerUserID, err := h.resolveOptionalViewerUserID(c)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析访问令牌失败")
+		response.WorkspaceErrAccessToken.Write(c)
+		return
+	}
+	if _, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, viewerUserID); err != nil {
+		setRequestErrmsg(c, err, "验证文档访问权限失败")
+		writeWorkspaceDocumentAccessError(c, err)
+		return
+	}
+
+	attachment, err := h.documentAttachmentRepo.GetByAttachmentID(c.Request.Context(), attachmentID)
+	if err != nil {
+		setRequestErrmsg(c, err, "查询文档附件失败")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if strings.TrimSpace(attachment.DocumentID) != documentID || attachment.Status == models.EntityStatusDeleted {
+		response.DocumentAttachmentErrAttachmentNotFound.Write(c)
+		return
+	}
+
+	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
+	if publicReadable {
+		config := service.DefaultImageHostingConfig()
+		if h.imageHostingService != nil {
+			if loadedConfig, configErr := h.imageHostingService.GetConfig(c.Request.Context()); configErr == nil {
+				config = loadedConfig
+			} else {
+				setRequestErrmsg(c, configErr, "读取图床配置失败")
+			}
+		}
+		publicDownloadURL, publicDownloadURLErr := h.resolveAttachmentPublicDownloadURL(
+			c.Request.Context(),
+			*attachment,
+			config,
+			service.DocumentAttachmentLinkPurposeDownload,
+		)
+		if publicDownloadURLErr != nil {
+			setRequestErrmsg(c, publicDownloadURLErr, "生成附件公开链接失败")
+		}
+		if publicDownloadURL != "" {
+			c.Redirect(http.StatusTemporaryRedirect, publicDownloadURL)
+			return
+		}
+	}
+
+	token, _, err := h.attachmentTokenService.Issue(service.IssueDocumentAttachmentDownloadTokenInput{
+		AttachmentID: attachmentID,
+		DocumentID:   documentID,
+		Purpose:      service.DocumentAttachmentLinkPurposeDownload,
+	})
+	if err != nil {
+		setRequestErrmsg(c, err, "签发附件下载令牌失败")
+		response.InternalError(c)
+		return
+	}
+
+	c.Redirect(http.StatusTemporaryRedirect, "/api/attachment-downloads/"+url.PathEscape(token))
+}
+
 // CreateDocumentAttachmentAccessLink 生成附件下载或预览访问链接。
 func (h *workspaceHandler) CreateDocumentAttachmentAccessLink(c *gin.Context) {
 	if h == nil || h.documentAttachmentRepo == nil || h.visibilityService == nil || h.attachmentTokenService == nil {

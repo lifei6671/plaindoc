@@ -28,6 +28,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const ATTACHMENT_ACTION_SELECTOR = "button[data-reader-attachment-action='1']";
   const ATTACHMENT_STATUS_SELECTOR = "[data-reader-hook='attachment-status']";
   const ATTACHMENT_ACTION_BUSY_CLASS = "reader-attachment__action--busy";
+  const ATTACHMENT_LINK_SELECTOR = "a[data-reader-attachment-link='1']";
   const EXPORT_ACTION_SELECTOR = "button[data-reader-export-action]";
   const EXPORT_ACTION_BUSY_CLASS = "reader-article-action--busy";
   const PREVIEW_HEADING_SELECTOR =
@@ -401,6 +402,23 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     actionButton.disabled = true;
     actionButton.classList.add(EXPORT_ACTION_BUSY_CLASS);
     try {
+      const attachmentLinks = document.querySelectorAll(ATTACHMENT_LINK_SELECTOR);
+      for (const node of attachmentLinks) {
+        if (!(node instanceof HTMLAnchorElement)) {
+          continue;
+        }
+        const rawHref = (node.getAttribute("href") || "").trim();
+        if (!rawHref) {
+          continue;
+        }
+        try {
+          const absoluteURL = new URL(rawHref, window.location.href).toString();
+          node.href = absoluteURL;
+          node.setAttribute("data-reader-print-url", absoluteURL);
+        } catch {
+          node.removeAttribute("data-reader-print-url");
+        }
+      }
       window.print();
     } catch (error) {
       console.error("[reader][export] pdf print failed", error);

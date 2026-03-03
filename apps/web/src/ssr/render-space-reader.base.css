@@ -584,6 +584,13 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.reader-attachment__name-link {
+  text-decoration: none;
+}
+.reader-attachment__name-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
 .reader-attachment__desc {
   margin-top: 2px;
   color: #64748b;
@@ -689,6 +696,19 @@ a {
     margin: 20px 0 0;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+  .reader-attachment__name-link {
+    color: #0f172a !important;
+    text-decoration: underline;
+  }
+  .reader-attachment__name-link::after {
+    content: " (" attr(data-reader-print-url) ")";
+    display: block;
+    margin-top: 2px;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 400;
+    overflow-wrap: anywhere;
   }
   pre,
   blockquote,

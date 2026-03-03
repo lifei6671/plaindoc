@@ -64,6 +64,7 @@ const MONTH_MS = 30 * DAY_MS;
 const YEAR_MS = 365 * DAY_MS;
 const SECOND_MS = 1000;
 const JUST_NOW_THRESHOLD_MS = 5 * SECOND_MS;
+const READER_HTTP_PROTOCOLS = new Set(["http:", "https:"]);
 
 function padToTwoDigits(value: number): string {
   return value < 10 ? `0${value}` : String(value);
@@ -331,6 +332,42 @@ function normalizeAttachmentPreviewKind(value: unknown): ReaderDocumentAttachmen
   return "none";
 }
 
+function normalizeReaderRequestOrigin(value: string | undefined): string {
+  const normalized = (value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+  try {
+    const parsedURL = new URL(normalized);
+    if (!READER_HTTP_PROTOCOLS.has(parsedURL.protocol)) {
+      return "";
+    }
+    return parsedURL.origin;
+  } catch {
+    return "";
+  }
+}
+
+function buildAttachmentDownloadHref(
+  documentID: string,
+  attachmentID: string,
+  requestOrigin: string | undefined
+): string {
+  const normalizedDocumentID = documentID.trim();
+  const normalizedAttachmentID = attachmentID.trim();
+  if (!normalizedDocumentID || !normalizedAttachmentID) {
+    return "";
+  }
+  const downloadPath =
+    "/api/docs/" +
+    encodeURIComponent(normalizedDocumentID) +
+    "/attachments/" +
+    encodeURIComponent(normalizedAttachmentID) +
+    "/download";
+  const origin = normalizeReaderRequestOrigin(requestOrigin);
+  return origin ? `${origin}${downloadPath}` : downloadPath;
+}
+
 function resolveAttachmentPreviewLabel(previewKind: ReaderDocumentAttachmentPayload["previewKind"]): string {
   switch (previewKind) {
     case "image":
@@ -541,7 +578,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                           <span className="reader-attachments__count">({documentAttachments.length})</span>
                         </h2>
                         <p className="reader-attachments__hint" data-reader-hook="attachment-status" aria-live="polite">
-                          预览会打开独立预览页，下载会自动生成访问链接。
+                          点击附件名称可直接下载，预览会打开独立预览页。
                         </p>
                       </div>
                       <ul className="reader-attachments__list">
@@ -553,14 +590,30 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                           const fileName = (attachment.fileName ?? "").trim() || attachmentID;
                           const mimeType = (attachment.mimeType ?? "").trim() || "application/octet-stream";
                           const documentID = (attachment.documentId ?? "").trim() || payload.document.id;
+                          const downloadHref = buildAttachmentDownloadHref(
+                            documentID,
+                            attachmentID,
+                            payload.requestOrigin
+                          );
                           const previewKind = normalizeAttachmentPreviewKind(attachment.previewKind);
                           const previewSupported = attachment.previewSupported === true;
                           return (
                             <li key={attachmentID} className="reader-attachment">
                               <div className="reader-attachment__meta">
-                                <div className="reader-attachment__name" title={fileName}>
-                                  {fileName}
-                                </div>
+                                {downloadHref ? (
+                                  <a
+                                    className="reader-attachment__name reader-attachment__name-link"
+                                    href={downloadHref}
+                                    data-reader-attachment-link="1"
+                                    title={fileName}
+                                  >
+                                    {fileName}
+                                  </a>
+                                ) : (
+                                  <div className="reader-attachment__name" title={fileName}>
+                                    {fileName}
+                                  </div>
+                                )}
                                 <div className="reader-attachment__desc">
                                   <span>{formatAttachmentSize(Number(attachment.sizeBytes))}</span>
                                   <span>{resolveAttachmentPreviewLabel(previewKind)}</span>
