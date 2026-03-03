@@ -60,6 +60,51 @@ func TestBleveProvider_SearchMatchesVisibilityMatrix(t *testing.T) {
 	})
 }
 
+func TestDatabaseProvider_SearchAllowsPartialTokenMatch(t *testing.T) {
+	db := openVisibilityMatrixTestDB(t, "file:test-database-provider-partial-token-match?mode=memory&cache=shared")
+	seedVisibilityMatrixTestData(t, db)
+
+	provider := NewDatabaseProvider(db)
+	result, err := provider.Search(context.Background(), SearchRequest{
+		Query:    "matrix hit missingterm",
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("database search failed: %v", err)
+	}
+	assertSearchDocSet(t, result, []string{"doc-public-public"})
+}
+
+func TestBleveProvider_SearchAllowsPartialTokenMatch(t *testing.T) {
+	db := openVisibilityMatrixTestDB(t, "file:test-bleve-provider-partial-token-match?mode=memory&cache=shared")
+	seedVisibilityMatrixTestData(t, db)
+
+	provider := NewBleveProvider(BleveProviderOptions{
+		DB:        db,
+		IndexPath: filepath.Join(t.TempDir(), "bleve-index-partial-token"),
+	})
+	ctx := context.Background()
+	if err := provider.EnsureSchema(ctx); err != nil {
+		t.Fatalf("bleve ensure schema failed: %v", err)
+	}
+
+	now := time.Now().UTC().Unix()
+	if err := provider.Upsert(ctx, buildVisibilityMatrixIndexRecords(now)); err != nil {
+		t.Fatalf("bleve upsert failed: %v", err)
+	}
+
+	result, err := provider.Search(context.Background(), SearchRequest{
+		Query:    "matrix hit missingterm",
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("bleve search failed: %v", err)
+	}
+	assertSearchDocSet(t, result, []string{"doc-public-public"})
+}
+
 func TestDatabaseProvider_SearchEnforcesMemberMinRoleInSingleSpace(t *testing.T) {
 	db := openVisibilityMatrixTestDB(t, "file:test-database-provider-min-role-single-space?mode=memory&cache=shared")
 	seedVisibilityMatrixTestData(t, db)

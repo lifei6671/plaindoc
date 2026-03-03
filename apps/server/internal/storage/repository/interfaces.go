@@ -172,6 +172,7 @@ type SpaceRepository interface {
 type SearchVisibleDocumentRow struct {
 	SpaceID         string
 	DocumentID      string
+	Title           string
 	ContentMD       string
 	VisibilityScope string
 	MinRole         int

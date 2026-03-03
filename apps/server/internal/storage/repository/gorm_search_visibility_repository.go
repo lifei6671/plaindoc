@@ -27,13 +27,23 @@ func (r *gormSearchVisibilityRepository) SearchVisibleDocuments(
 	}
 
 	query := r.baseVisibleDocumentsQuery(ctx, params.ActorUserID, params.SpaceID, params.ScopeSpaceIDs)
+	normalizedTerms := make([]string, 0, len(params.Terms))
 	for _, item := range params.Terms {
 		normalizedTerm := strings.ToLower(strings.TrimSpace(item))
 		if normalizedTerm == "" {
 			continue
 		}
-		likePattern := "%" + normalizedTerm + "%"
-		query = query.Where("(LOWER(d.title) LIKE ? OR LOWER(d.content_md) LIKE ?)", likePattern, likePattern)
+		normalizedTerms = append(normalizedTerms, normalizedTerm)
+	}
+	if len(normalizedTerms) > 0 {
+		clauses := make([]string, 0, len(normalizedTerms))
+		args := make([]any, 0, len(normalizedTerms)*2)
+		for _, item := range normalizedTerms {
+			clauses = append(clauses, "(LOWER(d.title) LIKE ? OR LOWER(d.content_md) LIKE ?)")
+			likePattern := "%" + item + "%"
+			args = append(args, likePattern, likePattern)
+		}
+		query = query.Where("("+strings.Join(clauses, " OR ")+")", args...)
 	}
 
 	var total int64
@@ -49,6 +59,7 @@ func (r *gormSearchVisibilityRepository) SearchVisibleDocuments(
 		Select(
 			"s.space_id AS space_id",
 			"d.document_id",
+			"d.title",
 			"d.content_md",
 			"CASE "+
 				"WHEN (s.visibility = 'member' OR d.visibility = 'member') THEN 'member' "+

@@ -15,7 +15,6 @@ import (
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
 	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/blevesearch/bleve/v2/search/query"
-	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -223,7 +222,8 @@ func (p *BleveProvider) Search(ctx context.Context, request SearchRequest) (Sear
 	}
 
 	query := buildBleveSearchQuery(request)
-	searchResults, err := p.searchCandidates(ctx, indexInstance, query, request.Sort)
+	searchSnippetTerms := buildSearchQueryTerms(request.Query)
+	searchResults, err := p.searchCandidates(ctx, indexInstance, query, request.Sort, searchSnippetTerms)
 	if err != nil {
 		return SearchResponse{}, err
 	}
@@ -514,6 +514,7 @@ func (p *BleveProvider) searchCandidates(
 	indexInstance bleve.Index,
 	searchQuery query.Query,
 	sortMode SortMode,
+	snippetTerms []string,
 ) ([]bleveSearchCandidate, error) {
 	candidates := make([]bleveSearchCandidate, 0, 256)
 	seen := make(map[string]struct{}, 256)
@@ -532,6 +533,7 @@ func (p *BleveProvider) searchCandidates(
 		searchRequest.Fields = []string{
 			"doc_id",
 			"space_id",
+			"title",
 			"body_plain",
 			"updated_at_unix",
 			"visibility_scope",
@@ -559,6 +561,7 @@ func (p *BleveProvider) searchCandidates(
 			}
 			seen[docID] = struct{}{}
 
+			title := extractStringField(hit.Fields, "title")
 			bodyPlain := extractStringField(hit.Fields, "body_plain")
 			spaceID := extractStringField(hit.Fields, "space_id")
 			updatedAtUnix := extractInt64Field(hit.Fields, "updated_at_unix")
@@ -571,7 +574,7 @@ func (p *BleveProvider) searchCandidates(
 				DocID:           docID,
 				SpaceID:         spaceID,
 				Score:           hit.Score,
-				Snippet:         buildBleveSearchSnippet(bodyPlain),
+				Snippet:         buildBleveSearchSnippet(title, bodyPlain, snippetTerms),
 				UpdatedAt:       time.Unix(updatedAtUnix, 0).UTC(),
 				VisibilityScope: visibilityScope,
 				MinRole:         minRole,
@@ -732,8 +735,9 @@ func buildBleveIndexMapping() *mapping.IndexMappingImpl {
 }
 
 func buildBleveSearchQuery(request SearchRequest) query.Query {
-	tokenQueries := make([]query.Query, 0, 8)
-	for _, token := range splitTerms(request.Query) {
+	queryTerms := buildSearchQueryTerms(request.Query)
+	tokenQueries := make([]query.Query, 0, len(queryTerms))
+	for _, token := range queryTerms {
 		termsQuery := bleve.NewTermQuery(token)
 		termsQuery.SetField("terms")
 		titleTermsQuery := bleve.NewTermQuery(token)
@@ -771,7 +775,9 @@ func buildBleveSearchQuery(request SearchRequest) query.Query {
 		}
 	}
 
-	filterQueries = append(filterQueries, bleve.NewConjunctionQuery(tokenQueries...))
+	tokenRecallQuery := bleve.NewDisjunctionQuery(tokenQueries...)
+	tokenRecallQuery.SetMin(float64(resolveTokenMinShouldMatch(len(tokenQueries))))
+	filterQueries = append(filterQueries, tokenRecallQuery)
 	return bleve.NewConjunctionQuery(filterQueries...)
 }
 
@@ -837,17 +843,8 @@ func normalizeBleveScopeSpaceIDs(items []string) []string {
 	return result
 }
 
-func buildBleveSearchSnippet(bodyPlain string) string {
-	plain := strings.TrimSpace(searchanalyzer.NormalizeMarkdownToPlainText(bodyPlain))
-	if plain == "" {
-		return ""
-	}
-	limit := 200
-	runes := []rune(plain)
-	if len(runes) <= limit {
-		return plain
-	}
-	return strings.TrimSpace(string(runes[:limit])) + "..."
+func buildBleveSearchSnippet(title string, bodyPlain string, queryTerms []string) string {
+	return buildKeywordWindowSnippetFromTitleAndBody(title, bodyPlain, queryTerms)
 }
 
 func extractStringField(fields map[string]any, key string) string {

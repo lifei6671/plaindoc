@@ -632,6 +632,13 @@ pre {
   line-height: 1.65;
 }
 
+.yt-search-highlight {
+  background: #fff3bf;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
 .yt-search-card-meta {
   margin: 10px 0 0;
   color: #818181;

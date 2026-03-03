@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -73,7 +72,7 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 		return SearchResponse{}, err
 	}
 
-	terms := extractSearchTerms(request.Query)
+	terms := buildSearchQueryTerms(request.Query)
 	if len(terms) == 0 {
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
@@ -98,6 +97,7 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 	if err != nil {
 		return SearchResponse{}, err
 	}
+	filteredRows = filterRowsByTokenMatch(filteredRows, terms)
 	if len(filteredRows) == 0 {
 		return SearchResponse{Total: 0, Hits: []SearchHit{}}, nil
 	}
@@ -118,7 +118,7 @@ func (p *DatabaseProvider) Search(ctx context.Context, request SearchRequest) (S
 		hits = append(hits, SearchHit{
 			DocID:   strings.TrimSpace(row.DocumentID),
 			Score:   baseScore - (float64(index) * 0.001),
-			Snippet: buildDatabaseSearchSnippet(row.ContentMD),
+			Snippet: buildDatabaseSearchSnippet(row.Title, row.ContentMD, terms),
 		})
 	}
 
@@ -251,6 +251,40 @@ func (p *DatabaseProvider) Capabilities() Capabilities {
 	}
 }
 
+func filterRowsByTokenMatch(
+	rows []repository.SearchVisibleDocumentRow,
+	terms []string,
+) []repository.SearchVisibleDocumentRow {
+	if len(rows) == 0 || len(terms) == 0 {
+		return []repository.SearchVisibleDocumentRow{}
+	}
+
+	minShouldMatch := resolveTokenMinShouldMatch(len(terms))
+	if minShouldMatch <= 0 {
+		return []repository.SearchVisibleDocumentRow{}
+	}
+
+	filtered := make([]repository.SearchVisibleDocumentRow, 0, len(rows))
+	for _, item := range rows {
+		content := strings.ToLower(strings.TrimSpace(item.Title + "\n" + item.ContentMD))
+		if content == "" {
+			continue
+		}
+
+		matchedCount := 0
+		for _, term := range terms {
+			if strings.Contains(content, term) {
+				matchedCount++
+			}
+		}
+		if matchedCount < minShouldMatch {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
 func normalizeDatabaseSearchPagination(page int, pageSize int) (int, int, int) {
 	normalizedPage := page
 	if normalizedPage <= 0 {
@@ -273,42 +307,6 @@ func normalizeDatabaseSearchPagination(page int, pageSize int) (int, int, int) {
 	return normalizedPage, normalizedPageSize, offset
 }
 
-func extractSearchTerms(query string) []string {
-	trimmedQuery := strings.TrimSpace(query)
-	if trimmedQuery == "" {
-		return []string{}
-	}
-
-	fields := strings.Fields(strings.ToLower(trimmedQuery))
-	if len(fields) == 0 {
-		return []string{}
-	}
-
-	result := make([]string, 0, len(fields))
-	seen := make(map[string]struct{}, len(fields))
-	for _, item := range fields {
-		term := strings.TrimSpace(item)
-		if term == "" {
-			continue
-		}
-		if _, exists := seen[term]; exists {
-			continue
-		}
-		seen[term] = struct{}{}
-		result = append(result, term)
-	}
-	return result
-}
-
-func buildDatabaseSearchSnippet(contentMD string) string {
-	plain := strings.TrimSpace(searchanalyzer.NormalizeMarkdownToPlainText(contentMD))
-	if plain == "" {
-		return ""
-	}
-	limit := 200
-	runes := []rune(plain)
-	if len(runes) <= limit {
-		return plain
-	}
-	return strings.TrimSpace(string(runes[:limit])) + "..."
+func buildDatabaseSearchSnippet(title string, contentMD string, queryTerms []string) string {
+	return buildKeywordWindowSnippetFromTitleAndBody(title, contentMD, queryTerms)
 }

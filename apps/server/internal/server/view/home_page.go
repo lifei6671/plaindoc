@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"io/fs"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +25,8 @@ var homepageTemplates = template.Must(template.New("homepage").Funcs(template.Fu
 	"formatFriendlyRelativeTime": func(value time.Time) string {
 		return formatFriendlyRelativeTime(value, time.Now())
 	},
-	"avatarInitial": avatarInitial,
+	"avatarInitial":       avatarInitial,
+	"highlightSearchText": highlightSearchText,
 }).ParseFS(homepageViewFS, "templates/*.tmpl", "templates/partials/*.tmpl"))
 
 const (
@@ -115,6 +117,162 @@ func maxInt(a int, b int) int {
 		return a
 	}
 	return b
+}
+
+type textHighlightRange struct {
+	Start int
+	End   int
+}
+
+func highlightSearchText(text string, keyword string) template.HTML {
+	normalizedText := strings.TrimSpace(text)
+	if normalizedText == "" {
+		return template.HTML("")
+	}
+
+	highlightKeywords := buildHighlightKeywords(keyword)
+	if len(highlightKeywords) == 0 {
+		return template.HTML(template.HTMLEscapeString(normalizedText))
+	}
+
+	mergedRanges := collectHighlightRanges(normalizedText, highlightKeywords)
+	if len(mergedRanges) == 0 {
+		return template.HTML(template.HTMLEscapeString(normalizedText))
+	}
+
+	textRunes := []rune(normalizedText)
+	var builder strings.Builder
+	lastIndex := 0
+	for _, item := range mergedRanges {
+		if item.Start > lastIndex {
+			builder.WriteString(template.HTMLEscapeString(string(textRunes[lastIndex:item.Start])))
+		}
+		builder.WriteString(`<mark class="yt-search-highlight">`)
+		builder.WriteString(template.HTMLEscapeString(string(textRunes[item.Start:item.End])))
+		builder.WriteString(`</mark>`)
+		lastIndex = item.End
+	}
+	if lastIndex < len(textRunes) {
+		builder.WriteString(template.HTMLEscapeString(string(textRunes[lastIndex:])))
+	}
+	return template.HTML(builder.String())
+}
+
+func buildHighlightKeywords(keyword string) []string {
+	normalizedKeyword := strings.TrimSpace(keyword)
+	if normalizedKeyword == "" {
+		return []string{}
+	}
+
+	result := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	appendKeyword := func(raw string) {
+		candidate := strings.ToLower(strings.TrimSpace(raw))
+		if candidate == "" {
+			return
+		}
+		if _, exists := seen[candidate]; exists {
+			return
+		}
+		seen[candidate] = struct{}{}
+		result = append(result, candidate)
+	}
+
+	appendKeyword(normalizedKeyword)
+	for _, item := range strings.Fields(normalizedKeyword) {
+		appendKeyword(item)
+	}
+	for _, item := range extractCJKBigrams(normalizedKeyword) {
+		appendKeyword(item)
+	}
+	return result
+}
+
+func extractCJKBigrams(value string) []string {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return []string{}
+	}
+	runes := []rune(text)
+	if len(runes) < 2 {
+		return []string{}
+	}
+
+	result := make([]string, 0, len(runes)-1)
+	for index := 0; index < len(runes)-1; index++ {
+		left := runes[index]
+		right := runes[index+1]
+		if !isHanRune(left) || !isHanRune(right) {
+			continue
+		}
+		result = append(result, string([]rune{left, right}))
+	}
+	return result
+}
+
+func isHanRune(r rune) bool {
+	return (r >= 0x3400 && r <= 0x4DBF) ||
+		(r >= 0x4E00 && r <= 0x9FFF) ||
+		(r >= 0xF900 && r <= 0xFAFF)
+}
+
+func collectHighlightRanges(text string, keywords []string) []textHighlightRange {
+	if strings.TrimSpace(text) == "" || len(keywords) == 0 {
+		return []textHighlightRange{}
+	}
+
+	lowerText := strings.ToLower(text)
+	ranges := make([]textHighlightRange, 0, 8)
+	for _, keyword := range keywords {
+		lowerKeyword := strings.ToLower(strings.TrimSpace(keyword))
+		if lowerKeyword == "" {
+			continue
+		}
+		for startByte := 0; startByte < len(lowerText); {
+			matchOffset := strings.Index(lowerText[startByte:], lowerKeyword)
+			if matchOffset < 0 {
+				break
+			}
+			matchStartByte := startByte + matchOffset
+			matchEndByte := matchStartByte + len(lowerKeyword)
+			matchStartRune := utf8.RuneCountInString(lowerText[:matchStartByte])
+			matchEndRune := matchStartRune + utf8.RuneCountInString(lowerText[matchStartByte:matchEndByte])
+			if matchEndRune > matchStartRune {
+				ranges = append(ranges, textHighlightRange{
+					Start: matchStartRune,
+					End:   matchEndRune,
+				})
+			}
+			startByte = matchEndByte
+		}
+	}
+	if len(ranges) == 0 {
+		return []textHighlightRange{}
+	}
+
+	sort.Slice(ranges, func(left int, right int) bool {
+		if ranges[left].Start == ranges[right].Start {
+			return ranges[left].End < ranges[right].End
+		}
+		return ranges[left].Start < ranges[right].Start
+	})
+
+	merged := make([]textHighlightRange, 0, len(ranges))
+	for _, item := range ranges {
+		if len(merged) == 0 {
+			merged = append(merged, item)
+			continue
+		}
+		lastIndex := len(merged) - 1
+		if item.Start > merged[lastIndex].End {
+			merged = append(merged, item)
+			continue
+		}
+		if item.End > merged[lastIndex].End {
+			merged[lastIndex].End = item.End
+		}
+	}
+	return merged
 }
 
 // HomeCategoryViewData 首页/分类页分类导航项。

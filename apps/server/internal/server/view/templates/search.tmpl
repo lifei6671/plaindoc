@@ -35,9 +35,9 @@
             {{ range .SearchResults }}
               <article class="yt-search-card">
                 <h2 class="yt-search-card-title">
-                  <a href="{{ .URL }}" class="yt-search-card-link" target="_blank">{{ if .Title }}{{ .Title }}{{ else }}未命名文档{{ end }}</a>
+                  <a href="{{ .URL }}" class="yt-search-card-link" target="_blank">{{ if .Title }}{{ highlightSearchText .Title $.SearchKeyword }}{{ else }}未命名文档{{ end }}</a>
                 </h2>
-                <p class="yt-search-card-snippet">{{ if .Snippet }}{{ .Snippet }}{{ else }}暂无摘要{{ end }}</p>
+                <p class="yt-search-card-snippet">{{ if .Snippet }}{{ highlightSearchText .Snippet $.SearchKeyword }}{{ else }}暂无摘要{{ end }}</p>
                 <p class="yt-search-card-meta">
                   <span>空间：{{ if .SpaceName }}{{ .SpaceName }}{{ else }}{{ .SpaceID }}{{ end }}</span>
                   <span>更新时间：{{ formatFriendlyRelativeTime .UpdatedAt }}</span>

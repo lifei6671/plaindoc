@@ -167,9 +167,8 @@ func newRouter(
 			logger.Error("search index bootstrap failed", slog.String("error", err.Error()))
 		}
 	}()
-	if !strings.EqualFold(strings.TrimSpace(cfg.Env), "test") {
-		go runSearchIndexJobLoop(context.Background(), logger, searchIndexJobService)
-	}
+	go runSearchIndexJobLoop(context.Background(), logger, searchIndexJobService)
+	
 	// 首页全文检索服务：负责首页落地页检索结果读取与可见性过滤。
 	homeSearchService := service.NewHomeSearchService(searchQueryService, db)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
@@ -887,7 +886,10 @@ func runSearchIndexJobLoop(
 	}
 
 	nextInterval := 5 * time.Second
-	for {
+	waitTimer := time.NewTimer(nextInterval)
+	defer waitTimer.Stop()
+
+	for range waitTimer.C {
 		runResult, err := jobService.RunOnce(ctx)
 		if err != nil {
 			nextInterval = 2 * time.Second
@@ -918,14 +920,7 @@ func runSearchIndexJobLoop(
 				)
 			}
 		}
-
-		waitTimer := time.NewTimer(nextInterval)
-		select {
-		case <-ctx.Done():
-			waitTimer.Stop()
-			return
-		case <-waitTimer.C:
-		}
+		waitTimer.Reset(nextInterval)
 	}
 }
 

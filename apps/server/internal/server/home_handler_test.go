@@ -339,13 +339,13 @@ func TestRouter_HomeSearchEnabled_ShowsSearchBoxAndResults(t *testing.T) {
 		t.Fatalf("expected status 200 for /search, got %d body=%s", searchRec.Code, searchRec.Body.String())
 	}
 	searchBody := searchRec.Body.String()
-	if !strings.Contains(searchBody, "检索命中文档") {
+	if !strings.Contains(searchBody, `检索<mark class="yt-search-highlight">命中</mark>文档`) {
 		t.Fatalf("expected search page contains matched document title, body=%s", searchBody)
 	}
 	if !strings.Contains(searchBody, "/r/01homesearchspace000000000001/01homesearchdocument00000000001") {
 		t.Fatalf("expected search result links reader page, body=%s", searchBody)
 	}
-	if strings.Contains(searchBody, "不应被匿名检索命中") {
+	if strings.Contains(searchBody, "/r/01homesearchspace000000000002/01homesearchdocument00000000002") {
 		t.Fatalf("expected anonymous search result excludes member-only document, body=%s", searchBody)
 	}
 }
