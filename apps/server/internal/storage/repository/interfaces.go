@@ -222,6 +222,201 @@ type SearchVisibilityRepository interface {
 	) (int, error)
 }
 
+// SearchIndexSourceDocumentRecord 索引构建所需文档快照。
+type SearchIndexSourceDocumentRecord struct {
+	SpaceID         string
+	DocumentID      string
+	NodeID          string
+	Title           string
+	ContentMD       string
+	SpaceVisibility string
+	DocVisibility   string
+	UpdatedAt       time.Time
+}
+
+// ListSearchIndexSourceDocumentsParams 索引源文档分页参数。
+type ListSearchIndexSourceDocumentsParams struct {
+	Limit  int
+	Offset int
+}
+
+// ListSearchIndexSourceDocumentsBySpaceParams 按空间分页拉取索引源文档参数。
+type ListSearchIndexSourceDocumentsBySpaceParams struct {
+	SpaceID string
+	Limit   int
+	Offset  int
+}
+
+// SearchIndexSourceRepository 索引构建源数据仓储接口。
+type SearchIndexSourceRepository interface {
+	ListActiveDocuments(
+		ctx context.Context,
+		params ListSearchIndexSourceDocumentsParams,
+	) ([]SearchIndexSourceDocumentRecord, error)
+	GetActiveDocumentByDocumentID(
+		ctx context.Context,
+		documentID string,
+	) (*SearchIndexSourceDocumentRecord, error)
+	ListActiveDocumentsBySpaceID(
+		ctx context.Context,
+		params ListSearchIndexSourceDocumentsBySpaceParams,
+	) ([]SearchIndexSourceDocumentRecord, error)
+}
+
+// SitemapPublicDocumentSourceRecord 表示 sitemap 公开文档源数据项。
+type SitemapPublicDocumentSourceRecord struct {
+	SpaceID           string
+	DocumentID        string
+	DocumentContentMD string
+	SpaceUpdatedAt    time.Time
+	DocumentUpdatedAt time.Time
+}
+
+// SitemapRepository sitemap 公开文档查询仓储接口。
+type SitemapRepository interface {
+	ListPublicDocuments(ctx context.Context) ([]SitemapPublicDocumentSourceRecord, error)
+}
+
+// HomeSearchDocumentMetadataRecord 首页检索文档元信息。
+type HomeSearchDocumentMetadataRecord struct {
+	SpaceID    string
+	SpaceName  string
+	DocumentID string
+	Title      string
+	UpdatedAt  time.Time
+}
+
+// HomeSearchRepository 首页检索数据仓储接口。
+type HomeSearchRepository interface {
+	ListActiveDocumentMetadataByDocumentIDs(
+		ctx context.Context,
+		documentIDs []string,
+	) ([]HomeSearchDocumentMetadataRecord, error)
+}
+
+// ReaderPageDocumentRecord 阅读页文档详情聚合记录。
+type ReaderPageDocumentRecord struct {
+	DocumentID     string
+	NodeID         string
+	ThemeID        string
+	Visibility     string
+	Title          string
+	ContentMD      string
+	Version        int
+	AuthorNickname string
+	UpdatedAt      time.Time
+	SpaceID        string
+}
+
+// ReaderPageTreeNodeRecord 阅读页目录树节点记录。
+type ReaderPageTreeNodeRecord struct {
+	NodeID             string
+	DocumentID         *string
+	ParentNodeID       *string
+	Type               models.NodeType
+	Title              string
+	Sort               int
+	DocumentVisibility *string
+}
+
+// ReaderPageRepository 阅读页数据仓储接口。
+type ReaderPageRepository interface {
+	ResolveDocumentID(
+		ctx context.Context,
+		spaceID string,
+		rawDocumentID string,
+	) (string, error)
+	GetDocumentByDocumentID(
+		ctx context.Context,
+		documentID string,
+	) (*ReaderPageDocumentRecord, error)
+	ListSpaceDocumentIDs(
+		ctx context.Context,
+		spaceID string,
+	) ([]string, error)
+	ListTreeNodesBySpaceID(
+		ctx context.Context,
+		spaceID string,
+	) ([]ReaderPageTreeNodeRecord, error)
+}
+
+// DeletedDocumentAttachmentCleanupCandidate 已删除文档附件清理候选。
+type DeletedDocumentAttachmentCleanupCandidate struct {
+	AttachmentID string
+	BlobID       string
+}
+
+// DocumentAttachmentCleanupRepository 文档附件清理查询仓储接口。
+type DocumentAttachmentCleanupRepository interface {
+	ListDeletedDocumentAttachmentCandidates(
+		ctx context.Context,
+		batchSize int,
+	) ([]DeletedDocumentAttachmentCleanupCandidate, error)
+}
+
+// DocumentImageAssetReferenceInput 文档图片引用输入项。
+type DocumentImageAssetReferenceInput struct {
+	StorageProvider string
+	ObjectKey       string
+	ObjectURL       string
+}
+
+// SyncDocumentImageAssetReferencesParams 文档图片引用同步参数。
+type SyncDocumentImageAssetReferencesParams struct {
+	DocumentID   string
+	SpaceID      string
+	ReferencedAt time.Time
+	References   []DocumentImageAssetReferenceInput
+}
+
+// DocumentImageAssetCleanupCandidate 文档图片清理候选项。
+type DocumentImageAssetCleanupCandidate struct {
+	ID              int64
+	StorageProvider string
+	ObjectKey       string
+}
+
+// DocumentImageAssetLifecycleRepository 文档图片生命周期仓储接口。
+type DocumentImageAssetLifecycleRepository interface {
+	SyncDocumentReferences(
+		ctx context.Context,
+		params SyncDocumentImageAssetReferencesParams,
+	) error
+	ListPendingCleanupCandidates(
+		ctx context.Context,
+		cutoff time.Time,
+		limit int,
+	) ([]DocumentImageAssetCleanupCandidate, error)
+	MarkDeletedDocumentReferencesPending(
+		ctx context.Context,
+		now time.Time,
+	) error
+	CountActiveReferencesByObject(
+		ctx context.Context,
+		storageProvider string,
+		objectKey string,
+	) (int64, error)
+	MarkDeletedByID(
+		ctx context.Context,
+		id int64,
+		now time.Time,
+	) (int64, error)
+	MarkDeletedByObject(
+		ctx context.Context,
+		storageProvider string,
+		objectKey string,
+		now time.Time,
+	) (int64, error)
+}
+
+// DataRetentionRepository 数据保留清理仓储接口。
+type DataRetentionRepository interface {
+	DeleteAuditLogsBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+	DeleteAuthCaptchaChallengesBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+	DeleteAuthRiskStatesBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+	DeleteUserSessionsBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+}
+
 // EnqueueSearchIndexJobParams 新增/合并检索索引任务参数。
 type EnqueueSearchIndexJobParams struct {
 	Provider    string

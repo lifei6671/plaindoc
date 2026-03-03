@@ -2,15 +2,12 @@ package service
 
 import (
 	"context"
-	"database/sql/driver"
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	searchprovider "github.com/lifei6671/plaindoc/apps/server/internal/search/provider"
-	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
@@ -49,28 +46,17 @@ type homeSearchDocumentMetadata struct {
 	UpdatedAt  time.Time
 }
 
-type searchScanTime struct {
-	time.Time
-}
-
-func (s searchScanTime) Value() (driver.Value, error) {
-	if s.Time.IsZero() {
-		return nil, nil
-	}
-	return s.Time, nil
-}
-
 // HomeSearchService 封装首页全文检索读取能力。
 type HomeSearchService struct {
 	searchQueryService *SearchQueryService
-	db                 *gorm.DB
+	homeSearchRepo     repository.HomeSearchRepository
 }
 
 // NewHomeSearchService 创建首页全文检索服务。
 func NewHomeSearchService(searchQueryService *SearchQueryService, db *gorm.DB) *HomeSearchService {
 	return &HomeSearchService{
 		searchQueryService: searchQueryService,
-		db:                 db,
+		homeSearchRepo:     repository.NewGormHomeSearchRepository(db),
 	}
 }
 
@@ -79,7 +65,7 @@ func (s *HomeSearchService) Search(
 	ctx context.Context,
 	input HomeSearchInput,
 ) (HomeSearchPageRecord, error) {
-	if s == nil || s.db == nil || s.searchQueryService == nil {
+	if s == nil || s.homeSearchRepo == nil || s.searchQueryService == nil {
 		return HomeSearchPageRecord{}, errors.New("home search service dependencies are nil")
 	}
 
@@ -161,37 +147,15 @@ func (s *HomeSearchService) loadDocumentMetadata(
 	ctx context.Context,
 	documentIDs []string,
 ) (map[string]homeSearchDocumentMetadata, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("home search service db is nil")
+	if s == nil || s.homeSearchRepo == nil {
+		return nil, errors.New("home search service repository is nil")
 	}
 	if len(documentIDs) == 0 {
 		return map[string]homeSearchDocumentMetadata{}, nil
 	}
 
-	type metadataRow struct {
-		SpaceID    string         `gorm:"column:space_id"`
-		SpaceName  string         `gorm:"column:space_name"`
-		DocumentID string         `gorm:"column:document_id"`
-		Title      string         `gorm:"column:title"`
-		UpdatedAt  searchScanTime `gorm:"column:updated_at"`
-	}
-
-	rows := make([]metadataRow, 0, len(documentIDs))
-	if err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"s.space_id AS space_id",
-			"s.name AS space_name",
-			"d.document_id AS document_id",
-			"d.title AS title",
-			"d.updated_at AS updated_at",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("d.document_id IN ?", documentIDs).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Find(&rows).Error; err != nil {
+	rows, err := s.homeSearchRepo.ListActiveDocumentMetadataByDocumentIDs(ctx, documentIDs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -206,76 +170,8 @@ func (s *HomeSearchService) loadDocumentMetadata(
 			SpaceName:  strings.TrimSpace(row.SpaceName),
 			DocumentID: documentID,
 			Title:      strings.TrimSpace(row.Title),
-			UpdatedAt:  row.UpdatedAt.Time,
+			UpdatedAt:  row.UpdatedAt,
 		}
 	}
 	return result, nil
-}
-
-func (s *searchScanTime) Scan(value any) error {
-	if s == nil {
-		return nil
-	}
-	switch current := value.(type) {
-	case nil:
-		s.Time = time.Time{}
-		return nil
-	case time.Time:
-		s.Time = current
-		return nil
-	case *time.Time:
-		if current == nil {
-			s.Time = time.Time{}
-			return nil
-		}
-		s.Time = *current
-		return nil
-	case []byte:
-		s.Time = parseSearchUpdatedAtString(string(current))
-		return nil
-	case string:
-		s.Time = parseSearchUpdatedAtString(current)
-		return nil
-	case int:
-		s.Time = time.Unix(int64(current), 0).UTC()
-		return nil
-	case int64:
-		s.Time = time.Unix(current, 0).UTC()
-		return nil
-	case float64:
-		s.Time = time.Unix(int64(current), 0).UTC()
-		return nil
-	default:
-		s.Time = parseSearchUpdatedAtString(fmt.Sprint(current))
-		return nil
-	}
-}
-
-func parseSearchUpdatedAtString(value string) time.Time {
-	raw := strings.TrimSpace(value)
-	if raw == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		time.DateTime,
-	}
-	for _, layout := range layouts {
-		parsed, err := time.Parse(layout, raw)
-		if err == nil {
-			return parsed
-		}
-	}
-	if epochSeconds, err := strconv.ParseInt(raw, 10, 64); err == nil {
-		return time.Unix(epochSeconds, 0).UTC()
-	}
-	if epochFloat, err := strconv.ParseFloat(raw, 64); err == nil {
-		return time.Unix(int64(epochFloat), 0).UTC()
-	}
-	return time.Time{}
 }

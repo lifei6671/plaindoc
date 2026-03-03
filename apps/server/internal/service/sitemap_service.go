@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
@@ -43,17 +42,9 @@ type SitemapPublicDocumentRecord struct {
 	DocumentUpdatedAt time.Time
 }
 
-type sitemapPublicDocumentRow struct {
-	SpaceID              string `gorm:"column:space_id"`
-	SpaceUpdatedAtRaw    string `gorm:"column:space_updated_at"`
-	DocumentID           string `gorm:"column:document_id"`
-	DocumentContentMD    string `gorm:"column:document_content_md"`
-	DocumentUpdatedAtRaw string `gorm:"column:document_updated_at"`
-}
-
 // SitemapService 负责生成 sitemap 所需的公开数据集合。
 type SitemapService struct {
-	db               *gorm.DB
+	sitemapRepo      repository.SitemapRepository
 	systemConfigRepo repository.SystemConfigRepository
 }
 
@@ -63,7 +54,7 @@ func NewSitemapService(
 	systemConfigRepo repository.SystemConfigRepository,
 ) *SitemapService {
 	return &SitemapService{
-		db:               db,
+		sitemapRepo:      repository.NewGormSitemapRepository(db),
 		systemConfigRepo: systemConfigRepo,
 	}
 }
@@ -72,8 +63,8 @@ func NewSitemapService(
 func (s *SitemapService) ListPublicDocuments(
 	ctx context.Context,
 ) ([]SitemapPublicDocumentRecord, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("sitemap service db is nil")
+	if s == nil || s.sitemapRepo == nil {
+		return nil, errors.New("sitemap service repository is nil")
 	}
 
 	config, err := s.GetConfig(ctx)
@@ -85,25 +76,8 @@ func (s *SitemapService) ListPublicDocuments(
 		updatedAfter = time.Now().UTC().AddDate(0, 0, -config.MaxUpdatedWithinDays)
 	}
 
-	var rows []sitemapPublicDocumentRow
-	if err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"s.space_id AS space_id",
-			"s.updated_at AS space_updated_at",
-			"d.document_id AS document_id",
-			"d.content_md AS document_content_md",
-			"d.updated_at AS document_updated_at",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("n.type = ?", models.NodeTypeDoc).
-		Where("s.visibility = ?", models.VisibilityPublic).
-		Where("s.status = ?", models.EntityStatusActive).
-		Where("d.visibility = ?", models.VisibilityPublic).
-		Where("d.status = ?", models.EntityStatusActive).
-		Order("s.space_id ASC, d.document_id ASC").
-		Find(&rows).Error; err != nil {
+	rows, err := s.sitemapRepo.ListPublicDocuments(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -118,7 +92,7 @@ func (s *SitemapService) ListPublicDocuments(
 		if strings.TrimSpace(row.DocumentContentMD) == "" {
 			continue
 		}
-		documentUpdatedAt := parseSitemapRecordTime(row.DocumentUpdatedAtRaw)
+		documentUpdatedAt := row.DocumentUpdatedAt
 		if !updatedAfter.IsZero() {
 			if documentUpdatedAt.IsZero() || documentUpdatedAt.Before(updatedAfter) {
 				continue
@@ -127,7 +101,7 @@ func (s *SitemapService) ListPublicDocuments(
 		result = append(result, SitemapPublicDocumentRecord{
 			SpaceID:           spaceID,
 			DocumentID:        documentID,
-			SpaceUpdatedAt:    parseSitemapRecordTime(row.SpaceUpdatedAtRaw),
+			SpaceUpdatedAt:    row.SpaceUpdatedAt,
 			DocumentUpdatedAt: documentUpdatedAt,
 		})
 	}
@@ -262,44 +236,4 @@ func readSitemapConfigInt(payload map[string]any, key string) (int, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func parseSitemapRecordTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05.999999999-07:00",
-		"2006-01-02T15:04:05-07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05 -0700 MST",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
-		}
-	}
-
-	normalized := strings.Replace(value, " ", "T", 1)
-	timePart := normalized
-	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
-		timePart = normalized[index+1:]
-	}
-	if !strings.ContainsAny(timePart, "Zz+-") {
-		normalized += "Z"
-	}
-	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
-		return parsedAt.UTC()
-	}
-	return time.Time{}
 }

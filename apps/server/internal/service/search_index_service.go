@@ -69,10 +69,11 @@ type SearchIndexStatusResult struct {
 
 // SearchIndexService 负责检索引擎索引创建与全量重建。
 type SearchIndexService struct {
-	db                  *gorm.DB
-	searchConfigService *SearchConfigService
-	providers           map[searchcfg.ProviderName]searchprovider.Provider
-	searchIndexJobRepo  repository.SearchIndexJobRepository
+	db                    *gorm.DB
+	searchConfigService   *SearchConfigService
+	providers             map[searchcfg.ProviderName]searchprovider.Provider
+	searchIndexSourceRepo repository.SearchIndexSourceRepository
+	searchIndexJobRepo    repository.SearchIndexJobRepository
 
 	asyncTaskQueue      chan searchIndexAsyncTask
 	asyncTaskWorkerOnce sync.Once
@@ -114,10 +115,11 @@ func NewSearchIndexService(
 		providerMap[name] = item
 	}
 	return &SearchIndexService{
-		db:                  db,
-		searchConfigService: searchConfigService,
-		providers:           providerMap,
-		asyncTaskQueue:      make(chan searchIndexAsyncTask, defaultSearchIndexAsyncQueueSize),
+		db:                    db,
+		searchConfigService:   searchConfigService,
+		providers:             providerMap,
+		searchIndexSourceRepo: repository.NewGormSearchIndexSourceRepository(db),
+		asyncTaskQueue:        make(chan searchIndexAsyncTask, defaultSearchIndexAsyncQueueSize),
 	}
 }
 
@@ -260,6 +262,16 @@ func (s *SearchIndexService) SetSearchIndexJobRepository(
 		return
 	}
 	s.searchIndexJobRepo = jobRepo
+}
+
+// SetSearchIndexSourceRepository 注入索引源仓储，用于查询可索引文档快照。
+func (s *SearchIndexService) SetSearchIndexSourceRepository(
+	searchIndexSourceRepo repository.SearchIndexSourceRepository,
+) {
+	if s == nil {
+		return
+	}
+	s.searchIndexSourceRepo = searchIndexSourceRepo
 }
 
 // SyncDocumentByID 按文档 ID 增量同步索引（存在则 upsert，不存在或不可索引则删除）。
@@ -720,9 +732,9 @@ func (s *SearchIndexService) loadActiveDocumentsForRebuild(
 	ctx context.Context,
 	limit int,
 	offset int,
-) ([]searchIndexRebuildRow, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("search index service db is nil")
+) ([]repository.SearchIndexSourceDocumentRecord, error) {
+	if s == nil || s.searchIndexSourceRepo == nil {
+		return nil, errors.New("search index source repository is nil")
 	}
 	if limit <= 0 {
 		limit = defaultSearchIndexRebuildBatchSize
@@ -730,64 +742,36 @@ func (s *SearchIndexService) loadActiveDocumentsForRebuild(
 	if offset < 0 {
 		offset = 0
 	}
-
-	rows := make([]searchIndexRebuildRow, 0, limit)
-	err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"s.space_id AS space_id",
-			"d.document_id AS document_id",
-			"d.node_id AS node_id",
-			"d.title AS title",
-			"d.content_md AS content_md",
-			"s.visibility AS space_visibility",
-			"d.visibility AS doc_visibility",
-			"d.updated_at AS updated_at",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Order("d.id ASC").
-		Limit(limit).
-		Offset(offset).
-		Find(&rows).Error
-	return rows, err
+	return s.searchIndexSourceRepo.ListActiveDocuments(
+		ctx,
+		repository.ListSearchIndexSourceDocumentsParams{
+			Limit:  limit,
+			Offset: offset,
+		},
+	)
 }
 
 func (s *SearchIndexService) loadActiveDocumentForSync(
 	ctx context.Context,
 	documentID string,
-) (searchIndexRebuildRow, error) {
-	if s == nil || s.db == nil {
-		return searchIndexRebuildRow{}, errors.New("search index service db is nil")
+) (repository.SearchIndexSourceDocumentRecord, error) {
+	if s == nil || s.searchIndexSourceRepo == nil {
+		return repository.SearchIndexSourceDocumentRecord{}, errors.New("search index source repository is nil")
 	}
 
 	normalizedDocumentID := strings.TrimSpace(documentID)
 	if normalizedDocumentID == "" {
-		return searchIndexRebuildRow{}, gorm.ErrRecordNotFound
+		return repository.SearchIndexSourceDocumentRecord{}, gorm.ErrRecordNotFound
 	}
 
-	var row searchIndexRebuildRow
-	err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"s.space_id AS space_id",
-			"d.document_id AS document_id",
-			"d.node_id AS node_id",
-			"d.title AS title",
-			"d.content_md AS content_md",
-			"s.visibility AS space_visibility",
-			"d.visibility AS doc_visibility",
-			"d.updated_at AS updated_at",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("d.document_id = ?", normalizedDocumentID).
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Take(&row).Error
-	return row, err
+	row, err := s.searchIndexSourceRepo.GetActiveDocumentByDocumentID(ctx, normalizedDocumentID)
+	if err != nil {
+		return repository.SearchIndexSourceDocumentRecord{}, err
+	}
+	if row == nil {
+		return repository.SearchIndexSourceDocumentRecord{}, gorm.ErrRecordNotFound
+	}
+	return *row, nil
 }
 
 func (s *SearchIndexService) loadActiveDocumentsForSpaceSync(
@@ -795,9 +779,9 @@ func (s *SearchIndexService) loadActiveDocumentsForSpaceSync(
 	spaceID string,
 	limit int,
 	offset int,
-) ([]searchIndexRebuildRow, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("search index service db is nil")
+) ([]repository.SearchIndexSourceDocumentRecord, error) {
+	if s == nil || s.searchIndexSourceRepo == nil {
+		return nil, errors.New("search index source repository is nil")
 	}
 	if limit <= 0 {
 		limit = defaultSearchIndexRebuildBatchSize
@@ -808,38 +792,23 @@ func (s *SearchIndexService) loadActiveDocumentsForSpaceSync(
 
 	normalizedSpaceID := strings.TrimSpace(spaceID)
 	if normalizedSpaceID == "" {
-		return []searchIndexRebuildRow{}, nil
+		return []repository.SearchIndexSourceDocumentRecord{}, nil
 	}
 
-	rows := make([]searchIndexRebuildRow, 0, limit)
-	err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"s.space_id AS space_id",
-			"d.document_id AS document_id",
-			"d.node_id AS node_id",
-			"d.title AS title",
-			"d.content_md AS content_md",
-			"s.visibility AS space_visibility",
-			"d.visibility AS doc_visibility",
-			"d.updated_at AS updated_at",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("s.space_id = ?", normalizedSpaceID).
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Order("d.id ASC").
-		Limit(limit).
-		Offset(offset).
-		Find(&rows).Error
-	return rows, err
+	return s.searchIndexSourceRepo.ListActiveDocumentsBySpaceID(
+		ctx,
+		repository.ListSearchIndexSourceDocumentsBySpaceParams{
+			SpaceID: normalizedSpaceID,
+			Limit:   limit,
+			Offset:  offset,
+		},
+	)
 }
 
 func buildSearchIndexRecord(
 	ctx context.Context,
 	snapshot SearchRuntimeSnapshot,
-	row searchIndexRebuildRow,
+	row repository.SearchIndexSourceDocumentRecord,
 ) (searchprovider.IndexRecord, error) {
 	if snapshot.ActiveAnalyzer == nil {
 		return searchprovider.IndexRecord{}, errors.New("active analyzer is nil")
@@ -894,7 +863,7 @@ func buildSearchIndexRecord(
 		TitleTerms:      strings.Join(mergeSearchTokens(titleOutput.Tokens, titleCompoundTokens), " "),
 		VisibilityScope: visibilityScope,
 		MinRole:         minRole,
-		UpdatedAtUnix:   parseSearchIndexUnix(row.UpdatedAt.Time),
+		UpdatedAtUnix:   parseSearchIndexUnix(row.UpdatedAt),
 		IsDeleted:       false,
 		SpaceStatus:     string(models.EntityStatusActive),
 		DocStatus:       string(models.EntityStatusActive),
@@ -1011,15 +980,4 @@ func resolveSearchVisibilityAndRole(
 	default:
 		return string(models.VisibilityMember), 1
 	}
-}
-
-type searchIndexRebuildRow struct {
-	SpaceID         string         `gorm:"column:space_id"`
-	DocumentID      string         `gorm:"column:document_id"`
-	NodeID          string         `gorm:"column:node_id"`
-	Title           string         `gorm:"column:title"`
-	ContentMD       string         `gorm:"column:content_md"`
-	SpaceVisibility string         `gorm:"column:space_visibility"`
-	DocVisibility   string         `gorm:"column:doc_visibility"`
-	UpdatedAt       searchScanTime `gorm:"column:updated_at"`
 }

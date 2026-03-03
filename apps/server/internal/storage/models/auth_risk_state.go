@@ -20,3 +20,29 @@ type AuthRiskState struct {
 func (AuthRiskState) TableName() string {
 	return "auth_risk_states"
 }
+
+var AuthRiskStateColumns = struct {
+	ID               string
+	Scene            string
+	SubjectType      string
+	SubjectHash      string
+	WindowStartedAt  string
+	AttemptCount     string
+	FailedCount      string
+	CaptchaFailCount string
+	LockUntil        string
+	CreatedAt        string
+	UpdatedAt        string
+}{
+	ID:               "id",
+	Scene:            "scene",
+	SubjectType:      "subject_type",
+	SubjectHash:      "subject_hash",
+	WindowStartedAt:  "window_started_at",
+	AttemptCount:     "attempt_count",
+	FailedCount:      "failed_count",
+	CaptchaFailCount: "captcha_failed_count",
+	LockUntil:        "lock_until",
+	CreatedAt:        "created_at",
+	UpdatedAt:        "updated_at",
+}

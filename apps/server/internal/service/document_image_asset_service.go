@@ -15,16 +15,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
-	"github.com/oklog/ulid/v2"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
 const (
-	documentImageAssetStatusActive         = "active"
-	documentImageAssetStatusPendingCleanup = "pending_cleanup"
-	documentImageAssetStatusDeleted        = "deleted"
-
 	defaultDocumentImageAssetCleanupGracePeriod = 24 * time.Hour
 	defaultDocumentImageAssetCleanupBatchSize   = 500
 	maxDocumentImageAssetCleanupBatchSize       = 5000
@@ -52,7 +47,7 @@ type documentImageReference struct {
 
 // DocumentImageAssetService 负责文档图片引用追踪与幽灵图片清理。
 type DocumentImageAssetService struct {
-	db                  *gorm.DB
+	lifecycleRepo       repository.DocumentImageAssetLifecycleRepository
 	imageHostingService *ImageHostingService
 	localRootDir        string
 	cleanupGracePeriod  time.Duration
@@ -64,7 +59,7 @@ func NewDocumentImageAssetService(
 	imageHostingService *ImageHostingService,
 ) *DocumentImageAssetService {
 	return &DocumentImageAssetService{
-		db:                  db,
+		lifecycleRepo:       repository.NewGormDocumentImageAssetLifecycleRepository(db),
 		imageHostingService: imageHostingService,
 		localRootDir:        defaultDocumentImageAssetLocalRootDir,
 		cleanupGracePeriod:  defaultDocumentImageAssetCleanupGracePeriod,
@@ -78,8 +73,8 @@ func (s *DocumentImageAssetService) SyncDocumentImageAssets(
 	ctx context.Context,
 	input SyncDocumentImageAssetsInput,
 ) error {
-	if s == nil || s.db == nil {
-		return errors.New("document image asset service db is nil")
+	if s == nil || s.lifecycleRepo == nil {
+		return errors.New("document image asset service repository is nil")
 	}
 	documentID := strings.TrimSpace(input.DocumentID)
 	spaceID := strings.TrimSpace(input.SpaceID)
@@ -97,91 +92,20 @@ func (s *DocumentImageAssetService) SyncDocumentImageAssets(
 		return err
 	}
 
-	type existingDocumentImageAssetRow struct {
-		ID              int64  `gorm:"column:id"`
-		StorageProvider string `gorm:"column:storage_provider"`
-		ObjectKey       string `gorm:"column:object_key"`
+	repoReferences := make([]repository.DocumentImageAssetReferenceInput, 0, len(references))
+	for _, reference := range references {
+		repoReferences = append(repoReferences, repository.DocumentImageAssetReferenceInput{
+			StorageProvider: strings.TrimSpace(strings.ToLower(string(reference.StorageProvider))),
+			ObjectKey:       strings.TrimSpace(reference.ObjectKey),
+			ObjectURL:       strings.TrimSpace(reference.ObjectURL),
+		})
 	}
 
-	existingAssets := make([]existingDocumentImageAssetRow, 0, len(references)+8)
-	if err := s.db.WithContext(ctx).
-		Table("document_image_assets").
-		Select("id, storage_provider, object_key").
-		Where("document_id = ? AND status IN ?", documentID, []string{
-			documentImageAssetStatusActive,
-			documentImageAssetStatusPendingCleanup,
-		}).
-		Find(&existingAssets).Error; err != nil {
-		return err
-	}
-
-	existingByKey := make(map[string]existingDocumentImageAssetRow, len(existingAssets))
-	for _, item := range existingAssets {
-		identityKey := buildDocumentImageIdentityKey(item.StorageProvider, item.ObjectKey)
-		if identityKey == "" {
-			continue
-		}
-		existingByKey[identityKey] = item
-	}
-
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, reference := range references {
-			identityKey := buildDocumentImageIdentityKey(string(reference.StorageProvider), reference.ObjectKey)
-			if identityKey == "" {
-				continue
-			}
-			if existing, exists := existingByKey[identityKey]; exists {
-				if err := tx.Model(&models.DocumentImageAsset{}).
-					Where("id = ?", existing.ID).
-					Updates(map[string]any{
-						"space_id":           spaceID,
-						"object_url":         strings.TrimSpace(reference.ObjectURL),
-						"status":             documentImageAssetStatusActive,
-						"pending_cleanup_at": nil,
-						"deleted_at":         nil,
-						"last_referenced_at": referencedAt,
-						"updated_at":         referencedAt,
-					}).Error; err != nil {
-					return err
-				}
-				delete(existingByKey, identityKey)
-				continue
-			}
-
-			newAsset := &models.DocumentImageAsset{
-				ImageAssetID:     strings.ToLower(ulid.Make().String()),
-				DocumentID:       documentID,
-				SpaceID:          spaceID,
-				StorageProvider:  string(reference.StorageProvider),
-				ObjectKey:        strings.TrimSpace(reference.ObjectKey),
-				ObjectURL:        strings.TrimSpace(reference.ObjectURL),
-				Status:           documentImageAssetStatusActive,
-				LastReferencedAt: referencedAt,
-				CreatedAt:        referencedAt,
-				UpdatedAt:        referencedAt,
-				PendingCleanupAt: nil,
-				DeletedAt:        nil,
-			}
-			if err := tx.Create(newAsset).Error; err != nil {
-				return err
-			}
-		}
-
-		staleAssetIDs := make([]int64, 0, len(existingByKey))
-		for _, item := range existingByKey {
-			staleAssetIDs = append(staleAssetIDs, item.ID)
-		}
-		if len(staleAssetIDs) == 0 {
-			return nil
-		}
-
-		return tx.Model(&models.DocumentImageAsset{}).
-			Where("id IN ?", staleAssetIDs).
-			Updates(map[string]any{
-				"status":             documentImageAssetStatusPendingCleanup,
-				"pending_cleanup_at": gorm.Expr("COALESCE(pending_cleanup_at, ?)", referencedAt),
-				"updated_at":         referencedAt,
-			}).Error
+	return s.lifecycleRepo.SyncDocumentReferences(ctx, repository.SyncDocumentImageAssetReferencesParams{
+		DocumentID:   documentID,
+		SpaceID:      spaceID,
+		ReferencedAt: referencedAt,
+		References:   repoReferences,
 	})
 }
 
@@ -191,8 +115,8 @@ func (s *DocumentImageAssetService) CleanupPendingDocumentImageAssets(
 	ctx context.Context,
 	batchSize int,
 ) (int64, error) {
-	if s == nil || s.db == nil {
-		return 0, errors.New("document image asset service db is nil")
+	if s == nil || s.lifecycleRepo == nil {
+		return 0, errors.New("document image asset service repository is nil")
 	}
 	if batchSize <= 0 {
 		batchSize = defaultDocumentImageAssetCleanupBatchSize
@@ -202,28 +126,13 @@ func (s *DocumentImageAssetService) CleanupPendingDocumentImageAssets(
 	}
 
 	now := time.Now().UTC()
-	if err := s.markDeletedDocumentReferencesPending(ctx, now); err != nil {
+	if err := s.lifecycleRepo.MarkDeletedDocumentReferencesPending(ctx, now); err != nil {
 		return 0, err
 	}
 
 	pendingCutoff := now.Add(-s.cleanupGracePeriod)
-	type pendingCandidateRow struct {
-		ID              int64  `gorm:"column:id"`
-		StorageProvider string `gorm:"column:storage_provider"`
-		ObjectKey       string `gorm:"column:object_key"`
-	}
-
-	candidates := make([]pendingCandidateRow, 0, batchSize)
-	if err := s.db.WithContext(ctx).
-		Table("document_image_assets").
-		Select("id, storage_provider, object_key").
-		Where("status = ? AND pending_cleanup_at IS NOT NULL AND pending_cleanup_at <= ?",
-			documentImageAssetStatusPendingCleanup,
-			pendingCutoff,
-		).
-		Order("pending_cleanup_at ASC").
-		Limit(batchSize).
-		Find(&candidates).Error; err != nil {
+	candidates, err := s.lifecycleRepo.ListPendingCleanupCandidates(ctx, pendingCutoff, batchSize)
+	if err != nil {
 		return 0, err
 	}
 	if len(candidates) == 0 {
@@ -244,7 +153,7 @@ func (s *DocumentImageAssetService) CleanupPendingDocumentImageAssets(
 	for _, candidate := range candidates {
 		identityKey := buildDocumentImageIdentityKey(candidate.StorageProvider, candidate.ObjectKey)
 		if identityKey == "" {
-			rows, err := s.markDocumentImageAssetDeletedByID(ctx, candidate.ID, now)
+			rows, err := s.lifecycleRepo.MarkDeletedByID(ctx, candidate.ID, now)
 			if err != nil {
 				return totalDeletedRows, err
 			}
@@ -256,12 +165,16 @@ func (s *DocumentImageAssetService) CleanupPendingDocumentImageAssets(
 			continue
 		}
 
-		activeRefCount, err := s.countActiveDocumentImageReferences(ctx, candidate.StorageProvider, candidate.ObjectKey)
+		activeRefCount, err := s.lifecycleRepo.CountActiveReferencesByObject(
+			ctx,
+			candidate.StorageProvider,
+			candidate.ObjectKey,
+		)
 		if err != nil {
 			return totalDeletedRows, err
 		}
 		if activeRefCount > 0 {
-			rows, err := s.markDocumentImageAssetDeletedByID(ctx, candidate.ID, now)
+			rows, err := s.lifecycleRepo.MarkDeletedByID(ctx, candidate.ID, now)
 			if err != nil {
 				return totalDeletedRows, err
 			}
@@ -274,7 +187,12 @@ func (s *DocumentImageAssetService) CleanupPendingDocumentImageAssets(
 			continue
 		}
 
-		rows, err := s.markDocumentImageAssetsDeletedByObject(ctx, candidate.StorageProvider, candidate.ObjectKey, now)
+		rows, err := s.lifecycleRepo.MarkDeletedByObject(
+			ctx,
+			candidate.StorageProvider,
+			candidate.ObjectKey,
+			now,
+		)
 		if err != nil {
 			return totalDeletedRows, err
 		}
@@ -283,83 +201,6 @@ func (s *DocumentImageAssetService) CleanupPendingDocumentImageAssets(
 	}
 
 	return totalDeletedRows, nil
-}
-
-func (s *DocumentImageAssetService) markDeletedDocumentReferencesPending(
-	ctx context.Context,
-	now time.Time,
-) error {
-	activeDocumentSubquery := s.db.WithContext(ctx).
-		Table("documents").
-		Select("document_id").
-		Where("status = ? AND deleted_at IS NULL", models.EntityStatusActive)
-
-	return s.db.WithContext(ctx).
-		Model(&models.DocumentImageAsset{}).
-		Where("status = ?", documentImageAssetStatusActive).
-		Where("document_id NOT IN (?)", activeDocumentSubquery).
-		Updates(map[string]any{
-			"status":             documentImageAssetStatusPendingCleanup,
-			"pending_cleanup_at": gorm.Expr("COALESCE(pending_cleanup_at, ?)", now),
-			"updated_at":         now,
-		}).Error
-}
-
-func (s *DocumentImageAssetService) countActiveDocumentImageReferences(
-	ctx context.Context,
-	storageProvider string,
-	objectKey string,
-) (int64, error) {
-	var count int64
-	err := s.db.WithContext(ctx).
-		Model(&models.DocumentImageAsset{}).
-		Where("storage_provider = ? AND object_key = ? AND status = ?",
-			strings.ToLower(strings.TrimSpace(storageProvider)),
-			strings.TrimSpace(objectKey),
-			documentImageAssetStatusActive,
-		).
-		Count(&count).Error
-	return count, err
-}
-
-func (s *DocumentImageAssetService) markDocumentImageAssetDeletedByID(
-	ctx context.Context,
-	id int64,
-	now time.Time,
-) (int64, error) {
-	if id <= 0 {
-		return 0, nil
-	}
-	updateTx := s.db.WithContext(ctx).
-		Model(&models.DocumentImageAsset{}).
-		Where("id = ? AND status <> ?", id, documentImageAssetStatusDeleted).
-		Updates(map[string]any{
-			"status":     documentImageAssetStatusDeleted,
-			"deleted_at": now,
-			"updated_at": now,
-		})
-	return updateTx.RowsAffected, updateTx.Error
-}
-
-func (s *DocumentImageAssetService) markDocumentImageAssetsDeletedByObject(
-	ctx context.Context,
-	storageProvider string,
-	objectKey string,
-	now time.Time,
-) (int64, error) {
-	updateTx := s.db.WithContext(ctx).
-		Model(&models.DocumentImageAsset{}).
-		Where("storage_provider = ? AND object_key = ? AND status <> ?",
-			strings.ToLower(strings.TrimSpace(storageProvider)),
-			strings.TrimSpace(objectKey),
-			documentImageAssetStatusDeleted,
-		).
-		Updates(map[string]any{
-			"status":     documentImageAssetStatusDeleted,
-			"deleted_at": now,
-			"updated_at": now,
-		})
-	return updateTx.RowsAffected, updateTx.Error
 }
 
 func (s *DocumentImageAssetService) deletePhysicalObject(

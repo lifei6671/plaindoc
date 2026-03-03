@@ -13,32 +13,9 @@ import (
 
 // ReaderPageService 负责聚合阅读页 SSR 所需的数据视图。
 type ReaderPageService struct {
-	db                     *gorm.DB
+	readerPageRepo         repository.ReaderPageRepository
 	visibilityService      *VisibilityService
 	documentAttachmentRepo repository.DocumentAttachmentRepository
-}
-
-type readerDocumentRow struct {
-	DocumentID     string `gorm:"column:document_id"`
-	NodeID         string `gorm:"column:node_id"`
-	ThemeID        string `gorm:"column:theme_id"`
-	Visibility     string `gorm:"column:visibility"`
-	Title          string `gorm:"column:title"`
-	ContentMD      string `gorm:"column:content_md"`
-	Version        int    `gorm:"column:version"`
-	AuthorNickname string `gorm:"column:author_nickname"`
-	UpdatedAt      string `gorm:"column:updated_at"`
-	SpaceID        string `gorm:"column:space_id"`
-}
-
-type readerTreeNodeRow struct {
-	NodeID             string          `gorm:"column:node_id"`
-	DocumentID         *string         `gorm:"column:document_id"`
-	ParentNodeID       *string         `gorm:"column:parent_node_id"`
-	Type               models.NodeType `gorm:"column:type"`
-	Title              string          `gorm:"column:title"`
-	Sort               int             `gorm:"column:sort"`
-	DocumentVisibility *string         `gorm:"column:document_visibility"`
 }
 
 type readerTreeNode struct {
@@ -52,14 +29,6 @@ type readerTreeNode struct {
 	Children   []*readerTreeNode
 }
 
-type readerDocumentIDRow struct {
-	DocumentID string `gorm:"column:document_id"`
-}
-
-type readerResolvedDocument struct {
-	DocumentID string `gorm:"column:document_id"`
-}
-
 // NewReaderPageService 创建阅读页聚合服务。
 func NewReaderPageService(
 	db *gorm.DB,
@@ -67,7 +36,7 @@ func NewReaderPageService(
 	documentAttachmentRepo repository.DocumentAttachmentRepository,
 ) *ReaderPageService {
 	return &ReaderPageService{
-		db:                     db,
+		readerPageRepo:         repository.NewGormReaderPageRepository(db),
 		visibilityService:      visibilityService,
 		documentAttachmentRepo: documentAttachmentRepo,
 	}
@@ -79,7 +48,7 @@ func (s *ReaderPageService) ResolveLandingDocumentID(
 	spaceID string,
 	viewerUserID string,
 ) (string, error) {
-	if s == nil || s.db == nil || s.visibilityService == nil {
+	if s == nil || s.readerPageRepo == nil || s.visibilityService == nil {
 		return "", errors.New("reader page service dependencies are nil")
 	}
 
@@ -104,7 +73,7 @@ func (s *ReaderPageService) ResolveLandingDocumentID(
 	hasDocumentAccessDenied := false
 	hasLoginRequired := false
 	for _, item := range candidateDocumentRows {
-		documentID := strings.TrimSpace(item.DocumentID)
+		documentID := strings.TrimSpace(item)
 		if documentID == "" {
 			continue
 		}
@@ -142,7 +111,7 @@ func (s *ReaderPageService) BuildPage(
 	documentID string,
 	viewerUserID string,
 ) (ReaderPageViewModel, error) {
-	if s == nil || s.db == nil || s.visibilityService == nil {
+	if s == nil || s.readerPageRepo == nil || s.visibilityService == nil {
 		return ReaderPageViewModel{}, errors.New("reader page service dependencies are nil")
 	}
 
@@ -230,7 +199,7 @@ func (s *ReaderPageService) BuildSpaceContext(
 	spaceID string,
 	viewerUserID string,
 ) (ReaderSpaceViewModel, []ReaderTreeNodeViewModel, error) {
-	if s == nil || s.db == nil || s.visibilityService == nil {
+	if s == nil || s.readerPageRepo == nil || s.visibilityService == nil {
 		return ReaderSpaceViewModel{}, nil, errors.New("reader page service dependencies are nil")
 	}
 
@@ -263,117 +232,50 @@ func (s *ReaderPageService) resolveDocumentID(
 	spaceID string,
 	rawDocumentID string,
 ) (string, error) {
-	normalizedSpaceID := strings.TrimSpace(spaceID)
-	normalizedDocumentID := strings.TrimSpace(rawDocumentID)
-	if normalizedSpaceID == "" || normalizedDocumentID == "" {
-		return "", ErrDocumentNotFound
+	if s == nil || s.readerPageRepo == nil {
+		return "", errors.New("reader page repository is nil")
 	}
 
-	tryResolve := func(
-		useSpaceFilter bool,
-		condition string,
-		args ...any,
-	) (string, error) {
-		query := s.db.WithContext(ctx).Table("documents AS d").Select("d.document_id")
-		if useSpaceFilter {
-			query = query.
-				Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-				Where("n.space_id = ?", normalizedSpaceID)
-		}
-
-		var row readerResolvedDocument
-		err := query.Where(condition, args...).Take(&row).Error
-		if err == nil {
-			return strings.TrimSpace(row.DocumentID), nil
-		}
+	resolvedDocumentID, err := s.readerPageRepo.ResolveDocumentID(ctx, spaceID, rawDocumentID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil
+			return "", ErrDocumentNotFound
 		}
 		return "", err
 	}
-
-	// 先在目标空间内解析，优先级：document_id 精确 > node_id 精确 > document_id 忽略大小写 > node_id 忽略大小写。
-	spaceScopedMatchers := []struct {
-		condition string
-		args      []any
-	}{
-		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
+	resolvedDocumentID = strings.TrimSpace(resolvedDocumentID)
+	if resolvedDocumentID == "" {
+		return "", ErrDocumentNotFound
 	}
-	for _, matcher := range spaceScopedMatchers {
-		resolvedDocumentID, err := tryResolve(true, matcher.condition, matcher.args...)
-		if err != nil {
-			return "", err
-		}
-		if resolvedDocumentID != "" {
-			return resolvedDocumentID, nil
-		}
-	}
-
-	// 回退到全局解析：兼容异常历史数据（后续仍会校验 space 一致性）。
-	globalMatchers := []struct {
-		condition string
-		args      []any
-	}{
-		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
-	}
-	for _, matcher := range globalMatchers {
-		resolvedDocumentID, err := tryResolve(false, matcher.condition, matcher.args...)
-		if err != nil {
-			return "", err
-		}
-		if resolvedDocumentID != "" {
-			return resolvedDocumentID, nil
-		}
-	}
-	return "", ErrDocumentNotFound
+	return resolvedDocumentID, nil
 }
 
 func (s *ReaderPageService) loadDocumentRow(
 	ctx context.Context,
 	documentID string,
-) (readerDocumentRow, error) {
-	var row readerDocumentRow
-	err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"d.document_id",
-			"d.node_id",
-			"d.theme_id",
-			"d.visibility",
-			"d.title",
-			"d.content_md",
-			"d.version",
-			// 作者固定取文档创建者，避免后续更新人覆盖创建人语义。
-			"COALESCE(NULLIF(TRIM(u_creator.name), ''), '未知作者') AS author_nickname",
-			"d.updated_at",
-			"n.space_id AS space_id",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("LEFT JOIN users AS u_creator ON u_creator.user_id = d.created_by_user_id").
-		Where("d.document_id = ?", documentID).
-		Take(&row).Error
-	return row, err
+) (repository.ReaderPageDocumentRecord, error) {
+	if s == nil || s.readerPageRepo == nil {
+		return repository.ReaderPageDocumentRecord{}, errors.New("reader page repository is nil")
+	}
+	row, err := s.readerPageRepo.GetDocumentByDocumentID(ctx, documentID)
+	if err != nil {
+		return repository.ReaderPageDocumentRecord{}, err
+	}
+	if row == nil {
+		return repository.ReaderPageDocumentRecord{}, gorm.ErrRecordNotFound
+	}
+	return *row, nil
 }
 
 func (s *ReaderPageService) loadSpaceDocumentIDs(
 	ctx context.Context,
 	spaceID string,
-) ([]readerDocumentIDRow, error) {
-	var rows []readerDocumentIDRow
-	if err := s.db.WithContext(ctx).
-		Table("documents AS d").
-		Select("d.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Where("n.space_id = ?", spaceID).
-		// 仅过滤已软删除文档；状态是否可读交由 visibilityService 统一判断，
-		// 以兼容历史数据中的空状态值。
-		Where("d.deleted_at IS NULL").
-		Order("CASE WHEN n.parent_node_id IS NULL THEN 0 ELSE 1 END ASC").
-		Order("n.parent_node_id ASC").
-		Order("n.sort ASC, n.id ASC, d.id ASC").
-		Find(&rows).Error; err != nil {
+) ([]string, error) {
+	if s == nil || s.readerPageRepo == nil {
+		return nil, errors.New("reader page repository is nil")
+	}
+	rows, err := s.readerPageRepo.ListSpaceDocumentIDs(ctx, spaceID)
+	if err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -383,22 +285,11 @@ func (s *ReaderPageService) loadTree(
 	ctx context.Context,
 	spaceID string,
 ) ([]ReaderTreeNodeViewModel, error) {
-	var rows []readerTreeNodeRow
-	if err := s.db.WithContext(ctx).
-		Table("nodes AS n").
-		Select(
-			"n.node_id",
-			"d.document_id AS document_id",
-			"n.parent_node_id",
-			"n.type",
-			"n.title",
-			"n.sort",
-			"d.visibility AS document_visibility",
-		).
-		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
-		Where("n.space_id = ?", spaceID).
-		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
-		Find(&rows).Error; err != nil {
+	if s == nil || s.readerPageRepo == nil {
+		return nil, errors.New("reader page repository is nil")
+	}
+	rows, err := s.readerPageRepo.ListTreeNodesBySpaceID(ctx, spaceID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -584,43 +475,9 @@ func normalizeReaderAuthorNickname(raw string) string {
 	return name
 }
 
-func formatReaderTime(raw string) string {
-	parsed := parseReaderTime(raw)
-	if parsed.IsZero() {
+func formatReaderTime(raw time.Time) string {
+	if raw.IsZero() {
 		return ""
 	}
-	return parsed.UTC().Format(time.RFC3339Nano)
-}
-
-func parseReaderTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02T15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02T15:04:05-07:00",
-		"2006-01-02 15:04:05.999999999-0700",
-		"2006-01-02T15:04:05.999999999-0700",
-		"2006-01-02 15:04:05-0700",
-		"2006-01-02T15:04:05-0700",
-		"2006-01-02 15:04:05.999999999-07",
-		"2006-01-02T15:04:05.999999999-07",
-		"2006-01-02 15:04:05-07",
-		"2006-01-02T15:04:05-07",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsed, err := time.Parse(layout, value); err == nil {
-			return parsed
-		}
-	}
-	return time.Time{}
+	return raw.UTC().Format(time.RFC3339Nano)
 }

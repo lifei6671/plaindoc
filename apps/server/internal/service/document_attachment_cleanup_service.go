@@ -24,10 +24,10 @@ type DocumentAttachmentCleanupResult struct {
 // DocumentAttachmentCleanupService 负责清理“已删除文档”的附件引用与无引用文件实体。
 // 补偿策略：当物理文件删除失败时，保留 file_blobs 记录，由后续批次继续重试。
 type DocumentAttachmentCleanupService struct {
-	db                     *gorm.DB
-	documentAttachmentRepo repository.DocumentAttachmentRepository
-	imageHostingService    *ImageHostingService
-	objectCleanupService   *DocumentImageAssetService
+	documentAttachmentCleanupRepo repository.DocumentAttachmentCleanupRepository
+	documentAttachmentRepo        repository.DocumentAttachmentRepository
+	imageHostingService           *ImageHostingService
+	objectCleanupService          *DocumentImageAssetService
 }
 
 // NewDocumentAttachmentCleanupService 创建附件清理服务。
@@ -37,10 +37,10 @@ func NewDocumentAttachmentCleanupService(
 	imageHostingService *ImageHostingService,
 ) *DocumentAttachmentCleanupService {
 	return &DocumentAttachmentCleanupService{
-		db:                     db,
-		documentAttachmentRepo: documentAttachmentRepo,
-		imageHostingService:    imageHostingService,
-		objectCleanupService:   NewDocumentImageAssetService(db, imageHostingService),
+		documentAttachmentCleanupRepo: repository.NewGormDocumentAttachmentCleanupRepository(db),
+		documentAttachmentRepo:        documentAttachmentRepo,
+		imageHostingService:           imageHostingService,
+		objectCleanupService:          NewDocumentImageAssetService(db, imageHostingService),
 	}
 }
 
@@ -52,13 +52,13 @@ func (s *DocumentAttachmentCleanupService) CleanupDeletedDocumentAttachments(
 	ctx context.Context,
 	batchSize int,
 ) (DocumentAttachmentCleanupResult, error) {
-	if s == nil || s.db == nil || s.documentAttachmentRepo == nil {
+	if s == nil || s.documentAttachmentCleanupRepo == nil || s.documentAttachmentRepo == nil {
 		return DocumentAttachmentCleanupResult{}, errors.New("document attachment cleanup service dependencies are nil")
 	}
 	normalizedBatchSize := normalizeDocumentAttachmentCleanupBatchSize(batchSize)
 	result := DocumentAttachmentCleanupResult{}
 
-	attachments, err := s.listDeletedDocumentAttachmentCandidates(ctx, normalizedBatchSize)
+	attachments, err := s.documentAttachmentCleanupRepo.ListDeletedDocumentAttachmentCandidates(ctx, normalizedBatchSize)
 	if err != nil {
 		return result, err
 	}
@@ -116,29 +116,6 @@ func (s *DocumentAttachmentCleanupService) CleanupDeletedDocumentAttachments(
 	}
 
 	return result, nil
-}
-
-type deletedDocumentAttachmentCleanupCandidate struct {
-	AttachmentID string `gorm:"column:attachment_id"`
-	BlobID       string `gorm:"column:blob_id"`
-}
-
-func (s *DocumentAttachmentCleanupService) listDeletedDocumentAttachmentCandidates(
-	ctx context.Context,
-	batchSize int,
-) ([]deletedDocumentAttachmentCleanupCandidate, error) {
-	candidates := make([]deletedDocumentAttachmentCleanupCandidate, 0, batchSize)
-	if err := s.db.WithContext(ctx).
-		Table("document_attachments AS da").
-		Select("da.attachment_id, da.blob_id").
-		Joins("JOIN documents AS d ON d.document_id = da.document_id").
-		Where("d.status = ? OR d.deleted_at IS NOT NULL", models.EntityStatusDeleted).
-		Order("da.id ASC").
-		Limit(batchSize).
-		Find(&candidates).Error; err != nil {
-		return nil, err
-	}
-	return candidates, nil
 }
 
 func (s *DocumentAttachmentCleanupService) cleanupBlobIfUnreferenced(

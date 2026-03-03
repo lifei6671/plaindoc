@@ -81,7 +81,7 @@ type dataRetentionPolicyPayload struct {
 
 // DataRetentionCleanupService 负责按策略清理持续增长的审计和临时数据。
 type DataRetentionCleanupService struct {
-	db                               *gorm.DB
+	dataRetentionRepo                repository.DataRetentionRepository
 	systemConfigRepo                 repository.SystemConfigRepository
 	documentAttachmentCleanupService *DocumentAttachmentCleanupService
 	documentImageAssetService        *DocumentImageAssetService
@@ -95,7 +95,7 @@ func NewDataRetentionCleanupService(
 	imageHostingService := NewImageHostingService(systemConfigRepo)
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	return &DataRetentionCleanupService{
-		db:                               db,
+		dataRetentionRepo:                repository.NewGormDataRetentionRepository(db),
 		systemConfigRepo:                 systemConfigRepo,
 		documentAttachmentCleanupService: NewDocumentAttachmentCleanupService(db, documentAttachmentRepo, imageHostingService),
 		documentImageAssetService:        NewDocumentImageAssetService(db, imageHostingService),
@@ -129,8 +129,8 @@ func (s *DataRetentionCleanupService) runOnce(
 		result.FinishedAt = time.Now().UTC()
 	}()
 
-	if s == nil || s.db == nil {
-		return result, errors.New("data retention cleanup service db is nil")
+	if s == nil || s.dataRetentionRepo == nil {
+		return result, errors.New("data retention cleanup service repository is nil")
 	}
 	if !result.Policy.Enabled && !force {
 		return result, nil
@@ -360,14 +360,10 @@ func hasDataRetentionCleanupTable(selectedTables []string, table string) bool {
 }
 
 func (s *DataRetentionCleanupService) cleanupAuditLogs(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
-	deleted, err := s.deleteRowsByID(
-		ctx,
-		"audit_logs",
-		batchSize,
-		func(query *gorm.DB) *gorm.DB {
-			return query.Where("created_at < ?", cutoff)
-		},
-	)
+	if s == nil || s.dataRetentionRepo == nil {
+		return 0, errors.New("data retention cleanup repository is nil")
+	}
+	deleted, err := s.dataRetentionRepo.DeleteAuditLogsBefore(ctx, cutoff, batchSize)
 	if err != nil {
 		return deleted, fmt.Errorf("cleanup audit_logs failed: %w", err)
 	}
@@ -375,14 +371,10 @@ func (s *DataRetentionCleanupService) cleanupAuditLogs(ctx context.Context, cuto
 }
 
 func (s *DataRetentionCleanupService) cleanupAuthCaptchaChallenges(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
-	deleted, err := s.deleteRowsByID(
-		ctx,
-		"auth_captcha_challenges",
-		batchSize,
-		func(query *gorm.DB) *gorm.DB {
-			return query.Where("expires_at < ?", cutoff)
-		},
-	)
+	if s == nil || s.dataRetentionRepo == nil {
+		return 0, errors.New("data retention cleanup repository is nil")
+	}
+	deleted, err := s.dataRetentionRepo.DeleteAuthCaptchaChallengesBefore(ctx, cutoff, batchSize)
 	if err != nil {
 		return deleted, fmt.Errorf("cleanup auth_captcha_challenges failed: %w", err)
 	}
@@ -390,14 +382,10 @@ func (s *DataRetentionCleanupService) cleanupAuthCaptchaChallenges(ctx context.C
 }
 
 func (s *DataRetentionCleanupService) cleanupAuthRiskStates(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
-	deleted, err := s.deleteRowsByID(
-		ctx,
-		"auth_risk_states",
-		batchSize,
-		func(query *gorm.DB) *gorm.DB {
-			return query.Where("updated_at < ? AND (lock_until IS NULL OR lock_until < ?)", cutoff, cutoff)
-		},
-	)
+	if s == nil || s.dataRetentionRepo == nil {
+		return 0, errors.New("data retention cleanup repository is nil")
+	}
+	deleted, err := s.dataRetentionRepo.DeleteAuthRiskStatesBefore(ctx, cutoff, batchSize)
 	if err != nil {
 		return deleted, fmt.Errorf("cleanup auth_risk_states failed: %w", err)
 	}
@@ -405,14 +393,10 @@ func (s *DataRetentionCleanupService) cleanupAuthRiskStates(ctx context.Context,
 }
 
 func (s *DataRetentionCleanupService) cleanupUserSessions(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
-	deleted, err := s.deleteRowsByID(
-		ctx,
-		"user_sessions",
-		batchSize,
-		func(query *gorm.DB) *gorm.DB {
-			return query.Where("(expires_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)", cutoff, cutoff)
-		},
-	)
+	if s == nil || s.dataRetentionRepo == nil {
+		return 0, errors.New("data retention cleanup repository is nil")
+	}
+	deleted, err := s.dataRetentionRepo.DeleteUserSessionsBefore(ctx, cutoff, batchSize)
 	if err != nil {
 		return deleted, fmt.Errorf("cleanup user_sessions failed: %w", err)
 	}
@@ -445,45 +429,4 @@ func (s *DataRetentionCleanupService) cleanupDocumentAttachments(
 		return result.DeletedAttachments, result.DeletedBlobs, fmt.Errorf("cleanup document_attachments failed: %w", err)
 	}
 	return result.DeletedAttachments, result.DeletedBlobs, nil
-}
-
-func (s *DataRetentionCleanupService) deleteRowsByID(
-	ctx context.Context,
-	tableName string,
-	batchSize int,
-	filterBuilder func(query *gorm.DB) *gorm.DB,
-) (int64, error) {
-	if s == nil || s.db == nil {
-		return 0, errors.New("data retention cleanup service db is nil")
-	}
-	if batchSize <= 0 {
-		batchSize = defaultDataRetentionBatchSize
-	}
-
-	var totalDeleted int64
-	for {
-		query := s.db.WithContext(ctx).Table(tableName).Select("id").Order("id ASC").Limit(batchSize)
-		if filterBuilder != nil {
-			query = filterBuilder(query)
-		}
-
-		ids := make([]int64, 0, batchSize)
-		if err := query.Pluck("id", &ids).Error; err != nil {
-			return totalDeleted, err
-		}
-		if len(ids) == 0 {
-			break
-		}
-
-		deleteTx := s.db.WithContext(ctx).Table(tableName).Where("id IN ?", ids).Delete(nil)
-		if deleteTx.Error != nil {
-			return totalDeleted, deleteTx.Error
-		}
-
-		totalDeleted += deleteTx.RowsAffected
-		if len(ids) < batchSize {
-			break
-		}
-	}
-	return totalDeleted, nil
 }
