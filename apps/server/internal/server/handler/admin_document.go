@@ -209,12 +209,6 @@ func (h *adminDocumentHandler) DeleteDocument(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.EnqueueDeleteDocumentByID(documentID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "后台删除文档后加入全文检索索引删除队列失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 

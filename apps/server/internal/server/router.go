@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
+	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/captchastore"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	searchprovider "github.com/lifei6671/plaindoc/apps/server/internal/search/provider"
@@ -107,9 +108,10 @@ func newRouter(
 	userSessionRepo := repository.NewGormUserSessionRepository(db)
 	authRiskStateRepo := repository.NewGormAuthRiskStateRepository(db)
 	authCaptchaChallengeRepo := repository.NewGormAuthCaptchaChallengeRepository(db)
-	spaceRepo := repository.NewGormSpaceRepository(db)
+	searchIndexJobRepo := repository.NewGormSearchIndexJobRepository(db)
+	spaceRepo := repository.NewGormSpaceRepository(db, searchIndexJobRepo)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
-	documentRepo := repository.NewGormDocumentRepository(db)
+	documentRepo := repository.NewGormDocumentRepository(db, searchIndexJobRepo)
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	documentImageAssetRepo := repository.NewGormDocumentImageAssetRepository(db)
 	searchAnalyzerDictEntryRepo := repository.NewGormSearchAnalyzerDictEntryRepository(db)
@@ -118,7 +120,7 @@ func newRouter(
 	auditLogRepo := repository.NewGormAuditLogRepository(db)
 	adminRoleRepo := repository.NewGormAdminRoleRepository(db)
 	spaceAdminScopeRepo := repository.NewGormSpaceAdminScopeRepository(db)
-	workspaceRepo := repository.NewGormWorkspaceRepository(db)
+	workspaceRepo := repository.NewGormWorkspaceRepository(db, searchIndexJobRepo)
 	// adminAccessService 统一封装 platform_admin / space_admin(scope) 权限判定。
 	adminAccessService := service.NewAdminAccessService(adminRoleRepo, spaceAdminScopeRepo, spaceRepo)
 
@@ -154,12 +156,17 @@ func newRouter(
 		databaseProvider,
 		bleveProvider,
 	)
+	searchIndexService.SetSearchIndexJobRepository(searchIndexJobRepo)
+	searchIndexJobService := service.NewSearchIndexJobService(searchIndexJobRepo, searchIndexService)
 	// 启动阶段异步初始化索引，避免大数据量重建阻塞服务启动。
 	go func() {
 		if _, err := searchIndexService.Bootstrap(context.Background()); err != nil && logger != nil {
 			logger.Error("search index bootstrap failed", slog.String("error", err.Error()))
 		}
 	}()
+	if !strings.EqualFold(strings.TrimSpace(cfg.Env), "test") {
+		go runSearchIndexJobLoop(context.Background(), logger, searchIndexJobService)
+	}
 	// 首页全文检索服务：负责首页落地页检索结果读取与可见性过滤。
 	homeSearchService := service.NewHomeSearchService(searchQueryService, db)
 	// 可见性服务为“空间/文档可访问性”提供统一判定，避免 handler 里散落权限逻辑。
@@ -865,6 +872,58 @@ func newRouter(
 
 	// 所有依赖与路由装配完成后返回 engine，供 main 包启动 HTTP 服务。
 	return router
+}
+
+func runSearchIndexJobLoop(
+	ctx context.Context,
+	logger *slog.Logger,
+	jobService *service.SearchIndexJobService,
+) {
+	if jobService == nil {
+		return
+	}
+
+	nextInterval := 5 * time.Second
+	for {
+		runResult, err := jobService.RunOnce(ctx)
+		if err != nil {
+			nextInterval = 2 * time.Second
+			if logger != nil {
+				logger.Error(
+					"search index outbox worker run failed",
+					logit.Error("error", err),
+					slog.Duration("next_run_in", nextInterval),
+				)
+			}
+		} else {
+			switch {
+			case runResult.Claimed == 0:
+				nextInterval = 5 * time.Second
+			case runResult.Retried > 0:
+				nextInterval = 1 * time.Second
+			default:
+				nextInterval = 150 * time.Millisecond
+			}
+
+			if logger != nil && runResult.Claimed > 0 {
+				logger.Info(
+					"search index outbox worker run finished",
+					slog.Int("claimed", runResult.Claimed),
+					slog.Int("succeeded", runResult.Succeeded),
+					slog.Int("retried", runResult.Retried),
+					slog.Duration("next_run_in", nextInterval),
+				)
+			}
+		}
+
+		waitTimer := time.NewTimer(nextInterval)
+		select {
+		case <-ctx.Done():
+			waitTimer.Stop()
+			return
+		case <-waitTimer.C:
+		}
+	}
 }
 
 func buildReaderRenderCache(

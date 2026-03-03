@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"gorm.io/gorm"
 )
 
 var (
@@ -199,6 +200,38 @@ type SearchVisibilityRepository interface {
 		ctx context.Context,
 		params SearchVisibleDocumentIDsByCandidatesParams,
 	) ([]string, error)
+}
+
+// EnqueueSearchIndexJobParams 新增/合并检索索引任务参数。
+type EnqueueSearchIndexJobParams struct {
+	Provider    string
+	JobType     string
+	DedupeKey   string
+	PayloadJSON string
+	Priority    int
+	NextRunAt   time.Time
+}
+
+// ClaimSearchIndexJobsParams 可执行任务拉取参数。
+type ClaimSearchIndexJobsParams struct {
+	Limit int
+	Now   time.Time
+}
+
+// MarkSearchIndexJobRetryParams 任务重试回写参数。
+type MarkSearchIndexJobRetryParams struct {
+	JobID     string
+	NextRunAt time.Time
+	LastError string
+}
+
+// SearchIndexJobRepository 检索索引任务仓储接口。
+type SearchIndexJobRepository interface {
+	Enqueue(ctx context.Context, params EnqueueSearchIndexJobParams) error
+	EnqueueInTx(ctx context.Context, tx *gorm.DB, params EnqueueSearchIndexJobParams) error
+	ClaimRunnableJobs(ctx context.Context, params ClaimSearchIndexJobsParams) ([]models.SearchIndexJob, error)
+	MarkSuccess(ctx context.Context, jobID string, finishedAt time.Time) error
+	MarkRetry(ctx context.Context, params MarkSearchIndexJobRetryParams) error
 }
 
 // WorkspaceSpaceListRecord 编辑器工作区空间列表项。

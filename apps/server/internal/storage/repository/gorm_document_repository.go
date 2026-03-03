@@ -11,7 +11,8 @@ import (
 )
 
 type gormDocumentRepository struct {
-	db *gorm.DB
+	db                 *gorm.DB
+	searchIndexJobRepo SearchIndexJobRepository
 }
 
 type documentAccessRow struct {
@@ -40,8 +41,18 @@ type documentAccessRow struct {
 }
 
 // NewGormDocumentRepository 创建基于 GORM 的文档仓储实现。
-func NewGormDocumentRepository(db *gorm.DB) DocumentRepository {
-	return &gormDocumentRepository{db: db}
+func NewGormDocumentRepository(
+	db *gorm.DB,
+	searchIndexJobRepos ...SearchIndexJobRepository,
+) DocumentRepository {
+	var searchIndexJobRepo SearchIndexJobRepository
+	if len(searchIndexJobRepos) > 0 {
+		searchIndexJobRepo = searchIndexJobRepos[0]
+	}
+	return &gormDocumentRepository{
+		db:                 db,
+		searchIndexJobRepo: searchIndexJobRepo,
+	}
 }
 
 func (r *gormDocumentRepository) Create(ctx context.Context, document *models.Document) error {
@@ -376,21 +387,53 @@ func (r *gormDocumentRepository) UpdateVisibility(
 		return nil, fmt.Errorf("document repository db is nil")
 	}
 
-	updateTx := r.db.WithContext(ctx).
-		Model(&models.Document{}).
-		Where("document_id = ?", documentID).
-		Updates(map[string]any{
-			"visibility": visibility,
-			"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
-		})
-	if updateTx.Error != nil {
-		return nil, updateTx.Error
-	}
-	if updateTx.RowsAffected == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
+	var updated models.Document
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Document{}).
+			Where("document_id = ?", documentID).
+			Updates(map[string]any{
+				"visibility": visibility,
+				"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
+			})
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := r.enqueueDocumentUpsertInTx(ctx, tx, documentID); err != nil {
+			return err
+		}
 
-	return r.GetByDocumentID(ctx, documentID)
+		return tx.Select(
+			"id",
+			"document_id",
+			"node_id",
+			"theme_id",
+			"visibility",
+			"status",
+			"banned_reason",
+			"banned_at",
+			"deleted_at",
+			"title",
+			"content_md",
+			"version",
+			"created_by_user_id",
+			"updated_by_user_id",
+		).
+			Where("document_id = ?", documentID).
+			Take(&updated).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !models.IsValidVisibility(updated.Visibility) {
+		updated.Visibility = models.VisibilityMember
+	}
+	if !models.IsValidEntityStatus(updated.Status) {
+		updated.Status = models.EntityStatusActive
+	}
+	return &updated, nil
 }
 
 func (r *gormDocumentRepository) UpdateStatus(ctx context.Context, params UpdateDocumentStatusParams) (bool, error) {
@@ -420,14 +463,31 @@ func (r *gormDocumentRepository) UpdateStatus(ctx context.Context, params Update
 		updateValues["banned_at"] = params.BannedAt
 	}
 
-	tx := r.db.WithContext(ctx).
-		Model(&models.Document{}).
-		Where("document_id = ? AND status <> ?", params.DocumentID, models.EntityStatusDeleted).
-		Updates(updateValues)
-	if tx.Error != nil {
-		return false, tx.Error
+	updated := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Document{}).
+			Where("document_id = ? AND status <> ?", params.DocumentID, models.EntityStatusDeleted).
+			Updates(updateValues)
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return nil
+		}
+		updated = true
+
+		var enqueueErr error
+		if params.Status == models.EntityStatusBanned || params.Status == models.EntityStatusDeleted {
+			enqueueErr = r.enqueueDocumentDeleteInTx(ctx, tx, params.DocumentID)
+		} else {
+			enqueueErr = r.enqueueDocumentUpsertInTx(ctx, tx, params.DocumentID)
+		}
+		return enqueueErr
+	})
+	if err != nil {
+		return false, err
 	}
-	return tx.RowsAffected > 0, nil
+	return updated, nil
 }
 
 func (r *gormDocumentRepository) SoftDelete(ctx context.Context, documentID string, deletedAt time.Time) (bool, error) {
@@ -441,20 +501,30 @@ func (r *gormDocumentRepository) SoftDelete(ctx context.Context, documentID stri
 		deletedAt = time.Now().UTC()
 	}
 
-	tx := r.db.WithContext(ctx).
-		Model(&models.Document{}).
-		Where("document_id = ? AND status <> ?", documentID, models.EntityStatusDeleted).
-		Updates(map[string]any{
-			"status":        models.EntityStatusDeleted,
-			"deleted_at":    deletedAt,
-			"banned_reason": "",
-			"banned_at":     nil,
-			"updated_at":    deletedAt,
-		})
-	if tx.Error != nil {
-		return false, tx.Error
+	deleted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Document{}).
+			Where("document_id = ? AND status <> ?", documentID, models.EntityStatusDeleted).
+			Updates(map[string]any{
+				"status":        models.EntityStatusDeleted,
+				"deleted_at":    deletedAt,
+				"banned_reason": "",
+				"banned_at":     nil,
+				"updated_at":    deletedAt,
+			})
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return nil
+		}
+		deleted = true
+		return r.enqueueDocumentDeleteInTx(ctx, tx, documentID)
+	})
+	if err != nil {
+		return false, err
 	}
-	return tx.RowsAffected > 0, nil
+	return deleted, nil
 }
 
 func (r *gormDocumentRepository) HardDelete(ctx context.Context, documentID string) (bool, error) {
@@ -494,7 +564,10 @@ func (r *gormDocumentRepository) HardDelete(ctx context.Context, documentID stri
 			return deleteDocumentTx.Error
 		}
 		documentDeleted = deleteDocumentTx.RowsAffected > 0
-		return nil
+		if !documentDeleted {
+			return nil
+		}
+		return r.enqueueDocumentDeleteInTx(ctx, tx, normalizedDocumentID)
 	})
 	if err != nil {
 		return false, err
@@ -523,23 +596,63 @@ func (r *gormDocumentRepository) UpdateWithVersion(
 		status = models.EntityStatusActive
 	}
 
-	updateTx := r.db.WithContext(ctx).
-		Model(&models.Document{}).
-		Where("document_id = ? AND version = ?", document.DocumentID, baseVersion).
-		Updates(map[string]any{
-			"title":              document.Title,
-			"content_md":         document.ContentMD,
-			"theme_id":           document.ThemeID,
-			"visibility":         visibility,
-			"status":             status,
-			"version":            document.Version,
-			"updated_by_user_id": document.UpdatedByUserID,
-			"updated_at":         gorm.Expr("CURRENT_TIMESTAMP"),
-		})
-	if updateTx.Error != nil {
-		return false, updateTx.Error
+	updated := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Document{}).
+			Where("document_id = ? AND version = ?", document.DocumentID, baseVersion).
+			Updates(map[string]any{
+				"title":              document.Title,
+				"content_md":         document.ContentMD,
+				"theme_id":           document.ThemeID,
+				"visibility":         visibility,
+				"status":             status,
+				"version":            document.Version,
+				"updated_by_user_id": document.UpdatedByUserID,
+				"updated_at":         gorm.Expr("CURRENT_TIMESTAMP"),
+			})
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected != 1 {
+			return nil
+		}
+		updated = true
+		return r.enqueueDocumentUpsertInTx(ctx, tx, document.DocumentID)
+	})
+	if err != nil {
+		return false, err
 	}
-	return updateTx.RowsAffected == 1, nil
+	return updated, nil
+}
+
+func (r *gormDocumentRepository) enqueueDocumentUpsertInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	documentID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexDocUpsertJob(documentID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
+}
+
+func (r *gormDocumentRepository) enqueueDocumentDeleteInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	documentID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexDocDeleteJob(documentID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
 }
 
 func normalizeDocumentStatuses(input []models.EntityStatus) []models.EntityStatus {

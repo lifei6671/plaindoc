@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS search_index_jobs (
+	id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+	job_id VARCHAR(26) NOT NULL COMMENT '任务业务ID（ULID）',
+	provider VARCHAR(32) NOT NULL DEFAULT '' COMMENT '任务目标 provider',
+	job_type VARCHAR(32) NOT NULL COMMENT '任务类型：DOC_UPSERT/DOC_DELETE/SPACE_PURGE/REBUILD_SPACE',
+	dedupe_key VARCHAR(255) NOT NULL COMMENT '去重键',
+	payload_json LONGTEXT NOT NULL COMMENT '任务载荷 JSON',
+	status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT '任务状态：pending/running/success/failed',
+	priority INT NOT NULL DEFAULT 100 COMMENT '优先级（越小越高）',
+	retry_count INT NOT NULL DEFAULT 0 COMMENT '重试次数',
+	next_run_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '下次执行时间',
+	started_at DATETIME(3) NULL COMMENT '任务开始执行时间',
+	last_error LONGTEXT NOT NULL COMMENT '最近一次错误信息',
+	created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+	updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+	UNIQUE KEY uk_search_index_jobs_job_id (job_id),
+	KEY idx_search_index_jobs_status_next_priority (status, next_run_at, priority, id),
+	KEY idx_search_index_jobs_dedupe_status (dedupe_key, status, id),
+	KEY idx_search_index_jobs_created_at (created_at),
+	CONSTRAINT chk_search_index_jobs_status CHECK (status IN ('pending', 'running', 'success', 'failed'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='全文检索 Outbox 任务表';

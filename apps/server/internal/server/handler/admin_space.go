@@ -784,12 +784,6 @@ func (h *adminSpaceHandler) DeleteSpace(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.PurgeSpaceByID(c.Request.Context(), spaceID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "后台删除空间后清理全文检索索引失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 

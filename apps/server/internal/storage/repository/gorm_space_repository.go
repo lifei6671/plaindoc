@@ -13,12 +13,23 @@ import (
 )
 
 type gormSpaceRepository struct {
-	db *gorm.DB
+	db                 *gorm.DB
+	searchIndexJobRepo SearchIndexJobRepository
 }
 
 // NewGormSpaceRepository 创建基于 GORM 的空间仓储实现。
-func NewGormSpaceRepository(db *gorm.DB) SpaceRepository {
-	return &gormSpaceRepository{db: db}
+func NewGormSpaceRepository(
+	db *gorm.DB,
+	searchIndexJobRepos ...SearchIndexJobRepository,
+) SpaceRepository {
+	var searchIndexJobRepo SearchIndexJobRepository
+	if len(searchIndexJobRepos) > 0 {
+		searchIndexJobRepo = searchIndexJobRepos[0]
+	}
+	return &gormSpaceRepository{
+		db:                 db,
+		searchIndexJobRepo: searchIndexJobRepo,
+	}
 }
 
 func (r *gormSpaceRepository) Create(ctx context.Context, space *models.Space) error {
@@ -840,21 +851,37 @@ func (r *gormSpaceRepository) UpdateVisibility(
 		return nil, fmt.Errorf("space repository db is nil")
 	}
 
-	updateTx := r.db.WithContext(ctx).
-		Model(&models.Space{}).
-		Where("space_id = ?", spaceID).
-		Updates(map[string]any{
-			"visibility": visibility,
-			"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
-		})
-	if updateTx.Error != nil {
-		return nil, updateTx.Error
+	var updatedSpace *models.Space
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Space{}).
+			Where("space_id = ?", spaceID).
+			Updates(map[string]any{
+				"visibility": visibility,
+				"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
+			})
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := r.enqueueSpaceRebuildInTx(ctx, tx, spaceID); err != nil {
+			return err
+		}
+		space, err := r.getBySpaceIDWithTx(ctx, tx, spaceID)
+		if err != nil {
+			return err
+		}
+		updatedSpace = space
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if updateTx.RowsAffected == 0 {
+	if updatedSpace == nil {
 		return nil, gorm.ErrRecordNotFound
 	}
-
-	return r.GetBySpaceID(ctx, spaceID)
+	return updatedSpace, nil
 }
 
 func (r *gormSpaceRepository) CreateCoverAsset(ctx context.Context, asset *models.SpaceCoverAsset) error {
@@ -908,14 +935,28 @@ func (r *gormSpaceRepository) UpdateStatus(ctx context.Context, params UpdateSpa
 		updateValues["banned_at"] = params.BannedAt
 	}
 
-	tx := r.db.WithContext(ctx).
-		Model(&models.Space{}).
-		Where("space_id = ? AND status <> ?", params.SpaceID, models.EntityStatusDeleted).
-		Updates(updateValues)
-	if tx.Error != nil {
-		return false, tx.Error
+	updated := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Space{}).
+			Where("space_id = ? AND status <> ?", params.SpaceID, models.EntityStatusDeleted).
+			Updates(updateValues)
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return nil
+		}
+		updated = true
+
+		if params.Status == models.EntityStatusBanned || params.Status == models.EntityStatusDeleted {
+			return r.enqueueSpacePurgeInTx(ctx, tx, params.SpaceID)
+		}
+		return r.enqueueSpaceRebuildInTx(ctx, tx, params.SpaceID)
+	})
+	if err != nil {
+		return false, err
 	}
-	return tx.RowsAffected > 0, nil
+	return updated, nil
 }
 
 func (r *gormSpaceRepository) UpdateMetadata(ctx context.Context, params UpdateSpaceMetadataParams) (bool, error) {
@@ -977,15 +1018,150 @@ func (r *gormSpaceRepository) UpdateMetadata(ctx context.Context, params UpdateS
 		updateValues["cover_height"] = *params.CoverHeight
 	}
 
-	tx := r.db.WithContext(ctx).
-		Model(&models.Space{}).
-		Where("space_id = ? AND status <> ?", params.SpaceID, models.EntityStatusDeleted).
-		Updates(updateValues)
-	if tx.Error != nil {
-		return false, tx.Error
+	updated := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateTx := tx.Model(&models.Space{}).
+			Where("space_id = ? AND status <> ?", params.SpaceID, models.EntityStatusDeleted).
+			Updates(updateValues)
+		if updateTx.Error != nil {
+			return updateTx.Error
+		}
+		if updateTx.RowsAffected == 0 {
+			return nil
+		}
+		updated = true
+		if params.Visibility != nil {
+			return r.enqueueSpaceRebuildInTx(ctx, tx, params.SpaceID)
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return updated, nil
+}
+
+func (r *gormSpaceRepository) getBySpaceIDWithTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	spaceID string,
+) (*models.Space, error) {
+	if tx == nil {
+		return nil, gorm.ErrRecordNotFound
 	}
 
-	return tx.RowsAffected > 0, nil
+	type spaceRecordRow struct {
+		ID           int64               `gorm:"column:id"`
+		SpaceID      string              `gorm:"column:space_id"`
+		Name         string              `gorm:"column:name"`
+		Description  string              `gorm:"column:description"`
+		CategoryID   string              `gorm:"column:category_id"`
+		Category     string              `gorm:"column:category"`
+		OwnerUserID  string              `gorm:"column:owner_user_id"`
+		Visibility   models.Visibility   `gorm:"column:visibility"`
+		CoverAssetID *string             `gorm:"column:cover_asset_id"`
+		CoverKey     string              `gorm:"column:cover_key"`
+		CoverURL     string              `gorm:"column:cover_url"`
+		CoverWidth   int                 `gorm:"column:cover_width"`
+		CoverHeight  int                 `gorm:"column:cover_height"`
+		CoverSource  string              `gorm:"column:cover_source"`
+		Status       models.EntityStatus `gorm:"column:status"`
+		BannedReason string              `gorm:"column:banned_reason"`
+		BannedAt     *time.Time          `gorm:"column:banned_at"`
+		DeletedAt    *time.Time          `gorm:"column:deleted_at"`
+		CreatedAtRaw string              `gorm:"column:created_at"`
+		UpdatedAtRaw string              `gorm:"column:updated_at"`
+	}
+
+	var row spaceRecordRow
+	if err := tx.WithContext(ctx).
+		Table("spaces").
+		Select(
+			"id",
+			"space_id",
+			"name",
+			"description",
+			"category_id",
+			"category",
+			"owner_user_id",
+			"visibility",
+			"cover_asset_id",
+			"cover_key",
+			"cover_url",
+			"cover_width",
+			"cover_height",
+			"cover_source",
+			"status",
+			"banned_reason",
+			"banned_at",
+			"deleted_at",
+			"created_at",
+			"updated_at",
+		).
+		Where("space_id = ?", strings.TrimSpace(spaceID)).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	space := models.Space{
+		ID:           row.ID,
+		SpaceID:      strings.TrimSpace(row.SpaceID),
+		Name:         strings.TrimSpace(row.Name),
+		Description:  strings.TrimSpace(row.Description),
+		CategoryID:   strings.TrimSpace(row.CategoryID),
+		Category:     strings.TrimSpace(row.Category),
+		OwnerUserID:  strings.TrimSpace(row.OwnerUserID),
+		Visibility:   row.Visibility,
+		CoverAssetID: row.CoverAssetID,
+		CoverKey:     strings.TrimSpace(row.CoverKey),
+		CoverURL:     strings.TrimSpace(row.CoverURL),
+		CoverWidth:   row.CoverWidth,
+		CoverHeight:  row.CoverHeight,
+		CoverSource:  strings.TrimSpace(row.CoverSource),
+		Status:       row.Status,
+		BannedReason: strings.TrimSpace(row.BannedReason),
+		BannedAt:     row.BannedAt,
+		DeletedAt:    row.DeletedAt,
+		CreatedAt:    parseSpaceRecordTime(row.CreatedAtRaw),
+		UpdatedAt:    parseSpaceRecordTime(row.UpdatedAtRaw),
+	}
+	if !models.IsValidVisibility(space.Visibility) {
+		space.Visibility = models.VisibilityMember
+	}
+	if !models.IsValidEntityStatus(space.Status) {
+		space.Status = models.EntityStatusActive
+	}
+	return &space, nil
+}
+
+func (r *gormSpaceRepository) enqueueSpaceRebuildInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	spaceID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexRebuildSpaceJob(spaceID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
+}
+
+func (r *gormSpaceRepository) enqueueSpacePurgeInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	spaceID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexSpacePurgeJob(spaceID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
 }
 
 func (r *gormSpaceRepository) IsMember(ctx context.Context, spaceID string, userID string) (bool, error) {
@@ -1122,7 +1298,7 @@ func (r *gormSpaceRepository) SoftDelete(ctx context.Context, spaceID string, de
 			return documentTx.Error
 		}
 
-		return nil
+		return r.enqueueSpacePurgeInTx(ctx, tx, spaceID)
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1203,7 +1379,10 @@ func (r *gormSpaceRepository) HardDelete(ctx context.Context, spaceID string) (b
 			return deleteSpaceTx.Error
 		}
 		spaceDeleted = deleteSpaceTx.RowsAffected > 0
-		return nil
+		if !spaceDeleted {
+			return nil
+		}
+		return r.enqueueSpacePurgeInTx(ctx, tx, normalizedSpaceID)
 	})
 	if err != nil {
 		return false, err

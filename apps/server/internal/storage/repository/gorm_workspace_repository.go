@@ -12,12 +12,23 @@ import (
 )
 
 type gormWorkspaceRepository struct {
-	db *gorm.DB
+	db                 *gorm.DB
+	searchIndexJobRepo SearchIndexJobRepository
 }
 
 // NewGormWorkspaceRepository 创建基于 GORM 的编辑器工作区仓储实现。
-func NewGormWorkspaceRepository(db *gorm.DB) WorkspaceRepository {
-	return &gormWorkspaceRepository{db: db}
+func NewGormWorkspaceRepository(
+	db *gorm.DB,
+	searchIndexJobRepos ...SearchIndexJobRepository,
+) WorkspaceRepository {
+	var searchIndexJobRepo SearchIndexJobRepository
+	if len(searchIndexJobRepos) > 0 {
+		searchIndexJobRepo = searchIndexJobRepos[0]
+	}
+	return &gormWorkspaceRepository{
+		db:                 db,
+		searchIndexJobRepo: searchIndexJobRepo,
+	}
 }
 
 func (r *gormWorkspaceRepository) ListSpacesByActor(
@@ -376,6 +387,9 @@ func (r *gormWorkspaceRepository) CreateNode(
 			if err := tx.Create(params.Document).Error; err != nil {
 				return err
 			}
+			if err := r.enqueueDocumentUpsertInTx(ctx, tx, params.Document.DocumentID); err != nil {
+				return err
+			}
 		}
 		if params.Revision != nil {
 			if err := tx.Create(params.Revision).Error; err != nil {
@@ -433,6 +447,9 @@ func (r *gormWorkspaceRepository) UpdateNode(
 		}
 
 		if params.DocumentTitle != nil {
+			type documentIdentityRow struct {
+				DocumentID string `gorm:"column:document_id"`
+			}
 			documentUpdates := map[string]any{
 				"title":      strings.TrimSpace(*params.DocumentTitle),
 				"updated_at": touchedAt,
@@ -444,6 +461,19 @@ func (r *gormWorkspaceRepository) UpdateNode(
 				Where("node_id = ?", nodeID).
 				Updates(documentUpdates).Error; err != nil {
 				return err
+			}
+			var identity documentIdentityRow
+			if err := tx.Table("documents").
+				Select("document_id").
+				Where("node_id = ?", nodeID).
+				Take(&identity).Error; err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+			} else {
+				if err := r.enqueueDocumentUpsertInTx(ctx, tx, identity.DocumentID); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -583,12 +613,55 @@ func (r *gormWorkspaceRepository) DeleteNode(
 	}
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		type deletedNodeSnapshot struct {
+			SpaceID string          `gorm:"column:space_id"`
+			Type    models.NodeType `gorm:"column:type"`
+		}
+		type documentIdentityRow struct {
+			DocumentID string `gorm:"column:document_id"`
+		}
+		var snapshot deletedNodeSnapshot
+		if err := tx.Table("nodes").
+			Select("space_id", "type").
+			Where("node_id = ?", normalizedNodeID).
+			Take(&snapshot).Error; err != nil {
+			return err
+		}
+		documentID := normalizedNodeID
+		if snapshot.Type == models.NodeTypeDoc {
+			var identity documentIdentityRow
+			if err := tx.Table("documents").
+				Select("document_id").
+				Where("node_id = ?", normalizedNodeID).
+				Take(&identity).Error; err == nil {
+				if strings.TrimSpace(identity.DocumentID) != "" {
+					documentID = strings.TrimSpace(identity.DocumentID)
+				}
+			} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+
 		deleteResult := tx.Where("node_id = ?", normalizedNodeID).Delete(&models.Node{})
 		if deleteResult.Error != nil {
 			return deleteResult.Error
 		}
 		if deleteResult.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
+		}
+
+		if snapshot.Type == models.NodeTypeDoc {
+			if err := r.enqueueDocumentDeleteInTx(ctx, tx, documentID); err != nil {
+				return err
+			}
+		} else {
+			spaceForRebuild := normalizedSpaceID
+			if strings.TrimSpace(spaceForRebuild) == "" {
+				spaceForRebuild = strings.TrimSpace(snapshot.SpaceID)
+			}
+			if err := r.enqueueSpaceRebuildInTx(ctx, tx, spaceForRebuild); err != nil {
+				return err
+			}
 		}
 
 		if normalizedSpaceID == "" {
@@ -697,6 +770,9 @@ func (r *gormWorkspaceRepository) SaveDocument(
 		}
 
 		saved = true
+		if err := r.enqueueDocumentUpsertInTx(ctx, tx, documentID); err != nil {
+			return err
+		}
 		if params.Revision != nil {
 			if err := tx.Create(params.Revision).Error; err != nil {
 				return err
@@ -781,6 +857,51 @@ func (r *gormWorkspaceRepository) ListRevisionsByDocumentID(
 	}
 
 	return revisions, nil
+}
+
+func (r *gormWorkspaceRepository) enqueueDocumentUpsertInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	documentID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexDocUpsertJob(documentID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
+}
+
+func (r *gormWorkspaceRepository) enqueueDocumentDeleteInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	documentID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexDocDeleteJob(documentID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
+}
+
+func (r *gormWorkspaceRepository) enqueueSpaceRebuildInTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	spaceID string,
+) error {
+	if r == nil || r.searchIndexJobRepo == nil {
+		return nil
+	}
+	params, err := BuildSearchIndexRebuildSpaceJob(spaceID)
+	if err != nil {
+		return err
+	}
+	return r.searchIndexJobRepo.EnqueueInTx(ctx, tx, params)
 }
 
 func trimOptionalString(value *string) *string {

@@ -499,12 +499,6 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		return
 	}
 
-	if req.Type == models.NodeTypeDoc && h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(responseBody.DocID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "创建文档后加入全文检索索引同步队列失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, responseBody)
 }
 
@@ -628,12 +622,6 @@ func (h *workspaceHandler) UpdateNode(c *gin.Context) {
 		// 文档节点标题变更会影响阅读页展示，按文档维度主动失效缓存。
 		h.renderCache.PurgeDoc(strings.TrimSpace(node.NodeID))
 	}
-	if node.Type == models.NodeTypeDoc && req.Title != nil && h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(strings.TrimSpace(node.NodeID)); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "更新文档标题后加入全文检索索引同步队列失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 
@@ -775,12 +763,6 @@ func (h *workspaceHandler) DeleteNode(c *gin.Context) {
 			setRequestErrmsg(c, cleanupErr, "删除节点后清理附件孤儿文件失败")
 		}
 	}
-	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.SyncSpaceByID(c.Request.Context(), spaceID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "删除节点后同步全文检索索引失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 
@@ -917,12 +899,6 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 			setRequestErrmsg(c, syncErr, "同步文档图片引用失败")
 		}
 	}
-	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(documentID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "保存文档后加入全文检索索引同步队列失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, saveWorkspaceDocumentResponse{
 		Document: mapWorkspaceDocumentResponse(current),
 	})

@@ -160,12 +160,6 @@ func (h *accessHandler) UpdateSpaceVisibility(c *gin.Context) {
 		}
 		return
 	}
-	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.SyncSpaceByID(c.Request.Context(), space.SpaceID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "更新空间可见性后同步全文检索索引失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, spaceAccessResponse{
 		ID:         space.SpaceID,
 		Name:       space.Name,
@@ -254,12 +248,6 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 		// 文档可见性变化会直接影响阅读页输出，需主动失效渲染缓存。
 		h.renderCache.PurgeDoc(document.DocumentID)
 	}
-	if h != nil && h.searchIndexService != nil {
-		if syncErr := h.searchIndexService.EnqueueSyncDocumentByID(document.DocumentID); syncErr != nil {
-			setRequestErrmsg(c, syncErr, "更新文档可见性后加入全文检索索引同步队列失败")
-		}
-	}
-
 	response.JSON(c, http.StatusOK, documentAccessResponse{
 		ID:         document.DocumentID,
 		NodeID:     document.NodeID,

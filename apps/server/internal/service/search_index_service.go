@@ -13,6 +13,7 @@ import (
 	searchanalyzer "github.com/lifei6671/plaindoc/apps/server/internal/search/analyzer"
 	searchprovider "github.com/lifei6671/plaindoc/apps/server/internal/search/provider"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
 
@@ -71,6 +72,7 @@ type SearchIndexService struct {
 	db                  *gorm.DB
 	searchConfigService *SearchConfigService
 	providers           map[searchcfg.ProviderName]searchprovider.Provider
+	searchIndexJobRepo  repository.SearchIndexJobRepository
 
 	asyncTaskQueue      chan searchIndexAsyncTask
 	asyncTaskWorkerOnce sync.Once
@@ -214,6 +216,13 @@ func (s *SearchIndexService) EnqueueSyncDocumentByID(documentID string) error {
 	if normalizedDocumentID == "" {
 		return nil
 	}
+	if s.searchIndexJobRepo != nil {
+		params, err := repository.BuildSearchIndexDocUpsertJob(normalizedDocumentID)
+		if err != nil {
+			return err
+		}
+		return s.searchIndexJobRepo.Enqueue(context.Background(), params)
+	}
 	return s.enqueueTask(searchIndexAsyncTask{
 		taskType:   searchIndexAsyncTaskTypeSyncDocument,
 		documentID: normalizedDocumentID,
@@ -230,10 +239,27 @@ func (s *SearchIndexService) EnqueueDeleteDocumentByID(documentID string) error 
 	if normalizedDocumentID == "" {
 		return nil
 	}
+	if s.searchIndexJobRepo != nil {
+		params, err := repository.BuildSearchIndexDocDeleteJob(normalizedDocumentID)
+		if err != nil {
+			return err
+		}
+		return s.searchIndexJobRepo.Enqueue(context.Background(), params)
+	}
 	return s.enqueueTask(searchIndexAsyncTask{
 		taskType:   searchIndexAsyncTaskTypeDeleteDocument,
 		documentID: normalizedDocumentID,
 	})
+}
+
+// SetSearchIndexJobRepository 注入检索任务仓储，用于 outbox 入队。
+func (s *SearchIndexService) SetSearchIndexJobRepository(
+	jobRepo repository.SearchIndexJobRepository,
+) {
+	if s == nil {
+		return
+	}
+	s.searchIndexJobRepo = jobRepo
 }
 
 // SyncDocumentByID 按文档 ID 增量同步索引（存在则 upsert，不存在或不可索引则删除）。
