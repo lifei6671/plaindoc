@@ -281,10 +281,14 @@ func (p *BleveProvider) filterCandidatesByVisibility(
 				directVisibleDocIDs[docID] = struct{}{}
 			}
 		case string(models.VisibilityMember):
-			// 单空间检索时，user_role_level 来源于该空间角色快照，满足 min_role 可直接放行。
-			if isSingleSpaceSearch && hasActorIdentity && request.UserRoleLevel >= item.MinRole {
-				directVisibleDocIDs[docID] = struct{}{}
-			} else if isAuthenticated {
+			// 单空间检索时，min_role 不满足必须直接拒绝，禁止回落 DB 造成绕过。
+			if isSingleSpaceSearch && hasActorIdentity {
+				if request.UserRoleLevel >= item.MinRole {
+					directVisibleDocIDs[docID] = struct{}{}
+				}
+				continue
+			}
+			if isAuthenticated {
 				needDBCheckDocIDs = append(needDBCheckDocIDs, docID)
 			}
 		default:
@@ -653,7 +657,7 @@ func buildBleveIndexMapping() *mapping.IndexMappingImpl {
 	documentMapping.AddFieldMappingsAt("body_plain", bodyPlainMapping)
 
 	minRoleMapping := bleve.NewNumericFieldMapping()
-	minRoleMapping.Store = false
+	minRoleMapping.Store = true
 	documentMapping.AddFieldMappingsAt("min_role", minRoleMapping)
 
 	updatedAtMapping := bleve.NewNumericFieldMapping()

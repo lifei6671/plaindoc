@@ -94,7 +94,7 @@
 
 | 编号 | 状态 | 优先级 | 任务 | 主要落地位置 | 验收标准 |
 |---|---|---|---|---|---|
-| G1 | 部分 | P0 | 强制注入过滤：所有 provider 查询都必须包含 `space_id + min_role<=user_role_level` | `search_query_service + provider` | 无法通过调用绕过过滤 |
+| G1 | 部分 | P0 | 强制注入过滤：所有 provider 查询都必须包含 `space_id + min_role<=user_role_level` | `search_query_service + provider` | 单空间已做 `min_role` 硬拒绝，跨空间与 DB provider 仍需继续收口 |
 | G2 | 已完成 | P0 | 查询前计算 `user_role_level`（owner/collaborator/reader/guest） | `search_query_service + repo` | `UserRoleLevel` 不再恒为 0 |
 | G3 | 部分 | P0 | 结果字段安全：仅返回已过滤命中的标题/片段，不做先召回后返回 | `provider.Search` | 不出现越权片段泄露 |
 | G4 | 部分 | P1 | 分页稳定性：`relevance`/`updated_at` 排序规则统一并写测试 | `provider.Search` | 分页翻页稳定 |

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -108,6 +109,117 @@ func TestBleveProvider_SearchAndPurgeBySpace(t *testing.T) {
 	}
 }
 
+func TestBleveProvider_SearchEnforcesMinRoleForMemberDocsInSingleSpace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:test-bleve-provider-min-role?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	if err := prepareBleveProviderTestSchema(db); err != nil {
+		t.Fatalf("prepare schema failed: %v", err)
+	}
+	if err := seedBleveProviderTestData(db); err != nil {
+		t.Fatalf("seed data failed: %v", err)
+	}
+
+	provider := NewBleveProvider(BleveProviderOptions{
+		DB:        db,
+		IndexPath: filepath.Join(t.TempDir(), "bleve-index-min-role"),
+	})
+	ctx := context.Background()
+	if err := provider.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema failed: %v", err)
+	}
+
+	now := time.Now().UTC().Unix()
+	if err := provider.Upsert(ctx, []IndexRecord{
+		{
+			SpaceID:         "space-1",
+			DocID:           "doc-min-role-1",
+			NodeID:          "node-min-role-1",
+			Title:           "成员权限文档1",
+			BodyPlain:       "单空间 min role 文档 1",
+			Terms:           "min role 文档",
+			TitleTerms:      "min role 文档",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         1,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+		{
+			SpaceID:         "space-1",
+			DocID:           "doc-min-role-2",
+			NodeID:          "node-min-role-2",
+			Title:           "成员权限文档2",
+			BodyPlain:       "单空间 min role 文档 2",
+			Terms:           "min role 文档",
+			TitleTerms:      "min role 文档",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         2,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+		{
+			SpaceID:         "space-1",
+			DocID:           "doc-min-role-3",
+			NodeID:          "node-min-role-3",
+			Title:           "成员权限文档3",
+			BodyPlain:       "单空间 min role 文档 3",
+			Terms:           "min role 文档",
+			TitleTerms:      "min role 文档",
+			VisibilityScope: string(models.VisibilityMember),
+			MinRole:         3,
+			UpdatedAtUnix:   now,
+			SpaceStatus:     "active",
+			DocStatus:       "active",
+		},
+	}); err != nil {
+		t.Fatalf("upsert failed: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		userRoleLevel int
+		expectedDocID []string
+	}{
+		{
+			name:          "reader-role-level-1",
+			userRoleLevel: 1,
+			expectedDocID: []string{"doc-min-role-1"},
+		},
+		{
+			name:          "collaborator-role-level-2",
+			userRoleLevel: 2,
+			expectedDocID: []string{"doc-min-role-1", "doc-min-role-2"},
+		},
+		{
+			name:          "owner-role-level-3",
+			userRoleLevel: 3,
+			expectedDocID: []string{"doc-min-role-1", "doc-min-role-2", "doc-min-role-3"},
+		},
+	}
+
+	for _, item := range cases {
+		item := item
+		t.Run(item.name, func(t *testing.T) {
+			result, searchErr := provider.Search(ctx, SearchRequest{
+				SpaceID:         "space-1",
+				Query:           "min role",
+				Page:            1,
+				PageSize:        20,
+				ActorUserID:     "member-1",
+				IsAuthenticated: true,
+				UserRoleLevel:   item.userRoleLevel,
+			})
+			if searchErr != nil {
+				t.Fatalf("search failed: %v", searchErr)
+			}
+			assertBleveSearchDocIDs(t, result, item.expectedDocID)
+		})
+	}
+}
+
 func prepareBleveProviderTestSchema(db *gorm.DB) error {
 	if err := db.Exec(`
 CREATE TABLE spaces (
@@ -163,7 +275,10 @@ INSERT INTO spaces(space_id, owner_user_id, visibility, status, deleted_at, name
 	if err := db.Exec(`
 INSERT INTO nodes(node_id, space_id) VALUES
   ('node-1', 'space-1'),
-  ('node-2', 'space-1')
+  ('node-2', 'space-1'),
+  ('node-min-role-1', 'space-1'),
+  ('node-min-role-2', 'space-1'),
+  ('node-min-role-3', 'space-1')
 `).Error; err != nil {
 		return err
 	}
@@ -181,4 +296,29 @@ INSERT INTO space_members(space_id, user_id) VALUES
 		return err
 	}
 	return nil
+}
+
+func assertBleveSearchDocIDs(t *testing.T, result SearchResponse, expectedDocIDs []string) {
+	t.Helper()
+
+	expected := append([]string(nil), expectedDocIDs...)
+	sort.Strings(expected)
+
+	actual := make([]string, 0, len(result.Hits))
+	for _, item := range result.Hits {
+		actual = append(actual, item.DocID)
+	}
+	sort.Strings(actual)
+
+	if int(result.Total) != len(expected) {
+		t.Fatalf("expected total=%d, got=%d", len(expected), result.Total)
+	}
+	if len(actual) != len(expected) {
+		t.Fatalf("expected hits=%v, got=%v", expected, actual)
+	}
+	for index := range expected {
+		if actual[index] != expected[index] {
+			t.Fatalf("expected hits=%v, got=%v", expected, actual)
+		}
+	}
 }
