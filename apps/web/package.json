@@ -11,7 +11,12 @@
     "build": "npm run check:dropdown-menu && tsc -b && npm run build:client && npm run build:ssr-worker",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:ui": "playwright test --ui",
+    "e2e:list": "playwright test --list",
+    "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.3.3",
@@ -53,6 +58,7 @@
     "ulid": "^3.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@tailwindcss/vite": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

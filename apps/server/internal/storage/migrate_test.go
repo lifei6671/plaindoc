@@ -45,6 +45,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		"space_members",
 		"nodes",
 		"themes",
+		"document_templates",
 		"documents",
 		"document_revisions",
 		"node_permissions",

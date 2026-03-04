@@ -41,6 +41,7 @@ import { AdminSpacesPage } from "./pages/AdminSpacesPage";
 import { AdminDocumentsPage } from "./pages/AdminDocumentsPage";
 import { AdminDocumentAttachmentsPage } from "./pages/AdminDocumentAttachmentsPage";
 import { AdminDocumentImagesPage } from "./pages/AdminDocumentImagesPage";
+import { AdminDocumentTemplatesPage } from "./pages/AdminDocumentTemplatesPage";
 import { AdminThemesPage } from "./pages/AdminThemesPage";
 import { AdminSystemConfigsPage } from "./pages/AdminSystemConfigsPage";
 import { AdminAuditsPage } from "./pages/AdminAuditsPage";
@@ -55,6 +56,7 @@ type AdminMenuKey =
   | "documents"
   | "attachments"
   | "images"
+  | "document-templates"
   | "themes"
   | "system"
   | "search-analyzers"
@@ -145,6 +147,16 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
       icon: Image
     }
   );
+
+  if (hasPlatformAdminRole) {
+    items.push({
+      key: "document-templates",
+      label: "模板管理",
+      description: "治理全站文档场景模板",
+      path: "/admin/document-templates",
+      icon: FileText
+    });
+  }
 
   if (hasPlatformAdminRole) {
     items.push({
@@ -248,6 +260,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         title: "图片管理",
         description: "图片资源检索、删除与审计追踪。",
         todo: ["支持多条件搜索", "支持逻辑删除/物理删除", "记录图片治理审计日志"]
+      };
+    case "document-templates":
+      return {
+        title: "模板管理",
+        description: "文档场景模板维护与启停管理。",
+        todo: ["实现模板 CRUD", "支持场景筛选", "支持模板变更审计"]
       };
     case "themes":
       return {
@@ -360,7 +378,7 @@ const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
   { label: "账号", keys: ["profile"] },
   { label: "内容管理", keys: ["users", "spaces", "documents", "attachments", "images"] },
-  { label: "系统治理", keys: ["themes", "system", "search-analyzers", "audits"] }
+  { label: "系统治理", keys: ["document-templates", "themes", "system", "search-analyzers", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
 const ADMIN_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
@@ -864,6 +882,8 @@ export function AdminApp({
                 <AdminDocumentAttachmentsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "images" ? (
                 <AdminDocumentImagesPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "document-templates" ? (
+                <AdminDocumentTemplatesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "themes" ? (
                 <AdminThemesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "system" ? (

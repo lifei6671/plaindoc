@@ -81,6 +81,8 @@ import {
   type AuthUnauthorizedEventDetail,
   type CreateNodeResult,
   type DocumentAttachment,
+  type DocumentTemplateDetail,
+  type DocumentTemplateSummary,
 } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
@@ -2442,6 +2444,8 @@ export default function App() {
       parentId: string | null;
       type: "folder" | "doc";
       title: string;
+      documentIdentifier?: string;
+      templateId?: string;
     }): Promise<CreateNodeResult> => {
       try {
         const created = await createNode(input);
@@ -2458,6 +2462,18 @@ export default function App() {
       }
     },
     [createNode, handleOpenWorkspaceDocument]
+  );
+
+  const loadWorkspaceDocumentTemplates = useCallback(async (): Promise<DocumentTemplateSummary[]> => {
+    const payload = await dataGateway.documentTemplate.listTemplates({ page: 1, pageSize: 100 });
+    return payload.items;
+  }, [dataGateway.documentTemplate]);
+
+  const loadWorkspaceDocumentTemplateDetail = useCallback(
+    async (templateId: string): Promise<DocumentTemplateDetail> => {
+      return dataGateway.documentTemplate.getTemplate(templateId);
+    },
+    [dataGateway.documentTemplate]
   );
 
   // 节点重命名动作：失败时回写状态栏，便于用户定位问题。
@@ -3290,6 +3306,8 @@ export default function App() {
             workspaceTree={workspaceTree}
             onOpenDocument={handleOpenWorkspaceDocument}
             onCreateNode={handleCreateWorkspaceNode}
+            onListDocumentTemplates={loadWorkspaceDocumentTemplates}
+            onGetDocumentTemplate={loadWorkspaceDocumentTemplateDetail}
             onUpdateDocumentIdentifier={handleUpdateWorkspaceDocumentIdentifier}
             onUpdateDocumentVisibility={handleUpdateWorkspaceDocumentVisibility}
             onRenameNode={handleRenameWorkspaceNode}

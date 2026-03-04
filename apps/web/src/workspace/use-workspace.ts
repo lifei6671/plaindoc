@@ -258,7 +258,8 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
           parentId: input.parentId,
           type: input.type,
           title: normalizedTitle,
-          documentIdentifier: input.documentIdentifier
+          documentIdentifier: input.documentIdentifier,
+          templateId: input.templateId
         });
         await reloadTree(targetSpaceId);
         return created;

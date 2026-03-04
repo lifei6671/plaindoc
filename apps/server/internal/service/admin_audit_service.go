@@ -24,6 +24,7 @@ const (
 	AdminAuditModuleUser         AdminAuditModule = "user"
 	AdminAuditModuleSpace        AdminAuditModule = "space"
 	AdminAuditModuleDocument     AdminAuditModule = "document"
+	AdminAuditModuleTemplate     AdminAuditModule = "document_template"
 	AdminAuditModuleTheme        AdminAuditModule = "theme"
 	AdminAuditModuleSystemConfig AdminAuditModule = "system_config"
 )
@@ -41,6 +42,7 @@ var validAdminAuditModules = map[string]struct{}{
 	string(AdminAuditModuleUser):         {},
 	string(AdminAuditModuleSpace):        {},
 	string(AdminAuditModuleDocument):     {},
+	string(AdminAuditModuleTemplate):     {},
 	string(AdminAuditModuleTheme):        {},
 	string(AdminAuditModuleSystemConfig): {},
 }

@@ -9,6 +9,11 @@
     "web:dev": "npm run dev -w @plaindoc/web",
     "web:build": "npm run build -w @plaindoc/web",
     "web:build-ssr": "npm run build:ssr-worker -w @plaindoc/web",
-    "web:preview": "npm run preview -w @plaindoc/web"
+    "web:preview": "npm run preview -w @plaindoc/web",
+    "web:e2e": "npm run e2e -w @plaindoc/web",
+    "web:e2e:headed": "npm run e2e:headed -w @plaindoc/web",
+    "web:e2e:ui": "npm run e2e:ui -w @plaindoc/web",
+    "web:e2e:list": "npm run e2e:list -w @plaindoc/web",
+    "web:e2e:install": "npm run e2e:install -w @plaindoc/web"
   }
 }

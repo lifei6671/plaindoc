@@ -43,6 +43,7 @@ type workspaceHandler struct {
 	documentAttachmentRepo     repository.DocumentAttachmentRepository
 	documentAttachmentCleanup  *service.DocumentAttachmentCleanupService
 	documentImageAssetService  *service.DocumentImageAssetService
+	documentTemplateService    *service.DocumentTemplateService
 	searchIndexService         *service.SearchIndexService
 	authService                *service.AuthService
 	visibilityService          *service.VisibilityService
@@ -117,6 +118,7 @@ type createWorkspaceNodeRequest struct {
 	Type               models.NodeType `json:"type" binding:"required"`
 	Title              string          `json:"title" binding:"required"`
 	DocumentIdentifier *string         `json:"documentIdentifier"`
+	TemplateID         *string         `json:"templateId"`
 }
 
 type createWorkspaceNodeResponse struct {
@@ -182,6 +184,7 @@ func NewWorkspaceHandler(
 	documentAttachmentRepo repository.DocumentAttachmentRepository,
 	documentAttachmentCleanup *service.DocumentAttachmentCleanupService,
 	documentImageAssetService *service.DocumentImageAssetService,
+	documentTemplateService *service.DocumentTemplateService,
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
 	imageHostingService *service.ImageHostingService,
@@ -199,6 +202,7 @@ func NewWorkspaceHandler(
 		documentAttachmentRepo:    documentAttachmentRepo,
 		documentAttachmentCleanup: documentAttachmentCleanup,
 		documentImageAssetService: documentImageAssetService,
+		documentTemplateService:   documentTemplateService,
 		searchIndexService:        searchIndexService,
 		authService:               authService,
 		visibilityService:         visibilityService,
@@ -433,12 +437,48 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		response.WorkspaceErrNodeType.Write(c)
 		return
 	}
+
+	templateID := ""
+	if req.TemplateID != nil {
+		templateID = strings.TrimSpace(*req.TemplateID)
+	}
+	if req.Type != models.NodeTypeDoc && templateID != "" {
+		response.WorkspaceErrCreateNodeRequest.Write(c)
+		return
+	}
+
+	var selectedTemplate *service.DocumentTemplateDetail
+	if req.Type == models.NodeTypeDoc && templateID != "" {
+		if h.documentTemplateService == nil {
+			response.InternalError(c)
+			return
+		}
+		template, err := h.documentTemplateService.GetEnabledTemplateByID(c.Request.Context(), templateID)
+		if err != nil {
+			setRequestErrmsg(c, err, "读取文档模板失败")
+			switch {
+			case errors.Is(err, service.ErrDocumentTemplateInvalidKey):
+				response.Error(c, http.StatusBadRequest, response.CodeInvalidTemplateID, "templateId 参数不合法")
+			case errors.Is(err, service.ErrDocumentTemplateNotFound):
+				response.Error(c, http.StatusNotFound, response.CodeTemplateNotFound, "模板不存在")
+			default:
+				response.InternalError(c)
+			}
+			return
+		}
+		selectedTemplate = &template
+	}
+
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		if req.Type == models.NodeTypeFolder {
 			title = "未命名目录"
 		} else {
-			title = "未命名文档"
+			if selectedTemplate != nil && strings.TrimSpace(selectedTemplate.DefaultTitle) != "" {
+				title = strings.TrimSpace(selectedTemplate.DefaultTitle)
+			} else {
+				title = "未命名文档"
+			}
 		}
 	}
 	readerSlug, identifierValidationErr := normalizeWorkspaceDocumentIdentifier(req.DocumentIdentifier)
@@ -506,6 +546,10 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 	var doc *models.Document
 	var revision *models.DocumentRevision
 	if req.Type == models.NodeTypeDoc {
+		initialContent := ""
+		if selectedTemplate != nil {
+			initialContent = selectedTemplate.ContentMD
+		}
 		documentID := node.NodeID
 		doc = &models.Document{
 			DocumentID:      documentID,
@@ -514,7 +558,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 			Visibility:      defaultDocumentVisibility,
 			Status:          models.EntityStatusActive,
 			Title:           title,
-			ContentMD:       "",
+			ContentMD:       initialContent,
 			Version:         1,
 			CreatedByUserID: &actorUserID,
 			UpdatedByUserID: &actorUserID,
@@ -525,7 +569,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 			DocumentRevisionID: strings.ToLower(ulid.Make().String()),
 			DocumentID:         documentID,
 			Version:            1,
-			ContentMD:          "",
+			ContentMD:          initialContent,
 			BaseVersion:        0,
 			EditorUserID:       &actorUserID,
 			Source:             models.RevisionSourceRemote,

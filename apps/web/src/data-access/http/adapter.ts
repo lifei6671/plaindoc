@@ -10,6 +10,9 @@ import {
   type AdminDocumentImageAssetDeleteResult,
   type AdminDocumentImageAssetListInput,
   type AdminDocumentImageAssetListResult,
+  type AdminDocumentTemplate,
+  type AdminDocumentTemplateListInput,
+  type AdminDocumentTemplateListResult,
   type AdminDocumentListInput,
   type AdminDocumentListResult,
   type AdminGateway,
@@ -54,6 +57,9 @@ import {
   type DocumentAttachment,
   type DocumentAttachmentAccessLink,
   type DocumentGateway,
+  type DocumentTemplateDetail,
+  type DocumentTemplateGateway,
+  type DocumentTemplateListResult,
   type DocumentRevision,
   type IssueImageObjectKeyResult,
   type ImageHostingGateway,
@@ -726,9 +732,18 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<TreeNode[]>(`/spaces/${spaceId}/tree`);
     },
     async createNode(input: CreateNodeInput) {
+      const documentIdentifier =
+        typeof input.documentIdentifier === "string" ? input.documentIdentifier.trim() : "";
+      const templateID = typeof input.templateId === "string" ? input.templateId.trim() : "";
       return request<CreateNodeResult>(`/spaces/${input.spaceId}/nodes`, {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify({
+          parentId: input.parentId,
+          type: input.type,
+          title: input.title,
+          documentIdentifier: documentIdentifier || undefined,
+          templateId: templateID || undefined
+        })
       });
     },
     async updateNode(input: UpdateNodeInput) {
@@ -914,6 +929,34 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
   const theme: ThemeGateway = {
     async listThemes() {
       return request<Theme[]>("/themes");
+    }
+  };
+
+  const documentTemplate: DocumentTemplateGateway = {
+    async listTemplates(input = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.sceneKey === "string" && input.sceneKey.trim()) {
+        query.set("sceneKey", input.sceneKey.trim());
+      }
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/document-templates?${queryText}` : "/document-templates";
+      return request<DocumentTemplateListResult>(path);
+    },
+    async getTemplate(templateId: string) {
+      const normalizedTemplateID = templateId.trim();
+      if (!normalizedTemplateID) {
+        throw new Error("模板标识不能为空");
+      }
+      return request<DocumentTemplateDetail>(`/document-templates/${encodeURIComponent(normalizedTemplateID)}`);
     }
   };
 
@@ -1659,6 +1702,140 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         headers: buildAdminOperationTokenHeaders(operationToken)
       });
     },
+    async listDocumentTemplates(input: AdminDocumentTemplateListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.sceneKey === "string" && input.sceneKey.trim()) {
+        query.set("sceneKey", input.sceneKey.trim());
+      }
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/admin/document-templates?${queryText}` : "/admin/document-templates";
+      return request<AdminDocumentTemplateListResult>(path);
+    },
+    async getDocumentTemplate(templateId: string) {
+      const templateID = templateId.trim();
+      if (!templateID) {
+        throw new Error("模板 ID 不能为空");
+      }
+      return request<AdminDocumentTemplate>(`/admin/document-templates/${encodeURIComponent(templateID)}`);
+    },
+    async createDocumentTemplate(input: {
+      templateId: string;
+      sceneKey: string;
+      sceneName: string;
+      name: string;
+      description?: string;
+      defaultTitle?: string;
+      contentMd?: string;
+      sort?: number;
+      enabled?: boolean;
+    }) {
+      const templateID = input.templateId.trim();
+      if (!templateID) {
+        throw new Error("模板 ID 不能为空");
+      }
+      const sceneKey = input.sceneKey.trim();
+      if (!sceneKey) {
+        throw new Error("场景标识不能为空");
+      }
+      const sceneName = input.sceneName.trim();
+      if (!sceneName) {
+        throw new Error("场景名称不能为空");
+      }
+      const name = input.name.trim();
+      if (!name) {
+        throw new Error("模板名称不能为空");
+      }
+
+      return request<AdminDocumentTemplate>("/admin/document-templates", {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: templateID,
+          sceneKey,
+          sceneName,
+          name,
+          description: input.description ?? "",
+          defaultTitle: input.defaultTitle ?? "",
+          contentMd: input.contentMd ?? "",
+          sort: typeof input.sort === "number" && Number.isFinite(input.sort) ? Math.trunc(input.sort) : 0,
+          enabled: input.enabled ?? true
+        })
+      });
+    },
+    async updateDocumentTemplate(input: {
+      templateId: string;
+      sceneKey?: string;
+      sceneName?: string;
+      name?: string;
+      description?: string;
+      defaultTitle?: string;
+      contentMd?: string;
+      sort?: number;
+      enabled?: boolean;
+    }) {
+      const templateID = input.templateId.trim();
+      if (!templateID) {
+        throw new Error("模板 ID 不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document_template.update",
+        targetType: "document_template",
+        targetId: templateID
+      });
+      const payload: Record<string, unknown> = {};
+      if (typeof input.sceneKey === "string") {
+        payload.sceneKey = input.sceneKey.trim();
+      }
+      if (typeof input.sceneName === "string") {
+        payload.sceneName = input.sceneName.trim();
+      }
+      if (typeof input.name === "string") {
+        payload.name = input.name.trim();
+      }
+      if (typeof input.description === "string") {
+        payload.description = input.description;
+      }
+      if (typeof input.defaultTitle === "string") {
+        payload.defaultTitle = input.defaultTitle;
+      }
+      if (typeof input.contentMd === "string") {
+        payload.contentMd = input.contentMd;
+      }
+      if (typeof input.sort === "number" && Number.isFinite(input.sort)) {
+        payload.sort = Math.trunc(input.sort);
+      }
+      if (typeof input.enabled === "boolean") {
+        payload.enabled = input.enabled;
+      }
+      return request<AdminDocumentTemplate>(`/admin/document-templates/${encodeURIComponent(templateID)}`, {
+        method: "PUT",
+        headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify(payload)
+      });
+    },
+    async deleteDocumentTemplate(templateId: string) {
+      const templateID = templateId.trim();
+      if (!templateID) {
+        throw new Error("模板 ID 不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document_template.delete",
+        targetType: "document_template",
+        targetId: templateID
+      });
+      await request<void>(`/admin/document-templates/${encodeURIComponent(templateID)}`, {
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
     async listThemes() {
       return request<AdminTheme[]>("/admin/themes");
     },
@@ -2113,6 +2290,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     auth,
     workspace,
     document,
+    documentTemplate,
     theme,
     admin,
     imageHosting,

@@ -69,6 +69,8 @@ function renderModuleLabel(value: AdminAuditModule): string {
       return "空间管理";
     case "document":
       return "文档管理";
+    case "document_template":
+      return "模板管理";
     case "theme":
       return "主题管理";
     case "system_config":
@@ -99,6 +101,8 @@ function renderModuleBadgeClass(value: AdminAuditModule): string {
       return "border-indigo-200 bg-indigo-50 text-indigo-700";
     case "document":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "document_template":
+      return "border-cyan-200 bg-cyan-50 text-cyan-700";
     case "theme":
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "system_config":
@@ -313,6 +317,7 @@ export function AdminAuditsPage({ dataGateway }: AdminAuditsPageProps) {
                   <SelectItem value="user">user</SelectItem>
                   <SelectItem value="space">space</SelectItem>
                   <SelectItem value="document">document</SelectItem>
+                  <SelectItem value="document_template">document_template</SelectItem>
                   <SelectItem value="theme">theme</SelectItem>
                   <SelectItem value="system_config">system_config</SelectItem>
                 </SelectContent>

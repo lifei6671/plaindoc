@@ -116,6 +116,7 @@ func newRouter(
 	documentRepo := repository.NewGormDocumentRepository(db, searchIndexJobRepo)
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	documentImageAssetRepo := repository.NewGormDocumentImageAssetRepository(db)
+	documentTemplateRepo := repository.NewGormDocumentTemplateRepository(db)
 	searchAnalyzerDictEntryRepo := repository.NewGormSearchAnalyzerDictEntryRepository(db)
 	themeRepo := repository.NewGormThemeRepository(db)
 	systemConfigRepo := repository.NewGormSystemConfigRepository(db)
@@ -215,14 +216,17 @@ func newRouter(
 		imageHostingService,
 	)
 	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
+	documentTemplateService := service.NewDocumentTemplateService(documentTemplateRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
 	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache, searchIndexService)
+	documentTemplateHandler := handler.NewDocumentTemplateHandler(documentTemplateService)
 	workspaceHandler := handler.NewWorkspaceHandler(
 		workspaceRepo,
 		documentAttachmentRepo,
 		documentAttachmentCleanupService,
 		documentImageAssetService,
+		documentTemplateService,
 		authService,
 		visibilityService,
 		imageHostingService,
@@ -375,6 +379,10 @@ func newRouter(
 		api.GET("/uploads/*path", imageHostingHandler.ServeLocalImage)
 
 		// ---- 工作区与文档协作 API（业务主链）----
+		// 文档模板列表（编辑器模板选择器数据源，仅返回已启用模板）。
+		api.GET("/document-templates", documentTemplateHandler.ListTemplates)
+		// 文档模板详情（按 template_id 查询）。
+		api.GET("/document-templates/:templateId", documentTemplateHandler.GetTemplate)
 		// 空间列表（按访问者可见范围过滤）。
 		api.GET("/spaces", workspaceHandler.ListSpaces)
 		// 新建空间（业务端入口，不是后台治理入口）。
@@ -486,6 +494,12 @@ func newRouter(
 			searchConfigService,
 		)
 		adminSearchAnalyzerHandler := handler.NewAdminSearchAnalyzerHandler(adminSearchAnalyzerService)
+		adminDocumentTemplateService := service.NewAdminDocumentTemplateService(
+			documentTemplateRepo,
+			adminAccessService,
+			adminAuditService,
+		)
+		adminDocumentTemplateHandler := handler.NewAdminDocumentTemplateHandler(adminDocumentTemplateService)
 		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
 		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
 		dataRetentionCleanupService := service.NewDataRetentionCleanupService(db, systemConfigRepo)
@@ -722,6 +736,49 @@ func newRouter(
 					},
 				),
 				adminDocumentImageAssetHandler.DeleteImageAsset,
+			)
+
+			// ---- 文档模板治理（仅平台管理员）----
+			adminAPI.GET(
+				"/document-templates",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminDocumentTemplateHandler.ListTemplates,
+			)
+			adminAPI.GET(
+				"/document-templates/:templateId",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminDocumentTemplateHandler.GetTemplate,
+			)
+			adminAPI.POST(
+				"/document-templates",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminDocumentTemplateHandler.CreateTemplate,
+			)
+			adminAPI.PUT(
+				"/document-templates/:templateId",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document_template.update",
+						TargetType:    "document_template",
+						TargetIDParam: "templateId",
+					},
+				),
+				adminDocumentTemplateHandler.UpdateTemplate,
+			)
+			adminAPI.DELETE(
+				"/document-templates/:templateId",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document_template.delete",
+						TargetType:    "document_template",
+						TargetIDParam: "templateId",
+					},
+				),
+				adminDocumentTemplateHandler.DeleteTemplate,
 			)
 
 			// ---- 主题治理（仅平台管理员）----

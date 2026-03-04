@@ -160,6 +160,7 @@ export interface CreateNodeInput {
   type: NodeType;
   title: string;
   documentIdentifier?: string;
+  templateId?: string;
 }
 
 export interface CreateNodeResult {
@@ -285,6 +286,55 @@ export interface Theme {
   inlineCodeStyle: Record<string, string | number>;
   customCss?: string;
   builtin?: boolean;
+}
+
+export interface DocumentTemplateSummary {
+  templateId: string;
+  sceneKey: string;
+  sceneName: string;
+  name: string;
+  description: string;
+  defaultTitle: string;
+  sort: number;
+  builtin: boolean;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface DocumentTemplateListResult {
+  items: DocumentTemplateSummary[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
+export interface DocumentTemplateDetail {
+  templateId: string;
+  sceneKey: string;
+  sceneName: string;
+  name: string;
+  description: string;
+  defaultTitle: string;
+  contentMd: string;
+  sort: number;
+  builtin: boolean;
+  enabled: boolean;
+  createdByUserId?: string;
+  updatedByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentTemplateGateway {
+  listTemplates(input?: {
+    sceneKey?: string;
+    keyword?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<DocumentTemplateListResult>;
+  getTemplate(templateId: string): Promise<DocumentTemplateDetail>;
 }
 
 export interface ThemeGateway {
@@ -590,6 +640,50 @@ export interface AdminDocumentImageAssetDeleteResult {
   physicalDeleteError: string;
 }
 
+export interface AdminDocumentTemplate {
+  templateId: string;
+  sceneKey: string;
+  sceneName: string;
+  name: string;
+  description: string;
+  defaultTitle: string;
+  contentMd: string;
+  sort: number;
+  builtin: boolean;
+  enabled: boolean;
+  createdByUserId?: string;
+  updatedByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminDocumentTemplateListInput {
+  sceneKey?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminDocumentTemplateListResult {
+  items: Array<{
+    templateId: string;
+    sceneKey: string;
+    sceneName: string;
+    name: string;
+    description: string;
+    defaultTitle: string;
+    sort: number;
+    builtin: boolean;
+    enabled: boolean;
+    updatedAt: string;
+  }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
 export interface AdminTheme {
   themeId: string;
   name: string;
@@ -716,7 +810,7 @@ export interface AdminSearchIndexStatusResult {
   lastRebuildIndexedDocuments: number;
 }
 
-export type AdminAuditModule = "user" | "space" | "document" | "theme" | "system_config";
+export type AdminAuditModule = "user" | "space" | "document" | "document_template" | "theme" | "system_config";
 export type AdminAuditAction = "create" | "update" | "delete";
 
 export interface AdminAuditLog {
@@ -837,6 +931,31 @@ export interface AdminGateway {
     physicalDelete?: boolean;
     forcePhysicalDeleteOnShare?: boolean;
   }): Promise<AdminDocumentImageAssetDeleteResult>;
+  listDocumentTemplates(input?: AdminDocumentTemplateListInput): Promise<AdminDocumentTemplateListResult>;
+  getDocumentTemplate(templateId: string): Promise<AdminDocumentTemplate>;
+  createDocumentTemplate(input: {
+    templateId: string;
+    sceneKey: string;
+    sceneName: string;
+    name: string;
+    description?: string;
+    defaultTitle?: string;
+    contentMd?: string;
+    sort?: number;
+    enabled?: boolean;
+  }): Promise<AdminDocumentTemplate>;
+  updateDocumentTemplate(input: {
+    templateId: string;
+    sceneKey?: string;
+    sceneName?: string;
+    name?: string;
+    description?: string;
+    defaultTitle?: string;
+    contentMd?: string;
+    sort?: number;
+    enabled?: boolean;
+  }): Promise<AdminDocumentTemplate>;
+  deleteDocumentTemplate(templateId: string): Promise<void>;
   listThemes(): Promise<AdminTheme[]>;
   createTheme(input: {
     themeId: string;
@@ -969,6 +1088,7 @@ export interface DataGateway {
   auth: AuthGateway;
   workspace: WorkspaceGateway;
   document: DocumentGateway;
+  documentTemplate: DocumentTemplateGateway;
   theme: ThemeGateway;
   admin: AdminGateway;
   imageHosting: ImageHostingGateway;

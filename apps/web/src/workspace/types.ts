@@ -70,6 +70,7 @@ export interface WorkspaceCreateNodeInput {
   type: NodeType;
   title: string;
   documentIdentifier?: string;
+  templateId?: string;
 }
 
 // 工作区动作：统一封装目录树和文档加载行为。

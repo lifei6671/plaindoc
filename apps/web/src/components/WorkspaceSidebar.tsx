@@ -1,5 +1,12 @@
 import { memo } from "react";
-import type { CreateNodeResult, NodeType, TreeNode, Visibility } from "../data-access";
+import type {
+  CreateNodeResult,
+  DocumentTemplateDetail,
+  DocumentTemplateSummary,
+  NodeType,
+  TreeNode,
+  Visibility
+} from "../data-access";
 import { WorkspaceTree } from "./WorkspaceTree";
 
 // 工作区侧边栏入参：仅管理“当前空间”文档，不提供空间维护能力。
@@ -12,7 +19,10 @@ interface WorkspaceSidebarProps {
     type: NodeType;
     title: string;
     documentIdentifier?: string;
+    templateId?: string;
   }) => Promise<CreateNodeResult>;
+  onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
+  onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
   onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
@@ -27,6 +37,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   workspaceTree,
   onOpenDocument,
   onCreateNode,
+  onListDocumentTemplates,
+  onGetDocumentTemplate,
   onUpdateDocumentIdentifier,
   onUpdateDocumentVisibility,
   onRenameNode,
@@ -44,6 +56,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
         activeDocId={activeDocId}
         onOpenDocument={onOpenDocument}
         onCreateNode={onCreateNode}
+        onListDocumentTemplates={onListDocumentTemplates}
+        onGetDocumentTemplate={onGetDocumentTemplate}
         onUpdateDocumentIdentifier={onUpdateDocumentIdentifier}
         onUpdateDocumentVisibility={onUpdateDocumentVisibility}
         onRenameNode={onRenameNode}

@@ -908,6 +908,71 @@ type RevisionRepository interface {
 	ListByDocumentID(ctx context.Context, documentID string) ([]models.DocumentRevision, error)
 }
 
+// ListDocumentTemplatesParams 文档模板列表查询参数。
+type ListDocumentTemplatesParams struct {
+	SceneKey    string
+	Keyword     string
+	EnabledOnly bool
+	Limit       int
+	Offset      int
+}
+
+// DocumentTemplateSummaryRecord 文档模板列表项。
+type DocumentTemplateSummaryRecord struct {
+	TemplateID   string
+	SceneKey     string
+	SceneName    string
+	Name         string
+	Description  string
+	DefaultTitle string
+	Sort         int
+	IsBuiltin    bool
+	IsEnabled    bool
+	UpdatedAtRaw string
+}
+
+// DocumentTemplateDetailRecord 文档模板详情。
+type DocumentTemplateDetailRecord struct {
+	TemplateID      string
+	SceneKey        string
+	SceneName       string
+	Name            string
+	Description     string
+	DefaultTitle    string
+	ContentMD       string
+	Sort            int
+	IsBuiltin       bool
+	IsEnabled       bool
+	CreatedByUserID *string
+	UpdatedByUserID *string
+	CreatedAtRaw    string
+	UpdatedAtRaw    string
+}
+
+// UpdateDocumentTemplateParams 文档模板更新参数。
+type UpdateDocumentTemplateParams struct {
+	TemplateID      string
+	SceneKey        *string
+	SceneName       *string
+	Name            *string
+	Description     *string
+	DefaultTitle    *string
+	ContentMD       *string
+	Sort            *int
+	IsEnabled       *bool
+	UpdatedByUserID *string
+	UpdatedAt       time.Time
+}
+
+// DocumentTemplateRepository 文档模板仓储接口。
+type DocumentTemplateRepository interface {
+	List(ctx context.Context, params ListDocumentTemplatesParams) ([]DocumentTemplateSummaryRecord, int64, error)
+	GetByTemplateID(ctx context.Context, templateID string, enabledOnly bool) (*DocumentTemplateDetailRecord, error)
+	Create(ctx context.Context, template *models.DocumentTemplate) error
+	UpdateByTemplateID(ctx context.Context, params UpdateDocumentTemplateParams) (bool, error)
+	DeleteByTemplateID(ctx context.Context, templateID string) (bool, error)
+}
+
 // ThemeRepository 主题仓储最小接口。
 type ThemeRepository interface {
 	List(ctx context.Context, includeDisabled bool) ([]models.Theme, error)

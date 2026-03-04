@@ -62,6 +62,7 @@ const (
 	CodeInvalidAvatarURL          = "INVALID_AVATAR_URL"
 	CodeInvalidNodeMove           = "INVALID_NODE_MOVE"
 	CodeInvalidDocumentIdentifier = "INVALID_DOCUMENT_IDENTIFIER"
+	CodeInvalidTemplateID         = "INVALID_TEMPLATE_ID"
 	CodePasswordConfirmMismatch   = "PASSWORD_CONFIRM_MISMATCH"
 	CodeInvalidCurrentPassword    = "INVALID_CURRENT_PASSWORD"
 	CodeInvalidNewPassword        = "INVALID_NEW_PASSWORD"
@@ -80,6 +81,7 @@ const (
 	CodeTransferTargetNotFound = "TRANSFER_TARGET_NOT_FOUND"
 	CodeSpaceCategoryNotFound  = "SPACE_CATEGORY_NOT_FOUND"
 	CodeNodeNotFound           = "NODE_NOT_FOUND"
+	CodeTemplateNotFound       = "TEMPLATE_NOT_FOUND"
 
 	// 4000 段：冲突与并发状态。
 	CodeEmailAlreadyExists          = "EMAIL_ALREADY_EXISTS"
@@ -94,6 +96,7 @@ const (
 	CodeDocumentVersionConflict     = "DOCUMENT_VERSION_CONFLICT"
 	CodeSpaceAlreadyExists          = "SPACE_ALREADY_EXISTS"
 	CodeDocumentIdentifierConflict  = "DOCUMENT_IDENTIFIER_CONFLICT"
+	CodeTemplateAlreadyExists       = "TEMPLATE_ALREADY_EXISTS"
 
 	// 5000 段：业务约束。
 	CodeSpaceDeleted                  = "SPACE_DELETED"
@@ -113,6 +116,7 @@ const (
 	CodeSpaceCategoryDefaultImmutable = "SPACE_CATEGORY_DEFAULT_IMMUTABLE"
 	CodePasswordUnchanged             = "PASSWORD_UNCHANGED"
 	CodeDocumentIdentifierReserved    = "DOCUMENT_IDENTIFIER_RESERVED"
+	CodeTemplateBuiltinImmutable      = "TEMPLATE_BUILTIN_IMMUTABLE"
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout = "REQUEST_TIMEOUT"
@@ -179,6 +183,7 @@ var errorCodeRegistry = map[string]int{
 	CodeInvalidNewPassword:        2037,
 	CodeInvalidNodeMove:           2038,
 	CodeInvalidDocumentIdentifier: 2039,
+	CodeInvalidTemplateID:         2040,
 
 	// 3000 段：资源不存在。
 	CodeRouteNotFound:          3001,
@@ -194,6 +199,7 @@ var errorCodeRegistry = map[string]int{
 	CodeTransferTargetNotFound: 3011,
 	CodeSpaceCategoryNotFound:  3012,
 	CodeNodeNotFound:           3013,
+	CodeTemplateNotFound:       3014,
 
 	// 4000 段：冲突与并发状态。
 	CodeEmailAlreadyExists:          4001,
@@ -208,6 +214,7 @@ var errorCodeRegistry = map[string]int{
 	CodeDocumentVersionConflict:     4010,
 	CodeSpaceAlreadyExists:          4011,
 	CodeDocumentIdentifierConflict:  4012,
+	CodeTemplateAlreadyExists:       4013,
 
 	// 5000 段：业务约束。
 	CodeSpaceDeleted:                  5001,
@@ -227,6 +234,7 @@ var errorCodeRegistry = map[string]int{
 	CodeSpaceCategoryDefaultImmutable: 5015,
 	CodePasswordUnchanged:             5016,
 	CodeDocumentIdentifierReserved:    5017,
+	CodeTemplateBuiltinImmutable:      5018,
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout: 9001,

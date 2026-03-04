@@ -36,7 +36,14 @@ import {
   type TreeItemRenderContext,
   type TreeViewState
 } from "react-complex-tree";
-import type { CreateNodeResult, NodeType, TreeNode, Visibility } from "../data-access";
+import type {
+  CreateNodeResult,
+  DocumentTemplateDetail,
+  DocumentTemplateSummary,
+  NodeType,
+  TreeNode,
+  Visibility
+} from "../data-access";
 import { formatError } from "../editor/status-utils";
 import { useConfirmDialog } from "./ConfirmDialog";
 import {
@@ -82,7 +89,10 @@ interface WorkspaceTreeProps {
     type: NodeType;
     title: string;
     documentIdentifier?: string;
+    templateId?: string;
   }) => Promise<CreateNodeResult>;
+  onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
+  onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
   onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
@@ -96,6 +106,7 @@ interface PendingCreateDraftNode {
   type: NodeType;
   title: string;
   documentIdentifier?: string;
+  templateId?: string;
 }
 
 interface CreateNodeDialogState {
@@ -103,6 +114,7 @@ interface CreateNodeDialogState {
   type: NodeType;
   title: string;
   documentIdentifier: string;
+  templateId: string;
 }
 
 function mergeClassNames(...classNames: Array<string | false | null | undefined>): string {
@@ -422,6 +434,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   activeDocId,
   onOpenDocument,
   onCreateNode,
+  onListDocumentTemplates,
+  onGetDocumentTemplate,
   onUpdateDocumentIdentifier,
   onUpdateDocumentVisibility,
   onRenameNode,
@@ -475,6 +489,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const inlineEditInputRef = useRef<HTMLInputElement | null>(null);
   const pendingInlineEditFocusNodeIdRef = useRef<string | null>(null);
   const isCommittingInlineEditRef = useRef(false);
+  const documentTemplateDetailsRef = useRef<Record<string, DocumentTemplateDetail>>({});
+  const templatePreviewRequestIDRef = useRef(0);
   // 默认全折叠：首次进入目录树时不自动展开任何节点。
   const [manuallyExpandedNodeIds, setManuallyExpandedNodeIds] = useState<string[]>([]);
   const expandedNodeIds = manuallyExpandedNodeIds;
@@ -484,6 +500,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const [creatingDraftNodeIds, setCreatingDraftNodeIds] = useState<string[]>([]);
   const [createNodeDialog, setCreateNodeDialog] = useState<CreateNodeDialogState | null>(null);
   const [isCreateNodeDialogSubmitting, setIsCreateNodeDialogSubmitting] = useState(false);
+  const [documentTemplates, setDocumentTemplates] = useState<DocumentTemplateSummary[]>([]);
+  const [isDocumentTemplatesLoading, setIsDocumentTemplatesLoading] = useState(false);
+  const [documentTemplatesLoaded, setDocumentTemplatesLoaded] = useState(false);
+  const [documentTemplatesError, setDocumentTemplatesError] = useState<string | null>(null);
+  const [documentTemplateDetails, setDocumentTemplateDetails] = useState<Record<string, DocumentTemplateDetail>>({});
+  const [isTemplatePreviewLoading, setIsTemplatePreviewLoading] = useState(false);
+  const [templatePreviewError, setTemplatePreviewError] = useState<string | null>(null);
   const [editIdentifierDialogNodeID, setEditIdentifierDialogNodeID] = useState<string | null>(null);
   const [editIdentifierDialogDocumentID, setEditIdentifierDialogDocumentID] = useState("");
   const [editIdentifierDialogTitle, setEditIdentifierDialogTitle] = useState(DEFAULT_DOCUMENT_TITLE);
@@ -501,6 +524,126 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     () => new Set(updatingIdentifierNodeIds),
     [updatingIdentifierNodeIds]
   );
+  const documentTemplateOptions = useMemo(
+    () =>
+      [...documentTemplates].sort((left, right) => {
+        if (left.sceneKey !== right.sceneKey) {
+          return left.sceneKey.localeCompare(right.sceneKey);
+        }
+        if (left.sort !== right.sort) {
+          return left.sort - right.sort;
+        }
+        return left.name.localeCompare(right.name);
+      }),
+    [documentTemplates]
+  );
+  const groupedDocumentTemplateOptions = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { sceneKey: string; sceneLabel: string; options: DocumentTemplateSummary[] }
+    >();
+    for (const item of documentTemplateOptions) {
+      const sceneKey = item.sceneKey || "default";
+      const sceneLabel = item.sceneName || item.sceneKey || "未分类场景";
+      const existing = grouped.get(sceneKey);
+      if (existing) {
+        existing.options.push(item);
+        continue;
+      }
+      grouped.set(sceneKey, { sceneKey, sceneLabel, options: [item] });
+    }
+    return Array.from(grouped.values());
+  }, [documentTemplateOptions]);
+  const selectedTemplateID = useMemo(() => {
+    if (!createNodeDialog || createNodeDialog.type !== "doc") {
+      return "";
+    }
+    return createNodeDialog.templateId.trim();
+  }, [createNodeDialog?.templateId, createNodeDialog?.type]);
+  const selectedTemplateDetail = useMemo(() => {
+    if (!selectedTemplateID) {
+      return null;
+    }
+    return documentTemplateDetails[selectedTemplateID] ?? null;
+  }, [documentTemplateDetails, selectedTemplateID]);
+  const selectedTemplatePreviewText = useMemo(() => {
+    const content = selectedTemplateDetail?.contentMd ?? "";
+    const normalized = content.trim();
+    if (!normalized) {
+      return "(该模板正文为空)";
+    }
+    const lines = normalized.split("\n").slice(0, 16);
+    return lines.join("\n");
+  }, [selectedTemplateDetail?.contentMd]);
+
+  const loadDocumentTemplates = useCallback(
+    async (forceReload = false): Promise<void> => {
+      if (!forceReload && (documentTemplatesLoaded || isDocumentTemplatesLoading)) {
+        return;
+      }
+      setIsDocumentTemplatesLoading(true);
+      try {
+        const items = await onListDocumentTemplates();
+        setDocumentTemplates(items);
+        setDocumentTemplatesLoaded(true);
+        setDocumentTemplatesError(null);
+      } catch (error) {
+        const message = formatError(error);
+        setDocumentTemplatesError(message);
+        toast.error(`加载模板失败：${message}`);
+      } finally {
+        setIsDocumentTemplatesLoading(false);
+      }
+    },
+    [documentTemplatesLoaded, isDocumentTemplatesLoading, onListDocumentTemplates]
+  );
+
+  const loadDocumentTemplateDetail = useCallback(
+    async (templateId: string, options?: { forceReload?: boolean }): Promise<void> => {
+      const normalizedTemplateID = templateId.trim();
+      if (!normalizedTemplateID) {
+        templatePreviewRequestIDRef.current += 1;
+        setTemplatePreviewError(null);
+        setIsTemplatePreviewLoading(false);
+        return;
+      }
+      if (!options?.forceReload && documentTemplateDetailsRef.current[normalizedTemplateID]) {
+        templatePreviewRequestIDRef.current += 1;
+        setTemplatePreviewError(null);
+        setIsTemplatePreviewLoading(false);
+        return;
+      }
+      const requestID = templatePreviewRequestIDRef.current + 1;
+      templatePreviewRequestIDRef.current = requestID;
+      setIsTemplatePreviewLoading(true);
+      setTemplatePreviewError(null);
+      try {
+        const detail = await onGetDocumentTemplate(normalizedTemplateID);
+        setDocumentTemplateDetails((previousDetails) => ({
+          ...previousDetails,
+          [normalizedTemplateID]: detail
+        }));
+      } catch (error) {
+        if (templatePreviewRequestIDRef.current !== requestID) {
+          return;
+        }
+        setTemplatePreviewError(formatError(error));
+      } finally {
+        if (templatePreviewRequestIDRef.current === requestID) {
+          setIsTemplatePreviewLoading(false);
+        }
+      }
+    },
+    [onGetDocumentTemplate]
+  );
+
+  useEffect(() => {
+    documentTemplateDetailsRef.current = documentTemplateDetails;
+  }, [documentTemplateDetails]);
+
+  useEffect(() => {
+    void loadDocumentTemplateDetail(selectedTemplateID);
+  }, [loadDocumentTemplateDetail, selectedTemplateID]);
 
   // 拖拽排序仅在桌面端启用：依赖 hover + fine pointer 能力判断。
   useEffect(() => {
@@ -769,7 +912,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           parentId: editingDraftNode.parentId,
           type: editingDraftNode.type,
           title: normalizedTitle,
-          documentIdentifier: editingDraftNode.documentIdentifier
+          documentIdentifier: editingDraftNode.documentIdentifier,
+          templateId: editingDraftNode.templateId
         });
         removeDraftNode(draftNodeID);
       } catch (error) {
@@ -872,11 +1016,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         parentId: nodeId,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE,
-        documentIdentifier: ""
+        documentIdentifier: "",
+        templateId: ""
       });
+      void loadDocumentTemplates();
       setOpenActionNodeId(null);
     },
-    []
+    [loadDocumentTemplates]
   );
 
   const handleCreateSiblingDocument = useCallback(
@@ -889,11 +1035,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         parentId: currentNode.parentId,
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE,
-        documentIdentifier: ""
+        documentIdentifier: "",
+        templateId: ""
       });
+      void loadDocumentTemplates();
       setOpenActionNodeId(null);
     },
-    [nodeById]
+    [loadDocumentTemplates, nodeById]
   );
 
   const handleCreateChildFolder = useCallback(
@@ -902,7 +1050,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         parentId: nodeId,
         type: "folder",
         title: DEFAULT_FOLDER_TITLE,
-        documentIdentifier: ""
+        documentIdentifier: "",
+        templateId: ""
       });
       setOpenActionNodeId(null);
     },
@@ -981,9 +1130,11 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       parentId: null,
       type: "doc",
       title: DEFAULT_DOCUMENT_TITLE,
-      documentIdentifier: ""
+      documentIdentifier: "",
+      templateId: ""
     });
-  }, []);
+    void loadDocumentTemplates();
+  }, [loadDocumentTemplates]);
 
   const closeCreateNodeDialog = useCallback(() => {
     if (isCreateNodeDialogSubmitting) {
@@ -1015,7 +1166,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         parentId: createNodeDialog.parentId,
         type: createNodeDialog.type,
         title: normalizedTitle,
-        documentIdentifier: normalizedIdentifier
+        documentIdentifier: normalizedIdentifier,
+        templateId: createNodeDialog.templateId || undefined
       });
       if (created.docId) {
         void onOpenDocument(created.docId).catch(() => {
@@ -1691,6 +1843,103 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             </label>
             {createNodeDialog.type === "doc" ? (
               <>
+                <label className="mb-3 block">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">模板（可选）</span>
+                  <select
+                    value={createNodeDialog.templateId}
+                    className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                    disabled={isCreateNodeDialogSubmitting || isDocumentTemplatesLoading}
+                    onChange={(event) => {
+                      const nextTemplateID = event.target.value;
+                      setCreateNodeDialog((previousDialog) =>
+                        previousDialog
+                          ? {
+                              ...previousDialog,
+                              templateId: nextTemplateID
+                            }
+                          : previousDialog
+                      );
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeCreateNodeDialog();
+                      }
+                    }}
+                  >
+                    <option value="">不使用模板</option>
+                    {groupedDocumentTemplateOptions.map((group) => (
+                      <optgroup key={group.sceneKey} label={group.sceneLabel}>
+                        {group.options.map((item) => (
+                          <option key={item.templateId} value={item.templateId}>
+                            {item.name} ({item.templateId})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+                <p className="mt-0 mb-3 text-[12px] text-[#6b7280]">
+                  {isDocumentTemplatesLoading
+                    ? "模板加载中..."
+                    : documentTemplatesError
+                      ? `模板加载失败：${documentTemplatesError}`
+                      : documentTemplatesLoaded
+                        ? documentTemplateOptions.length > 0
+                          ? `当前可用模板 ${documentTemplateOptions.length} 个，按场景分组展示。`
+                          : "当前暂无可用模板，可联系管理员在后台「模板管理」中创建并启用模板。"
+                        : "将按需加载模板列表。"}
+                  {documentTemplatesError ? (
+                    <button
+                      type="button"
+                      className="ml-2 rounded border border-[#cdd5df] bg-white px-1.5 py-0.5 text-[11px] text-[#334155] hover:bg-[#f8fafc]"
+                      onClick={() => {
+                        void loadDocumentTemplates(true);
+                      }}
+                      disabled={isDocumentTemplatesLoading || isCreateNodeDialogSubmitting}
+                    >
+                      重试
+                    </button>
+                  ) : null}
+                </p>
+                {createNodeDialog.templateId ? (
+                  <div className="mb-3 rounded-[10px] border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2.5">
+                    {isTemplatePreviewLoading ? (
+                      <p className="m-0 text-[12px] text-[#475467]">模板预览加载中...</p>
+                    ) : templatePreviewError ? (
+                      <p className="m-0 text-[12px] text-[#b42318]">
+                        模板预览加载失败：{templatePreviewError}
+                        <button
+                          type="button"
+                          className="ml-2 rounded border border-[#fecdd3] bg-white px-1.5 py-0.5 text-[11px] text-[#b42318] hover:bg-[#fff1f2]"
+                          onClick={() => {
+                            void loadDocumentTemplateDetail(selectedTemplateID, { forceReload: true });
+                          }}
+                          disabled={isCreateNodeDialogSubmitting}
+                        >
+                          重试
+                        </button>
+                      </p>
+                    ) : selectedTemplateDetail ? (
+                      <>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="text-[12px] font-medium text-[#0f172a]">{selectedTemplateDetail.name}</span>
+                          <span className="text-[11px] text-[#64748b]">{selectedTemplateDetail.sceneName}</span>
+                        </div>
+                        {selectedTemplateDetail.defaultTitle ? (
+                          <p className="mt-0 mb-2 text-[11px] text-[#475569]">
+                            默认标题：{selectedTemplateDetail.defaultTitle}
+                          </p>
+                        ) : null}
+                        <pre className="m-0 max-h-[132px] overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-white px-2.5 py-2 text-[11px] leading-[1.5] text-[#334155]">
+                          {selectedTemplatePreviewText}
+                        </pre>
+                      </>
+                    ) : (
+                      <p className="m-0 text-[12px] text-[#475467]">模板预览不可用。</p>
+                    )}
+                  </div>
+                ) : null}
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">文档标识（可空）</span>
                   <input
