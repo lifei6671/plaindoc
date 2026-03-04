@@ -691,10 +691,11 @@ func TestRouter_AuthOptions(t *testing.T) {
 	}
 
 	payload := decodeJSONResultData[struct {
-		LoginMode         string `json:"loginMode"`
-		DefaultProviderID string `json:"defaultProviderId"`
-		AllowUserRegister bool   `json:"allowUserRegister"`
-		Providers         []struct {
+		LoginMode            string `json:"loginMode"`
+		DefaultProviderID    string `json:"defaultProviderId"`
+		AllowUserRegister    bool   `json:"allowUserRegister"`
+		PasswordResetEnabled bool   `json:"passwordResetEnabled"`
+		Providers            []struct {
 			ID       string `json:"id"`
 			Name     string `json:"name"`
 			Type     string `json:"type"`
@@ -711,11 +712,45 @@ func TestRouter_AuthOptions(t *testing.T) {
 	if payload.AllowUserRegister {
 		t.Fatal("expected allowUserRegister=false because site config disabled registration")
 	}
+	if payload.PasswordResetEnabled {
+		t.Fatal("expected passwordResetEnabled=false because email service is disabled by default")
+	}
 	if len(payload.Providers) != 2 {
 		t.Fatalf("expected 2 enabled providers, got %d", len(payload.Providers))
 	}
 	if payload.Providers[0].ID != "corp-ldap" || payload.Providers[1].ID != "backup-ldap" {
 		t.Fatalf("unexpected provider order: %#v", payload.Providers)
+	}
+}
+
+func TestRouter_AuthOptionsPasswordResetEnabledByEmailConfig(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	now := time.Now().UTC()
+	if err := database.ORM.WithContext(context.Background()).Create(&models.SystemConfig{
+		ConfigKey:       "email",
+		ConfigValueJSON: `{"enabled":true}`,
+		Version:         1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error; err != nil {
+		t.Fatalf("seed email config failed: %v", err)
+	}
+
+	optionsReq := httptest.NewRequest(http.MethodGet, "/api/auth/options", nil)
+	optionsRec := serve(optionsReq)
+	if optionsRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", optionsRec.Code, optionsRec.Body.String())
+	}
+
+	payload := decodeJSONResultData[struct {
+		PasswordResetEnabled bool `json:"passwordResetEnabled"`
+	}](t, optionsRec.Body.Bytes())
+	if !payload.PasswordResetEnabled {
+		t.Fatal("expected passwordResetEnabled=true when email config is enabled")
 	}
 }
 

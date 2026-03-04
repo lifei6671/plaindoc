@@ -50,9 +50,9 @@ type RequestPasswordResetByEmailInput struct {
 
 // RequestPasswordResetByAdminInput 管理员触发重置密码参数。
 type RequestPasswordResetByAdminInput struct {
-	TargetUserID     string
+	TargetUserID      string
 	RequestedByUserID string
-	ClientIP         string
+	ClientIP          string
 }
 
 // VerifyPasswordResetTokenResult 密码重置令牌校验结果。
@@ -70,13 +70,13 @@ type ConfirmPasswordResetInput struct {
 
 // PasswordResetService 处理密码重置申请、校验与确认。
 type PasswordResetService struct {
-	userRepo         repository.UserRepository
-	userSessionRepo  repository.UserSessionRepository
-	tokenRepo        repository.PasswordResetTokenRepository
+	userRepo           repository.UserRepository
+	userSessionRepo    repository.UserSessionRepository
+	tokenRepo          repository.PasswordResetTokenRepository
 	emailConfigService *EmailConfigService
-	mailSender       MailSender
-	secret           []byte
-	now              func() time.Time
+	mailSender         MailSender
+	secret             []byte
+	now                func() time.Time
 }
 
 // NewPasswordResetService 创建密码重置服务。
@@ -137,13 +137,25 @@ func (s *PasswordResetService) RequestByEmail(ctx context.Context, input Request
 		return err
 	}
 	return s.issueAndSendResetEmail(ctx, cfg, issuePasswordResetEmailInput{
-		UserID:        user.UserID,
-		UserEmail:     user.Email,
-		UserName:      user.Name,
-		Source:        passwordResetSourceSelfService,
-		RequestIP:     input.ClientIP,
-		RequestedBy:   nil,
+		UserID:      user.UserID,
+		UserEmail:   user.Email,
+		UserName:    user.Name,
+		Source:      passwordResetSourceSelfService,
+		RequestIP:   input.ClientIP,
+		RequestedBy: nil,
 	})
+}
+
+// IsEmailEnabled 返回当前是否开启邮件能力（密码找回入口展示开关）。
+func (s *PasswordResetService) IsEmailEnabled(ctx context.Context) (bool, error) {
+	if s == nil || s.emailConfigService == nil {
+		return false, nil
+	}
+	cfg, err := s.emailConfigService.GetConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	return cfg.Enabled, nil
 }
 
 // RequestByAdmin 管理员触发密码重置邮件发送。

@@ -153,6 +153,7 @@ const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
   loginMode: "local_only",
   defaultProviderId: "local",
   allowUserRegister: true,
+  passwordResetEnabled: false,
   providers: []
 };
 
@@ -207,11 +208,16 @@ function normalizeAuthLoginOptions(value: unknown): AuthLoginOptions {
     typeof record.allowUserRegister === "boolean"
       ? record.allowUserRegister
       : DEFAULT_AUTH_LOGIN_OPTIONS.allowUserRegister;
+  const passwordResetEnabled =
+    typeof record.passwordResetEnabled === "boolean"
+      ? record.passwordResetEnabled
+      : DEFAULT_AUTH_LOGIN_OPTIONS.passwordResetEnabled;
 
   return {
     loginMode: normalizeAuthLoginMode(record.loginMode),
     defaultProviderId,
     allowUserRegister,
+    passwordResetEnabled,
     providers
   };
 }

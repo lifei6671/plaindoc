@@ -29,6 +29,7 @@ export interface AuthLoginOptions {
   loginMode: AuthLoginMode;
   defaultProviderId: string;
   allowUserRegister: boolean;
+  passwordResetEnabled: boolean;
   providers: AuthLoginProviderOption[];
 }
 

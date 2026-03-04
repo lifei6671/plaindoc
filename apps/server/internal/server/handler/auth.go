@@ -72,10 +72,11 @@ type authLoginProviderOptionResponse struct {
 }
 
 type authLoginOptionsResponse struct {
-	LoginMode         string                            `json:"loginMode"`
-	DefaultProviderID string                            `json:"defaultProviderId"`
-	AllowUserRegister bool                              `json:"allowUserRegister"`
-	Providers         []authLoginProviderOptionResponse `json:"providers"`
+	LoginMode            string                            `json:"loginMode"`
+	DefaultProviderID    string                            `json:"defaultProviderId"`
+	AllowUserRegister    bool                              `json:"allowUserRegister"`
+	PasswordResetEnabled bool                              `json:"passwordResetEnabled"`
+	Providers            []authLoginProviderOptionResponse `json:"providers"`
 }
 
 type authUserResponse struct {
@@ -324,10 +325,11 @@ func (h *authHandler) Register(c *gin.Context) {
 func (h *authHandler) Options(c *gin.Context) {
 	if h == nil || h.authRegistrationPolicyService == nil {
 		response.JSON(c, http.StatusOK, authLoginOptionsResponse{
-			LoginMode:         "local_only",
-			DefaultProviderID: service.AuthProviderLocalID,
-			AllowUserRegister: true,
-			Providers:         []authLoginProviderOptionResponse{},
+			LoginMode:            "local_only",
+			DefaultProviderID:    service.AuthProviderLocalID,
+			AllowUserRegister:    true,
+			PasswordResetEnabled: false,
+			Providers:            []authLoginProviderOptionResponse{},
 		})
 		return
 	}
@@ -349,11 +351,22 @@ func (h *authHandler) Options(c *gin.Context) {
 		})
 	}
 
+	passwordResetEnabled := false
+	if h.passwordResetService != nil {
+		enabled, enabledErr := h.passwordResetService.IsEmailEnabled(c.Request.Context())
+		if enabledErr != nil {
+			setRequestErrmsg(c, enabledErr, "获取密码重置开关失败")
+		} else {
+			passwordResetEnabled = enabled
+		}
+	}
+
 	response.JSON(c, http.StatusOK, authLoginOptionsResponse{
-		LoginMode:         options.LoginMode,
-		DefaultProviderID: options.DefaultProviderID,
-		AllowUserRegister: options.AllowUserRegister,
-		Providers:         providers,
+		LoginMode:            options.LoginMode,
+		DefaultProviderID:    options.DefaultProviderID,
+		AllowUserRegister:    options.AllowUserRegister,
+		PasswordResetEnabled: passwordResetEnabled,
+		Providers:            providers,
 	})
 }
 

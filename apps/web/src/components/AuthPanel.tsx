@@ -28,6 +28,7 @@ interface AuthPanelProps {
   errorMessage: string | null;
   loginMode: AuthLoginMode;
   allowUserRegister: boolean;
+  allowPasswordReset: boolean;
   providerOptions: AuthLoginProviderOption[];
   authChallenge: AuthCaptchaChallenge | null;
   onLogin: (input: AuthLoginInput) => Promise<void>;
@@ -46,6 +47,7 @@ export function AuthPanel({
   errorMessage,
   loginMode,
   allowUserRegister,
+  allowPasswordReset,
   providerOptions,
   authChallenge,
   onLogin,
@@ -309,7 +311,7 @@ export function AuthPanel({
                 disabled={checking || submitting}
               />
             </label>
-            {mode === "login" ? (
+            {mode === "login" && allowPasswordReset ? (
               <p className="text-right text-xs text-slate-600">
                 <a href={forgotPasswordHref} className="font-medium text-cyan-700 hover:text-cyan-800 hover:underline">
                   忘记密码？

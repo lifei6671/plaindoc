@@ -163,6 +163,7 @@ const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
   loginMode: "local_only",
   defaultProviderId: "local",
   allowUserRegister: true,
+  passwordResetEnabled: false,
   providers: []
 };
 
@@ -3024,6 +3025,7 @@ export default function App() {
           errorMessage={authErrorMessage}
           loginMode={authLoginOptions.loginMode}
           allowUserRegister={authLoginOptions.allowUserRegister}
+          allowPasswordReset={authLoginOptions.passwordResetEnabled}
           providerOptions={authLoginOptions.providers}
           authChallenge={authChallenge}
           onLogin={handleAuthLogin}
