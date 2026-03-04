@@ -66,6 +66,7 @@ type DataRetentionCleanupTable =
 interface SiteSystemConfigValue {
   allowRegistration: boolean;
   defaultSpaceVisibility: SpaceVisibility;
+  siteName: string;
   filingNumber: string;
   filingLink: string;
 }
@@ -387,6 +388,7 @@ const EMAIL_SECRET_MASK = "********";
 const SITE_TEMPLATE: SiteSystemConfigValue = {
   allowRegistration: true,
   defaultSpaceVisibility: "member",
+  siteName: "",
   filingNumber: "",
   filingLink: "https://beian.miit.gov.cn/"
 };
@@ -657,6 +659,7 @@ function parseSiteConfig(value: unknown): SiteSystemConfigValue {
   return {
     allowRegistration,
     defaultSpaceVisibility,
+    siteName: parseString(payload.siteName, SITE_TEMPLATE.siteName),
     filingNumber: parseString(payload.filingNumber, SITE_TEMPLATE.filingNumber),
     filingLink: parseString(payload.filingLink, SITE_TEMPLATE.filingLink)
   };
@@ -1418,6 +1421,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         return {
           allowRegistration: siteDraft.allowRegistration,
           defaultSpaceVisibility: siteDraft.defaultSpaceVisibility,
+          siteName: siteDraft.siteName,
           filingNumber: siteDraft.filingNumber,
           filingLink: siteDraft.filingLink
         };
@@ -1918,6 +1922,26 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             ))}
                           </SelectContent>
                         </Select>
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">站点名称</span>
+                        <Input
+                          type="text"
+                          maxLength={128}
+                          value={siteDraft.siteName}
+                          onChange={(event) => {
+                            setSiteDraft((previous) => ({
+                              ...previous,
+                              siteName: event.target.value
+                            }));
+                            markDirty("site");
+                          }}
+                          placeholder="例如：PlainDoc"
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">
+                          展示在 SSR 首页、分类页、搜索页底部 Footer。
+                        </p>
                       </label>
                       <label className="space-y-1.5 sm:col-span-2">
                         <span className="text-xs font-semibold tracking-wide text-slate-600">备案号</span>

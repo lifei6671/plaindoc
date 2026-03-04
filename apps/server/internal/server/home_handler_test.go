@@ -356,7 +356,7 @@ func TestRouter_HomePages_RenderFooterWithSiteFilingNumber(t *testing.T) {
 		_ = database.Close()
 	}()
 
-	seedHomepageSiteConfig(t, database, "沪ICP备2026000001号", "https://beian.miit.gov.cn/")
+	seedHomepageSiteConfig(t, database, "Acme Docs", "沪ICP备2026000001号", "https://beian.miit.gov.cn/")
 
 	paths := []string{"/", "/explore/all", "/search"}
 	for _, path := range paths {
@@ -367,10 +367,45 @@ func TestRouter_HomePages_RenderFooterWithSiteFilingNumber(t *testing.T) {
 		}
 
 		body := rec.Body.String()
+		if !strings.Contains(body, "Acme Docs") {
+			t.Fatalf("expected footer contains configured site name on %s, body=%s", path, body)
+		}
 		if !strings.Contains(body, "一个适合中小团队文档在线管理系统") {
 			t.Fatalf("expected footer contains site description on %s, body=%s", path, body)
 		}
-		if !strings.Contains(body, "备案号：") || !strings.Contains(body, "沪ICP备2026000001号") {
+		if !strings.Contains(body, "沪ICP备2026000001号") {
+			t.Fatalf("expected footer contains filing number on %s, body=%s", path, body)
+		}
+		if !strings.Contains(body, "https://beian.miit.gov.cn/") {
+			t.Fatalf("expected footer filing link exists on %s, body=%s", path, body)
+		}
+	}
+}
+
+func TestRouter_HomePages_EmptySiteNameUsesTemplateFallbackTitle(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	seedHomepageSiteConfig(t, database, "", "沪ICP备2026000009号", "https://beian.miit.gov.cn/")
+
+	paths := []string{"/", "/explore/all", "/search"}
+	for _, path := range paths {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := serve(req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `href="https://www.iminho.me"`) {
+			t.Fatalf("expected footer uses template fallback title link when siteName is empty on %s, body=%s", path, body)
+		}
+		if !strings.Contains(body, ">PlainDoc<") {
+			t.Fatalf("expected footer contains template fallback title when siteName is empty on %s, body=%s", path, body)
+		}
+		if !strings.Contains(body, "沪ICP备2026000009号") {
 			t.Fatalf("expected footer contains filing number on %s, body=%s", path, body)
 		}
 		if !strings.Contains(body, "https://beian.miit.gov.cn/") {
@@ -539,13 +574,19 @@ func seedHomepageSearchConfig(t *testing.T, database *storage.Database) {
 	}
 }
 
-func seedHomepageSiteConfig(t *testing.T, database *storage.Database, filingNumber string, filingLink string) {
+func seedHomepageSiteConfig(
+	t *testing.T,
+	database *storage.Database,
+	siteName string,
+	filingNumber string,
+	filingLink string,
+) {
 	t.Helper()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := database.ORM.Table("system_configs").Create(map[string]any{
 		"config_key":         "site",
-		"config_value_json":  `{"allowRegistration":true,"defaultSpaceVisibility":"member","filingNumber":"` + filingNumber + `","filingLink":"` + filingLink + `"}`,
+		"config_value_json":  `{"allowRegistration":true,"defaultSpaceVisibility":"member","siteName":"` + siteName + `","filingNumber":"` + filingNumber + `","filingLink":"` + filingLink + `"}`,
 		"version":            1,
 		"updated_by_user_id": nil,
 		"created_at":         now,

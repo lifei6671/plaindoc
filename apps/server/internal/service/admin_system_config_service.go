@@ -787,6 +787,7 @@ func validateSiteConfig(payload map[string]any) error {
 	requiredKeys := map[string]struct{}{
 		"allowRegistration":      {},
 		"defaultSpaceVisibility": {},
+		"siteName":               {},
 		"filingNumber":           {},
 		"filingLink":             {},
 	}
@@ -804,6 +805,13 @@ func validateSiteConfig(payload map[string]any) error {
 	}
 	if !models.IsValidVisibility(models.Visibility(defaultVisibility)) {
 		return fmt.Errorf("defaultSpaceVisibility must be public/authenticated/member")
+	}
+	siteName, hasSiteName, err := getOptionalString(payload, "siteName")
+	if err != nil {
+		return err
+	}
+	if hasSiteName && len([]rune(siteName)) > 128 {
+		return fmt.Errorf("siteName must be at most 128 characters")
 	}
 	filingNumber, hasFilingNumber, err := getOptionalString(payload, "filingNumber")
 	if err != nil {

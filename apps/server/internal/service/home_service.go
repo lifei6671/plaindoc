@@ -21,7 +21,7 @@ const (
 	homepageDefaultMaxAgeSeconds    = 60
 	homepageDefaultSMaxAgeSeconds   = 300
 	homepageDefaultSWRSeconds       = 60
-	homepageDefaultSiteName         = "PlainDoc"
+	homepageDefaultSiteName         = ""
 	homepageDefaultSiteDescription  = "一个适合中小团队文档在线管理系统"
 )
 
@@ -83,6 +83,7 @@ type homepageAnonymousCacheConfig struct {
 }
 
 type homepageSiteConfig struct {
+	SiteName     string `json:"siteName"`
 	FilingNumber string `json:"filingNumber"`
 	FilingLink   string `json:"filingLink"`
 }
@@ -147,6 +148,9 @@ func (s *HomeService) GetPage(ctx context.Context, input HomepageQueryInput) (Ho
 	}
 
 	siteConfig := s.resolveHomepageSiteConfig(ctx)
+	if configuredSiteName := strings.TrimSpace(siteConfig.SiteName); configuredSiteName != "" {
+		result.SiteName = configuredSiteName
+	}
 	result.FilingNumber = strings.TrimSpace(siteConfig.FilingNumber)
 	result.FilingLink = strings.TrimSpace(siteConfig.FilingLink)
 
@@ -312,6 +316,7 @@ func decodeHomepageSiteConfig(rawJSON string, target *homepageSiteConfig) error 
 
 	target.FilingNumber = strings.TrimSpace(payload.FilingNumber)
 	target.FilingLink = strings.TrimSpace(payload.FilingLink)
+	target.SiteName = strings.TrimSpace(payload.SiteName)
 	return nil
 }
 
