@@ -17,11 +17,26 @@ func TestRouter_ListDocumentTemplates_EnabledOnlyAndFilters(t *testing.T) {
 	}()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("document_template_scenes").Create([]map[string]any{
+		{
+			"scene_key":          "meeting",
+			"scene_name":         "会议纪要",
+			"description":        "",
+			"sort":               1,
+			"is_builtin":         1,
+			"created_by_user_id": nil,
+			"updated_by_user_id": nil,
+			"created_at":         now,
+			"updated_at":         now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("insert document template scenes failed: %v", err)
+	}
+
 	if err := database.ORM.Table("document_templates").Create([]map[string]any{
 		{
 			"template_id":        "meeting-notes",
 			"scene_key":          "meeting",
-			"scene_name":         "会议纪要",
 			"name":               "会议纪要模板",
 			"description":        "用于会议记录",
 			"default_title":      "会议纪要",
@@ -37,7 +52,6 @@ func TestRouter_ListDocumentTemplates_EnabledOnlyAndFilters(t *testing.T) {
 		{
 			"template_id":        "retro-template",
 			"scene_key":          "meeting",
-			"scene_name":         "会议纪要",
 			"name":               "复盘模板",
 			"description":        "用于事故复盘",
 			"default_title":      "复盘文档",
@@ -93,10 +107,23 @@ func TestRouter_GetDocumentTemplate(t *testing.T) {
 	}()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("document_template_scenes").Create(map[string]any{
+		"scene_key":          "requirement",
+		"scene_name":         "需求评审",
+		"description":        "",
+		"sort":               1,
+		"is_builtin":         0,
+		"created_by_user_id": nil,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert document template scene failed: %v", err)
+	}
+
 	if err := database.ORM.Table("document_templates").Create(map[string]any{
 		"template_id":        "prd-template",
 		"scene_key":          "requirement",
-		"scene_name":         "需求评审",
 		"name":               "PRD 模板",
 		"description":        "产品需求文档模板",
 		"default_title":      "产品需求文档",

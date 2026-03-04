@@ -21,10 +21,23 @@ func TestRouter_CreateNode_WithTemplateInitializesDocumentAndRevision(t *testing
 	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("document_template_scenes").Create(map[string]any{
+		"scene_key":          "meeting",
+		"scene_name":         "会议纪要",
+		"description":        "",
+		"sort":               1,
+		"is_builtin":         0,
+		"created_by_user_id": ownerUserID,
+		"updated_by_user_id": ownerUserID,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert document template scene failed: %v", err)
+	}
+
 	if err := database.ORM.Table("document_templates").Create(map[string]any{
 		"template_id":        "meeting-template",
 		"scene_key":          "meeting",
-		"scene_name":         "会议纪要",
 		"name":               "会议模板",
 		"description":        "",
 		"default_title":      "会议纪要",

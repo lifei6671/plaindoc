@@ -684,6 +684,42 @@ export interface AdminDocumentTemplateListResult {
   };
 }
 
+export interface AdminDocumentTemplateScene {
+  sceneKey: string;
+  sceneName: string;
+  description: string;
+  sort: number;
+  builtin: boolean;
+  templateCount: number;
+  createdByUserId?: string;
+  updatedByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminDocumentTemplateSceneListInput {
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminDocumentTemplateSceneListResult {
+  items: Array<{
+    sceneKey: string;
+    sceneName: string;
+    description: string;
+    sort: number;
+    builtin: boolean;
+    templateCount: number;
+    updatedAt: string;
+  }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
 export interface AdminTheme {
   themeId: string;
   name: string;
@@ -810,7 +846,14 @@ export interface AdminSearchIndexStatusResult {
   lastRebuildIndexedDocuments: number;
 }
 
-export type AdminAuditModule = "user" | "space" | "document" | "document_template" | "theme" | "system_config";
+export type AdminAuditModule =
+  | "user"
+  | "space"
+  | "document"
+  | "document_template"
+  | "document_template_scene"
+  | "theme"
+  | "system_config";
 export type AdminAuditAction = "create" | "update" | "delete";
 
 export interface AdminAuditLog {
@@ -933,10 +976,24 @@ export interface AdminGateway {
   }): Promise<AdminDocumentImageAssetDeleteResult>;
   listDocumentTemplates(input?: AdminDocumentTemplateListInput): Promise<AdminDocumentTemplateListResult>;
   getDocumentTemplate(templateId: string): Promise<AdminDocumentTemplate>;
+  listDocumentTemplateScenes(input?: AdminDocumentTemplateSceneListInput): Promise<AdminDocumentTemplateSceneListResult>;
+  getDocumentTemplateScene(sceneKey: string): Promise<AdminDocumentTemplateScene>;
+  createDocumentTemplateScene(input: {
+    sceneKey: string;
+    sceneName: string;
+    description?: string;
+    sort?: number;
+  }): Promise<AdminDocumentTemplateScene>;
+  updateDocumentTemplateScene(input: {
+    sceneKey: string;
+    sceneName?: string;
+    description?: string;
+    sort?: number;
+  }): Promise<AdminDocumentTemplateScene>;
+  deleteDocumentTemplateScene(sceneKey: string): Promise<void>;
   createDocumentTemplate(input: {
     templateId: string;
     sceneKey: string;
-    sceneName: string;
     name: string;
     description?: string;
     defaultTitle?: string;
@@ -946,8 +1003,6 @@ export interface AdminGateway {
   }): Promise<AdminDocumentTemplate>;
   updateDocumentTemplate(input: {
     templateId: string;
-    sceneKey?: string;
-    sceneName?: string;
     name?: string;
     description?: string;
     defaultTitle?: string;

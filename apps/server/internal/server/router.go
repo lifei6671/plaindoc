@@ -117,6 +117,7 @@ func newRouter(
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	documentImageAssetRepo := repository.NewGormDocumentImageAssetRepository(db)
 	documentTemplateRepo := repository.NewGormDocumentTemplateRepository(db)
+	documentTemplateSceneRepo := repository.NewGormDocumentTemplateSceneRepository(db)
 	searchAnalyzerDictEntryRepo := repository.NewGormSearchAnalyzerDictEntryRepository(db)
 	themeRepo := repository.NewGormThemeRepository(db)
 	systemConfigRepo := repository.NewGormSystemConfigRepository(db)
@@ -496,10 +497,17 @@ func newRouter(
 		adminSearchAnalyzerHandler := handler.NewAdminSearchAnalyzerHandler(adminSearchAnalyzerService)
 		adminDocumentTemplateService := service.NewAdminDocumentTemplateService(
 			documentTemplateRepo,
+			documentTemplateSceneRepo,
 			adminAccessService,
 			adminAuditService,
 		)
 		adminDocumentTemplateHandler := handler.NewAdminDocumentTemplateHandler(adminDocumentTemplateService)
+		adminDocumentTemplateSceneService := service.NewAdminDocumentTemplateSceneService(
+			documentTemplateSceneRepo,
+			adminAccessService,
+			adminAuditService,
+		)
+		adminDocumentTemplateSceneHandler := handler.NewAdminDocumentTemplateSceneHandler(adminDocumentTemplateSceneService)
 		adminThemeService := service.NewAdminThemeService(themeRepo, adminAccessService, adminAuditService)
 		adminThemeHandler := handler.NewAdminThemeHandler(adminThemeService)
 		dataRetentionCleanupService := service.NewDataRetentionCleanupService(db, systemConfigRepo)
@@ -779,6 +787,47 @@ func newRouter(
 					},
 				),
 				adminDocumentTemplateHandler.DeleteTemplate,
+			)
+			adminAPI.GET(
+				"/document-template-scenes",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminDocumentTemplateSceneHandler.ListScenes,
+			)
+			adminAPI.GET(
+				"/document-template-scenes/:sceneKey",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminDocumentTemplateSceneHandler.GetScene,
+			)
+			adminAPI.POST(
+				"/document-template-scenes",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				adminDocumentTemplateSceneHandler.CreateScene,
+			)
+			adminAPI.PUT(
+				"/document-template-scenes/:sceneKey",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document_template_scene.update",
+						TargetType:    "document_template_scene",
+						TargetIDParam: "sceneKey",
+					},
+				),
+				adminDocumentTemplateSceneHandler.UpdateScene,
+			)
+			adminAPI.DELETE(
+				"/document-template-scenes/:sceneKey",
+				middleware.RequirePlatformAdmin(adminAccessService),
+				middleware.RequireAdminOperationToken(
+					adminOperationTokenService,
+					middleware.AdminOperationTokenBinding{
+						Operation:     "document_template_scene.delete",
+						TargetType:    "document_template_scene",
+						TargetIDParam: "sceneKey",
+					},
+				),
+				adminDocumentTemplateSceneHandler.DeleteScene,
 			)
 
 			// ---- 主题治理（仅平台管理员）----

@@ -952,8 +952,6 @@ type DocumentTemplateDetailRecord struct {
 // UpdateDocumentTemplateParams 文档模板更新参数。
 type UpdateDocumentTemplateParams struct {
 	TemplateID      string
-	SceneKey        *string
-	SceneName       *string
 	Name            *string
 	Description     *string
 	DefaultTitle    *string
@@ -971,6 +969,57 @@ type DocumentTemplateRepository interface {
 	Create(ctx context.Context, template *models.DocumentTemplate) error
 	UpdateByTemplateID(ctx context.Context, params UpdateDocumentTemplateParams) (bool, error)
 	DeleteByTemplateID(ctx context.Context, templateID string) (bool, error)
+}
+
+// ListDocumentTemplateScenesParams 文档模板场景列表查询参数。
+type ListDocumentTemplateScenesParams struct {
+	Keyword string
+	Limit   int
+	Offset  int
+}
+
+// DocumentTemplateSceneSummaryRecord 文档模板场景列表项。
+type DocumentTemplateSceneSummaryRecord struct {
+	SceneKey      string
+	SceneName     string
+	Description   string
+	Sort          int
+	IsBuiltin     bool
+	TemplateCount int64
+	UpdatedAtRaw  string
+}
+
+// DocumentTemplateSceneDetailRecord 文档模板场景详情。
+type DocumentTemplateSceneDetailRecord struct {
+	SceneKey        string
+	SceneName       string
+	Description     string
+	Sort            int
+	IsBuiltin       bool
+	CreatedByUserID *string
+	UpdatedByUserID *string
+	CreatedAtRaw    string
+	UpdatedAtRaw    string
+}
+
+// UpdateDocumentTemplateSceneParams 文档模板场景更新参数。
+type UpdateDocumentTemplateSceneParams struct {
+	SceneKey        string
+	SceneName       *string
+	Description     *string
+	Sort            *int
+	UpdatedByUserID *string
+	UpdatedAt       time.Time
+}
+
+// DocumentTemplateSceneRepository 文档模板场景仓储接口。
+type DocumentTemplateSceneRepository interface {
+	List(ctx context.Context, params ListDocumentTemplateScenesParams) ([]DocumentTemplateSceneSummaryRecord, int64, error)
+	GetBySceneKey(ctx context.Context, sceneKey string) (*DocumentTemplateSceneDetailRecord, error)
+	Create(ctx context.Context, scene *models.DocumentTemplateScene) error
+	UpdateBySceneKey(ctx context.Context, params UpdateDocumentTemplateSceneParams) (bool, error)
+	DeleteBySceneKey(ctx context.Context, sceneKey string) (bool, error)
+	CountTemplatesBySceneKey(ctx context.Context, sceneKey string) (int64, error)
 }
 
 // ThemeRepository 主题仓储最小接口。

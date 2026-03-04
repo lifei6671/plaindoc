@@ -35,10 +35,26 @@ func TestRouter_AdminDocumentTemplate_CRUD(t *testing.T) {
 	})
 
 	t.Run("platform_admin_crud", func(t *testing.T) {
+		createSceneBody, err := json.Marshal(map[string]any{
+			"sceneKey":    "meeting",
+			"sceneName":   "会议纪要",
+			"description": "会议场景",
+			"sort":        1,
+		})
+		if err != nil {
+			t.Fatalf("marshal create scene body failed: %v", err)
+		}
+		createSceneReq := httptest.NewRequest(http.MethodPost, "/api/admin/document-template-scenes", bytes.NewReader(createSceneBody))
+		createSceneReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+		createSceneReq.Header.Set("Content-Type", "application/json")
+		createSceneRec := serve(createSceneReq)
+		if createSceneRec.Code != http.StatusOK {
+			t.Fatalf("expected create scene status 200, got %d body=%s", createSceneRec.Code, createSceneRec.Body.String())
+		}
+
 		createBody, err := json.Marshal(map[string]any{
 			"templateId":   "meeting-template",
 			"sceneKey":     "meeting",
-			"sceneName":    "会议纪要",
 			"name":         "会议模板",
 			"description":  "用于周会",
 			"defaultTitle": "会议纪要",
@@ -177,7 +193,6 @@ func TestRouter_AdminDocumentTemplate_CreateInvalidTemplateID(t *testing.T) {
 	reqBody := []byte(`{
 		"templateId":"_invalid",
 		"sceneKey":"meeting",
-		"sceneName":"会议纪要",
 		"name":"会议模板",
 		"description":"",
 		"defaultTitle":"",

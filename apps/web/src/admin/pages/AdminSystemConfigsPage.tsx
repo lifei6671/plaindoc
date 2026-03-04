@@ -1770,7 +1770,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                 <div>
                   <h3 className="text-base font-semibold text-slate-800">{selectedTab.label}</h3>
                 </div>
-                <AdminToolbarActions>
+                <AdminToolbarActions showGuideLabel={false} className="self-auto" actionsClassName="h-auto">
                   <Button type="button" variant="outline" disabled={loading || saving} onClick={handleResetTemplate}>
                     模板填充
                   </Button>

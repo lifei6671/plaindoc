@@ -57,7 +57,6 @@ type adminDocumentTemplateListResponse struct {
 type createAdminDocumentTemplateRequest struct {
 	TemplateID   string `json:"templateId"`
 	SceneKey     string `json:"sceneKey"`
-	SceneName    string `json:"sceneName"`
 	Name         string `json:"name"`
 	Description  string `json:"description"`
 	DefaultTitle string `json:"defaultTitle"`
@@ -67,8 +66,6 @@ type createAdminDocumentTemplateRequest struct {
 }
 
 type updateAdminDocumentTemplateRequest struct {
-	SceneKey     *string `json:"sceneKey"`
-	SceneName    *string `json:"sceneName"`
 	Name         *string `json:"name"`
 	Description  *string `json:"description"`
 	DefaultTitle *string `json:"defaultTitle"`
@@ -213,7 +210,6 @@ func (h *adminDocumentTemplateHandler) CreateTemplate(c *gin.Context) {
 		RequestID:    response.RequestIDFromContext(c),
 		TemplateID:   req.TemplateID,
 		SceneKey:     req.SceneKey,
-		SceneName:    req.SceneName,
 		Name:         req.Name,
 		Description:  req.Description,
 		DefaultTitle: req.DefaultTitle,
@@ -261,8 +257,6 @@ func (h *adminDocumentTemplateHandler) UpdateTemplate(c *gin.Context) {
 		ActorUserID:  actorUserID,
 		RequestID:    response.RequestIDFromContext(c),
 		TemplateID:   templateID,
-		SceneKey:     req.SceneKey,
-		SceneName:    req.SceneName,
 		Name:         req.Name,
 		Description:  req.Description,
 		DefaultTitle: req.DefaultTitle,

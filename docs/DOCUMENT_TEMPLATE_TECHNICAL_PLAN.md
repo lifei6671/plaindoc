@@ -1,6 +1,6 @@
 # 文档模板（场景模板）技术方案
 
-**文档状态**: Draft（待评审）  
+**文档状态**: In Progress（开发中）  
 **创建日期**: 2026-03-04  
 **适用范围**: `apps/server`、`apps/web`（编辑器、后台管理、数据层）  
 **目标**: 支持“编辑区选择模板应用到文档”，并支持“平台管理员在后台按场景管理模板”。
@@ -36,6 +36,11 @@
      - `apps/web/e2e/admin-document-templates.smoke.spec.ts`
      - `apps/web/e2e/workspace-document-template-create.smoke.spec.ts`
    - 已补充运行文档：`apps/web/e2e/README.md`。
+7. **Phase F 已完成（本次实现）**
+   - 引入独立场景主数据 `document_template_scenes`。
+   - 约束：`sceneKey` 在模板中不可修改；场景被模板引用时禁止删除。
+   - 由于功能未上线，直接移除 `document_templates.scene_name` 字段，模板展示名称统一由场景表提供。
+   - 管理端模板页已接入场景管理（场景 CRUD + 引用保护）与模板创建场景下拉。
 
 ---
 
@@ -66,8 +71,10 @@
 ### 3.1 包含
 
 1. 新增模板数据表与三套数据库迁移。
+2. 新增场景主数据表与三套数据库迁移。
 2. 业务端模板只读接口（编辑器可读取已启用模板）。
 3. 后台模板管理接口（CRUD、启停、排序、审计）。
+4. 后台场景管理接口（CRUD、排序、审计、引用保护）。
 4. 编辑器模板选择弹窗（预览 + 应用）。
 5. 新建文档时可选模板（可空，不影响原流程）。
 
@@ -81,30 +88,50 @@
 
 ## 4. 数据模型与迁移
 
-新增表：`document_templates`
+新增表：
 
-建议字段：
+1. `document_template_scenes`（场景主数据）
+2. `document_templates`（模板，引用场景）
+
+`document_template_scenes` 建议字段：
+
+1. `id`：自增主键。
+2. `scene_key`：场景标识（唯一，如 `meeting`、`weekly-report`）。
+3. `scene_name`：场景名称（如“会议纪要”）。
+4. `description`：场景描述（可空）。
+5. `sort`：场景排序。
+6. `is_builtin`：是否内置。
+7. `created_by_user_id`、`updated_by_user_id`。
+8. `created_at`、`updated_at`。
+
+`document_templates` 建议字段：
 
 1. `id`：自增主键。
 2. `template_id`：模板标识（唯一，程序使用）。
-3. `scene_key`：场景标识（如 `meeting`、`weekly-report`）。
-4. `scene_name`：场景名称（如“会议纪要”）。
-5. `name`：模板名称。
-6. `description`：模板简介。
-7. `default_title`：应用模板时建议标题（可空）。
-8. `content_md`：模板正文（Markdown）。
-9. `sort`：同场景排序。
-10. `is_builtin`：是否内置。
-11. `is_enabled`：是否启用。
-12. `created_by_user_id`、`updated_by_user_id`。
-13. `created_at`、`updated_at`。
+3. `scene_key`：场景标识（外键语义，指向 `document_template_scenes.scene_key`）。
+4. `name`：模板名称。
+5. `description`：模板简介。
+6. `default_title`：应用模板时建议标题（可空）。
+7. `content_md`：模板正文（Markdown）。
+8. `sort`：同场景排序。
+9. `is_builtin`：是否内置。
+10. `is_enabled`：是否启用。
+11. `created_by_user_id`、`updated_by_user_id`。
+12. `created_at`、`updated_at`。
+
+迁移策略（本期）：
+
+1. 创建 `document_template_scenes`。
+2. 从 `document_templates(scene_key, scene_name)` 去重回填场景。
+3. 删除 `document_templates.scene_name`（功能尚未上线，允许直接收敛模型）。
 
 索引与约束：
 
-1. `UNIQUE(template_id)`。
-2. `INDEX(scene_key, is_enabled, sort, updated_at)`。
-3. `INDEX(is_enabled, updated_at)`。
-4. `CHECK(template_id <> '')`、`CHECK(scene_key <> '')`（按方言可用性实现）。
+1. `document_template_scenes.UNIQUE(scene_key)`。
+2. `document_templates.UNIQUE(template_id)`。
+3. `document_templates.INDEX(scene_key, is_enabled, sort, updated_at)`。
+4. `document_templates.INDEX(is_enabled, updated_at)`。
+5. `CHECK(template_id <> '')`、`CHECK(scene_key <> '')`（按方言可用性实现）。
 
 ---
 
@@ -122,15 +149,21 @@
 
 ### 5.2 后台（平台管理员）
 
-1. `GET /api/admin/document-templates`
-2. `POST /api/admin/document-templates`
-3. `PUT /api/admin/document-templates/:templateId`
-4. `DELETE /api/admin/document-templates/:templateId`
+1. 模板：
+   - `GET /api/admin/document-templates`
+   - `POST /api/admin/document-templates`
+   - `PUT /api/admin/document-templates/:templateId`
+   - `DELETE /api/admin/document-templates/:templateId`
+2. 场景：
+   - `GET /api/admin/document-template-scenes`
+   - `POST /api/admin/document-template-scenes`
+   - `PUT /api/admin/document-template-scenes/:sceneKey`
+   - `DELETE /api/admin/document-template-scenes/:sceneKey`
 
 权限策略：
 
 1. 仅 `platform_admin`。
-2. 高风险变更（更新/删除）建议接入后台一次性操作令牌机制。
+2. 高风险变更（更新/删除）接入后台一次性操作令牌机制。
 
 ---
 
@@ -138,7 +171,9 @@
 
 1. `template_id`：`^[a-z0-9][a-z0-9_-]{1,63}$`。
 2. `scene_key`：同样采用可读 key 规范。
-3. `name`、`scene_name` 不可空；`content_md` 可空（允许纯骨架模板）。
+3. `scene_key` 在模板创建后不可修改。
+4. 场景被模板引用时禁止删除。
+5. `name`、`scene_name` 不可空；`content_md` 可空（允许纯骨架模板）。
 4. 删除内置模板：禁止。
 5. 业务端只读取启用模板。
 6. 新建文档时：
@@ -167,22 +202,27 @@
 ### 7.3 后台
 
 1. 新增“模板管理”菜单与页面。
-2. 支持列表、创建、编辑、启停、删除。
+2. 模板创建/编辑不再填写场景名称，改为从场景下拉选择。
+3. 新增“场景管理”能力，支持场景列表、创建、编辑、删除（有引用禁止删除）。
+4. 模板管理继续支持列表、创建、编辑、启停、删除。
 
 ---
 
 ## 8. 安全规范
 
 1. 后台模板治理必须校验管理员身份与角色。
+2. 后台场景治理必须校验管理员身份与角色。
 2. 接口统一参数校验，防止超长/非法输入。
 3. 模板正文长度设置上限（例如 200KB），避免资源滥用。
 4. 模板变更写审计日志（module: `document_template`）。
+5. 场景变更写审计日志（module: `document_template_scene`）。
 
 ---
 
 ## 9. 性能规范
 
 1. 列表查询仅选取必要字段，详情接口再返回 `content_md`。
+2. 模板列表通过 `scene_key` 关联场景表，仅返回必要字段。
 2. 列表接口分页并限制 `pageSize` 上限（例如 100）。
 3. 使用组合索引命中 `scene_key + is_enabled + sort` 查询路径。
 4. 编辑器侧模板列表可做短期内存缓存，减少重复请求。
@@ -211,6 +251,13 @@
 
 1. 回归测试、接口压测、文档补齐。
 
+### Phase F（场景主数据收敛，本次）
+
+1. 场景表迁移、回填、模板表去冗余字段（删除 `scene_name`）。
+2. 后台场景管理 API + 审计。
+3. 模板 API 收敛（模板仅引用 `scene_key`，`sceneKey` 不可修改）。
+4. 管理端模板页接入场景管理与场景下拉选择。
+
 ---
 
 ## 11. 测试清单
@@ -224,7 +271,7 @@
    - 详情 not found 分支。
 3. 后台：
    - 非平台管理员访问拒绝。
-   - CRUD 审计完整。
+   - 模板与场景 CRUD 审计完整。
 4. 创建文档带模板：
    - 文档内容正确初始化。
    - 首版修订内容与文档一致。
@@ -237,7 +284,8 @@
 
 1. 补齐模板“启停后前台可见性联动”E2E。
 2. 补齐“无模板空态引导”E2E。
-3. 补齐“创建后阅读路由可访问性”E2E（需接入可控测试数据的 SSR 校验）。
+3. 补齐“场景删除引用保护”E2E。
+4. 补齐“创建后阅读路由可访问性”E2E（需接入可控测试数据的 SSR 校验）。
 
 ---
 

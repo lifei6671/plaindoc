@@ -17,7 +17,6 @@ const (
 	adminDocumentTemplateDefaultPageSize = 20
 	adminDocumentTemplateMaxPageSize     = 100
 	adminDocumentTemplateMaxKeywordLen   = 64
-	adminDocumentTemplateSceneNameMaxLen = 80
 	adminDocumentTemplateNameMaxLen      = 120
 	adminDocumentTemplateDescMaxLen      = 255
 	adminDocumentTemplateTitleMaxLen     = 120
@@ -81,7 +80,6 @@ type CreateAdminDocumentTemplateInput struct {
 	RequestID    string
 	TemplateID   string
 	SceneKey     string
-	SceneName    string
 	Name         string
 	Description  string
 	DefaultTitle string
@@ -95,8 +93,6 @@ type UpdateAdminDocumentTemplateInput struct {
 	ActorUserID  string
 	RequestID    string
 	TemplateID   string
-	SceneKey     *string
-	SceneName    *string
 	Name         *string
 	Description  *string
 	DefaultTitle *string
@@ -107,21 +103,24 @@ type UpdateAdminDocumentTemplateInput struct {
 
 // AdminDocumentTemplateService 封装管理员文档模板治理能力。
 type AdminDocumentTemplateService struct {
-	documentTemplateRepo repository.DocumentTemplateRepository
-	adminAccessService   *AdminAccessService
-	adminAuditService    *AdminAuditService
+	documentTemplateRepo      repository.DocumentTemplateRepository
+	documentTemplateSceneRepo repository.DocumentTemplateSceneRepository
+	adminAccessService        *AdminAccessService
+	adminAuditService         *AdminAuditService
 }
 
 // NewAdminDocumentTemplateService 创建管理员文档模板治理服务。
 func NewAdminDocumentTemplateService(
 	documentTemplateRepo repository.DocumentTemplateRepository,
+	documentTemplateSceneRepo repository.DocumentTemplateSceneRepository,
 	adminAccessService *AdminAccessService,
 	adminAuditService *AdminAuditService,
 ) *AdminDocumentTemplateService {
 	return &AdminDocumentTemplateService{
-		documentTemplateRepo: documentTemplateRepo,
-		adminAccessService:   adminAccessService,
-		adminAuditService:    adminAuditService,
+		documentTemplateRepo:      documentTemplateRepo,
+		documentTemplateSceneRepo: documentTemplateSceneRepo,
+		adminAccessService:        adminAccessService,
+		adminAuditService:         adminAuditService,
 	}
 }
 
@@ -247,7 +246,7 @@ func (s *AdminDocumentTemplateService) CreateTemplate(
 		err = errcode.MapAdminDocumentTemplateError(err)
 	}()
 
-	if s == nil || s.documentTemplateRepo == nil || s.adminAccessService == nil {
+	if s == nil || s.documentTemplateRepo == nil || s.documentTemplateSceneRepo == nil || s.adminAccessService == nil {
 		return AdminDocumentTemplateRecord{}, errors.New("admin document template service dependencies are nil")
 	}
 	if err := s.ensurePlatformAdminActor(ctx, input.ActorUserID); err != nil {
@@ -262,8 +261,11 @@ func (s *AdminDocumentTemplateService) CreateTemplate(
 	if err != nil {
 		return AdminDocumentTemplateRecord{}, errcode.ErrAdminDocumentTemplateInvalidSceneKey
 	}
-	sceneName, err := normalizeAdminDocumentTemplateSceneName(input.SceneName)
+	_, err = s.documentTemplateSceneRepo.GetBySceneKey(ctx, sceneKey)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AdminDocumentTemplateRecord{}, errcode.ErrAdminDocumentTemplateSceneNotFound
+		}
 		return AdminDocumentTemplateRecord{}, err
 	}
 	name, err := normalizeAdminDocumentTemplateName(input.Name)
@@ -299,7 +301,6 @@ func (s *AdminDocumentTemplateService) CreateTemplate(
 	template := &models.DocumentTemplate{
 		TemplateID:      templateID,
 		SceneKey:        sceneKey,
-		SceneName:       sceneName,
 		Name:            name,
 		Description:     description,
 		DefaultTitle:    defaultTitle,
@@ -329,9 +330,10 @@ func (s *AdminDocumentTemplateService) CreateTemplate(
 		TargetID:   payload.TemplateID,
 		Summary:    "document template created: " + payload.TemplateID,
 		Detail: map[string]any{
-			"sceneKey": payload.SceneKey,
-			"name":     payload.Name,
-			"enabled":  payload.Enabled,
+			"sceneKey":  payload.SceneKey,
+			"sceneName": payload.SceneName,
+			"name":      payload.Name,
+			"enabled":   payload.Enabled,
 		},
 		RequestID: input.RequestID,
 	}); err != nil {
@@ -380,26 +382,6 @@ func (s *AdminDocumentTemplateService) UpdateTemplate(
 		UpdatedByUserID: stringPtr(strings.TrimSpace(input.ActorUserID)),
 	}
 
-	if input.SceneKey != nil {
-		sceneKey, normalizeErr := normalizeAdminDocumentTemplateKey(*input.SceneKey)
-		if normalizeErr != nil {
-			return AdminDocumentTemplateRecord{}, errcode.ErrAdminDocumentTemplateInvalidSceneKey
-		}
-		if sceneKey != strings.TrimSpace(target.SceneKey) {
-			params.SceneKey = &sceneKey
-			changedFields = append(changedFields, "sceneKey")
-		}
-	}
-	if input.SceneName != nil {
-		sceneName, normalizeErr := normalizeAdminDocumentTemplateSceneName(*input.SceneName)
-		if normalizeErr != nil {
-			return AdminDocumentTemplateRecord{}, normalizeErr
-		}
-		if sceneName != strings.TrimSpace(target.SceneName) {
-			params.SceneName = &sceneName
-			changedFields = append(changedFields, "sceneName")
-		}
-	}
 	if input.Name != nil {
 		name, normalizeErr := normalizeAdminDocumentTemplateName(*input.Name)
 		if normalizeErr != nil {
@@ -481,6 +463,7 @@ func (s *AdminDocumentTemplateService) UpdateTemplate(
 		Detail: map[string]any{
 			"changedFields": changedFields,
 			"enabled":       payload.Enabled,
+			"sceneKey":      payload.SceneKey,
 		},
 		RequestID: input.RequestID,
 	}); err != nil {
@@ -577,14 +560,6 @@ func normalizeAdminDocumentTemplateKey(rawKey string) (string, error) {
 		return "", errors.New("invalid key")
 	}
 	return normalized, nil
-}
-
-func normalizeAdminDocumentTemplateSceneName(rawSceneName string) (string, error) {
-	sceneName := strings.TrimSpace(rawSceneName)
-	if sceneName == "" || len([]rune(sceneName)) > adminDocumentTemplateSceneNameMaxLen {
-		return "", errcode.ErrAdminDocumentTemplateInvalidSceneName
-	}
-	return sceneName, nil
 }
 
 func normalizeAdminDocumentTemplateName(rawName string) (string, error) {

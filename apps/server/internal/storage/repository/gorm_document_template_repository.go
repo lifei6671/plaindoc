@@ -77,6 +77,7 @@ func (r *gormDocumentTemplateRepository) List(
 	}
 
 	query := r.db.WithContext(ctx).Table("document_templates AS t")
+	query = query.Joins("LEFT JOIN document_template_scenes AS s ON s.scene_key = t.scene_key")
 	if params.EnabledOnly {
 		query = query.Where("t.is_enabled = ?", true)
 	}
@@ -86,7 +87,7 @@ func (r *gormDocumentTemplateRepository) List(
 	if keyword != "" {
 		searchKeyword := "%" + keyword + "%"
 		query = query.Where(
-			"(LOWER(t.template_id) LIKE ? OR LOWER(t.scene_name) LIKE ? OR LOWER(t.name) LIKE ? OR LOWER(t.description) LIKE ?)",
+			"(LOWER(t.template_id) LIKE ? OR LOWER(COALESCE(s.scene_name, '')) LIKE ? OR LOWER(t.name) LIKE ? OR LOWER(t.description) LIKE ?)",
 			searchKeyword,
 			searchKeyword,
 			searchKeyword,
@@ -104,7 +105,7 @@ func (r *gormDocumentTemplateRepository) List(
 		Select(
 			"t.template_id",
 			"t.scene_key",
-			"t.scene_name",
+			"COALESCE(s.scene_name, '') AS scene_name",
 			"t.name",
 			"t.description",
 			"t.default_title",
@@ -155,7 +156,9 @@ func (r *gormDocumentTemplateRepository) GetByTemplateID(
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	query := r.db.WithContext(ctx).Table("document_templates AS t")
+	query := r.db.WithContext(ctx).
+		Table("document_templates AS t").
+		Joins("LEFT JOIN document_template_scenes AS s ON s.scene_key = t.scene_key")
 	if enabledOnly {
 		query = query.Where("t.is_enabled = ?", true)
 	}
@@ -165,7 +168,7 @@ func (r *gormDocumentTemplateRepository) GetByTemplateID(
 		Select(
 			"t.template_id",
 			"t.scene_key",
-			"t.scene_name",
+			"COALESCE(s.scene_name, '') AS scene_name",
 			"t.name",
 			"t.description",
 			"t.default_title",
@@ -225,12 +228,6 @@ func (r *gormDocumentTemplateRepository) UpdateByTemplateID(
 	}
 
 	updateValues := map[string]any{}
-	if params.SceneKey != nil {
-		updateValues["scene_key"] = strings.ToLower(strings.TrimSpace(*params.SceneKey))
-	}
-	if params.SceneName != nil {
-		updateValues["scene_name"] = strings.TrimSpace(*params.SceneName)
-	}
 	if params.Name != nil {
 		updateValues["name"] = strings.TrimSpace(*params.Name)
 	}

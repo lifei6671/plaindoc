@@ -19,6 +19,7 @@ type AdminDocumentTemplateErrorTargets struct {
 	InvalidSort         error
 	InvalidContent      error
 	InvalidKeyword      error
+	SceneNotFound       error
 	AlreadyExists       error
 	NoChanges           error
 	NotFound            error
@@ -52,6 +53,7 @@ var defaultAdminDocumentTemplateErrorTargets = AdminDocumentTemplateErrorTargets
 	InvalidSort:         ErrAdminDocumentTemplateInvalidSort,
 	InvalidContent:      ErrAdminDocumentTemplateInvalidContent,
 	InvalidKeyword:      ErrAdminDocumentTemplateInvalidKeyword,
+	SceneNotFound:       ErrAdminDocumentTemplateSceneNotFound,
 	AlreadyExists:       ErrAdminDocumentTemplateAlreadyExists,
 	NoChanges:           ErrAdminDocumentTemplateNoChanges,
 	NotFound:            ErrAdminDocumentTemplateNotFound,
@@ -126,6 +128,12 @@ func MapAdminDocumentTemplateError(err error, targets ...AdminDocumentTemplateEr
 			Status:  http.StatusBadRequest,
 			Code:    response.CodeInvalidRequest,
 			Message: "keyword is invalid",
+		},
+		AppErrorMapping{
+			Target:  resolvedTargets.SceneNotFound,
+			Status:  http.StatusBadRequest,
+			Code:    response.CodeInvalidRequest,
+			Message: "scene not found",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.AlreadyExists,

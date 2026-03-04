@@ -21,12 +21,13 @@ const (
 type AdminAuditModule string
 
 const (
-	AdminAuditModuleUser         AdminAuditModule = "user"
-	AdminAuditModuleSpace        AdminAuditModule = "space"
-	AdminAuditModuleDocument     AdminAuditModule = "document"
-	AdminAuditModuleTemplate     AdminAuditModule = "document_template"
-	AdminAuditModuleTheme        AdminAuditModule = "theme"
-	AdminAuditModuleSystemConfig AdminAuditModule = "system_config"
+	AdminAuditModuleUser          AdminAuditModule = "user"
+	AdminAuditModuleSpace         AdminAuditModule = "space"
+	AdminAuditModuleDocument      AdminAuditModule = "document"
+	AdminAuditModuleTemplate      AdminAuditModule = "document_template"
+	AdminAuditModuleTemplateScene AdminAuditModule = "document_template_scene"
+	AdminAuditModuleTheme         AdminAuditModule = "theme"
+	AdminAuditModuleSystemConfig  AdminAuditModule = "system_config"
 )
 
 // AdminAuditAction 审计动作。
@@ -39,12 +40,13 @@ const (
 )
 
 var validAdminAuditModules = map[string]struct{}{
-	string(AdminAuditModuleUser):         {},
-	string(AdminAuditModuleSpace):        {},
-	string(AdminAuditModuleDocument):     {},
-	string(AdminAuditModuleTemplate):     {},
-	string(AdminAuditModuleTheme):        {},
-	string(AdminAuditModuleSystemConfig): {},
+	string(AdminAuditModuleUser):          {},
+	string(AdminAuditModuleSpace):         {},
+	string(AdminAuditModuleDocument):      {},
+	string(AdminAuditModuleTemplate):      {},
+	string(AdminAuditModuleTemplateScene): {},
+	string(AdminAuditModuleTheme):         {},
+	string(AdminAuditModuleSystemConfig):  {},
 }
 
 var validAdminAuditActions = map[string]struct{}{

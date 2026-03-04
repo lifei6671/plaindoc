@@ -21,15 +21,23 @@ interface AdminToolbarActionsProps {
   children: ReactNode;
   className?: string;
   actionsClassName?: string;
+  showGuideLabel?: boolean;
 }
 
-export function AdminToolbarActions({ children, className, actionsClassName }: AdminToolbarActionsProps) {
+export function AdminToolbarActions({
+  children,
+  className,
+  actionsClassName,
+  showGuideLabel = true
+}: AdminToolbarActionsProps) {
   return (
     <div className={cn("space-y-1.5 self-start", className)}>
-      <span aria-hidden="true" className="invisible block text-xs font-semibold tracking-wide text-slate-600">
-        操作
-      </span>
-      <div className={cn("flex h-9 flex-wrap items-center gap-2", actionsClassName)}>{children}</div>
+      {showGuideLabel ? (
+        <span aria-hidden="true" className="invisible block text-xs font-semibold tracking-wide text-slate-600">
+          操作
+        </span>
+      ) : null}
+      <div className={cn("flex h-9 flex-wrap items-center gap-2 [&>*]:shrink-0", actionsClassName)}>{children}</div>
     </div>
   );
 }

@@ -475,7 +475,7 @@ export function AdminSearchAnalyzersPage({ dataGateway }: AdminSearchAnalyzersPa
                 <div>
                   <h3 className="text-base font-semibold text-slate-800">{selectedSection.label}</h3>
                 </div>
-                <AdminToolbarActions className="space-y-0">
+                <AdminToolbarActions showGuideLabel={false} className="self-auto" actionsClassName="h-auto">
                   {(selectedSectionKey === "status" || selectedSectionKey === "dictionary") ? (
                     <Button type="button" variant="outline" size="sm" disabled={loadingAnalyzers || loadingDict} onClick={handleRefresh}>
                       {loadingAnalyzers || loadingDict ? <LoaderCircle className="mr-1 animate-spin" size={14} /> : <RefreshCw className="mr-1" size={14} />}

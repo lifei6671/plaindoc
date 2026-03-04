@@ -27,6 +27,10 @@ vi.mock("../../components/ui/toast", () => {
 });
 
 describe("AdminDocumentTemplatesPage", () => {
+  const switchToTemplateMenu = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "模板管理" }));
+  };
+
   beforeEach(() => {
     confirmMock.mockReset();
     promptMock.mockReset();
@@ -34,6 +38,20 @@ describe("AdminDocumentTemplatesPage", () => {
   });
 
   it("creates template from prompt result and refreshes list", async () => {
+    const listDocumentTemplateScenes = vi.fn().mockResolvedValue({
+      items: [
+        {
+          sceneKey: "meeting",
+          sceneName: "会议",
+          description: "",
+          sort: 0,
+          builtin: false,
+          templateCount: 0,
+          updatedAt: "2026-03-04T00:00:00Z"
+        }
+      ],
+      pagination: { page: 1, pageSize: 200, total: 1 }
+    });
     const listDocumentTemplates = vi
       .fn()
       .mockResolvedValueOnce({
@@ -74,7 +92,6 @@ describe("AdminDocumentTemplatesPage", () => {
     promptMock.mockResolvedValue({
       templateId: " meeting-template ",
       sceneKey: " meeting ",
-      sceneName: " 会议 ",
       name: " 会议模板 ",
       description: " 描述 ",
       defaultTitle: " 默认标题 ",
@@ -85,6 +102,7 @@ describe("AdminDocumentTemplatesPage", () => {
 
     const dataGateway = {
       admin: {
+        listDocumentTemplateScenes,
         listDocumentTemplates,
         createDocumentTemplate
       }
@@ -93,6 +111,8 @@ describe("AdminDocumentTemplatesPage", () => {
     const user = userEvent.setup();
     render(<AdminDocumentTemplatesPage dataGateway={dataGateway} />);
 
+    await screen.findByText("meeting");
+    await switchToTemplateMenu(user);
     await screen.findByText("暂无模板");
     await user.click(screen.getByRole("button", { name: "新建模板" }));
 
@@ -103,7 +123,6 @@ describe("AdminDocumentTemplatesPage", () => {
     expect(createDocumentTemplate).toHaveBeenCalledWith({
       templateId: "meeting-template",
       sceneKey: "meeting",
-      sceneName: "会议",
       name: "会议模板",
       description: "描述",
       defaultTitle: "默认标题",
@@ -116,6 +135,20 @@ describe("AdminDocumentTemplatesPage", () => {
   });
 
   it("edits template after loading detail", async () => {
+    const listDocumentTemplateScenes = vi.fn().mockResolvedValue({
+      items: [
+        {
+          sceneKey: "report",
+          sceneName: "报告",
+          description: "",
+          sort: 0,
+          builtin: false,
+          templateCount: 1,
+          updatedAt: "2026-03-04T00:00:00Z"
+        }
+      ],
+      pagination: { page: 1, pageSize: 200, total: 1 }
+    });
     const listDocumentTemplates = vi.fn().mockResolvedValue({
       items: [
         {
@@ -162,8 +195,6 @@ describe("AdminDocumentTemplatesPage", () => {
       updatedAt: "2026-03-04T00:00:00Z"
     });
     promptMock.mockResolvedValue({
-      sceneKey: "report",
-      sceneName: "报告",
       name: "周报模板（新）",
       description: "新描述",
       defaultTitle: "周报",
@@ -174,6 +205,7 @@ describe("AdminDocumentTemplatesPage", () => {
 
     const dataGateway = {
       admin: {
+        listDocumentTemplateScenes,
         listDocumentTemplates,
         getDocumentTemplate,
         updateDocumentTemplate
@@ -183,6 +215,7 @@ describe("AdminDocumentTemplatesPage", () => {
     const user = userEvent.setup();
     render(<AdminDocumentTemplatesPage dataGateway={dataGateway} />);
 
+    await switchToTemplateMenu(user);
     const templateName = await screen.findByText("周报模板");
     const row = templateName.closest("tr");
     expect(row).not.toBeNull();
@@ -195,8 +228,6 @@ describe("AdminDocumentTemplatesPage", () => {
     });
     expect(updateDocumentTemplate).toHaveBeenCalledWith({
       templateId: "tpl-weekly",
-      sceneKey: "report",
-      sceneName: "报告",
       name: "周报模板（新）",
       description: "新描述",
       defaultTitle: "周报",
@@ -208,6 +239,20 @@ describe("AdminDocumentTemplatesPage", () => {
   });
 
   it("deletes template after confirm", async () => {
+    const listDocumentTemplateScenes = vi.fn().mockResolvedValue({
+      items: [
+        {
+          sceneKey: "meeting",
+          sceneName: "会议",
+          description: "",
+          sort: 0,
+          builtin: false,
+          templateCount: 1,
+          updatedAt: "2026-03-04T00:00:00Z"
+        }
+      ],
+      pagination: { page: 1, pageSize: 200, total: 1 }
+    });
     const listDocumentTemplates = vi.fn().mockResolvedValue({
       items: [
         {
@@ -230,6 +275,7 @@ describe("AdminDocumentTemplatesPage", () => {
 
     const dataGateway = {
       admin: {
+        listDocumentTemplateScenes,
         listDocumentTemplates,
         deleteDocumentTemplate
       }
@@ -238,6 +284,7 @@ describe("AdminDocumentTemplatesPage", () => {
     const user = userEvent.setup();
     render(<AdminDocumentTemplatesPage dataGateway={dataGateway} />);
 
+    await switchToTemplateMenu(user);
     const templateName = await screen.findByText("会议模板");
     const row = templateName.closest("tr");
     expect(row).not.toBeNull();
@@ -251,6 +298,20 @@ describe("AdminDocumentTemplatesPage", () => {
   });
 
   it("disables actions for builtin template", async () => {
+    const listDocumentTemplateScenes = vi.fn().mockResolvedValue({
+      items: [
+        {
+          sceneKey: "meeting",
+          sceneName: "会议",
+          description: "",
+          sort: 0,
+          builtin: true,
+          templateCount: 1,
+          updatedAt: "2026-03-04T00:00:00Z"
+        }
+      ],
+      pagination: { page: 1, pageSize: 200, total: 1 }
+    });
     const listDocumentTemplates = vi.fn().mockResolvedValue({
       items: [
         {
@@ -271,12 +332,15 @@ describe("AdminDocumentTemplatesPage", () => {
 
     const dataGateway = {
       admin: {
+        listDocumentTemplateScenes,
         listDocumentTemplates
       }
     } as unknown as DataGateway;
 
+    const user = userEvent.setup();
     render(<AdminDocumentTemplatesPage dataGateway={dataGateway} />);
 
+    await switchToTemplateMenu(user);
     const templateName = await screen.findByText("内置模板");
     const row = templateName.closest("tr");
     expect(row).not.toBeNull();
@@ -288,6 +352,29 @@ describe("AdminDocumentTemplatesPage", () => {
   });
 
   it("searches, refreshes and resets with expected keyword", async () => {
+    const listDocumentTemplateScenes = vi.fn().mockResolvedValue({
+      items: [
+        {
+          sceneKey: "meeting",
+          sceneName: "会议",
+          description: "",
+          sort: 0,
+          builtin: false,
+          templateCount: 1,
+          updatedAt: "2026-03-04T00:00:00Z"
+        },
+        {
+          sceneKey: "report",
+          sceneName: "报告",
+          description: "",
+          sort: 10,
+          builtin: false,
+          templateCount: 1,
+          updatedAt: "2026-03-04T00:00:00Z"
+        }
+      ],
+      pagination: { page: 1, pageSize: 200, total: 2 }
+    });
     const listDocumentTemplates = vi.fn().mockImplementation(async (input?: { keyword?: string }) => {
       const keyword = (input?.keyword ?? "").trim();
       if (keyword === "meeting") {
@@ -342,6 +429,7 @@ describe("AdminDocumentTemplatesPage", () => {
 
     const dataGateway = {
       admin: {
+        listDocumentTemplateScenes,
         listDocumentTemplates
       }
     } as unknown as DataGateway;
@@ -349,6 +437,7 @@ describe("AdminDocumentTemplatesPage", () => {
     const user = userEvent.setup();
     render(<AdminDocumentTemplatesPage dataGateway={dataGateway} />);
 
+    await switchToTemplateMenu(user);
     await screen.findByText("周报模板");
     expect(listDocumentTemplates).toHaveBeenNthCalledWith(1, {
       keyword: "",

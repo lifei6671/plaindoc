@@ -11,6 +11,9 @@ import {
   type AdminDocumentImageAssetListInput,
   type AdminDocumentImageAssetListResult,
   type AdminDocumentTemplate,
+  type AdminDocumentTemplateScene,
+  type AdminDocumentTemplateSceneListInput,
+  type AdminDocumentTemplateSceneListResult,
   type AdminDocumentTemplateListInput,
   type AdminDocumentTemplateListResult,
   type AdminDocumentListInput,
@@ -1727,10 +1730,101 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
       return request<AdminDocumentTemplate>(`/admin/document-templates/${encodeURIComponent(templateID)}`);
     },
+    async listDocumentTemplateScenes(input: AdminDocumentTemplateSceneListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/admin/document-template-scenes?${queryText}` : "/admin/document-template-scenes";
+      return request<AdminDocumentTemplateSceneListResult>(path);
+    },
+    async getDocumentTemplateScene(sceneKey: string) {
+      const normalizedSceneKey = sceneKey.trim();
+      if (!normalizedSceneKey) {
+        throw new Error("场景标识不能为空");
+      }
+      return request<AdminDocumentTemplateScene>(`/admin/document-template-scenes/${encodeURIComponent(normalizedSceneKey)}`);
+    },
+    async createDocumentTemplateScene(input: {
+      sceneKey: string;
+      sceneName: string;
+      description?: string;
+      sort?: number;
+    }) {
+      const sceneKey = input.sceneKey.trim();
+      if (!sceneKey) {
+        throw new Error("场景标识不能为空");
+      }
+      const sceneName = input.sceneName.trim();
+      if (!sceneName) {
+        throw new Error("场景名称不能为空");
+      }
+      return request<AdminDocumentTemplateScene>("/admin/document-template-scenes", {
+        method: "POST",
+        body: JSON.stringify({
+          sceneKey,
+          sceneName,
+          description: input.description ?? "",
+          sort: typeof input.sort === "number" && Number.isFinite(input.sort) ? Math.trunc(input.sort) : 0
+        })
+      });
+    },
+    async updateDocumentTemplateScene(input: {
+      sceneKey: string;
+      sceneName?: string;
+      description?: string;
+      sort?: number;
+    }) {
+      const sceneKey = input.sceneKey.trim();
+      if (!sceneKey) {
+        throw new Error("场景标识不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document_template_scene.update",
+        targetType: "document_template_scene",
+        targetId: sceneKey
+      });
+      const payload: Record<string, unknown> = {};
+      if (typeof input.sceneName === "string") {
+        payload.sceneName = input.sceneName.trim();
+      }
+      if (typeof input.description === "string") {
+        payload.description = input.description;
+      }
+      if (typeof input.sort === "number" && Number.isFinite(input.sort)) {
+        payload.sort = Math.trunc(input.sort);
+      }
+      return request<AdminDocumentTemplateScene>(`/admin/document-template-scenes/${encodeURIComponent(sceneKey)}`, {
+        method: "PUT",
+        headers: buildAdminOperationTokenHeaders(operationToken),
+        body: JSON.stringify(payload)
+      });
+    },
+    async deleteDocumentTemplateScene(sceneKey: string) {
+      const normalizedSceneKey = sceneKey.trim();
+      if (!normalizedSceneKey) {
+        throw new Error("场景标识不能为空");
+      }
+      const operationToken = await issueAdminOperationToken({
+        operation: "document_template_scene.delete",
+        targetType: "document_template_scene",
+        targetId: normalizedSceneKey
+      });
+      await request<void>(`/admin/document-template-scenes/${encodeURIComponent(normalizedSceneKey)}`, {
+        method: "DELETE",
+        headers: buildAdminOperationTokenHeaders(operationToken)
+      });
+    },
     async createDocumentTemplate(input: {
       templateId: string;
       sceneKey: string;
-      sceneName: string;
       name: string;
       description?: string;
       defaultTitle?: string;
@@ -1746,10 +1840,6 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (!sceneKey) {
         throw new Error("场景标识不能为空");
       }
-      const sceneName = input.sceneName.trim();
-      if (!sceneName) {
-        throw new Error("场景名称不能为空");
-      }
       const name = input.name.trim();
       if (!name) {
         throw new Error("模板名称不能为空");
@@ -1760,7 +1850,6 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         body: JSON.stringify({
           templateId: templateID,
           sceneKey,
-          sceneName,
           name,
           description: input.description ?? "",
           defaultTitle: input.defaultTitle ?? "",
@@ -1772,8 +1861,6 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     },
     async updateDocumentTemplate(input: {
       templateId: string;
-      sceneKey?: string;
-      sceneName?: string;
       name?: string;
       description?: string;
       defaultTitle?: string;
@@ -1791,12 +1878,6 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         targetId: templateID
       });
       const payload: Record<string, unknown> = {};
-      if (typeof input.sceneKey === "string") {
-        payload.sceneKey = input.sceneKey.trim();
-      }
-      if (typeof input.sceneName === "string") {
-        payload.sceneName = input.sceneName.trim();
-      }
       if (typeof input.name === "string") {
         payload.name = input.name.trim();
       }
