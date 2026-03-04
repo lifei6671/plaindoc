@@ -18,23 +18,27 @@
     {{ template "youtube_sidebar" . }}
 
     <main class="yt-main">
-      <header class="yt-page-header">
-        <p class="yt-page-kicker">For You</p>
-        <h1 class="yt-page-title">推荐空间流</h1>
-        <p class="yt-page-subtitle">快速浏览你可访问的文档空间。</p>
-      </header>
+      <div class="yt-main-content">
+        <header class="yt-page-header">
+          <p class="yt-page-kicker">For You</p>
+          <h1 class="yt-page-title">推荐空间流</h1>
+          <p class="yt-page-subtitle">快速浏览你可访问的文档空间。</p>
+        </header>
 
-      {{ template "youtube_category_chips" . }}
+        {{ template "youtube_category_chips" . }}
 
-      <section class="yt-grid" aria-label="首页空间列表">
-        {{ if .Spaces }}
-          {{ range .Spaces }}
-            {{ template "youtube_space_card" . }}
+        <section class="yt-grid" aria-label="首页空间列表">
+          {{ if .Spaces }}
+            {{ range .Spaces }}
+              {{ template "youtube_space_card" . }}
+            {{ end }}
+          {{ else }}
+            <div class="yt-empty">当前暂无可见空间</div>
           {{ end }}
-        {{ else }}
-          <div class="yt-empty">当前暂无可见空间</div>
-        {{ end }}
-      </section>
+        </section>
+      </div>
+
+      {{ template "youtube_footer" . }}
     </main>
   </div>
   <script src="/assets/home.js?v=20260224" defer></script>

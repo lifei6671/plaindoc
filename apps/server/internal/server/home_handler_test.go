@@ -350,6 +350,35 @@ func TestRouter_HomeSearchEnabled_ShowsSearchBoxAndResults(t *testing.T) {
 	}
 }
 
+func TestRouter_HomePages_RenderFooterWithSiteFilingNumber(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	seedHomepageSiteConfig(t, database, "沪ICP备2026000001号", "https://beian.miit.gov.cn/")
+
+	paths := []string{"/", "/explore/all", "/search"}
+	for _, path := range paths {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := serve(req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "一个适合中小团队文档在线管理系统") {
+			t.Fatalf("expected footer contains site description on %s, body=%s", path, body)
+		}
+		if !strings.Contains(body, "备案号：") || !strings.Contains(body, "沪ICP备2026000001号") {
+			t.Fatalf("expected footer contains filing number on %s, body=%s", path, body)
+		}
+		if !strings.Contains(body, "https://beian.miit.gov.cn/") {
+			t.Fatalf("expected footer filing link exists on %s, body=%s", path, body)
+		}
+	}
+}
+
 func TestRouter_HomeLogoutRedirectsAndClearsCookie(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
@@ -507,5 +536,21 @@ func seedHomepageSearchConfig(t *testing.T, database *storage.Database) {
 		"updated_at":         now,
 	}).Error; err != nil {
 		t.Fatalf("insert homepage search config failed: %v", err)
+	}
+}
+
+func seedHomepageSiteConfig(t *testing.T, database *storage.Database, filingNumber string, filingLink string) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "site",
+		"config_value_json":  `{"allowRegistration":true,"defaultSpaceVisibility":"member","filingNumber":"` + filingNumber + `","filingLink":"` + filingLink + `"}`,
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert homepage site config failed: %v", err)
 	}
 }

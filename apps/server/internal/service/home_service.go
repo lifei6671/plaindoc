@@ -15,11 +15,14 @@ import (
 
 const (
 	HomepageAnonymousCacheConfigKey = "homepage.ssr.anonymous_cache"
+	homepageSiteConfigKey           = "site"
 	homepageDefaultPageSize         = 20
 	homepageMaxPageSize             = 200
 	homepageDefaultMaxAgeSeconds    = 60
 	homepageDefaultSMaxAgeSeconds   = 300
 	homepageDefaultSWRSeconds       = 60
+	homepageDefaultSiteName         = "PlainDoc"
+	homepageDefaultSiteDescription  = "一个适合中小团队文档在线管理系统"
 )
 
 // HomepageQueryInput 首页/分类页查询参数。
@@ -67,12 +70,21 @@ type HomepagePageRecord struct {
 	ActiveCategory   string
 	Pagination       HomepagePagination
 	CacheControl     string
+	SiteName         string
+	SiteDescription  string
+	FilingNumber     string
+	FilingLink       string
 }
 
 type homepageAnonymousCacheConfig struct {
 	MaxAgeSeconds               int `json:"maxAgeSeconds"`
 	SMaxAgeSeconds              int `json:"sMaxAgeSeconds"`
 	StaleWhileRevalidateSeconds int `json:"staleWhileRevalidateSeconds"`
+}
+
+type homepageSiteConfig struct {
+	FilingNumber string `json:"filingNumber"`
+	FilingLink   string `json:"filingLink"`
 }
 
 // HomeService 封装首页/分类页查询与缓存策略。
@@ -129,8 +141,14 @@ func (s *HomeService) GetPage(ctx context.Context, input HomepageQueryInput) (Ho
 			PageSize: pageSize,
 			Total:    total,
 		},
-		CacheControl: "private, no-store, max-age=0",
+		CacheControl:    "private, no-store, max-age=0",
+		SiteName:        homepageDefaultSiteName,
+		SiteDescription: homepageDefaultSiteDescription,
 	}
+
+	siteConfig := s.resolveHomepageSiteConfig(ctx)
+	result.FilingNumber = strings.TrimSpace(siteConfig.FilingNumber)
+	result.FilingLink = strings.TrimSpace(siteConfig.FilingLink)
 
 	categoryNameByID := make(map[string]string, len(categories))
 	for _, item := range categories {
@@ -227,6 +245,29 @@ func (s *HomeService) resolveAnonymousCacheControl(ctx context.Context) string {
 	)
 }
 
+func (s *HomeService) resolveHomepageSiteConfig(ctx context.Context) homepageSiteConfig {
+	config := homepageSiteConfig{}
+	if s == nil || s.systemConfigRepo == nil {
+		return config
+	}
+
+	item, err := s.systemConfigRepo.GetByConfigKey(ctx, homepageSiteConfigKey)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return config
+		}
+		return config
+	}
+	if item == nil {
+		return config
+	}
+
+	if err := decodeHomepageSiteConfig(item.ConfigValueJSON, &config); err != nil {
+		return homepageSiteConfig{}
+	}
+	return config
+}
+
 func decodeHomepageAnonymousCacheConfig(
 	rawJSON string,
 	target *homepageAnonymousCacheConfig,
@@ -251,6 +292,26 @@ func decodeHomepageAnonymousCacheConfig(
 		payload.StaleWhileRevalidateSeconds,
 		homepageDefaultSWRSeconds,
 	)
+	return nil
+}
+
+func decodeHomepageSiteConfig(rawJSON string, target *homepageSiteConfig) error {
+	if target == nil {
+		return errors.New("homepage site config target is nil")
+	}
+
+	trimmed := strings.TrimSpace(rawJSON)
+	if trimmed == "" {
+		return nil
+	}
+
+	var payload homepageSiteConfig
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return err
+	}
+
+	target.FilingNumber = strings.TrimSpace(payload.FilingNumber)
+	target.FilingLink = strings.TrimSpace(payload.FilingLink)
 	return nil
 }
 

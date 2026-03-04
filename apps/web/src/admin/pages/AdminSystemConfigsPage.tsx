@@ -66,6 +66,8 @@ type DataRetentionCleanupTable =
 interface SiteSystemConfigValue {
   allowRegistration: boolean;
   defaultSpaceVisibility: SpaceVisibility;
+  filingNumber: string;
+  filingLink: string;
 }
 
 interface EditorSystemConfigValue {
@@ -384,7 +386,9 @@ const EMAIL_SECRET_MASK = "********";
 
 const SITE_TEMPLATE: SiteSystemConfigValue = {
   allowRegistration: true,
-  defaultSpaceVisibility: "member"
+  defaultSpaceVisibility: "member",
+  filingNumber: "",
+  filingLink: "https://beian.miit.gov.cn/"
 };
 
 const EDITOR_TEMPLATE: EditorSystemConfigValue = {
@@ -652,7 +656,9 @@ function parseSiteConfig(value: unknown): SiteSystemConfigValue {
 
   return {
     allowRegistration,
-    defaultSpaceVisibility
+    defaultSpaceVisibility,
+    filingNumber: parseString(payload.filingNumber, SITE_TEMPLATE.filingNumber),
+    filingLink: parseString(payload.filingLink, SITE_TEMPLATE.filingLink)
   };
 }
 
@@ -1411,7 +1417,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       case "site":
         return {
           allowRegistration: siteDraft.allowRegistration,
-          defaultSpaceVisibility: siteDraft.defaultSpaceVisibility
+          defaultSpaceVisibility: siteDraft.defaultSpaceVisibility,
+          filingNumber: siteDraft.filingNumber,
+          filingLink: siteDraft.filingLink
         };
       case "editor":
         return {
@@ -1910,6 +1918,46 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             ))}
                           </SelectContent>
                         </Select>
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">备案号</span>
+                        <Input
+                          type="text"
+                          maxLength={128}
+                          value={siteDraft.filingNumber}
+                          onChange={(event) => {
+                            setSiteDraft((previous) => ({
+                              ...previous,
+                              filingNumber: event.target.value
+                            }));
+                            markDirty("site");
+                          }}
+                          placeholder="例如：沪ICP备2026000001号"
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">
+                          将展示在首页、分类页、搜索页底部 Footer。
+                        </p>
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">备案跳转链接</span>
+                        <Input
+                          type="url"
+                          maxLength={512}
+                          value={siteDraft.filingLink}
+                          onChange={(event) => {
+                            setSiteDraft((previous) => ({
+                              ...previous,
+                              filingLink: event.target.value
+                            }));
+                            markDirty("site");
+                          }}
+                          placeholder="https://beian.miit.gov.cn/"
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">
+                          Footer 中备案号会以 a 标签渲染并跳转到该链接，默认工信部备案网站。
+                        </p>
                       </label>
                     </div>
                   </div>

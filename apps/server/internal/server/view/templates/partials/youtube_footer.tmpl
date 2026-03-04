@@ -1,0 +1,15 @@
+{{ define "youtube_footer" }}
+<footer class="yt-footer" role="contentinfo" aria-label="站点信息">
+  <div class="yt-footer-main">
+    <p class="yt-footer-site">{{ if .SiteName }}{{ .SiteName }}{{ else }}PlainDoc{{ end }}</p>
+    <p class="yt-footer-desc">
+      {{ if .SiteDescription }}{{ .SiteDescription }}{{ else }}一个适合中小团队文档在线管理系统{{ end }}
+    </p>
+  </div>
+  <p class="yt-footer-filing">
+    {{ if .FilingNumber }}
+      <a href="{{ if .FilingLink }}{{ .FilingLink }}{{ else }}https://beian.miit.gov.cn/{{ end }}" target="_blank" rel="noopener noreferrer">{{ .FilingNumber }}</a>
+    {{ end }}
+  </p>
+</footer>
+{{ end }}

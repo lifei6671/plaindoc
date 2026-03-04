@@ -2009,7 +2009,16 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<AdminSystemConfig[]>("/admin/system-configs");
     },
     async upsertSystemConfig(input: {
-      configKey: "site" | "editor" | "security" | "search" | "auth" | "image-hosting" | "sitemap" | "data-retention";
+      configKey:
+        | "site"
+        | "editor"
+        | "security"
+        | "search"
+        | "auth"
+        | "email"
+        | "image-hosting"
+        | "sitemap"
+        | "data-retention";
       value: Record<string, unknown>;
       expectedVersion?: number;
     }) {

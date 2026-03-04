@@ -416,6 +416,9 @@ type HomePageViewData struct {
 	Description          string
 	CanonicalURL         string
 	SiteName             string
+	SiteDescription      string
+	FilingNumber         string
+	FilingLink           string
 	IsExplore            bool
 	IsSearch             bool
 	IsAuthenticated      bool

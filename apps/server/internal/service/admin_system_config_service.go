@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -786,6 +787,8 @@ func validateSiteConfig(payload map[string]any) error {
 	requiredKeys := map[string]struct{}{
 		"allowRegistration":      {},
 		"defaultSpaceVisibility": {},
+		"filingNumber":           {},
+		"filingLink":             {},
 	}
 	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
 		return err
@@ -801,6 +804,33 @@ func validateSiteConfig(payload map[string]any) error {
 	}
 	if !models.IsValidVisibility(models.Visibility(defaultVisibility)) {
 		return fmt.Errorf("defaultSpaceVisibility must be public/authenticated/member")
+	}
+	filingNumber, hasFilingNumber, err := getOptionalString(payload, "filingNumber")
+	if err != nil {
+		return err
+	}
+	if hasFilingNumber && len([]rune(filingNumber)) > 128 {
+		return fmt.Errorf("filingNumber must be at most 128 characters")
+	}
+	filingLink, hasFilingLink, err := getOptionalString(payload, "filingLink")
+	if err != nil {
+		return err
+	}
+	if hasFilingLink && len([]rune(filingLink)) > 512 {
+		return fmt.Errorf("filingLink must be at most 512 characters")
+	}
+	if hasFilingLink && filingLink != "" {
+		parsedURL, parseErr := url.Parse(filingLink)
+		if parseErr != nil || parsedURL == nil {
+			return fmt.Errorf("filingLink must be valid http/https URL")
+		}
+		scheme := strings.ToLower(strings.TrimSpace(parsedURL.Scheme))
+		if scheme != "http" && scheme != "https" {
+			return fmt.Errorf("filingLink must be valid http/https URL")
+		}
+		if strings.TrimSpace(parsedURL.Host) == "" {
+			return fmt.Errorf("filingLink must be valid http/https URL")
+		}
 	}
 
 	return nil

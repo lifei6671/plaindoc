@@ -2103,7 +2103,7 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	platformCreateReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/site",
-		bytes.NewReader([]byte(`{"value":{"allowRegistration":true,"defaultSpaceVisibility":"member"}}`)),
+		bytes.NewReader([]byte(`{"value":{"allowRegistration":true,"defaultSpaceVisibility":"member","filingNumber":"京ICP备2026000001号","filingLink":"https://beian.miit.gov.cn/"}}`)),
 	)
 	platformCreateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformCreateReq.Header.Set("Content-Type", "application/json")
@@ -2145,7 +2145,7 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	platformUpdateReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/site",
-		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"allowRegistration":false,"defaultSpaceVisibility":"authenticated"}}`)),
+		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"allowRegistration":false,"defaultSpaceVisibility":"authenticated","filingNumber":"京ICP备2026000002号","filingLink":"https://beian.miit.gov.cn/"}}`)),
 	)
 	platformUpdateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformUpdateReq.Header.Set("Content-Type", "application/json")
@@ -2176,7 +2176,7 @@ func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	platformConflictReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/site",
-		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"allowRegistration":true,"defaultSpaceVisibility":"member"}}`)),
+		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"allowRegistration":true,"defaultSpaceVisibility":"member","filingNumber":"京ICP备2026000003号","filingLink":"https://beian.miit.gov.cn/"}}`)),
 	)
 	platformConflictReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	platformConflictReq.Header.Set("Content-Type", "application/json")
