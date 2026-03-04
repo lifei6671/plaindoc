@@ -116,6 +116,7 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 		ID                  int64   `gorm:"column:id"`
 		ImageAssetID        string  `gorm:"column:image_asset_id"`
 		DocumentID          string  `gorm:"column:document_id"`
+		ReaderSlug          *string `gorm:"column:reader_slug"`
 		SpaceID             string  `gorm:"column:space_id"`
 		StorageProvider     string  `gorm:"column:storage_provider"`
 		ObjectKey           string  `gorm:"column:object_key"`
@@ -141,6 +142,7 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 			"dia.id",
 			"dia.image_asset_id",
 			"dia.document_id",
+			"n.reader_slug AS reader_slug",
 			"dia.space_id",
 			"dia.storage_provider",
 			"dia.object_key",
@@ -191,12 +193,13 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 				CreatedAt:        parseRecordTime(row.CreatedAtRaw),
 				UpdatedAt:        parseRecordTime(row.UpdatedAtRaw),
 			},
-			DocumentTitle:   strings.TrimSpace(row.DocumentTitle),
-			DocumentStatus:  documentStatus,
-			SpaceName:       strings.TrimSpace(row.SpaceName),
-			SpaceOwnerID:    strings.TrimSpace(row.SpaceOwnerID),
-			SpaceOwnerName:  strings.TrimSpace(row.SpaceOwnerName),
-			SpaceOwnerEmail: strings.TrimSpace(row.SpaceOwnerMail),
+			DocumentRouteKey: resolveAdminDocumentRouteKey(row.DocumentID, row.ReaderSlug),
+			DocumentTitle:    strings.TrimSpace(row.DocumentTitle),
+			DocumentStatus:   documentStatus,
+			SpaceName:        strings.TrimSpace(row.SpaceName),
+			SpaceOwnerID:     strings.TrimSpace(row.SpaceOwnerID),
+			SpaceOwnerName:   strings.TrimSpace(row.SpaceOwnerName),
+			SpaceOwnerEmail:  strings.TrimSpace(row.SpaceOwnerMail),
 		})
 	}
 

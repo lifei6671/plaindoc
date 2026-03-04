@@ -20,6 +20,7 @@ type adminDocumentImageAssetHandler struct {
 type adminDocumentImageAssetResponse struct {
 	ImageAssetID     string              `json:"imageAssetId"`
 	DocumentID       string              `json:"documentId"`
+	DocumentRouteKey string              `json:"documentRouteKey"`
 	DocumentTitle    string              `json:"documentTitle"`
 	DocumentStatus   models.EntityStatus `json:"documentStatus"`
 	SpaceID          string              `json:"spaceId"`
@@ -197,6 +198,7 @@ func mapAdminDocumentImageAssetResponse(value service.AdminDocumentImageAssetRec
 	return adminDocumentImageAssetResponse{
 		ImageAssetID:     value.ImageAssetID,
 		DocumentID:       value.DocumentID,
+		DocumentRouteKey: value.DocumentRouteKey,
 		DocumentTitle:    value.DocumentTitle,
 		DocumentStatus:   value.DocumentStatus,
 		SpaceID:          value.SpaceID,

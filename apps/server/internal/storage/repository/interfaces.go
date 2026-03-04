@@ -297,6 +297,7 @@ type SearchIndexSourceRepository interface {
 type SitemapPublicDocumentSourceRecord struct {
 	SpaceID           string
 	DocumentID        string
+	DocumentRouteKey  string
 	DocumentContentMD string
 	SpaceUpdatedAt    time.Time
 	DocumentUpdatedAt time.Time
@@ -309,11 +310,12 @@ type SitemapRepository interface {
 
 // HomeSearchDocumentMetadataRecord 首页检索文档元信息。
 type HomeSearchDocumentMetadataRecord struct {
-	SpaceID    string
-	SpaceName  string
-	DocumentID string
-	Title      string
-	UpdatedAt  time.Time
+	SpaceID          string
+	SpaceName        string
+	DocumentID       string
+	DocumentRouteKey string
+	Title            string
+	UpdatedAt        time.Time
 }
 
 // HomeSearchRepository 首页检索数据仓储接口。
@@ -328,6 +330,7 @@ type HomeSearchRepository interface {
 type ReaderPageDocumentRecord struct {
 	DocumentID     string
 	NodeID         string
+	ReaderSlug     *string
 	ThemeID        string
 	Visibility     string
 	Title          string
@@ -342,6 +345,7 @@ type ReaderPageDocumentRecord struct {
 type ReaderPageTreeNodeRecord struct {
 	NodeID             string
 	DocumentID         *string
+	ReaderSlug         *string
 	ParentNodeID       *string
 	Type               models.NodeType
 	Title              string
@@ -503,6 +507,7 @@ type WorkspaceSpacePermissionSnapshot struct {
 type WorkspaceTreeNodeRecord struct {
 	NodeID             string
 	DocumentID         *string
+	ReaderSlug         *string
 	SpaceID            string
 	ParentNodeID       *string
 	Type               models.NodeType
@@ -516,6 +521,7 @@ type WorkspaceNodeRecord struct {
 	NodeID       string
 	SpaceID      string
 	ParentNodeID *string
+	ReaderSlug   *string
 	Type         models.NodeType
 	Title        string
 	Sort         int
@@ -525,6 +531,7 @@ type WorkspaceNodeRecord struct {
 type WorkspaceDocumentRecord struct {
 	DocumentID   string
 	NodeID       string
+	ReaderSlug   *string
 	ThemeID      string
 	Title        string
 	ContentMD    string
@@ -586,6 +593,15 @@ type WorkspaceMoveNodeParams struct {
 	TouchedAt          time.Time
 }
 
+// WorkspaceUpdateDocumentIdentifierParams 工作区更新文档阅读标识参数。
+type WorkspaceUpdateDocumentIdentifierParams struct {
+	DocumentID  string
+	ReaderSlug  *string
+	ActorUserID string
+	TouchSpace  string
+	TouchedAt   time.Time
+}
+
 // WorkspaceRepository 编辑器工作区仓储接口。
 type WorkspaceRepository interface {
 	ListSpacesByActor(ctx context.Context, actorUserID string) ([]WorkspaceSpaceListRecord, error)
@@ -604,6 +620,7 @@ type WorkspaceRepository interface {
 	MoveNode(ctx context.Context, params WorkspaceMoveNodeParams) error
 	DeleteNode(ctx context.Context, nodeID string, touchSpace string, touchedAt time.Time) (bool, error)
 	GetDocumentByDocumentID(ctx context.Context, documentID string) (*WorkspaceDocumentRecord, error)
+	UpdateDocumentIdentifier(ctx context.Context, params WorkspaceUpdateDocumentIdentifierParams) (bool, error)
 	SaveDocument(ctx context.Context, params WorkspaceSaveDocumentParams) (bool, error)
 	ListRevisionsByDocumentID(ctx context.Context, documentID string) ([]WorkspaceRevisionRecord, error)
 }
@@ -723,12 +740,13 @@ type ListAdminDocumentsParams struct {
 
 // AdminDocumentListRecord 管理后台文档列表项。
 type AdminDocumentListRecord struct {
-	Document        models.Document
-	SpaceID         string
-	SpaceName       string
-	SpaceOwnerID    string
-	SpaceOwnerName  string
-	SpaceOwnerEmail string
+	Document         models.Document
+	DocumentRouteKey string
+	SpaceID          string
+	SpaceName        string
+	SpaceOwnerID     string
+	SpaceOwnerName   string
+	SpaceOwnerEmail  string
 }
 
 // ListAdminDocumentAttachmentsParams 管理后台文档附件分页查询参数。
@@ -746,15 +764,16 @@ type ListAdminDocumentAttachmentsParams struct {
 
 // AdminDocumentAttachmentListRecord 管理后台文档附件列表项。
 type AdminDocumentAttachmentListRecord struct {
-	Attachment      models.DocumentAttachment
-	DocumentTitle   string
-	DocumentStatus  models.EntityStatus
-	SpaceName       string
-	SpaceOwnerID    string
-	SpaceOwnerName  string
-	SpaceOwnerEmail string
-	CreatedByName   string
-	CreatedByEmail  string
+	Attachment       models.DocumentAttachment
+	DocumentRouteKey string
+	DocumentTitle    string
+	DocumentStatus   models.EntityStatus
+	SpaceName        string
+	SpaceOwnerID     string
+	SpaceOwnerName   string
+	SpaceOwnerEmail  string
+	CreatedByName    string
+	CreatedByEmail   string
 }
 
 // ListAdminDocumentImageAssetsParams 管理后台文档图片资源分页查询参数。
@@ -772,13 +791,14 @@ type ListAdminDocumentImageAssetsParams struct {
 
 // AdminDocumentImageAssetListRecord 管理后台文档图片资源列表项。
 type AdminDocumentImageAssetListRecord struct {
-	ImageAsset      models.DocumentImageAsset
-	DocumentTitle   string
-	DocumentStatus  models.EntityStatus
-	SpaceName       string
-	SpaceOwnerID    string
-	SpaceOwnerName  string
-	SpaceOwnerEmail string
+	ImageAsset       models.DocumentImageAsset
+	DocumentRouteKey string
+	DocumentTitle    string
+	DocumentStatus   models.EntityStatus
+	SpaceName        string
+	SpaceOwnerID     string
+	SpaceOwnerName   string
+	SpaceOwnerEmail  string
 }
 
 // DocumentImageAssetReferenceRecord 表示同一图片对象的活跃引用记录。

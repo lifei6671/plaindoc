@@ -106,8 +106,8 @@ function buildSpaceReaderPath(spaceId: string): string {
   return `/r/${encodeURIComponent(spaceId)}`;
 }
 
-function buildDocumentReaderPath(spaceId: string, documentId: string): string {
-  return `${buildSpaceReaderPath(spaceId)}/${encodeURIComponent(documentId)}`;
+function buildDocumentReaderPath(spaceId: string, documentRouteKey: string): string {
+  return `${buildSpaceReaderPath(spaceId)}/${encodeURIComponent(documentRouteKey)}`;
 }
 
 export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
@@ -591,7 +591,8 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                       const isActioning = actioningDocumentID === document.documentId || batchActioning;
                       const isDeleted = document.status === "deleted";
                       const spaceReaderPath = buildSpaceReaderPath(document.spaceId);
-                      const documentReaderPath = buildDocumentReaderPath(document.spaceId, document.documentId);
+                      const documentRouteKey = (document.documentRouteKey || document.documentId || "").trim();
+                      const documentReaderPath = buildDocumentReaderPath(document.spaceId, documentRouteKey);
                       return (
                         <tr key={document.documentId} className="border-b border-slate-100 align-top text-slate-700">
                           <td className="min-w-0 px-3 py-3">

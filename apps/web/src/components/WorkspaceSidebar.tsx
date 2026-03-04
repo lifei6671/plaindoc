@@ -11,7 +11,9 @@ interface WorkspaceSidebarProps {
     parentId: string | null;
     type: NodeType;
     title: string;
+    documentIdentifier?: string;
   }) => Promise<CreateNodeResult>;
+  onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
@@ -25,6 +27,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   workspaceTree,
   onOpenDocument,
   onCreateNode,
+  onUpdateDocumentIdentifier,
   onUpdateDocumentVisibility,
   onRenameNode,
   onDeleteNode,
@@ -41,6 +44,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
         activeDocId={activeDocId}
         onOpenDocument={onOpenDocument}
         onCreateNode={onCreateNode}
+        onUpdateDocumentIdentifier={onUpdateDocumentIdentifier}
         onUpdateDocumentVisibility={onUpdateDocumentVisibility}
         onRenameNode={onRenameNode}
         onDeleteNode={onDeleteNode}

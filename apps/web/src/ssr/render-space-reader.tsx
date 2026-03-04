@@ -189,8 +189,9 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
     <ul className={depth > 0 ? "reader-tree__children" : "reader-tree"}>
       {nodes.map((node) => {
         const isDocumentNode = node.type === "doc";
-        const resolvedDocumentID = isDocumentNode
-          ? (node.documentId?.trim() || node.id.trim())
+        const resolvedDocumentID = isDocumentNode ? (node.documentId?.trim() || node.id.trim()) : node.id.trim();
+        const resolvedDocumentRouteKey = isDocumentNode
+          ? (node.documentRouteKey?.trim() || resolvedDocumentID)
           : node.id.trim();
         const isActive = isDocumentNode ? resolvedDocumentID === activeDocId : false;
         const isFolderNode = node.type === "folder";
@@ -227,7 +228,7 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
             data-reader-label-active={isActive ? "1" : undefined}
             data-reader-doc-link={isDocumentNode ? "1" : undefined}
             data-reader-doc-id={isDocumentNode ? resolvedDocumentID : undefined}
-            href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentID)}`}
+            href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentRouteKey)}`}
           >
             {visibilityMarker}
             <span
@@ -280,7 +281,7 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
                 data-reader-doc-link="1"
                 data-reader-doc-id={resolvedDocumentID}
                 style={rowStyle}
-                href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentID)}`}
+                href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentRouteKey)}`}
               >
                 {rowContent}
               </a>
@@ -406,7 +407,8 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const startedAt = Date.now();
   const renderedAt = new Date(startedAt);
   const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
-  const canonicalPath = `/r/${encodeURIComponent(payload.space.id)}/${encodeURIComponent(payload.document.id)}`;
+  const documentRouteKey = (payload.document.routeKey || payload.document.id || "").trim() || payload.document.id;
+  const canonicalPath = `/r/${encodeURIComponent(payload.space.id)}/${encodeURIComponent(documentRouteKey)}`;
 
   const resolvedTheme = resolvePreviewTheme(
     payload.document.themeId || DEFAULT_PREVIEW_THEME_TEMPLATE.id,

@@ -113,8 +113,8 @@ function renderStorageProviderLabel(value: string): string {
   }
 }
 
-function buildDocumentReaderPath(spaceID: string, documentID: string): string {
-  return `/r/${encodeURIComponent(spaceID)}/${encodeURIComponent(documentID)}`;
+function buildDocumentReaderPath(spaceID: string, documentRouteKey: string): string {
+  return `/r/${encodeURIComponent(spaceID)}/${encodeURIComponent(documentRouteKey)}`;
 }
 
 function resolveAbsoluteUrl(raw: string): string {
@@ -727,7 +727,14 @@ export function AdminDocumentImagesPage({ dataGateway }: AdminDocumentImagesPage
                           <DropdownMenuContent align="end" className="w-40">
                             <DropdownMenuItem
                               disabled={isDeleted}
-                              onSelect={() => openPathInNewTab(buildDocumentReaderPath(imageAsset.spaceId, imageAsset.documentId))}
+                              onSelect={() =>
+                                openPathInNewTab(
+                                  buildDocumentReaderPath(
+                                    imageAsset.spaceId,
+                                    (imageAsset.documentRouteKey || imageAsset.documentId || "").trim()
+                                  )
+                                )
+                              }
                             >
                               <ExternalLink size={14} className="mr-2" />
                               <span>查看文档</span>

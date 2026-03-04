@@ -149,4 +149,22 @@ var (
 		Code:    CodeUnauthorized,
 		Message: "访问令牌无效",
 	}
+	// WorkspaceErrDocumentIdentifierInvalid 对应场景：invalid document identifier
+	WorkspaceErrDocumentIdentifierInvalid = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidDocumentIdentifier,
+		Message: "文档标识无效",
+	}
+	// WorkspaceErrDocumentIdentifierReserved 对应场景：reserved document identifier
+	WorkspaceErrDocumentIdentifierReserved = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeDocumentIdentifierReserved,
+		Message: "文档标识为保留词",
+	}
+	// WorkspaceErrDocumentIdentifierConflict 对应场景：duplicate document identifier in same space
+	WorkspaceErrDocumentIdentifierConflict = ErrorTemplate{
+		Status:  http.StatusConflict,
+		Code:    CodeDocumentIdentifierConflict,
+		Message: "文档标识已存在",
+	}
 )

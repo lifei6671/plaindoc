@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,9 +20,22 @@ import (
 )
 
 const (
-	defaultWorkspaceCategoryID   = "01jmf4v2x7m7f1m6qv5kh0t2mn"
-	defaultWorkspaceCategoryName = "未分类"
-	maxWorkspaceSpaceNameLength  = 64
+	defaultWorkspaceCategoryID           = "01jmf4v2x7m7f1m6qv5kh0t2mn"
+	defaultWorkspaceCategoryName         = "未分类"
+	maxWorkspaceSpaceNameLength          = 64
+	maxWorkspaceDocumentIdentifierLength = 80
+)
+
+var (
+	workspaceDocumentIdentifierPattern   = regexp.MustCompile(`^[a-z0-9-]+$`)
+	workspaceReservedDocumentIdentifiers = map[string]struct{}{
+		"admin":    {},
+		"api":      {},
+		"explore":  {},
+		"login":    {},
+		"register": {},
+		"search":   {},
+	}
 )
 
 type workspaceHandler struct {
@@ -50,15 +64,17 @@ type workspaceSpaceResponse struct {
 }
 
 type workspaceTreeNodeResponse struct {
-	ID         string                      `json:"id"`
-	DocumentID *string                     `json:"documentId,omitempty"`
-	SpaceID    string                      `json:"spaceId"`
-	ParentID   *string                     `json:"parentId"`
-	Type       models.NodeType             `json:"type"`
-	Title      string                      `json:"title"`
-	Sort       int                         `json:"sort"`
-	Visibility *models.Visibility          `json:"visibility,omitempty"`
-	Children   []workspaceTreeNodeResponse `json:"children"`
+	ID                 string                      `json:"id"`
+	DocumentID         *string                     `json:"documentId,omitempty"`
+	DocumentIdentifier *string                     `json:"documentIdentifier,omitempty"`
+	DocumentRouteKey   *string                     `json:"documentRouteKey,omitempty"`
+	SpaceID            string                      `json:"spaceId"`
+	ParentID           *string                     `json:"parentId"`
+	Type               models.NodeType             `json:"type"`
+	Title              string                      `json:"title"`
+	Sort               int                         `json:"sort"`
+	Visibility         *models.Visibility          `json:"visibility,omitempty"`
+	Children           []workspaceTreeNodeResponse `json:"children"`
 }
 
 type workspaceDocumentResponse struct {
@@ -97,9 +113,10 @@ type createWorkspaceSpaceRequest struct {
 }
 
 type createWorkspaceNodeRequest struct {
-	ParentID *string         `json:"parentId"`
-	Type     models.NodeType `json:"type" binding:"required"`
-	Title    string          `json:"title" binding:"required"`
+	ParentID           *string         `json:"parentId"`
+	Type               models.NodeType `json:"type" binding:"required"`
+	Title              string          `json:"title" binding:"required"`
+	DocumentIdentifier *string         `json:"documentIdentifier"`
 }
 
 type createWorkspaceNodeResponse struct {
@@ -127,6 +144,16 @@ type saveWorkspaceDocumentResponse struct {
 	Document workspaceDocumentResponse `json:"document"`
 }
 
+type updateWorkspaceDocumentIdentifierRequest struct {
+	Identifier *string `json:"identifier"`
+}
+
+type updateWorkspaceDocumentIdentifierResponse struct {
+	DocumentID string  `json:"documentId"`
+	Identifier *string `json:"identifier,omitempty"`
+	ReaderURL  string  `json:"readerUrl"`
+}
+
 type localizeDocumentRemoteImagesRequest struct {
 	ImageURLs []string `json:"imageUrls"`
 }
@@ -136,15 +163,17 @@ type localizeDocumentRemoteImagesResponse struct {
 }
 
 type workspaceTreeNode struct {
-	ID         string
-	DocumentID *string
-	SpaceID    string
-	ParentID   *string
-	Type       models.NodeType
-	Title      string
-	Sort       int
-	Visibility *models.Visibility
-	Children   []*workspaceTreeNode
+	ID                 string
+	DocumentID         *string
+	DocumentIdentifier *string
+	DocumentRouteKey   *string
+	SpaceID            string
+	ParentID           *string
+	Type               models.NodeType
+	Title              string
+	Sort               int
+	Visibility         *models.Visibility
+	Children           []*workspaceTreeNode
 }
 
 // NewWorkspaceHandler 创建编辑器工作区处理器。
@@ -324,17 +353,21 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 			continue
 		}
 		documentID := normalizeOptionalString(row.DocumentID)
+		documentIdentifier := normalizeOptionalString(row.ReaderSlug)
+		documentRouteKey := resolveWorkspaceDocumentRouteKey(documentID, documentIdentifier)
 		documentVisibility := normalizeWorkspaceDocumentVisibility(row.Type, row.DocumentVisibility)
 		treeNodes[nodeID] = &workspaceTreeNode{
-			ID:         nodeID,
-			DocumentID: documentID,
-			SpaceID:    strings.TrimSpace(row.SpaceID),
-			ParentID:   normalizeOptionalString(row.ParentNodeID),
-			Type:       normalizeWorkspaceNodeType(row.Type),
-			Title:      strings.TrimSpace(row.Title),
-			Sort:       row.Sort,
-			Visibility: documentVisibility,
-			Children:   make([]*workspaceTreeNode, 0),
+			ID:                 nodeID,
+			DocumentID:         documentID,
+			DocumentIdentifier: documentIdentifier,
+			DocumentRouteKey:   documentRouteKey,
+			SpaceID:            strings.TrimSpace(row.SpaceID),
+			ParentID:           normalizeOptionalString(row.ParentNodeID),
+			Type:               normalizeWorkspaceNodeType(row.Type),
+			Title:              strings.TrimSpace(row.Title),
+			Sort:               row.Sort,
+			Visibility:         documentVisibility,
+			Children:           make([]*workspaceTreeNode, 0),
 		}
 	}
 
@@ -408,6 +441,20 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 			title = "未命名文档"
 		}
 	}
+	readerSlug, identifierValidationErr := normalizeWorkspaceDocumentIdentifier(req.DocumentIdentifier)
+	if identifierValidationErr != nil {
+		setRequestErrmsg(c, identifierValidationErr, "校验文档标识失败")
+		if errors.Is(identifierValidationErr, errWorkspaceDocumentIdentifierReserved) {
+			response.WorkspaceErrDocumentIdentifierReserved.Write(c)
+			return
+		}
+		response.WorkspaceErrDocumentIdentifierInvalid.Write(c)
+		return
+	}
+	if req.Type != models.NodeTypeDoc && readerSlug != nil {
+		response.WorkspaceErrCreateNodeRequest.Write(c)
+		return
+	}
 
 	parentID := normalizeOptionalString(req.ParentID)
 	if parentID != nil {
@@ -438,6 +485,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		NodeID:          nodeID,
 		SpaceID:         spaceID,
 		ParentNodeID:    parentID,
+		ReaderSlug:      readerSlug,
 		Type:            req.Type,
 		Title:           title,
 		Sort:            maxSort + 1,
@@ -493,6 +541,11 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		TouchSpace: spaceID,
 		TouchedAt:  now,
 	}); err != nil {
+		setRequestErrmsg(c, err, "创建目录节点失败")
+		if isWorkspaceUniqueConstraintError(err) && readerSlug != nil {
+			response.WorkspaceErrDocumentIdentifierConflict.Write(c)
+			return
+		}
 		response.InternalError(c)
 		return
 	}
@@ -902,6 +955,100 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 	})
 }
 
+// UpdateDocumentIdentifier 更新文档阅读标识（同空间唯一）。
+func (h *workspaceHandler) UpdateDocumentIdentifier(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil {
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+
+	var req updateWorkspaceDocumentIdentifierRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		setRequestErrmsg(c, err, "解析文档标识请求失败")
+		response.WorkspaceErrDocumentIdentifierInvalid.Write(c)
+		return
+	}
+
+	normalizedIdentifier, normalizeErr := normalizeWorkspaceDocumentIdentifier(req.Identifier)
+	if normalizeErr != nil {
+		setRequestErrmsg(c, normalizeErr, "校验文档标识失败")
+		if errors.Is(normalizeErr, errWorkspaceDocumentIdentifierReserved) {
+			response.WorkspaceErrDocumentIdentifierReserved.Write(c)
+			return
+		}
+		response.WorkspaceErrDocumentIdentifierInvalid.Write(c)
+		return
+	}
+
+	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrDocumentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(currentRecord.SpaceID)
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.WorkspaceErrSpaceNotFound.Write(c)
+		case errors.Is(err, service.ErrSpaceAccessDenied):
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	now := time.Now().UTC()
+	updated, updateErr := h.workspaceRepo.UpdateDocumentIdentifier(
+		c.Request.Context(),
+		repository.WorkspaceUpdateDocumentIdentifierParams{
+			DocumentID:  documentID,
+			ReaderSlug:  normalizedIdentifier,
+			ActorUserID: actorUserID,
+			TouchSpace:  spaceID,
+			TouchedAt:   now,
+		},
+	)
+	if updateErr != nil {
+		setRequestErrmsg(c, updateErr, "更新文档标识失败")
+		if isWorkspaceUniqueConstraintError(updateErr) {
+			response.WorkspaceErrDocumentIdentifierConflict.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if !updated {
+		response.WorkspaceErrDocumentNotFound.Write(c)
+		return
+	}
+
+	if h != nil && h.renderCache != nil {
+		h.renderCache.PurgeDoc(documentID)
+	}
+
+	response.JSON(c, http.StatusOK, updateWorkspaceDocumentIdentifierResponse{
+		DocumentID: documentID,
+		Identifier: normalizedIdentifier,
+		ReaderURL:  buildWorkspaceDocumentReaderURL(spaceID, resolveWorkspaceDocumentRouteKeyValue(documentID, normalizedIdentifier)),
+	})
+}
+
 // LocalizeDocumentRemoteImages 将指定文档中的外链图片 URL 转存到本地并返回映射关系。
 func (h *workspaceHandler) LocalizeDocumentRemoteImages(c *gin.Context) {
 	actorUserID, ok := h.requireActorUserID(c)
@@ -1139,15 +1286,17 @@ func mapWorkspaceTreeResponses(nodes []*workspaceTreeNode) []workspaceTreeNodeRe
 			continue
 		}
 		items = append(items, workspaceTreeNodeResponse{
-			ID:         node.ID,
-			DocumentID: node.DocumentID,
-			SpaceID:    node.SpaceID,
-			ParentID:   node.ParentID,
-			Type:       normalizeWorkspaceNodeType(node.Type),
-			Title:      node.Title,
-			Sort:       node.Sort,
-			Visibility: node.Visibility,
-			Children:   mapWorkspaceTreeResponses(node.Children),
+			ID:                 node.ID,
+			DocumentID:         node.DocumentID,
+			DocumentIdentifier: node.DocumentIdentifier,
+			DocumentRouteKey:   node.DocumentRouteKey,
+			SpaceID:            node.SpaceID,
+			ParentID:           node.ParentID,
+			Type:               normalizeWorkspaceNodeType(node.Type),
+			Title:              node.Title,
+			Sort:               node.Sort,
+			Visibility:         node.Visibility,
+			Children:           mapWorkspaceTreeResponses(node.Children),
 		})
 	}
 	return items
@@ -1163,6 +1312,80 @@ func mapWorkspaceDocumentResponse(row workspaceDocumentRow) workspaceDocumentRes
 		Version:   row.Version,
 		UpdatedAt: formatWorkspaceTime(row.UpdatedAtRaw),
 	}
+}
+
+var (
+	errWorkspaceDocumentIdentifierInvalid  = errors.New("workspace document identifier invalid")
+	errWorkspaceDocumentIdentifierReserved = errors.New("workspace document identifier reserved")
+)
+
+func normalizeWorkspaceDocumentIdentifier(rawIdentifier *string) (*string, error) {
+	identifier := strings.ToLower(strings.TrimSpace(derefOptionalString(rawIdentifier)))
+	if identifier == "" {
+		return nil, nil
+	}
+	if len(identifier) > maxWorkspaceDocumentIdentifierLength {
+		return nil, errWorkspaceDocumentIdentifierInvalid
+	}
+	if !workspaceDocumentIdentifierPattern.MatchString(identifier) {
+		return nil, errWorkspaceDocumentIdentifierInvalid
+	}
+	if strings.HasPrefix(identifier, "-") || strings.HasSuffix(identifier, "-") {
+		return nil, errWorkspaceDocumentIdentifierInvalid
+	}
+	if _, reserved := workspaceReservedDocumentIdentifiers[identifier]; reserved {
+		return nil, errWorkspaceDocumentIdentifierReserved
+	}
+	return &identifier, nil
+}
+
+func resolveWorkspaceDocumentRouteKey(documentID *string, documentIdentifier *string) *string {
+	if documentID == nil {
+		return nil
+	}
+	documentRouteKey := resolveWorkspaceDocumentRouteKeyValue(*documentID, documentIdentifier)
+	if strings.TrimSpace(documentRouteKey) == "" {
+		return nil
+	}
+	return &documentRouteKey
+}
+
+func resolveWorkspaceDocumentRouteKeyValue(documentID string, documentIdentifier *string) string {
+	identifier := strings.TrimSpace(strings.ToLower(derefOptionalString(documentIdentifier)))
+	if identifier != "" {
+		return identifier
+	}
+	return strings.TrimSpace(documentID)
+}
+
+func buildWorkspaceDocumentReaderURL(spaceID string, documentRouteKey string) string {
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedDocumentRouteKey := strings.TrimSpace(documentRouteKey)
+	if normalizedSpaceID == "" || normalizedDocumentRouteKey == "" {
+		return ""
+	}
+	return "/r/" + normalizedSpaceID + "/" + normalizedDocumentRouteKey
+}
+
+func isWorkspaceUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	lowerMessage := strings.ToLower(err.Error())
+	return strings.Contains(lowerMessage, "unique constraint") ||
+		strings.Contains(lowerMessage, "duplicate entry") ||
+		strings.Contains(lowerMessage, "duplicate key") ||
+		strings.Contains(lowerMessage, "unique failed")
+}
+
+func derefOptionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func normalizeOptionalString(value *string) *string {

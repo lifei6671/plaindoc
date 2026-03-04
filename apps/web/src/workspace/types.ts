@@ -1,5 +1,14 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { CreateNodeResult, DataGateway, Document, NodeType, Space, TreeNode, Visibility } from "../data-access";
+import type {
+  CreateNodeResult,
+  DataGateway,
+  Document,
+  NodeType,
+  Space,
+  TreeNode,
+  UpdateDocumentIdentifierResult,
+  Visibility
+} from "../data-access";
 
 // useWorkspace 初始化参数：由上层注入网关与默认展示文案。
 export interface UseWorkspaceOptions {
@@ -60,6 +69,7 @@ export interface WorkspaceCreateNodeInput {
   parentId: string | null;
   type: NodeType;
   title: string;
+  documentIdentifier?: string;
 }
 
 // 工作区动作：统一封装目录树和文档加载行为。
@@ -69,6 +79,7 @@ export interface WorkspaceActions {
   switchSpace(spaceId: string): Promise<WorkspaceBootstrapResult>;
   createSpace(spaceName: string): Promise<WorkspaceBootstrapResult>;
   createNode(input: WorkspaceCreateNodeInput): Promise<CreateNodeResult>;
+  updateDocumentIdentifier(docId: string, identifier: string | null): Promise<UpdateDocumentIdentifierResult>;
   updateDocumentVisibility(docId: string, visibility: Visibility): Promise<Document>;
   renameNode(nodeId: string, title: string): Promise<void>;
   deleteNode(nodeId: string): Promise<void>;

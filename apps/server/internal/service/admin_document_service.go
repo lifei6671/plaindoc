@@ -41,6 +41,7 @@ const (
 // AdminDocumentRecord 后台文档列表项。
 type AdminDocumentRecord struct {
 	DocumentID       string
+	DocumentRouteKey string
 	NodeID           string
 	Title            string
 	SpaceID          string
@@ -528,9 +529,15 @@ func mapAdminDocumentRecord(record repository.AdminDocumentListRecord) AdminDocu
 	if !models.IsValidEntityStatus(status) {
 		status = models.EntityStatusActive
 	}
+	documentID := strings.TrimSpace(record.Document.DocumentID)
+	documentRouteKey := strings.TrimSpace(record.DocumentRouteKey)
+	if documentRouteKey == "" {
+		documentRouteKey = documentID
+	}
 
 	return AdminDocumentRecord{
-		DocumentID:       record.Document.DocumentID,
+		DocumentID:       documentID,
+		DocumentRouteKey: documentRouteKey,
 		NodeID:           record.Document.NodeID,
 		Title:            record.Document.Title,
 		SpaceID:          record.SpaceID,

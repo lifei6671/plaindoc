@@ -1,5 +1,13 @@
 import { useCallback, useState } from "react";
-import type { CreateNodeResult, Document, MoveNodeInput, Space, TreeNode, Visibility } from "../data-access";
+import type {
+  CreateNodeResult,
+  Document,
+  MoveNodeInput,
+  Space,
+  TreeNode,
+  UpdateDocumentIdentifierResult,
+  Visibility
+} from "../data-access";
 import { findFirstDocId, formatError } from "../editor/status-utils";
 import type {
   WorkspaceBootstrapInput,
@@ -249,7 +257,8 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
           spaceId: targetSpaceId,
           parentId: input.parentId,
           type: input.type,
-          title: normalizedTitle
+          title: normalizedTitle,
+          documentIdentifier: input.documentIdentifier
         });
         await reloadTree(targetSpaceId);
         return created;
@@ -259,6 +268,22 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
       }
     },
     [activeSpaceId, dataGateway.workspace, defaultDocumentTitle, reloadTree]
+  );
+
+  // 更新文档阅读标识：成功后刷新目录树，确保路由键与节点标识即时同步。
+  const updateDocumentIdentifier = useCallback(
+    async (docId: string, identifier: string | null): Promise<UpdateDocumentIdentifierResult> => {
+      setWorkspaceErrorMessage(null);
+      try {
+        const updated = await dataGateway.document.updateDocumentIdentifier(docId, identifier);
+        await reloadTree();
+        return updated;
+      } catch (error) {
+        setWorkspaceErrorMessage(formatError(error));
+        throw error;
+      }
+    },
+    [dataGateway.document, reloadTree]
   );
 
   // 更新文档可见性：成功后刷新目录树，确保菜单与最新权限状态一致。
@@ -461,6 +486,7 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
     switchSpace,
     createSpace,
     createNode,
+    updateDocumentIdentifier,
     updateDocumentVisibility,
     renameNode,
     deleteNode,

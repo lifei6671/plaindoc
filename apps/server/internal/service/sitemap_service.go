@@ -38,6 +38,7 @@ type SitemapConfig struct {
 type SitemapPublicDocumentRecord struct {
 	SpaceID           string
 	DocumentID        string
+	DocumentRouteKey  string
 	SpaceUpdatedAt    time.Time
 	DocumentUpdatedAt time.Time
 }
@@ -101,6 +102,7 @@ func (s *SitemapService) ListPublicDocuments(
 		result = append(result, SitemapPublicDocumentRecord{
 			SpaceID:           spaceID,
 			DocumentID:        documentID,
+			DocumentRouteKey:  strings.TrimSpace(row.DocumentRouteKey),
 			SpaceUpdatedAt:    row.SpaceUpdatedAt,
 			DocumentUpdatedAt: documentUpdatedAt,
 		})

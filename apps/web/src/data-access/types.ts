@@ -91,6 +91,8 @@ export interface Space {
 export interface TreeNode {
   id: string;
   documentId?: string;
+  documentIdentifier?: string;
+  documentRouteKey?: string;
   spaceId: string;
   parentId: string | null;
   type: NodeType;
@@ -157,6 +159,7 @@ export interface CreateNodeInput {
   parentId: string | null;
   type: NodeType;
   title: string;
+  documentIdentifier?: string;
 }
 
 export interface CreateNodeResult {
@@ -186,6 +189,12 @@ export interface SaveDocumentInput {
 
 export interface SaveDocumentResult {
   document: Document;
+}
+
+export interface UpdateDocumentIdentifierResult {
+  documentId: string;
+  identifier: string | null;
+  readerUrl: string;
 }
 
 export interface LocalizeRemoteImagesInput {
@@ -250,6 +259,7 @@ export interface WorkspaceGateway {
 export interface DocumentGateway {
   getDocument(docId: string): Promise<Document>;
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
+  updateDocumentIdentifier(docId: string, identifier: string | null): Promise<UpdateDocumentIdentifierResult>;
   localizeRemoteImages(input: LocalizeRemoteImagesInput): Promise<LocalizeRemoteImagesResult>;
   listRevisions(docId: string): Promise<DocumentRevision[]>;
   listAttachments(docId: string): Promise<DocumentAttachment[]>;
@@ -407,6 +417,7 @@ export type AdminDocumentVisibilityFilter = "all" | "public" | "authenticated" |
 
 export interface AdminDocument {
   documentId: string;
+  documentRouteKey?: string;
   nodeId: string;
   title: string;
   spaceId: string;
@@ -447,6 +458,7 @@ export type AdminDocumentAttachmentStorageProviderFilter = "all" | "local" | "cl
 export interface AdminDocumentAttachment {
   attachmentId: string;
   documentId: string;
+  documentRouteKey?: string;
   documentTitle: string;
   documentStatus: EntityStatus;
   spaceId: string;
@@ -517,6 +529,7 @@ export type AdminDocumentImageAssetStorageProviderFilter = "all" | "local" | "cl
 export interface AdminDocumentImageAsset {
   imageAssetId: string;
   documentId: string;
+  documentRouteKey?: string;
   documentTitle: string;
   documentStatus: EntityStatus;
   spaceId: string;

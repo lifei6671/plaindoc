@@ -367,6 +367,10 @@ func mapSearchResultHits(items []service.HomeSearchHitRecord) []view.HomeSearchH
 	for _, item := range items {
 		spaceID := strings.TrimSpace(item.SpaceID)
 		documentID := strings.TrimSpace(item.DocumentID)
+		documentRouteKey := strings.TrimSpace(item.DocumentRouteKey)
+		if documentRouteKey == "" {
+			documentRouteKey = documentID
+		}
 		hits = append(hits, view.HomeSearchHitViewData{
 			SpaceID:    spaceID,
 			SpaceName:  strings.TrimSpace(item.SpaceName),
@@ -374,7 +378,7 @@ func mapSearchResultHits(items []service.HomeSearchHitRecord) []view.HomeSearchH
 			Title:      strings.TrimSpace(item.Title),
 			Snippet:    strings.TrimSpace(item.Snippet),
 			UpdatedAt:  item.UpdatedAt,
-			URL:        "/r/" + spaceID + "/" + documentID,
+			URL:        "/r/" + spaceID + "/" + documentRouteKey,
 		})
 	}
 	return hits

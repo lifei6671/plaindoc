@@ -14,11 +14,12 @@ type gormSitemapRepository struct {
 }
 
 type sitemapPublicDocumentSourceRow struct {
-	SpaceID              string `gorm:"column:space_id"`
-	SpaceUpdatedAtRaw    string `gorm:"column:space_updated_at"`
-	DocumentID           string `gorm:"column:document_id"`
-	DocumentContentMD    string `gorm:"column:document_content_md"`
-	DocumentUpdatedAtRaw string `gorm:"column:document_updated_at"`
+	SpaceID              string  `gorm:"column:space_id"`
+	SpaceUpdatedAtRaw    string  `gorm:"column:space_updated_at"`
+	DocumentID           string  `gorm:"column:document_id"`
+	ReaderSlug           *string `gorm:"column:reader_slug"`
+	DocumentContentMD    string  `gorm:"column:document_content_md"`
+	DocumentUpdatedAtRaw string  `gorm:"column:document_updated_at"`
 }
 
 // NewGormSitemapRepository 创建 sitemap 仓储实现。
@@ -40,6 +41,7 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 			"s.space_id AS space_id",
 			"s.updated_at AS space_updated_at",
 			"d.document_id AS document_id",
+			"n.reader_slug AS reader_slug",
 			"d.content_md AS document_content_md",
 			"d.updated_at AS document_updated_at",
 		).
@@ -62,10 +64,21 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 		result = append(result, SitemapPublicDocumentSourceRecord{
 			SpaceID:           strings.TrimSpace(row.SpaceID),
 			DocumentID:        strings.TrimSpace(row.DocumentID),
+			DocumentRouteKey:  resolveSitemapDocumentRouteKey(strings.TrimSpace(row.DocumentID), row.ReaderSlug),
 			DocumentContentMD: row.DocumentContentMD,
 			SpaceUpdatedAt:    parseRecordTime(row.SpaceUpdatedAtRaw),
 			DocumentUpdatedAt: parseRecordTime(row.DocumentUpdatedAtRaw),
 		})
 	}
 	return result, nil
+}
+
+func resolveSitemapDocumentRouteKey(documentID string, readerSlug *string) string {
+	if readerSlug != nil {
+		normalizedReaderSlug := strings.ToLower(strings.TrimSpace(*readerSlug))
+		if normalizedReaderSlug != "" {
+			return normalizedReaderSlug
+		}
+	}
+	return strings.TrimSpace(documentID)
 }

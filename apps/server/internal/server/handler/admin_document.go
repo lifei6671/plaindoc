@@ -22,6 +22,7 @@ type adminDocumentHandler struct {
 
 type adminDocumentResponse struct {
 	DocumentID       string              `json:"documentId"`
+	DocumentRouteKey string              `json:"documentRouteKey"`
 	NodeID           string              `json:"nodeId"`
 	Title            string              `json:"title"`
 	SpaceID          string              `json:"spaceId"`
@@ -227,6 +228,7 @@ func parseAdminDocumentQueryInt(rawValue string) (int, error) {
 func mapAdminDocumentResponse(value service.AdminDocumentRecord) adminDocumentResponse {
 	return adminDocumentResponse{
 		DocumentID:       value.DocumentID,
+		DocumentRouteKey: value.DocumentRouteKey,
 		NodeID:           value.NodeID,
 		Title:            value.Title,
 		SpaceID:          value.SpaceID,

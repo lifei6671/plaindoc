@@ -239,6 +239,7 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 	type nodeRow struct {
 		NodeID             string          `gorm:"column:node_id"`
 		DocumentID         *string         `gorm:"column:document_id"`
+		ReaderSlug         *string         `gorm:"column:reader_slug"`
 		SpaceID            string          `gorm:"column:space_id"`
 		ParentNodeID       *string         `gorm:"column:parent_node_id"`
 		Type               models.NodeType `gorm:"column:type"`
@@ -253,6 +254,7 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 		Select(
 			"n.node_id",
 			"d.document_id AS document_id",
+			"n.reader_slug",
 			"n.space_id",
 			"n.parent_node_id",
 			"n.type",
@@ -277,6 +279,7 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 		items = append(items, WorkspaceTreeNodeRecord{
 			NodeID:             strings.TrimSpace(row.NodeID),
 			DocumentID:         trimOptionalString(row.DocumentID),
+			ReaderSlug:         trimOptionalString(row.ReaderSlug),
 			SpaceID:            strings.TrimSpace(row.SpaceID),
 			ParentNodeID:       trimOptionalString(row.ParentNodeID),
 			Type:               row.Type,
@@ -301,6 +304,7 @@ func (r *gormWorkspaceRepository) GetNodeByNodeID(
 		NodeID       string          `gorm:"column:node_id"`
 		SpaceID      string          `gorm:"column:space_id"`
 		ParentNodeID *string         `gorm:"column:parent_node_id"`
+		ReaderSlug   *string         `gorm:"column:reader_slug"`
 		Type         models.NodeType `gorm:"column:type"`
 		Title        string          `gorm:"column:title"`
 		Sort         int             `gorm:"column:sort"`
@@ -309,7 +313,7 @@ func (r *gormWorkspaceRepository) GetNodeByNodeID(
 	var row nodeRow
 	if err := r.db.WithContext(ctx).
 		Table("nodes").
-		Select("node_id", "space_id", "parent_node_id", "type", "title", "sort").
+		Select("node_id", "space_id", "parent_node_id", "reader_slug", "type", "title", "sort").
 		Where("node_id = ?", strings.TrimSpace(nodeID)).
 		Take(&row).Error; err != nil {
 		return nil, err
@@ -324,6 +328,7 @@ func (r *gormWorkspaceRepository) GetNodeByNodeID(
 		NodeID:       strings.TrimSpace(row.NodeID),
 		SpaceID:      strings.TrimSpace(row.SpaceID),
 		ParentNodeID: trimOptionalString(row.ParentNodeID),
+		ReaderSlug:   trimOptionalString(row.ReaderSlug),
 		Type:         nodeType,
 		Title:        strings.TrimSpace(row.Title),
 		Sort:         row.Sort,
@@ -369,6 +374,14 @@ func (r *gormWorkspaceRepository) CreateNode(
 	}
 	if params.Node == nil {
 		return fmt.Errorf("workspace create node params must include node")
+	}
+	if params.Node.ReaderSlug != nil {
+		normalizedReaderSlug := strings.ToLower(strings.TrimSpace(*params.Node.ReaderSlug))
+		if normalizedReaderSlug == "" {
+			params.Node.ReaderSlug = nil
+		} else {
+			params.Node.ReaderSlug = &normalizedReaderSlug
+		}
 	}
 
 	spaceID := strings.TrimSpace(params.TouchSpace)
@@ -690,14 +703,15 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 	}
 
 	type documentRow struct {
-		DocumentID   string `gorm:"column:document_id"`
-		NodeID       string `gorm:"column:node_id"`
-		ThemeID      string `gorm:"column:theme_id"`
-		Title        string `gorm:"column:title"`
-		ContentMD    string `gorm:"column:content_md"`
-		Version      int    `gorm:"column:version"`
-		SpaceID      string `gorm:"column:space_id"`
-		UpdatedAtRaw string `gorm:"column:updated_at"`
+		DocumentID   string  `gorm:"column:document_id"`
+		NodeID       string  `gorm:"column:node_id"`
+		ReaderSlug   *string `gorm:"column:reader_slug"`
+		ThemeID      string  `gorm:"column:theme_id"`
+		Title        string  `gorm:"column:title"`
+		ContentMD    string  `gorm:"column:content_md"`
+		Version      int     `gorm:"column:version"`
+		SpaceID      string  `gorm:"column:space_id"`
+		UpdatedAtRaw string  `gorm:"column:updated_at"`
 	}
 
 	var row documentRow
@@ -706,6 +720,7 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 		Select(
 			"d.document_id",
 			"d.node_id",
+			"n.reader_slug",
 			"d.theme_id",
 			"d.title",
 			"d.content_md",
@@ -722,6 +737,7 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 	return &WorkspaceDocumentRecord{
 		DocumentID:   strings.TrimSpace(row.DocumentID),
 		NodeID:       strings.TrimSpace(row.NodeID),
+		ReaderSlug:   trimOptionalString(row.ReaderSlug),
 		ThemeID:      strings.TrimSpace(row.ThemeID),
 		Title:        strings.TrimSpace(row.Title),
 		ContentMD:    row.ContentMD,
@@ -729,6 +745,107 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 		SpaceID:      strings.TrimSpace(row.SpaceID),
 		UpdatedAtRaw: row.UpdatedAtRaw,
 	}, nil
+}
+
+func (r *gormWorkspaceRepository) UpdateDocumentIdentifier(
+	ctx context.Context,
+	params WorkspaceUpdateDocumentIdentifierParams,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("workspace repository db is nil")
+	}
+
+	documentID := strings.TrimSpace(params.DocumentID)
+	if documentID == "" {
+		return false, nil
+	}
+
+	actorUserID := strings.TrimSpace(params.ActorUserID)
+	spaceID := strings.TrimSpace(params.TouchSpace)
+	touchedAt := params.TouchedAt
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	readerSlug := trimOptionalString(params.ReaderSlug)
+	updated := false
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		type documentIdentityRow struct {
+			DocumentID string `gorm:"column:document_id"`
+			NodeID     string `gorm:"column:node_id"`
+			SpaceID    string `gorm:"column:space_id"`
+		}
+
+		var identity documentIdentityRow
+		if err := tx.Table("documents AS d").
+			Select("d.document_id", "d.node_id", "n.space_id AS space_id").
+			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+			Where("d.document_id = ?", documentID).
+			Take(&identity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+
+		normalizedNodeID := strings.TrimSpace(identity.NodeID)
+		if normalizedNodeID == "" {
+			return nil
+		}
+
+		nodeUpdates := map[string]any{
+			"reader_slug": readerSlug,
+			"updated_at":  touchedAt,
+		}
+		if actorUserID != "" {
+			nodeUpdates["updated_by_user_id"] = actorUserID
+		}
+		nodeUpdateResult := tx.Table("nodes").
+			Where("node_id = ?", normalizedNodeID).
+			Updates(nodeUpdates)
+		if nodeUpdateResult.Error != nil {
+			return nodeUpdateResult.Error
+		}
+		if nodeUpdateResult.RowsAffected == 0 {
+			return nil
+		}
+
+		documentUpdates := map[string]any{
+			"updated_at": touchedAt,
+		}
+		if actorUserID != "" {
+			documentUpdates["updated_by_user_id"] = actorUserID
+		}
+		if err := tx.Table("documents").
+			Where("document_id = ?", documentID).
+			Updates(documentUpdates).Error; err != nil {
+			return err
+		}
+
+		spaceForTouch := spaceID
+		if spaceForTouch == "" {
+			spaceForTouch = strings.TrimSpace(identity.SpaceID)
+		}
+		if spaceForTouch != "" {
+			if err := tx.Table("spaces").
+				Where("space_id = ?", spaceForTouch).
+				Update("updated_at", touchedAt).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := r.enqueueDocumentUpsertInTx(ctx, tx, documentID); err != nil {
+			return err
+		}
+
+		updated = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return updated, nil
 }
 
 func (r *gormWorkspaceRepository) SaveDocument(

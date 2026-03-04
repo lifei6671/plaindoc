@@ -33,6 +33,7 @@ type sitemapURL struct {
 type sitemapDocumentURLRecord struct {
 	SpaceID           string
 	DocumentID        string
+	DocumentRouteKey  string
 	DocumentUpdatedAt time.Time
 }
 
@@ -125,6 +126,7 @@ func buildSitemapURLs(
 		documentItems = append(documentItems, sitemapDocumentURLRecord{
 			SpaceID:           spaceID,
 			DocumentID:        documentID,
+			DocumentRouteKey:  strings.TrimSpace(record.DocumentRouteKey),
 			DocumentUpdatedAt: record.DocumentUpdatedAt,
 		})
 
@@ -156,10 +158,14 @@ func buildSitemapURLs(
 		return documentItems[left].SpaceID < documentItems[right].SpaceID
 	})
 	for _, item := range documentItems {
+		documentRouteKey := strings.TrimSpace(item.DocumentRouteKey)
+		if documentRouteKey == "" {
+			documentRouteKey = strings.TrimSpace(item.DocumentID)
+		}
 		items = append(items, sitemapURL{
 			Loc: buildSitemapLoc(
 				baseOrigin,
-				"/r/"+escapeSitemapPathSegment(item.SpaceID)+"/"+escapeSitemapPathSegment(item.DocumentID),
+				"/r/"+escapeSitemapPathSegment(item.SpaceID)+"/"+escapeSitemapPathSegment(documentRouteKey),
 			),
 			LastMod: formatSitemapLastMod(item.DocumentUpdatedAt),
 		})

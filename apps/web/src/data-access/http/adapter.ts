@@ -66,6 +66,7 @@ import {
   type Theme,
   type ThemeGateway,
   type TreeNode,
+  type UpdateDocumentIdentifierResult,
   type UpdateNodeInput,
   type UploadLocalImageResult,
   type WorkspaceGateway
@@ -760,6 +761,18 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       return request<SaveDocumentResult>(`/docs/${input.docId}`, {
         method: "PUT",
         body: JSON.stringify(input)
+      });
+    },
+    async updateDocumentIdentifier(docId: string, identifier: string | null) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      return request<UpdateDocumentIdentifierResult>(`/docs/${documentID}/identifier`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          identifier
+        })
       });
     },
     async localizeRemoteImages(input: LocalizeRemoteImagesInput) {

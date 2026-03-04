@@ -1,6 +1,6 @@
 # Docs 导航（精简版）
 
-**Last Updated**: 2026-02-28  
+**Last Updated**: 2026-03-04  
 **目标**: 文档收敛到“前端一份 + 后端一份”，减少重复、冲突与维护成本。
 
 ---
@@ -20,6 +20,13 @@
 
 1. `AUTH_SECURITY_HARDENING_PLAN.md`  
    注册/登录安全加固专项实施文档（验证码分级、失败封禁、实施清单与落地状态）。
+
+---
+
+## 1.2 功能专题文档（按需阅读）
+
+1. `READER_DOCUMENT_IDENTIFIER_SEO_TECHNICAL_PLAN.md`  
+   阅读页文档自定义标识（slug）方案：兼容旧 URL、canonical 统一、编辑器文档树入口、sitemap/搜索联动与迁移测试清单。
 
 ---
 

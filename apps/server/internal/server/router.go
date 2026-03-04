@@ -395,6 +395,8 @@ func newRouter(
 		api.PUT("/spaces/:spaceId/visibility", accessHandler.UpdateSpaceVisibility)
 		// 读取文档正文。
 		api.GET("/docs/:docId", accessHandler.GetDocument)
+		// 更新文档阅读标识（slug）。
+		api.PATCH("/docs/:docId/identifier", workspaceHandler.UpdateDocumentIdentifier)
 		// 保存文档（包含版本冲突检测链路）。
 		api.PUT("/docs/:docId", workspaceHandler.SaveDocument)
 		// 外链图片转存（编辑器粘贴链路前端失败时的服务端兜底）。

@@ -203,6 +203,7 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 		AttachmentID    string              `gorm:"column:attachment_id"`
 		BlobID          string              `gorm:"column:blob_id"`
 		DocumentID      string              `gorm:"column:document_id"`
+		ReaderSlug      *string             `gorm:"column:reader_slug"`
 		SpaceID         string              `gorm:"column:space_id"`
 		StorageProvider string              `gorm:"column:storage_provider"`
 		FileName        string              `gorm:"column:file_name"`
@@ -236,6 +237,7 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 			"da.attachment_id",
 			"da.blob_id",
 			"da.document_id",
+			"n.reader_slug AS reader_slug",
 			"da.space_id",
 			"da.storage_provider",
 			"da.file_name",
@@ -300,15 +302,16 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 		}
 
 		result = append(result, AdminDocumentAttachmentListRecord{
-			Attachment:      attachment,
-			DocumentTitle:   strings.TrimSpace(row.DocumentTitle),
-			DocumentStatus:  documentStatus,
-			SpaceName:       strings.TrimSpace(row.SpaceName),
-			SpaceOwnerID:    strings.TrimSpace(row.SpaceOwnerID),
-			SpaceOwnerName:  strings.TrimSpace(row.SpaceOwnerName),
-			SpaceOwnerEmail: strings.TrimSpace(row.SpaceOwnerMail),
-			CreatedByName:   strings.TrimSpace(row.CreatedByName),
-			CreatedByEmail:  strings.TrimSpace(row.CreatedByEmail),
+			Attachment:       attachment,
+			DocumentRouteKey: resolveAdminDocumentRouteKey(row.DocumentID, row.ReaderSlug),
+			DocumentTitle:    strings.TrimSpace(row.DocumentTitle),
+			DocumentStatus:   documentStatus,
+			SpaceName:        strings.TrimSpace(row.SpaceName),
+			SpaceOwnerID:     strings.TrimSpace(row.SpaceOwnerID),
+			SpaceOwnerName:   strings.TrimSpace(row.SpaceOwnerName),
+			SpaceOwnerEmail:  strings.TrimSpace(row.SpaceOwnerMail),
+			CreatedByName:    strings.TrimSpace(row.CreatedByName),
+			CreatedByEmail:   strings.TrimSpace(row.CreatedByEmail),
 		})
 	}
 

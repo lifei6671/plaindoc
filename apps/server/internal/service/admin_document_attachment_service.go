@@ -50,6 +50,7 @@ const (
 type AdminDocumentAttachmentRecord struct {
 	AttachmentID     string
 	DocumentID       string
+	DocumentRouteKey string
 	DocumentTitle    string
 	DocumentStatus   models.EntityStatus
 	SpaceID          string
@@ -691,6 +692,11 @@ func mapAdminDocumentAttachmentRecord(
 	record repository.AdminDocumentAttachmentListRecord,
 ) AdminDocumentAttachmentRecord {
 	attachment := record.Attachment
+	documentID := strings.TrimSpace(attachment.DocumentID)
+	documentRouteKey := strings.TrimSpace(record.DocumentRouteKey)
+	if documentRouteKey == "" {
+		documentRouteKey = documentID
+	}
 	status := attachment.Status
 	if !models.IsValidEntityStatus(status) {
 		status = models.EntityStatusActive
@@ -702,7 +708,8 @@ func mapAdminDocumentAttachmentRecord(
 
 	return AdminDocumentAttachmentRecord{
 		AttachmentID:     strings.TrimSpace(attachment.AttachmentID),
-		DocumentID:       strings.TrimSpace(attachment.DocumentID),
+		DocumentID:       documentID,
+		DocumentRouteKey: documentRouteKey,
 		DocumentTitle:    strings.TrimSpace(record.DocumentTitle),
 		DocumentStatus:   documentStatus,
 		SpaceID:          strings.TrimSpace(attachment.SpaceID),

@@ -7,63 +7,64 @@ const (
 	UnknownErrorCode = 9999
 
 	// 1000 段：认证与权限。
-	CodeUnauthorized          = "UNAUTHORIZED"
-	CodeForbidden             = "FORBIDDEN"
-	CodeRoleForbidden         = "ROLE_FORBIDDEN"
-	CodeInvalidCredentials    = "INVALID_CREDENTIALS"
-	CodeRegistrationDisabled  = "REGISTRATION_DISABLED"
-	CodeUserBanned            = "USER_BANNED"
-	CodeUserDeleted           = "USER_DELETED"
-	CodeCaptchaRequired       = "CAPTCHA_REQUIRED"
-	CodeCaptchaInvalid        = "CAPTCHA_INVALID"
-	CodeAuthTemporarilyLocked = "AUTH_TEMPORARILY_LOCKED"
-	CodePasswordResetUnavailable = "PASSWORD_RESET_UNAVAILABLE"
-	CodePasswordResetRateLimited = "PASSWORD_RESET_RATE_LIMITED"
-	CodePasswordResetSendFailed  = "PASSWORD_RESET_SEND_FAILED"
-	CodePasswordResetTokenInvalid = "PASSWORD_RESET_TOKEN_INVALID"
-	CodePasswordResetTokenExpired = "PASSWORD_RESET_TOKEN_EXPIRED"
+	CodeUnauthorized               = "UNAUTHORIZED"
+	CodeForbidden                  = "FORBIDDEN"
+	CodeRoleForbidden              = "ROLE_FORBIDDEN"
+	CodeInvalidCredentials         = "INVALID_CREDENTIALS"
+	CodeRegistrationDisabled       = "REGISTRATION_DISABLED"
+	CodeUserBanned                 = "USER_BANNED"
+	CodeUserDeleted                = "USER_DELETED"
+	CodeCaptchaRequired            = "CAPTCHA_REQUIRED"
+	CodeCaptchaInvalid             = "CAPTCHA_INVALID"
+	CodeAuthTemporarilyLocked      = "AUTH_TEMPORARILY_LOCKED"
+	CodePasswordResetUnavailable   = "PASSWORD_RESET_UNAVAILABLE"
+	CodePasswordResetRateLimited   = "PASSWORD_RESET_RATE_LIMITED"
+	CodePasswordResetSendFailed    = "PASSWORD_RESET_SEND_FAILED"
+	CodePasswordResetTokenInvalid  = "PASSWORD_RESET_TOKEN_INVALID"
+	CodePasswordResetTokenExpired  = "PASSWORD_RESET_TOKEN_EXPIRED"
 	CodePasswordResetTokenConsumed = "PASSWORD_RESET_TOKEN_CONSUMED"
-	CodePasswordResetUnsupported = "PASSWORD_RESET_UNSUPPORTED"
+	CodePasswordResetUnsupported   = "PASSWORD_RESET_UNSUPPORTED"
 
 	// 2000 段：请求参数与输入校验。
-	CodeInvalidRequest          = "INVALID_REQUEST"
-	CodeInvalidEmail            = "INVALID_EMAIL"
-	CodeInvalidPassword         = "INVALID_PASSWORD"
-	CodeInvalidName             = "INVALID_NAME"
-	CodeInvalidRole             = "INVALID_ROLE"
-	CodeInvalidStatus           = "INVALID_STATUS"
-	CodeInvalidReason           = "INVALID_REASON"
-	CodeInvalidPage             = "INVALID_PAGE"
-	CodeInvalidPageSize         = "INVALID_PAGE_SIZE"
-	CodeInvalidUserID           = "INVALID_USER_ID"
-	CodeInvalidSpaceID          = "INVALID_SPACE_ID"
-	CodeInvalidDocumentID       = "INVALID_DOCUMENT_ID"
-	CodeInvalidThemeID          = "INVALID_THEME_ID"
-	CodeInvalidVisibility       = "INVALID_VISIBILITY"
-	CodeInvalidSource           = "INVALID_SOURCE"
-	CodeInvalidUploadFile       = "INVALID_UPLOAD_FILE"
-	CodeInvalidFilePath         = "INVALID_FILE_PATH"
-	CodeInvalidConfigKey        = "INVALID_CONFIG_KEY"
-	CodeInvalidConfigValue      = "INVALID_CONFIG_VALUE"
-	CodeInvalidExpectedVersion  = "INVALID_EXPECTED_VERSION"
-	CodeInvalidOperation        = "INVALID_OPERATION"
-	CodeInvalidModule           = "INVALID_MODULE"
-	CodeInvalidAction           = "INVALID_ACTION"
-	CodeInvalidFrom             = "INVALID_FROM"
-	CodeInvalidTo               = "INVALID_TO"
-	CodeInvalidTimeRange        = "INVALID_TIME_RANGE"
-	CodeInvalidMemberRole       = "INVALID_MEMBER_ROLE"
-	CodeInvalidSpaceName        = "INVALID_SPACE_NAME"
-	CodeInvalidCoverImage       = "INVALID_COVER_IMAGE"
-	CodeInvalidSyntaxTheme      = "INVALID_SYNTAX_THEME"
-	CodeInvalidDescription      = "INVALID_DESCRIPTION"
-	CodeInvalidSpaceCategory    = "INVALID_SPACE_CATEGORY"
-	CodeInvalidNodeID           = "INVALID_NODE_ID"
-	CodeInvalidAvatarURL        = "INVALID_AVATAR_URL"
-	CodeInvalidNodeMove         = "INVALID_NODE_MOVE"
-	CodePasswordConfirmMismatch = "PASSWORD_CONFIRM_MISMATCH"
-	CodeInvalidCurrentPassword  = "INVALID_CURRENT_PASSWORD"
-	CodeInvalidNewPassword      = "INVALID_NEW_PASSWORD"
+	CodeInvalidRequest            = "INVALID_REQUEST"
+	CodeInvalidEmail              = "INVALID_EMAIL"
+	CodeInvalidPassword           = "INVALID_PASSWORD"
+	CodeInvalidName               = "INVALID_NAME"
+	CodeInvalidRole               = "INVALID_ROLE"
+	CodeInvalidStatus             = "INVALID_STATUS"
+	CodeInvalidReason             = "INVALID_REASON"
+	CodeInvalidPage               = "INVALID_PAGE"
+	CodeInvalidPageSize           = "INVALID_PAGE_SIZE"
+	CodeInvalidUserID             = "INVALID_USER_ID"
+	CodeInvalidSpaceID            = "INVALID_SPACE_ID"
+	CodeInvalidDocumentID         = "INVALID_DOCUMENT_ID"
+	CodeInvalidThemeID            = "INVALID_THEME_ID"
+	CodeInvalidVisibility         = "INVALID_VISIBILITY"
+	CodeInvalidSource             = "INVALID_SOURCE"
+	CodeInvalidUploadFile         = "INVALID_UPLOAD_FILE"
+	CodeInvalidFilePath           = "INVALID_FILE_PATH"
+	CodeInvalidConfigKey          = "INVALID_CONFIG_KEY"
+	CodeInvalidConfigValue        = "INVALID_CONFIG_VALUE"
+	CodeInvalidExpectedVersion    = "INVALID_EXPECTED_VERSION"
+	CodeInvalidOperation          = "INVALID_OPERATION"
+	CodeInvalidModule             = "INVALID_MODULE"
+	CodeInvalidAction             = "INVALID_ACTION"
+	CodeInvalidFrom               = "INVALID_FROM"
+	CodeInvalidTo                 = "INVALID_TO"
+	CodeInvalidTimeRange          = "INVALID_TIME_RANGE"
+	CodeInvalidMemberRole         = "INVALID_MEMBER_ROLE"
+	CodeInvalidSpaceName          = "INVALID_SPACE_NAME"
+	CodeInvalidCoverImage         = "INVALID_COVER_IMAGE"
+	CodeInvalidSyntaxTheme        = "INVALID_SYNTAX_THEME"
+	CodeInvalidDescription        = "INVALID_DESCRIPTION"
+	CodeInvalidSpaceCategory      = "INVALID_SPACE_CATEGORY"
+	CodeInvalidNodeID             = "INVALID_NODE_ID"
+	CodeInvalidAvatarURL          = "INVALID_AVATAR_URL"
+	CodeInvalidNodeMove           = "INVALID_NODE_MOVE"
+	CodeInvalidDocumentIdentifier = "INVALID_DOCUMENT_IDENTIFIER"
+	CodePasswordConfirmMismatch   = "PASSWORD_CONFIRM_MISMATCH"
+	CodeInvalidCurrentPassword    = "INVALID_CURRENT_PASSWORD"
+	CodeInvalidNewPassword        = "INVALID_NEW_PASSWORD"
 
 	// 3000 段：资源不存在。
 	CodeRouteNotFound          = "ROUTE_NOT_FOUND"
@@ -92,6 +93,7 @@ const (
 	CodeSpaceCategoryNameExists     = "SPACE_CATEGORY_NAME_EXISTS"
 	CodeDocumentVersionConflict     = "DOCUMENT_VERSION_CONFLICT"
 	CodeSpaceAlreadyExists          = "SPACE_ALREADY_EXISTS"
+	CodeDocumentIdentifierConflict  = "DOCUMENT_IDENTIFIER_CONFLICT"
 
 	// 5000 段：业务约束。
 	CodeSpaceDeleted                  = "SPACE_DELETED"
@@ -110,6 +112,7 @@ const (
 	CodeCoverFontUnavailable          = "COVER_FONT_UNAVAILABLE"
 	CodeSpaceCategoryDefaultImmutable = "SPACE_CATEGORY_DEFAULT_IMMUTABLE"
 	CodePasswordUnchanged             = "PASSWORD_UNCHANGED"
+	CodeDocumentIdentifierReserved    = "DOCUMENT_IDENTIFIER_RESERVED"
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout = "REQUEST_TIMEOUT"
@@ -118,63 +121,64 @@ const (
 
 var errorCodeRegistry = map[string]int{
 	// 1000 段：认证与权限。
-	CodeUnauthorized:          1001,
-	CodeInvalidCredentials:    1002,
-	CodeForbidden:             1003,
-	CodeRoleForbidden:         1004,
-	CodeRegistrationDisabled:  1005,
-	CodeUserBanned:            1006,
-	CodeUserDeleted:           1007,
-	CodeCaptchaRequired:       1008,
-	CodeCaptchaInvalid:        1009,
-	CodeAuthTemporarilyLocked: 1010,
-	CodePasswordResetUnavailable: 1011,
-	CodePasswordResetRateLimited: 1012,
-	CodePasswordResetSendFailed:  1013,
-	CodePasswordResetTokenInvalid: 1014,
-	CodePasswordResetTokenExpired: 1015,
+	CodeUnauthorized:               1001,
+	CodeInvalidCredentials:         1002,
+	CodeForbidden:                  1003,
+	CodeRoleForbidden:              1004,
+	CodeRegistrationDisabled:       1005,
+	CodeUserBanned:                 1006,
+	CodeUserDeleted:                1007,
+	CodeCaptchaRequired:            1008,
+	CodeCaptchaInvalid:             1009,
+	CodeAuthTemporarilyLocked:      1010,
+	CodePasswordResetUnavailable:   1011,
+	CodePasswordResetRateLimited:   1012,
+	CodePasswordResetSendFailed:    1013,
+	CodePasswordResetTokenInvalid:  1014,
+	CodePasswordResetTokenExpired:  1015,
 	CodePasswordResetTokenConsumed: 1016,
-	CodePasswordResetUnsupported: 1017,
+	CodePasswordResetUnsupported:   1017,
 
 	// 2000 段：请求参数与输入校验。
-	CodeInvalidRequest:          2001,
-	CodeInvalidEmail:            2002,
-	CodeInvalidPassword:         2003,
-	CodeInvalidName:             2004,
-	CodeInvalidRole:             2005,
-	CodeInvalidStatus:           2006,
-	CodeInvalidReason:           2007,
-	CodeInvalidPage:             2008,
-	CodeInvalidPageSize:         2009,
-	CodeInvalidUserID:           2010,
-	CodeInvalidSpaceID:          2011,
-	CodeInvalidDocumentID:       2012,
-	CodeInvalidThemeID:          2013,
-	CodeInvalidVisibility:       2014,
-	CodeInvalidSource:           2015,
-	CodeInvalidUploadFile:       2016,
-	CodeInvalidFilePath:         2017,
-	CodeInvalidConfigKey:        2018,
-	CodeInvalidConfigValue:      2019,
-	CodeInvalidExpectedVersion:  2020,
-	CodeInvalidOperation:        2021,
-	CodeInvalidModule:           2022,
-	CodeInvalidAction:           2023,
-	CodeInvalidFrom:             2024,
-	CodeInvalidTo:               2025,
-	CodeInvalidTimeRange:        2026,
-	CodeInvalidMemberRole:       2027,
-	CodeInvalidSpaceName:        2028,
-	CodeInvalidCoverImage:       2029,
-	CodeInvalidSyntaxTheme:      2030,
-	CodeInvalidDescription:      2031,
-	CodeInvalidSpaceCategory:    2032,
-	CodeInvalidNodeID:           2033,
-	CodeInvalidAvatarURL:        2034,
-	CodePasswordConfirmMismatch: 2035,
-	CodeInvalidCurrentPassword:  2036,
-	CodeInvalidNewPassword:      2037,
-	CodeInvalidNodeMove:         2038,
+	CodeInvalidRequest:            2001,
+	CodeInvalidEmail:              2002,
+	CodeInvalidPassword:           2003,
+	CodeInvalidName:               2004,
+	CodeInvalidRole:               2005,
+	CodeInvalidStatus:             2006,
+	CodeInvalidReason:             2007,
+	CodeInvalidPage:               2008,
+	CodeInvalidPageSize:           2009,
+	CodeInvalidUserID:             2010,
+	CodeInvalidSpaceID:            2011,
+	CodeInvalidDocumentID:         2012,
+	CodeInvalidThemeID:            2013,
+	CodeInvalidVisibility:         2014,
+	CodeInvalidSource:             2015,
+	CodeInvalidUploadFile:         2016,
+	CodeInvalidFilePath:           2017,
+	CodeInvalidConfigKey:          2018,
+	CodeInvalidConfigValue:        2019,
+	CodeInvalidExpectedVersion:    2020,
+	CodeInvalidOperation:          2021,
+	CodeInvalidModule:             2022,
+	CodeInvalidAction:             2023,
+	CodeInvalidFrom:               2024,
+	CodeInvalidTo:                 2025,
+	CodeInvalidTimeRange:          2026,
+	CodeInvalidMemberRole:         2027,
+	CodeInvalidSpaceName:          2028,
+	CodeInvalidCoverImage:         2029,
+	CodeInvalidSyntaxTheme:        2030,
+	CodeInvalidDescription:        2031,
+	CodeInvalidSpaceCategory:      2032,
+	CodeInvalidNodeID:             2033,
+	CodeInvalidAvatarURL:          2034,
+	CodePasswordConfirmMismatch:   2035,
+	CodeInvalidCurrentPassword:    2036,
+	CodeInvalidNewPassword:        2037,
+	CodeInvalidNodeMove:           2038,
+	CodeInvalidDocumentIdentifier: 2039,
 
 	// 3000 段：资源不存在。
 	CodeRouteNotFound:          3001,
@@ -203,6 +207,7 @@ var errorCodeRegistry = map[string]int{
 	CodeSpaceCategoryNameExists:     4009,
 	CodeDocumentVersionConflict:     4010,
 	CodeSpaceAlreadyExists:          4011,
+	CodeDocumentIdentifierConflict:  4012,
 
 	// 5000 段：业务约束。
 	CodeSpaceDeleted:                  5001,
@@ -221,6 +226,7 @@ var errorCodeRegistry = map[string]int{
 	CodeCoverFontUnavailable:          5014,
 	CodeSpaceCategoryDefaultImmutable: 5015,
 	CodePasswordUnchanged:             5016,
+	CodeDocumentIdentifierReserved:    5017,
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout: 9001,

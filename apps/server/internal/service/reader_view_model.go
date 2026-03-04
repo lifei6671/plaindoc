@@ -4,20 +4,24 @@ import "github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 
 // ReaderTreeNodeViewModel 表示阅读页目录树节点。
 type ReaderTreeNodeViewModel struct {
-	ID         string                    `json:"id"`
-	DocumentID *string                   `json:"documentId,omitempty"`
-	ParentID   *string                   `json:"parentId,omitempty"`
-	Type       models.NodeType           `json:"type"`
-	Title      string                    `json:"title"`
-	Sort       int                       `json:"sort"`
-	Visibility *models.Visibility        `json:"visibility,omitempty"`
-	Children   []ReaderTreeNodeViewModel `json:"children"`
+	ID                 string                    `json:"id"`
+	DocumentID         *string                   `json:"documentId,omitempty"`
+	DocumentIdentifier *string                   `json:"documentIdentifier,omitempty"`
+	DocumentRouteKey   *string                   `json:"documentRouteKey,omitempty"`
+	ParentID           *string                   `json:"parentId,omitempty"`
+	Type               models.NodeType           `json:"type"`
+	Title              string                    `json:"title"`
+	Sort               int                       `json:"sort"`
+	Visibility         *models.Visibility        `json:"visibility,omitempty"`
+	Children           []ReaderTreeNodeViewModel `json:"children"`
 }
 
 // ReaderDocumentViewModel 表示阅读页正文数据。
 type ReaderDocumentViewModel struct {
 	ID             string            `json:"id"`
 	NodeID         string            `json:"nodeId"`
+	Identifier     string            `json:"identifier,omitempty"`
+	RouteKey       string            `json:"routeKey"`
 	ThemeID        string            `json:"themeId"`
 	Visibility     models.Visibility `json:"visibility"`
 	Title          string            `json:"title"`

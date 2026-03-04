@@ -19,14 +19,16 @@ type ReaderPageService struct {
 }
 
 type readerTreeNode struct {
-	ID         string
-	DocumentID *string
-	ParentID   *string
-	Type       models.NodeType
-	Title      string
-	Sort       int
-	Visibility *models.Visibility
-	Children   []*readerTreeNode
+	ID           string
+	DocumentID   *string
+	ReaderSlug   *string
+	DocumentPath *string
+	ParentID     *string
+	Type         models.NodeType
+	Title        string
+	Sort         int
+	Visibility   *models.Visibility
+	Children     []*readerTreeNode
 }
 
 // NewReaderPageService 创建阅读页聚合服务。
@@ -42,7 +44,7 @@ func NewReaderPageService(
 	}
 }
 
-// ResolveLandingDocumentID 返回空间阅读入口应跳转的首篇可读文档 ID。
+// ResolveLandingDocumentID 返回空间阅读入口应跳转的首篇可读文档路由标识（slug 或 document_id）。
 func (s *ReaderPageService) ResolveLandingDocumentID(
 	ctx context.Context,
 	spaceID string,
@@ -80,7 +82,14 @@ func (s *ReaderPageService) ResolveLandingDocumentID(
 
 		_, readErr := s.visibilityService.GetDocument(ctx, documentID, normalizedViewerUserID)
 		if readErr == nil {
-			return documentID, nil
+			documentRow, loadErr := s.loadDocumentRow(ctx, documentID)
+			if loadErr != nil {
+				if errors.Is(loadErr, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return "", loadErr
+			}
+			return resolveReaderDocumentRouteKey(documentRow.DocumentID, documentRow.ReaderSlug), nil
 		}
 
 		switch {
@@ -169,6 +178,9 @@ func (s *ReaderPageService) BuildPage(
 	}
 
 	updatedAt := formatReaderTime(documentRow.UpdatedAt)
+	documentIDValue := strings.TrimSpace(documentRow.DocumentID)
+	documentIdentifier := normalizeReaderOptionalString(documentRow.ReaderSlug)
+	documentRouteKey := resolveReaderDocumentRouteKey(documentIDValue, documentRow.ReaderSlug)
 
 	return ReaderPageViewModel{
 		Space: ReaderSpaceViewModel{
@@ -177,8 +189,10 @@ func (s *ReaderPageService) BuildPage(
 			Title: pageTitle,
 		},
 		Document: ReaderDocumentViewModel{
-			ID:             strings.TrimSpace(documentRow.DocumentID),
+			ID:             documentIDValue,
 			NodeID:         strings.TrimSpace(documentRow.NodeID),
+			Identifier:     normalizeReaderString(documentIdentifier),
+			RouteKey:       documentRouteKey,
 			ThemeID:        strings.TrimSpace(documentRow.ThemeID),
 			Visibility:     normalizeReaderVisibility(documentRow.Visibility),
 			Title:          documentTitle,
@@ -189,7 +203,7 @@ func (s *ReaderPageService) BuildPage(
 		},
 		Attachments: attachments,
 		Tree:        tree,
-		ActiveDocID: strings.TrimSpace(documentRow.DocumentID),
+		ActiveDocID: documentIDValue,
 	}, nil
 }
 
@@ -300,16 +314,20 @@ func (s *ReaderPageService) loadTree(
 			continue
 		}
 		documentID := normalizeReaderOptionalString(row.DocumentID)
+		readerSlug := normalizeReaderOptionalString(row.ReaderSlug)
+		documentPath := resolveReaderTreeDocumentRouteKey(documentID, readerSlug)
 		documentVisibility := normalizeReaderDocumentVisibility(row.Type, row.DocumentVisibility)
 		treeNodes[nodeID] = &readerTreeNode{
-			ID:         nodeID,
-			DocumentID: documentID,
-			ParentID:   normalizeReaderOptionalString(row.ParentNodeID),
-			Type:       normalizeReaderNodeType(row.Type),
-			Title:      strings.TrimSpace(row.Title),
-			Sort:       row.Sort,
-			Visibility: documentVisibility,
-			Children:   make([]*readerTreeNode, 0),
+			ID:           nodeID,
+			DocumentID:   documentID,
+			ReaderSlug:   readerSlug,
+			DocumentPath: documentPath,
+			ParentID:     normalizeReaderOptionalString(row.ParentNodeID),
+			Type:         normalizeReaderNodeType(row.Type),
+			Title:        strings.TrimSpace(row.Title),
+			Sort:         row.Sort,
+			Visibility:   documentVisibility,
+			Children:     make([]*readerTreeNode, 0),
 		}
 	}
 
@@ -361,17 +379,45 @@ func mapReaderTreeNodes(nodes []*readerTreeNode) []ReaderTreeNodeViewModel {
 			continue
 		}
 		items = append(items, ReaderTreeNodeViewModel{
-			ID:         node.ID,
-			DocumentID: node.DocumentID,
-			ParentID:   node.ParentID,
-			Type:       normalizeReaderNodeType(node.Type),
-			Title:      node.Title,
-			Sort:       node.Sort,
-			Visibility: node.Visibility,
-			Children:   mapReaderTreeNodes(node.Children),
+			ID:                 node.ID,
+			DocumentID:         node.DocumentID,
+			DocumentIdentifier: node.ReaderSlug,
+			DocumentRouteKey:   node.DocumentPath,
+			ParentID:           node.ParentID,
+			Type:               normalizeReaderNodeType(node.Type),
+			Title:              node.Title,
+			Sort:               node.Sort,
+			Visibility:         node.Visibility,
+			Children:           mapReaderTreeNodes(node.Children),
 		})
 	}
 	return items
+}
+
+func resolveReaderDocumentRouteKey(documentID string, readerSlug *string) string {
+	normalizedSlug := strings.ToLower(normalizeReaderString(normalizeReaderOptionalString(readerSlug)))
+	if normalizedSlug != "" {
+		return normalizedSlug
+	}
+	return strings.TrimSpace(documentID)
+}
+
+func resolveReaderTreeDocumentRouteKey(documentID *string, readerSlug *string) *string {
+	if documentID == nil {
+		return nil
+	}
+	documentRouteKey := resolveReaderDocumentRouteKey(*documentID, readerSlug)
+	if strings.TrimSpace(documentRouteKey) == "" {
+		return nil
+	}
+	return &documentRouteKey
+}
+
+func normalizeReaderString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 func (s *ReaderPageService) loadDocumentAttachments(

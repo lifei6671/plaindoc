@@ -16,21 +16,23 @@ type gormReaderPageRepository struct {
 }
 
 type readerPageDocumentRow struct {
-	DocumentID     string `gorm:"column:document_id"`
-	NodeID         string `gorm:"column:node_id"`
-	ThemeID        string `gorm:"column:theme_id"`
-	Visibility     string `gorm:"column:visibility"`
-	Title          string `gorm:"column:title"`
-	ContentMD      string `gorm:"column:content_md"`
-	Version        int    `gorm:"column:version"`
-	AuthorNickname string `gorm:"column:author_nickname"`
-	UpdatedAtRaw   string `gorm:"column:updated_at"`
-	SpaceID        string `gorm:"column:space_id"`
+	DocumentID     string  `gorm:"column:document_id"`
+	NodeID         string  `gorm:"column:node_id"`
+	ReaderSlug     *string `gorm:"column:reader_slug"`
+	ThemeID        string  `gorm:"column:theme_id"`
+	Visibility     string  `gorm:"column:visibility"`
+	Title          string  `gorm:"column:title"`
+	ContentMD      string  `gorm:"column:content_md"`
+	Version        int     `gorm:"column:version"`
+	AuthorNickname string  `gorm:"column:author_nickname"`
+	UpdatedAtRaw   string  `gorm:"column:updated_at"`
+	SpaceID        string  `gorm:"column:space_id"`
 }
 
 type readerPageTreeNodeRow struct {
 	NodeID             string          `gorm:"column:node_id"`
 	DocumentID         *string         `gorm:"column:document_id"`
+	ReaderSlug         *string         `gorm:"column:reader_slug"`
 	ParentNodeID       *string         `gorm:"column:parent_node_id"`
 	Type               models.NodeType `gorm:"column:type"`
 	Title              string          `gorm:"column:title"`
@@ -65,6 +67,7 @@ func (r *gormReaderPageRepository) ResolveDocumentID(
 	if normalizedSpaceID == "" || normalizedDocumentID == "" {
 		return "", gorm.ErrRecordNotFound
 	}
+	normalizedDocumentSlug := strings.ToLower(normalizedDocumentID)
 
 	tryResolve := func(
 		useSpaceFilter bool,
@@ -95,6 +98,7 @@ func (r *gormReaderPageRepository) ResolveDocumentID(
 	}{
 		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
 		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
+		{condition: "n.reader_slug = ?", args: []any{normalizedDocumentSlug}},
 	}
 	for _, matcher := range spaceScopedMatchers {
 		resolvedDocumentID, err := tryResolve(true, matcher.condition, matcher.args...)
@@ -144,6 +148,7 @@ func (r *gormReaderPageRepository) GetDocumentByDocumentID(
 		Select(
 			"d.document_id",
 			"d.node_id",
+			"n.reader_slug",
 			"d.theme_id",
 			"d.visibility",
 			"d.title",
@@ -164,6 +169,7 @@ func (r *gormReaderPageRepository) GetDocumentByDocumentID(
 	return &ReaderPageDocumentRecord{
 		DocumentID:     strings.TrimSpace(row.DocumentID),
 		NodeID:         strings.TrimSpace(row.NodeID),
+		ReaderSlug:     trimReaderOptionalString(row.ReaderSlug),
 		ThemeID:        strings.TrimSpace(row.ThemeID),
 		Visibility:     strings.TrimSpace(row.Visibility),
 		Title:          strings.TrimSpace(row.Title),
@@ -230,6 +236,7 @@ func (r *gormReaderPageRepository) ListTreeNodesBySpaceID(
 		Select(
 			"n.node_id",
 			"d.document_id AS document_id",
+			"n.reader_slug",
 			"n.parent_node_id",
 			"n.type",
 			"n.title",
@@ -248,6 +255,7 @@ func (r *gormReaderPageRepository) ListTreeNodesBySpaceID(
 		result = append(result, ReaderPageTreeNodeRecord{
 			NodeID:             strings.TrimSpace(row.NodeID),
 			DocumentID:         trimReaderOptionalString(row.DocumentID),
+			ReaderSlug:         trimReaderOptionalString(row.ReaderSlug),
 			ParentNodeID:       trimReaderOptionalString(row.ParentNodeID),
 			Type:               row.Type,
 			Title:              strings.TrimSpace(row.Title),

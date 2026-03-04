@@ -20,6 +20,7 @@ type adminDocumentAttachmentHandler struct {
 type adminDocumentAttachmentResponse struct {
 	AttachmentID     string              `json:"attachmentId"`
 	DocumentID       string              `json:"documentId"`
+	DocumentRouteKey string              `json:"documentRouteKey"`
 	DocumentTitle    string              `json:"documentTitle"`
 	DocumentStatus   models.EntityStatus `json:"documentStatus"`
 	SpaceID          string              `json:"spaceId"`
@@ -196,6 +197,7 @@ func mapAdminDocumentAttachmentResponse(value service.AdminDocumentAttachmentRec
 	return adminDocumentAttachmentResponse{
 		AttachmentID:     value.AttachmentID,
 		DocumentID:       value.DocumentID,
+		DocumentRouteKey: value.DocumentRouteKey,
 		DocumentTitle:    value.DocumentTitle,
 		DocumentStatus:   value.DocumentStatus,
 		SpaceID:          value.SpaceID,

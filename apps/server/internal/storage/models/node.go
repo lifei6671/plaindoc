@@ -8,6 +8,7 @@ type Node struct {
 	NodeID          string    `gorm:"column:node_id"`
 	SpaceID         string    `gorm:"column:space_id"`
 	ParentNodeID    *string   `gorm:"column:parent_node_id"`
+	ReaderSlug      *string   `gorm:"column:reader_slug"`
 	Type            NodeType  `gorm:"column:type"`
 	Title           string    `gorm:"column:title"`
 	Sort            int       `gorm:"column:sort"`

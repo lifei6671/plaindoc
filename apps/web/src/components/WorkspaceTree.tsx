@@ -5,6 +5,7 @@ import {
   FilePlus2,
   FolderPlus,
   Globe,
+  Link2,
   Lock,
   LockOpen,
   LoaderCircle,
@@ -51,6 +52,9 @@ const WORKSPACE_TREE_ID = "workspace-doc-tree";
 const WORKSPACE_TREE_ROOT_ID = "__workspace_doc_tree_root__";
 const DEFAULT_DOCUMENT_TITLE = "未命名文档";
 const DEFAULT_FOLDER_TITLE = "未命名目录";
+const MAX_DOCUMENT_IDENTIFIER_LENGTH = 80;
+const DOCUMENT_IDENTIFIER_PATTERN = /^[a-z0-9-]+$/;
+const RESERVED_DOCUMENT_IDENTIFIERS = new Set(["admin", "api", "explore", "login", "register", "search"]);
 
 interface WorkspaceTreeItemData {
   nodeId: string | null;
@@ -77,7 +81,9 @@ interface WorkspaceTreeProps {
     parentId: string | null;
     type: NodeType;
     title: string;
+    documentIdentifier?: string;
   }) => Promise<CreateNodeResult>;
+  onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
@@ -89,10 +95,44 @@ interface PendingCreateDraftNode {
   parentId: string | null;
   type: NodeType;
   title: string;
+  documentIdentifier?: string;
+}
+
+interface CreateNodeDialogState {
+  parentId: string | null;
+  type: NodeType;
+  title: string;
+  documentIdentifier: string;
 }
 
 function mergeClassNames(...classNames: Array<string | false | null | undefined>): string {
   return classNames.filter(Boolean).join(" ");
+}
+
+function validateDocumentIdentifier(rawValue: string, options: { allowEmpty: boolean }): {
+  value: string | null;
+  error: string | null;
+} {
+  const normalizedValue = rawValue.trim().toLowerCase();
+  if (!normalizedValue) {
+    if (options.allowEmpty) {
+      return { value: null, error: null };
+    }
+    return { value: null, error: "文档标识不能为空" };
+  }
+  if (normalizedValue.length > MAX_DOCUMENT_IDENTIFIER_LENGTH) {
+    return { value: null, error: `文档标识长度不能超过 ${MAX_DOCUMENT_IDENTIFIER_LENGTH} 个字符` };
+  }
+  if (!DOCUMENT_IDENTIFIER_PATTERN.test(normalizedValue)) {
+    return { value: null, error: "文档标识仅支持小写字母、数字和连字符（-）" };
+  }
+  if (normalizedValue.startsWith("-") || normalizedValue.endsWith("-")) {
+    return { value: null, error: "文档标识不能以连字符（-）开头或结尾" };
+  }
+  if (RESERVED_DOCUMENT_IDENTIFIERS.has(normalizedValue)) {
+    return { value: null, error: "该标识为系统保留词，请更换其他标识" };
+  }
+  return { value: normalizedValue, error: null };
 }
 
 // 收集可展开节点：用于在树结构刷新后过滤无效展开项。
@@ -188,11 +228,6 @@ function findNodeByID(nodes: TreeNode[], targetNodeID: string): TreeNode | null 
     }
   }
   return null;
-}
-
-function buildDraftNodeID(): string {
-  const randomValue = Math.random().toString(36).slice(2, 10);
-  return `draft-${Date.now().toString(36)}-${randomValue}`;
 }
 
 function collectAncestorNodeIds(
@@ -387,6 +422,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   activeDocId,
   onOpenDocument,
   onCreateNode,
+  onUpdateDocumentIdentifier,
   onUpdateDocumentVisibility,
   onRenameNode,
   onDeleteNode,
@@ -446,14 +482,24 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingNodeTitle, setEditingNodeTitle] = useState("");
   const [creatingDraftNodeIds, setCreatingDraftNodeIds] = useState<string[]>([]);
-  const [isCreatingFirstDocument, setIsCreatingFirstDocument] = useState(false);
+  const [createNodeDialog, setCreateNodeDialog] = useState<CreateNodeDialogState | null>(null);
+  const [isCreateNodeDialogSubmitting, setIsCreateNodeDialogSubmitting] = useState(false);
+  const [editIdentifierDialogNodeID, setEditIdentifierDialogNodeID] = useState<string | null>(null);
+  const [editIdentifierDialogDocumentID, setEditIdentifierDialogDocumentID] = useState("");
+  const [editIdentifierDialogTitle, setEditIdentifierDialogTitle] = useState(DEFAULT_DOCUMENT_TITLE);
+  const [editIdentifierDialogValue, setEditIdentifierDialogValue] = useState("");
   // 文档可见性更新中的节点：用于在树节点上展示细粒度 loading 状态。
   const [updatingVisibilityNodeIds, setUpdatingVisibilityNodeIds] = useState<string[]>([]);
+  const [updatingIdentifierNodeIds, setUpdatingIdentifierNodeIds] = useState<string[]>([]);
   const [isDesktopDragEnabled, setIsDesktopDragEnabled] = useState(false);
   const creatingDraftNodeIdSet = useMemo(() => new Set(creatingDraftNodeIds), [creatingDraftNodeIds]);
   const updatingVisibilityNodeIdSet = useMemo(
     () => new Set(updatingVisibilityNodeIds),
     [updatingVisibilityNodeIds]
+  );
+  const updatingIdentifierNodeIdSet = useMemo(
+    () => new Set(updatingIdentifierNodeIds),
+    [updatingIdentifierNodeIds]
   );
 
   // 拖拽排序仅在桌面端启用：依赖 hover + fine pointer 能力判断。
@@ -722,7 +768,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         await onCreateNode({
           parentId: editingDraftNode.parentId,
           type: editingDraftNode.type,
-          title: normalizedTitle
+          title: normalizedTitle,
+          documentIdentifier: editingDraftNode.documentIdentifier
         });
         removeDraftNode(draftNodeID);
       } catch (error) {
@@ -771,32 +818,6 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     onRenameNode,
     removeDraftNode
   ]);
-
-  const stageDraftNodeAndEnterInlineEdit = useCallback(
-    (input: { parentId: string | null; type: NodeType; title: string }) => {
-      const draftNodeID = buildDraftNodeID();
-      setDraftNodes((previousDraftNodes) => [
-        ...previousDraftNodes,
-        {
-          nodeId: draftNodeID,
-          parentId: input.parentId,
-          type: input.type,
-          title: input.title
-        }
-      ]);
-      if (input.parentId) {
-        setManuallyExpandedNodeIds((previousExpandedNodeIds) => {
-          if (previousExpandedNodeIds.includes(input.parentId!)) {
-            return previousExpandedNodeIds;
-          }
-          return [...previousExpandedNodeIds, input.parentId!];
-        });
-      }
-      setOpenActionNodeId(null);
-      beginInlineEdit(draftNodeID, input.title);
-    },
-    [beginInlineEdit]
-  );
 
   const handleExpandNode = useCallback((item: TreeItem<WorkspaceTreeItemData>) => {
     const nodeId = String(item.index);
@@ -847,13 +868,15 @@ export const WorkspaceTree = memo(function WorkspaceTree({
 
   const handleCreateChildDocument = useCallback(
     async (nodeId: string): Promise<void> => {
-      stageDraftNodeAndEnterInlineEdit({
+      setCreateNodeDialog({
         parentId: nodeId,
         type: "doc",
-        title: DEFAULT_DOCUMENT_TITLE
+        title: DEFAULT_DOCUMENT_TITLE,
+        documentIdentifier: ""
       });
+      setOpenActionNodeId(null);
     },
-    [stageDraftNodeAndEnterInlineEdit]
+    []
   );
 
   const handleCreateSiblingDocument = useCallback(
@@ -862,24 +885,28 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       if (!currentNode) {
         throw new Error("目录节点不存在");
       }
-      stageDraftNodeAndEnterInlineEdit({
+      setCreateNodeDialog({
         parentId: currentNode.parentId,
         type: "doc",
-        title: DEFAULT_DOCUMENT_TITLE
+        title: DEFAULT_DOCUMENT_TITLE,
+        documentIdentifier: ""
       });
+      setOpenActionNodeId(null);
     },
-    [nodeById, stageDraftNodeAndEnterInlineEdit]
+    [nodeById]
   );
 
   const handleCreateChildFolder = useCallback(
     async (nodeId: string): Promise<void> => {
-      stageDraftNodeAndEnterInlineEdit({
+      setCreateNodeDialog({
         parentId: nodeId,
         type: "folder",
-        title: DEFAULT_FOLDER_TITLE
+        title: DEFAULT_FOLDER_TITLE,
+        documentIdentifier: ""
       });
+      setOpenActionNodeId(null);
     },
-    [stageDraftNodeAndEnterInlineEdit]
+    []
   );
 
   const handleRenameNode = useCallback(
@@ -950,20 +977,121 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   );
 
   const handleCreateRootDocument = useCallback(async () => {
-    if (isCreatingFirstDocument) {
+    setCreateNodeDialog({
+      parentId: null,
+      type: "doc",
+      title: DEFAULT_DOCUMENT_TITLE,
+      documentIdentifier: ""
+    });
+  }, []);
+
+  const closeCreateNodeDialog = useCallback(() => {
+    if (isCreateNodeDialogSubmitting) {
       return;
     }
-    setIsCreatingFirstDocument(true);
-    try {
-      stageDraftNodeAndEnterInlineEdit({
-        parentId: null,
-        type: "doc",
-        title: DEFAULT_DOCUMENT_TITLE
-      });
-    } finally {
-      setIsCreatingFirstDocument(false);
+    setCreateNodeDialog(null);
+  }, [isCreateNodeDialogSubmitting]);
+
+  const handleCreateNodeByDialog = useCallback(async () => {
+    if (!createNodeDialog || isCreateNodeDialogSubmitting) {
+      return;
     }
-  }, [isCreatingFirstDocument, stageDraftNodeAndEnterInlineEdit]);
+    const fallbackTitle = createNodeDialog.type === "folder" ? DEFAULT_FOLDER_TITLE : DEFAULT_DOCUMENT_TITLE;
+    const normalizedTitle = createNodeDialog.title.trim() || fallbackTitle;
+
+    let normalizedIdentifier: string | undefined;
+    if (createNodeDialog.type === "doc") {
+      const identifierValidation = validateDocumentIdentifier(createNodeDialog.documentIdentifier, { allowEmpty: true });
+      if (identifierValidation.error) {
+        toast.error(identifierValidation.error);
+        return;
+      }
+      normalizedIdentifier = identifierValidation.value ?? undefined;
+    }
+
+    setIsCreateNodeDialogSubmitting(true);
+    try {
+      const created = await onCreateNode({
+        parentId: createNodeDialog.parentId,
+        type: createNodeDialog.type,
+        title: normalizedTitle,
+        documentIdentifier: normalizedIdentifier
+      });
+      if (created.docId) {
+        void onOpenDocument(created.docId).catch(() => {
+          // 上层会统一更新状态与路由，这里吞掉 Promise rejection 避免控制台噪音。
+        });
+      }
+      setCreateNodeDialog(null);
+    } catch (error) {
+      toast.error(`创建失败：${formatError(error)}`);
+    } finally {
+      setIsCreateNodeDialogSubmitting(false);
+    }
+  }, [createNodeDialog, isCreateNodeDialogSubmitting, onCreateNode, onOpenDocument]);
+
+  const openEditDocumentIdentifierDialog = useCallback(
+    (nodeId: string) => {
+      const currentNode = nodeById.get(nodeId);
+      if (!currentNode || currentNode.type !== "doc") {
+        toast.error("仅文档支持设置标识");
+        return;
+      }
+      const documentID = (currentNode.documentId ?? currentNode.id ?? "").trim();
+      if (!documentID) {
+        toast.error("文档 ID 不存在");
+        return;
+      }
+      setEditIdentifierDialogNodeID(nodeId);
+      setEditIdentifierDialogDocumentID(documentID);
+      setEditIdentifierDialogTitle(currentNode.title?.trim() || DEFAULT_DOCUMENT_TITLE);
+      setEditIdentifierDialogValue((currentNode.documentIdentifier ?? "").trim());
+      setOpenActionNodeId(null);
+    },
+    [nodeById]
+  );
+
+  const closeEditDocumentIdentifierDialog = useCallback(() => {
+    setEditIdentifierDialogNodeID(null);
+    setEditIdentifierDialogDocumentID("");
+    setEditIdentifierDialogTitle(DEFAULT_DOCUMENT_TITLE);
+    setEditIdentifierDialogValue("");
+  }, []);
+
+  const handleUpdateDocumentIdentifier = useCallback(async () => {
+    const nodeID = (editIdentifierDialogNodeID ?? "").trim();
+    const documentID = editIdentifierDialogDocumentID.trim();
+    if (!nodeID || !documentID) {
+      return;
+    }
+    if (updatingIdentifierNodeIdSet.has(nodeID)) {
+      return;
+    }
+    const identifierValidation = validateDocumentIdentifier(editIdentifierDialogValue, { allowEmpty: true });
+    if (identifierValidation.error) {
+      toast.error(identifierValidation.error);
+      return;
+    }
+
+    setUpdatingIdentifierNodeIds((previousNodeIDs) =>
+      previousNodeIDs.includes(nodeID) ? previousNodeIDs : [...previousNodeIDs, nodeID]
+    );
+    try {
+      await onUpdateDocumentIdentifier(documentID, identifierValidation.value);
+      closeEditDocumentIdentifierDialog();
+    } finally {
+      setUpdatingIdentifierNodeIds((previousNodeIDs) =>
+        previousNodeIDs.filter((candidateNodeID) => candidateNodeID !== nodeID)
+      );
+    }
+  }, [
+    closeEditDocumentIdentifierDialog,
+    editIdentifierDialogDocumentID,
+    editIdentifierDialogNodeID,
+    editIdentifierDialogValue,
+    onUpdateDocumentIdentifier,
+    updatingIdentifierNodeIdSet
+  ]);
 
   const canDragItems = useCallback(
     (draggingItems: TreeItem<WorkspaceTreeItemData>[]): boolean => {
@@ -1107,6 +1235,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const isDraftNode = draftNodeByID.has(nodeId);
       const isCreatingDraftNode = creatingDraftNodeIdSet.has(nodeId);
       const isUpdatingVisibility = updatingVisibilityNodeIdSet.has(nodeId);
+      const isUpdatingIdentifier = updatingIdentifierNodeIdSet.has(nodeId);
       const currentDocumentVisibility: Visibility =
         currentNode?.type === "doc" ? currentNode.visibility ?? "member" : "member";
       const nodeTitleText = (currentNode?.title ?? item.data.title ?? "").trim() || "未命名文档";
@@ -1281,6 +1410,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                   {isUpdatingVisibility ? (
                     <span className="ml-2 shrink-0 text-[11px] text-[#64748b]">权限更新中...</span>
                   ) : null}
+                  {isUpdatingIdentifier ? (
+                    <span className="ml-2 shrink-0 text-[11px] text-[#64748b]">标识更新中...</span>
+                  ) : null}
                   {isDraftNode && isCreatingDraftNode ? (
                     <span className="ml-2 shrink-0 text-[11px] text-[#8a8d90]">创建中...</span>
                   ) : null}
@@ -1356,6 +1488,23 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                     {currentNode?.type === "doc" ? (
                       <>
                         <div className="my-1 h-px bg-[#eceff3]" />
+                        <button
+                          type="button"
+                          className={mergeClassNames(
+                            "inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] focus-visible:outline-none",
+                            isUpdatingIdentifier ? "cursor-not-allowed opacity-60" : "hover:bg-[#f0f2f4]"
+                          )}
+                          role="menuitem"
+                          disabled={isUpdatingIdentifier}
+                          onMouseDown={stopTreeItemEvent}
+                          onClick={(event) => {
+                            stopTreeItemEvent(event);
+                            openEditDocumentIdentifierDialog(nodeId);
+                          }}
+                        >
+                          <Link2 size={14} />
+                          <span>设置文档标识</span>
+                        </button>
                         <button
                           type="button"
                           className={mergeClassNames(
@@ -1471,6 +1620,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       handleCreateChildFolder,
       handleCreateSiblingDocument,
       handleDeleteNode,
+      openEditDocumentIdentifierDialog,
       handleRenameNode,
       handleUpdateNodeVisibility,
       cancelInlineEdit,
@@ -1483,6 +1633,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       runActionMenuTask,
       stopTreeItemPropagation,
       stopTreeItemEvent,
+      updatingIdentifierNodeIdSet,
       updatingVisibilityNodeIdSet
     ]
   );
@@ -1490,6 +1641,183 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   return (
     <TooltipProvider delayDuration={120}>
       {confirmDialog}
+      {createNodeDialog !== null ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) {
+              return;
+            }
+            closeCreateNodeDialog();
+          }}
+        >
+          <div
+            className="w-full max-w-[440px] rounded-[14px] bg-white p-5 shadow-[0_22px_48px_rgba(15,23,42,0.28)]"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="mb-4">
+              <h3 className="m-0 text-[16px] font-semibold text-[#1f2328]">
+                {createNodeDialog.type === "folder" ? "新建目录" : "新建文档"}
+              </h3>
+              <p className="mt-1 mb-0 text-[13px] leading-[1.55] text-[#5f6468]">
+                {createNodeDialog.type === "folder"
+                  ? "目录创建后会直接出现在当前节点下。"
+                  : "可选文档标识将用于阅读页 URL，例如 /r/space/quick-start。"}
+              </p>
+            </div>
+            <label className={mergeClassNames("block", createNodeDialog.type === "doc" && "mb-3")}>
+              <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">
+                {createNodeDialog.type === "folder" ? "目录标题" : "文档标题"}
+              </span>
+              <input
+                value={createNodeDialog.title}
+                className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                disabled={isCreateNodeDialogSubmitting}
+                onChange={(event) => {
+                  const nextTitle = event.target.value;
+                  setCreateNodeDialog((previousDialog) =>
+                    previousDialog ? { ...previousDialog, title: nextTitle } : previousDialog
+                  );
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeCreateNodeDialog();
+                  }
+                }}
+              />
+            </label>
+            {createNodeDialog.type === "doc" ? (
+              <>
+                <label className="block">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">文档标识（可空）</span>
+                  <input
+                    value={createNodeDialog.documentIdentifier}
+                    className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                    placeholder="留空则使用 documentId"
+                    disabled={isCreateNodeDialogSubmitting}
+                    onChange={(event) => {
+                      const nextIdentifier = event.target.value;
+                      setCreateNodeDialog((previousDialog) =>
+                        previousDialog
+                          ? {
+                              ...previousDialog,
+                              documentIdentifier: nextIdentifier
+                            }
+                          : previousDialog
+                      );
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleCreateNodeByDialog();
+                        return;
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeCreateNodeDialog();
+                      }
+                    }}
+                  />
+                </label>
+                <p className="mt-2 mb-0 text-[12px] text-[#6b7280]">
+                  仅支持小写字母、数字和连字符（-），并在同一空间内保持唯一。
+                </p>
+              </>
+            ) : null}
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-[8px] border border-[#d0d5db] bg-white px-3 text-[13px] text-[#344054] hover:bg-[#f8fafc] focus-visible:outline-none"
+                onClick={closeCreateNodeDialog}
+                disabled={isCreateNodeDialogSubmitting}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-[8px] border-0 bg-[#3b82f6] px-3 text-[13px] font-medium text-white hover:bg-[#2563eb] focus-visible:outline-none"
+                onClick={() => {
+                  void handleCreateNodeByDialog();
+                }}
+                disabled={isCreateNodeDialogSubmitting}
+              >
+                {isCreateNodeDialogSubmitting ? "创建中..." : "创建"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {editIdentifierDialogNodeID !== null ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) {
+              return;
+            }
+            closeEditDocumentIdentifierDialog();
+          }}
+        >
+          <div
+            className="w-full max-w-[440px] rounded-[14px] bg-white p-5 shadow-[0_22px_48px_rgba(15,23,42,0.28)]"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="mb-4">
+              <h3 className="m-0 text-[16px] font-semibold text-[#1f2328]">设置文档标识</h3>
+              <p className="mt-1 mb-0 text-[13px] leading-[1.55] text-[#5f6468]">
+                当前文档：<span className="font-medium text-[#1f2328]">{editIdentifierDialogTitle}</span>
+              </p>
+            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">文档标识</span>
+              <input
+                value={editIdentifierDialogValue}
+                className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                placeholder="留空表示清空标识并回退到文档 ID"
+                onChange={(event) => {
+                  setEditIdentifierDialogValue(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleUpdateDocumentIdentifier();
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeEditDocumentIdentifierDialog();
+                  }
+                }}
+              />
+            </label>
+            <p className="mt-2 mb-0 text-[12px] text-[#6b7280]">
+              仅支持小写字母、数字和连字符（-），同一空间内唯一。
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-[8px] border border-[#d0d5db] bg-white px-3 text-[13px] text-[#344054] hover:bg-[#f8fafc] focus-visible:outline-none"
+                onClick={closeEditDocumentIdentifierDialog}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-[8px] border-0 bg-[#3b82f6] px-3 text-[13px] font-medium text-white hover:bg-[#2563eb] focus-visible:outline-none"
+                onClick={() => {
+                  void handleUpdateDocumentIdentifier();
+                }}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="mb-2 flex h-11 items-center justify-between border-b border-[#d9dade] px-2">
         <span className="text-[18px] font-semibold text-[#1f2328]">目录</span>
         <DropdownMenu modal={false}>
@@ -1498,7 +1826,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
               type="button"
               className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] border-0 bg-transparent text-[#1f2328] transition-colors hover:bg-[#e7e8ea] data-[state=open]:bg-[#e7e8ea] focus:outline-none focus-visible:outline-none"
               aria-label="打开目录快捷菜单"
-              disabled={isCreatingFirstDocument}
+              disabled={isCreateNodeDialogSubmitting}
             >
               <Plus size={18} />
             </button>
@@ -1507,7 +1835,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             align="end"
             className="min-w-[148px]"
             onCloseAutoFocus={(event) => {
-              // 新建后焦点应交给行内输入框，而不是回到触发按钮。
+              // 弹窗创建关闭后不强制把焦点归回触发按钮，避免焦点跳动。
               event.preventDefault();
             }}
           >
@@ -1532,10 +1860,10 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             onClick={() => {
               void handleCreateRootDocument();
             }}
-            disabled={isCreatingFirstDocument}
+            disabled={isCreateNodeDialogSubmitting}
           >
             <FilePlus2 size={14} />
-            <span>{isCreatingFirstDocument ? "创建中..." : "新建第一篇文档"}</span>
+            <span>{isCreateNodeDialogSubmitting ? "创建中..." : "新建第一篇文档"}</span>
           </button>
         </div>
       ) : (

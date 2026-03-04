@@ -218,10 +218,13 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 		return
 	}
 
-	resolvedDocumentID := strings.TrimSpace(viewModel.Document.ID)
-	if resolvedDocumentID != "" && resolvedDocumentID != documentID {
-		// 兼容历史 node_id 入参：统一重定向到 canonical document_id URL。
-		targetPath := "/r/" + url.PathEscape(spaceID) + "/" + url.PathEscape(resolvedDocumentID)
+	canonicalDocumentRouteKey := strings.TrimSpace(viewModel.Document.RouteKey)
+	if canonicalDocumentRouteKey == "" {
+		canonicalDocumentRouteKey = strings.TrimSpace(viewModel.Document.ID)
+	}
+	if canonicalDocumentRouteKey != "" && canonicalDocumentRouteKey != documentID {
+		// 兼容历史 node_id/document_id 入参：统一重定向到 canonical 文档路由 key（slug 或 document_id）。
+		targetPath := "/r/" + url.PathEscape(spaceID) + "/" + url.PathEscape(canonicalDocumentRouteKey)
 		c.Redirect(http.StatusSeeOther, targetPath)
 		return
 	}

@@ -21,12 +21,13 @@ type HomeSearchInput struct {
 
 // HomeSearchHitRecord 首页全文检索命中项。
 type HomeSearchHitRecord struct {
-	SpaceID    string
-	SpaceName  string
-	DocumentID string
-	Title      string
-	Snippet    string
-	UpdatedAt  time.Time
+	SpaceID          string
+	SpaceName        string
+	DocumentID       string
+	DocumentRouteKey string
+	Title            string
+	Snippet          string
+	UpdatedAt        time.Time
 }
 
 // HomeSearchPageRecord 首页全文检索分页结果。
@@ -39,11 +40,12 @@ type HomeSearchPageRecord struct {
 }
 
 type homeSearchDocumentMetadata struct {
-	SpaceID    string
-	SpaceName  string
-	DocumentID string
-	Title      string
-	UpdatedAt  time.Time
+	SpaceID          string
+	SpaceName        string
+	DocumentID       string
+	DocumentRouteKey string
+	Title            string
+	UpdatedAt        time.Time
 }
 
 // HomeSearchService 封装首页全文检索读取能力。
@@ -130,12 +132,13 @@ func (s *HomeSearchService) Search(
 			continue
 		}
 		items = append(items, HomeSearchHitRecord{
-			SpaceID:    metadata.SpaceID,
-			SpaceName:  metadata.SpaceName,
-			DocumentID: metadata.DocumentID,
-			Title:      metadata.Title,
-			Snippet:    strings.TrimSpace(item.Snippet),
-			UpdatedAt:  metadata.UpdatedAt,
+			SpaceID:          metadata.SpaceID,
+			SpaceName:        metadata.SpaceName,
+			DocumentID:       metadata.DocumentID,
+			DocumentRouteKey: metadata.DocumentRouteKey,
+			Title:            metadata.Title,
+			Snippet:          strings.TrimSpace(item.Snippet),
+			UpdatedAt:        metadata.UpdatedAt,
 		})
 	}
 
@@ -166,11 +169,12 @@ func (s *HomeSearchService) loadDocumentMetadata(
 			continue
 		}
 		result[documentID] = homeSearchDocumentMetadata{
-			SpaceID:    strings.TrimSpace(row.SpaceID),
-			SpaceName:  strings.TrimSpace(row.SpaceName),
-			DocumentID: documentID,
-			Title:      strings.TrimSpace(row.Title),
-			UpdatedAt:  row.UpdatedAt,
+			SpaceID:          strings.TrimSpace(row.SpaceID),
+			SpaceName:        strings.TrimSpace(row.SpaceName),
+			DocumentID:       documentID,
+			DocumentRouteKey: strings.TrimSpace(row.DocumentRouteKey),
+			Title:            strings.TrimSpace(row.Title),
+			UpdatedAt:        row.UpdatedAt,
 		}
 	}
 	return result, nil

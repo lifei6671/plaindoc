@@ -51,6 +51,7 @@ const (
 type AdminDocumentImageAssetRecord struct {
 	ImageAssetID     string
 	DocumentID       string
+	DocumentRouteKey string
 	DocumentTitle    string
 	DocumentStatus   models.EntityStatus
 	SpaceID          string
@@ -653,6 +654,11 @@ func mapAdminDocumentImageAssetRecord(
 	record repository.AdminDocumentImageAssetListRecord,
 ) AdminDocumentImageAssetRecord {
 	imageAsset := record.ImageAsset
+	documentID := strings.TrimSpace(imageAsset.DocumentID)
+	documentRouteKey := strings.TrimSpace(record.DocumentRouteKey)
+	if documentRouteKey == "" {
+		documentRouteKey = documentID
+	}
 	documentStatus := record.DocumentStatus
 	if !models.IsValidEntityStatus(documentStatus) {
 		documentStatus = models.EntityStatusActive
@@ -660,7 +666,8 @@ func mapAdminDocumentImageAssetRecord(
 
 	return AdminDocumentImageAssetRecord{
 		ImageAssetID:     strings.TrimSpace(imageAsset.ImageAssetID),
-		DocumentID:       strings.TrimSpace(imageAsset.DocumentID),
+		DocumentID:       documentID,
+		DocumentRouteKey: documentRouteKey,
 		DocumentTitle:    strings.TrimSpace(record.DocumentTitle),
 		DocumentStatus:   documentStatus,
 		SpaceID:          strings.TrimSpace(imageAsset.SpaceID),

@@ -1,6 +1,8 @@
 export interface ReaderTreeNode {
   id: string;
   documentId?: string;
+  documentIdentifier?: string;
+  documentRouteKey?: string;
   parentId?: string | null;
   type: "folder" | "doc";
   title: string;
@@ -18,6 +20,8 @@ export interface ReaderSpacePayload {
 export interface ReaderDocumentPayload {
   id: string;
   nodeId: string;
+  identifier?: string;
+  routeKey: string;
   themeId: string;
   visibility: "public" | "authenticated" | "member";
   title: string;

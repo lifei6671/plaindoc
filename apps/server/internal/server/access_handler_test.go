@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
@@ -385,6 +386,200 @@ func TestRouter_ReaderPage_UnauthorizedRendersForbiddenInsteadOfRedirect(t *test
 	}
 	if location := spaceRec.Header().Get("Location"); location != "" {
 		t.Fatalf("expected no redirect location for reader space, got %q", location)
+	}
+}
+
+func TestRouter_UpdateDocumentIdentifier_AccessControlAndConflict(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "owner-doc-identifier@example.com")
+	collaboratorUserID, _, collaboratorToken := registerAccessUser(
+		t,
+		serve,
+		"collaborator-doc-identifier@example.com",
+	)
+	readerUserID, _, readerToken := registerAccessUser(t, serve, "reader-doc-identifier@example.com")
+	_, _, outsiderToken := registerAccessUser(t, serve, "outsider-doc-identifier@example.com")
+
+	spaceID := "01h1spaceidentifier00000000001"
+	firstNodeID := "01h1nodeidentifier000000000001"
+	firstDocID := "01h1docidentifier000000000001"
+	secondNodeID := "01h1nodeidentifier000000000002"
+	secondDocID := "01h1docidentifier000000000002"
+
+	seedSpaceAndDocumentForAccess(t, database, ownerUserID, spaceID, firstNodeID, firstDocID, "member", "member")
+	seedSpaceMemberForAccess(t, database, spaceID, collaboratorUserID, "collaborator")
+	seedSpaceMemberForAccess(t, database, spaceID, readerUserID, "reader")
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("nodes").Create(map[string]any{
+		"node_id":        secondNodeID,
+		"space_id":       spaceID,
+		"parent_node_id": nil,
+		"type":           "doc",
+		"title":          "Conflict Doc",
+		"sort":           2,
+		"created_at":     now,
+		"updated_at":     now,
+	}).Error; err != nil {
+		t.Fatalf("insert second node failed: %v", err)
+	}
+	if err := database.ORM.Table("documents").Create(map[string]any{
+		"document_id":        secondDocID,
+		"node_id":            secondNodeID,
+		"theme_id":           "default",
+		"visibility":         "member",
+		"title":              "Conflict Doc",
+		"content_md":         "# conflict",
+		"version":            1,
+		"updated_by_user_id": ownerUserID,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert second document failed: %v", err)
+	}
+
+	updateBody := []byte(`{"identifier":"quick-start"}`)
+
+	outsiderReq := httptest.NewRequest(http.MethodPatch, "/api/docs/"+firstDocID+"/identifier", bytes.NewReader(updateBody))
+	outsiderReq.Header.Set("Authorization", "Bearer "+outsiderToken)
+	outsiderReq.Header.Set("Content-Type", "application/json")
+	outsiderRec := serve(outsiderReq)
+	if outsiderRec.Code != http.StatusForbidden {
+		t.Fatalf("expected outsider patch status 403, got %d body=%s", outsiderRec.Code, outsiderRec.Body.String())
+	}
+
+	readerReq := httptest.NewRequest(http.MethodPatch, "/api/docs/"+firstDocID+"/identifier", bytes.NewReader(updateBody))
+	readerReq.Header.Set("Authorization", "Bearer "+readerToken)
+	readerReq.Header.Set("Content-Type", "application/json")
+	readerRec := serve(readerReq)
+	if readerRec.Code != http.StatusForbidden {
+		t.Fatalf("expected reader patch status 403, got %d body=%s", readerRec.Code, readerRec.Body.String())
+	}
+
+	collaboratorReq := httptest.NewRequest(http.MethodPatch, "/api/docs/"+firstDocID+"/identifier", bytes.NewReader(updateBody))
+	collaboratorReq.Header.Set("Authorization", "Bearer "+collaboratorToken)
+	collaboratorReq.Header.Set("Content-Type", "application/json")
+	collaboratorRec := serve(collaboratorReq)
+	if collaboratorRec.Code != http.StatusOK {
+		t.Fatalf("expected collaborator patch status 200, got %d body=%s", collaboratorRec.Code, collaboratorRec.Body.String())
+	}
+
+	updatePayload := decodeJSONResultData[struct {
+		DocumentID string  `json:"documentId"`
+		Identifier *string `json:"identifier"`
+		ReaderURL  string  `json:"readerUrl"`
+	}](t, collaboratorRec.Body.Bytes())
+	if updatePayload.DocumentID != firstDocID {
+		t.Fatalf("expected document id %s, got %s", firstDocID, updatePayload.DocumentID)
+	}
+	if updatePayload.Identifier == nil || *updatePayload.Identifier != "quick-start" {
+		t.Fatalf("expected identifier quick-start, got %#v", updatePayload.Identifier)
+	}
+	if !strings.HasSuffix(updatePayload.ReaderURL, "/"+spaceID+"/quick-start") {
+		t.Fatalf("expected reader url suffix /%s/quick-start, got %s", spaceID, updatePayload.ReaderURL)
+	}
+
+	conflictReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/docs/"+secondDocID+"/identifier",
+		bytes.NewReader([]byte(`{"identifier":"quick-start"}`)),
+	)
+	conflictReq.Header.Set("Authorization", "Bearer "+ownerToken)
+	conflictReq.Header.Set("Content-Type", "application/json")
+	conflictRec := serve(conflictReq)
+	if conflictRec.Code != http.StatusOK {
+		t.Fatalf("expected conflict http status 200, got %d body=%s", conflictRec.Code, conflictRec.Body.String())
+	}
+	if decodeJSONResultCode(t, conflictRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeDocumentIdentifierConflict) {
+		t.Fatalf(
+			"expected conflict business code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeDocumentIdentifierConflict),
+			decodeJSONResultCode(t, conflictRec.Body.Bytes()),
+			conflictRec.Body.String(),
+		)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/docs/"+firstDocID+"/identifier",
+		bytes.NewReader([]byte(`{"identifier":"api"}`)),
+	)
+	invalidReq.Header.Set("Authorization", "Bearer "+ownerToken)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidRec := serve(invalidReq)
+	if invalidRec.Code != http.StatusOK {
+		t.Fatalf("expected reserved identifier http status 200, got %d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeDocumentIdentifierReserved) {
+		t.Fatalf(
+			"expected reserved business code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeDocumentIdentifierReserved),
+			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
+			invalidRec.Body.String(),
+		)
+	}
+
+	clearReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/docs/"+firstDocID+"/identifier",
+		bytes.NewReader([]byte(`{"identifier":""}`)),
+	)
+	clearReq.Header.Set("Authorization", "Bearer "+ownerToken)
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearRec := serve(clearReq)
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("expected clear identifier status 200, got %d body=%s", clearRec.Code, clearRec.Body.String())
+	}
+
+	var persistedNode struct {
+		ReaderSlug *string `gorm:"column:reader_slug"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("reader_slug").
+		Where("node_id = ?", firstNodeID).
+		Take(&persistedNode).Error; err != nil {
+		t.Fatalf("query persisted reader_slug failed: %v", err)
+	}
+	if persistedNode.ReaderSlug != nil && strings.TrimSpace(*persistedNode.ReaderSlug) != "" {
+		t.Fatalf("expected reader_slug cleared, got %q", strings.TrimSpace(*persistedNode.ReaderSlug))
+	}
+}
+
+func TestRouter_ReaderPage_DocumentIDRedirectsToSlugCanonical(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, _ := registerAccessUser(t, serve, "owner-reader-slug@example.com")
+	spaceID := "01h1readerslugspace0000000001"
+	nodeID := "01h1readerslugnode00000000001"
+	docID := "01h1readerslugdoc000000000001"
+	readerSlug := "quick-start"
+
+	seedSpaceAndDocumentForAccess(t, database, ownerUserID, spaceID, nodeID, docID, "public", "public")
+	if err := database.ORM.Table("nodes").Where("node_id = ?", nodeID).Update("reader_slug", readerSlug).Error; err != nil {
+		t.Fatalf("update reader slug failed: %v", err)
+	}
+
+	legacyURLReq := httptest.NewRequest(http.MethodGet, "/r/"+spaceID+"/"+docID, nil)
+	legacyURLRec := serve(legacyURLReq)
+	if legacyURLRec.Code != http.StatusSeeOther {
+		t.Fatalf("expected legacy doc id redirect status 303, got %d body=%s", legacyURLRec.Code, legacyURLRec.Body.String())
+	}
+	expectedLocation := "/r/" + spaceID + "/" + readerSlug
+	if location := legacyURLRec.Header().Get("Location"); location != expectedLocation {
+		t.Fatalf("expected redirect location %q, got %q", expectedLocation, location)
+	}
+
+	slugURLReq := httptest.NewRequest(http.MethodGet, "/r/"+spaceID+"/"+readerSlug, nil)
+	slugURLRec := serve(slugURLReq)
+	if slugURLRec.Code != http.StatusOK {
+		t.Fatalf("expected slug url status 200, got %d body=%s", slugURLRec.Code, slugURLRec.Body.String())
 	}
 }
 

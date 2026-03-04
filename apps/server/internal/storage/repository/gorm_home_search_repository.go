@@ -14,11 +14,12 @@ type gormHomeSearchRepository struct {
 }
 
 type homeSearchMetadataRow struct {
-	SpaceID      string `gorm:"column:space_id"`
-	SpaceName    string `gorm:"column:space_name"`
-	DocumentID   string `gorm:"column:document_id"`
-	Title        string `gorm:"column:title"`
-	UpdatedAtRaw string `gorm:"column:updated_at"`
+	SpaceID      string  `gorm:"column:space_id"`
+	SpaceName    string  `gorm:"column:space_name"`
+	DocumentID   string  `gorm:"column:document_id"`
+	ReaderSlug   *string `gorm:"column:reader_slug"`
+	Title        string  `gorm:"column:title"`
+	UpdatedAtRaw string  `gorm:"column:updated_at"`
 }
 
 // NewGormHomeSearchRepository 创建首页检索仓储实现。
@@ -45,6 +46,7 @@ func (r *gormHomeSearchRepository) ListActiveDocumentMetadataByDocumentIDs(
 			"s.space_id AS space_id",
 			"s.name AS space_name",
 			"d.document_id AS document_id",
+			"n.reader_slug AS reader_slug",
 			"d.title AS title",
 			"d.updated_at AS updated_at",
 		).
@@ -60,14 +62,30 @@ func (r *gormHomeSearchRepository) ListActiveDocumentMetadataByDocumentIDs(
 	result := make([]HomeSearchDocumentMetadataRecord, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, HomeSearchDocumentMetadataRecord{
-			SpaceID:    strings.TrimSpace(row.SpaceID),
-			SpaceName:  strings.TrimSpace(row.SpaceName),
-			DocumentID: strings.TrimSpace(row.DocumentID),
-			Title:      strings.TrimSpace(row.Title),
-			UpdatedAt:  parseRecordTime(row.UpdatedAtRaw),
+			SpaceID:          strings.TrimSpace(row.SpaceID),
+			SpaceName:        strings.TrimSpace(row.SpaceName),
+			DocumentID:       strings.TrimSpace(row.DocumentID),
+			DocumentRouteKey: resolveDocumentRouteKey(strings.TrimSpace(row.DocumentID), row.ReaderSlug),
+			Title:            strings.TrimSpace(row.Title),
+			UpdatedAt:        parseRecordTime(row.UpdatedAtRaw),
 		})
 	}
 	return result, nil
+}
+
+func resolveDocumentRouteKey(documentID string, readerSlug *string) string {
+	slug := strings.ToLower(strings.TrimSpace(derefOptionalString(readerSlug)))
+	if slug != "" {
+		return slug
+	}
+	return strings.TrimSpace(documentID)
+}
+
+func derefOptionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func normalizeHomeSearchDocumentIDs(documentIDs []string) []string {

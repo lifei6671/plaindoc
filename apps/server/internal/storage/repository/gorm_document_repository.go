@@ -261,6 +261,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 		ID              int64               `gorm:"column:id"`
 		DocumentID      string              `gorm:"column:document_id"`
 		NodeID          string              `gorm:"column:node_id"`
+		ReaderSlug      *string             `gorm:"column:reader_slug"`
 		ThemeID         string              `gorm:"column:theme_id"`
 		Visibility      models.Visibility   `gorm:"column:visibility"`
 		Status          models.EntityStatus `gorm:"column:status"`
@@ -287,6 +288,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 			"d.id",
 			"d.document_id",
 			"d.node_id",
+			"n.reader_slug AS reader_slug",
 			"d.theme_id",
 			"d.visibility",
 			"d.status",
@@ -340,12 +342,13 @@ func (r *gormDocumentRepository) ListForAdmin(
 			document.Status = models.EntityStatusActive
 		}
 		result = append(result, AdminDocumentListRecord{
-			Document:        document,
-			SpaceID:         row.SpaceID,
-			SpaceName:       row.SpaceName,
-			SpaceOwnerID:    row.SpaceOwnerID,
-			SpaceOwnerName:  row.SpaceOwnerName,
-			SpaceOwnerEmail: row.SpaceOwnerEmail,
+			Document:         document,
+			DocumentRouteKey: resolveAdminDocumentRouteKey(row.DocumentID, row.ReaderSlug),
+			SpaceID:          row.SpaceID,
+			SpaceName:        row.SpaceName,
+			SpaceOwnerID:     row.SpaceOwnerID,
+			SpaceOwnerName:   row.SpaceOwnerName,
+			SpaceOwnerEmail:  row.SpaceOwnerEmail,
 		})
 	}
 
@@ -691,6 +694,14 @@ func normalizeDocumentVisibilities(input []models.Visibility) []models.Visibilit
 		visibilities = append(visibilities, visibility)
 	}
 	return visibilities
+}
+
+func resolveAdminDocumentRouteKey(documentID string, readerSlug *string) string {
+	normalizedReaderSlug := strings.TrimSpace(strings.ToLower(derefOptionalString(readerSlug)))
+	if normalizedReaderSlug != "" {
+		return normalizedReaderSlug
+	}
+	return strings.TrimSpace(documentID)
 }
 
 func parseDocumentRecordTime(raw string) time.Time {

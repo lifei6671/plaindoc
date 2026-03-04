@@ -970,6 +970,7 @@ export default function App() {
     lastSavedAt,
     bootstrapWorkspace,
     createNode,
+    updateDocumentIdentifier,
     updateDocumentVisibility,
     renameNode,
     deleteNode,
@@ -2527,6 +2528,30 @@ export default function App() {
     [updateDocumentVisibility]
   );
 
+  // 文档路由标识动作：用于目录树中快速设置/清空阅读 URL 标识。
+  const handleUpdateWorkspaceDocumentIdentifier = useCallback(
+    async (docId: string, identifier: string | null): Promise<void> => {
+      try {
+        const updated = await updateDocumentIdentifier(docId, identifier);
+        if (updated.identifier) {
+          const message = `文档标识已更新：${updated.identifier}`;
+          setStatusMessage(message);
+          toast.success(message);
+          return;
+        }
+        const message = "文档标识已清空，已回退为文档 ID 路由";
+        setStatusMessage(message);
+        toast.success(message);
+      } catch (error) {
+        const message = `更新文档标识失败：${formatError(error)}`;
+        setStatusMessage(message);
+        toast.error(message);
+        throw error;
+      }
+    },
+    [updateDocumentIdentifier]
+  );
+
   // 侧栏拖拽移动：按起始宽度和鼠标偏移计算目标宽度。
   const handleWorkspaceSidebarResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = workspaceSidebarResizeStateRef.current;
@@ -3265,6 +3290,7 @@ export default function App() {
             workspaceTree={workspaceTree}
             onOpenDocument={handleOpenWorkspaceDocument}
             onCreateNode={handleCreateWorkspaceNode}
+            onUpdateDocumentIdentifier={handleUpdateWorkspaceDocumentIdentifier}
             onUpdateDocumentVisibility={handleUpdateWorkspaceDocumentVisibility}
             onRenameNode={handleRenameWorkspaceNode}
             onDeleteNode={handleDeleteWorkspaceNode}
