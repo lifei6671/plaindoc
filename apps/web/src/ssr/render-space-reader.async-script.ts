@@ -10,6 +10,11 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const TREE_LABEL_ACTIVE_SELECTOR = "[data-reader-hook='tree-label'][data-reader-label-active='1']";
   const ARTICLE_SHELL_SELECTOR = "[data-reader-hook='article-shell']";
   const MAIN_SELECTOR = "[data-reader-hook='main']";
+  const MOBILE_SIDEBAR_OPEN_TRIGGER_SELECTOR = "[data-reader-hook='mobile-sidebar-open']";
+  const MOBILE_SIDEBAR_CLOSE_TRIGGER_SELECTOR = "[data-reader-hook='mobile-sidebar-close']";
+  const MOBILE_SIDEBAR_OVERLAY_SELECTOR = "[data-reader-hook='mobile-overlay']";
+  const MOBILE_BAR_TITLE_SELECTOR = "[data-reader-hook='mobile-bar-title']";
+  const MOBILE_SIDEBAR_OPEN_CLASS = "reader-mobile-sidebar-open";
   const TREE_TITLE_TOOLTIP_SELECTOR = "[data-reader-hook='tree-title-tooltip'][data-tooltip]";
   const TREE_ROW_ACTIVE_CLASS = "reader-tree__row--active";
   const TREE_LABEL_ACTIVE_CLASS = "reader-tree__label--active";
@@ -35,6 +40,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     "#plaindoc-preview-body h1, #plaindoc-preview-body h2, #plaindoc-preview-body h3, #plaindoc-preview-body h4, #plaindoc-preview-body h5, #plaindoc-preview-body h6";
   const OUTLINE_SCROLL_OFFSET = 16;
   const OUTLINE_ACTIVE_OFFSET = 108;
+  const MOBILE_SIDEBAR_BREAKPOINT = 1024;
   const queryActiveRow = () => document.querySelector(TREE_ROW_ACTIVE_SELECTOR);
 
   const normalizePathname = (pathname) => pathname.replace(/\\/+$/, "") || "/";
@@ -45,6 +51,63 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     event.ctrlKey ||
     event.shiftKey ||
     event.altKey;
+
+  const isMobileSidebarViewport = () => window.innerWidth <= MOBILE_SIDEBAR_BREAKPOINT;
+
+  const collectMobileSidebarOpenButtons = () =>
+    Array.from(document.querySelectorAll(MOBILE_SIDEBAR_OPEN_TRIGGER_SELECTOR)).filter(
+      (node) => node instanceof HTMLButtonElement
+    );
+
+  let mobileSidebarOpen = false;
+
+  const syncMobileSidebarDOMState = () => {
+    const shouldOpen = isMobileSidebarViewport() && mobileSidebarOpen;
+    if (document.body instanceof HTMLElement) {
+      document.body.classList.toggle(MOBILE_SIDEBAR_OPEN_CLASS, shouldOpen);
+    }
+
+    const mobileSidebarOpenButtons = collectMobileSidebarOpenButtons();
+    for (const button of mobileSidebarOpenButtons) {
+      if (!(button instanceof HTMLButtonElement)) {
+        continue;
+      }
+      button.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    }
+
+    const overlayNode = document.querySelector(MOBILE_SIDEBAR_OVERLAY_SELECTOR);
+    if (overlayNode instanceof HTMLElement) {
+      overlayNode.hidden = !shouldOpen;
+    }
+  };
+
+  const setMobileSidebarOpen = (nextOpen) => {
+    mobileSidebarOpen = nextOpen === true;
+    syncMobileSidebarDOMState();
+  };
+
+  const syncNestedTreeStateAfterExpand = (detailsElement) => {
+    if (!(detailsElement instanceof HTMLDetailsElement)) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      if (!detailsElement.open) {
+        return;
+      }
+      const nestedDetails = detailsElement.querySelectorAll(TREE_DETAILS_SELECTOR);
+      const activeRow = queryActiveRow();
+      for (const nestedDetail of nestedDetails) {
+        if (!(nestedDetail instanceof HTMLDetailsElement) || nestedDetail === detailsElement) {
+          continue;
+        }
+        if (activeRow instanceof HTMLElement && nestedDetail.contains(activeRow)) {
+          nestedDetail.open = true;
+          continue;
+        }
+        nestedDetail.open = false;
+      }
+    });
+  };
 
   const toSameOriginURL = (rawHref) => {
     try {
@@ -666,6 +729,29 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     }
   };
 
+  const syncMobileBarTitle = (nextDocument) => {
+    const currentTitleNode = document.querySelector(MOBILE_BAR_TITLE_SELECTOR);
+    if (!(currentTitleNode instanceof HTMLElement)) {
+      return;
+    }
+    const nextTitleNode = nextDocument.querySelector(MOBILE_BAR_TITLE_SELECTOR);
+    let nextTitle = "";
+    if (nextTitleNode instanceof HTMLElement) {
+      nextTitle = (nextTitleNode.textContent || "").trim();
+    }
+    if (!nextTitle) {
+      const fallbackTitleNode = nextDocument.querySelector(".reader-article-title");
+      if (fallbackTitleNode instanceof HTMLElement) {
+        nextTitle = (fallbackTitleNode.textContent || "").trim();
+      }
+    }
+    if (!nextTitle) {
+      return;
+    }
+    currentTitleNode.textContent = nextTitle;
+    currentTitleNode.setAttribute("title", nextTitle);
+  };
+
   const replaceArticleShell = (nextDocument) => {
     const currentArticleShell = document.querySelector(ARTICLE_SHELL_SELECTOR);
     const nextArticleShell =
@@ -946,7 +1032,9 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       syncHeadStyleByID(THEME_STYLE_ID, parsedDocument);
       syncHeadStyleByID(THEME_CUSTOM_STYLE_ID, parsedDocument);
       syncReaderStateScript(parsedDocument);
+      syncMobileBarTitle(parsedDocument);
       markActiveTreeItemByPathname(targetPathname);
+      setMobileSidebarOpen(false);
 
       const readerMain = document.querySelector(MAIN_SELECTOR);
       if (readerMain instanceof HTMLElement) {
@@ -977,6 +1065,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     expandAncestorsForActiveRow();
     markActiveTreeItemByPathname(window.location.pathname);
     refreshOutlineRegistry();
+    setMobileSidebarOpen(false);
   } catch {
     // no-op: initialization enhancement should never block rendering.
   }
@@ -1011,6 +1100,39 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
           return;
         }
 
+        const mobileSidebarOpenButton = event.target.closest(MOBILE_SIDEBAR_OPEN_TRIGGER_SELECTOR);
+        if (mobileSidebarOpenButton instanceof HTMLButtonElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setMobileSidebarOpen(true);
+          return;
+        }
+
+        const mobileSidebarCloseButton = event.target.closest(MOBILE_SIDEBAR_CLOSE_TRIGGER_SELECTOR);
+        if (mobileSidebarCloseButton instanceof HTMLButtonElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setMobileSidebarOpen(false);
+          return;
+        }
+
+        const mobileSidebarOverlay = event.target.closest(MOBILE_SIDEBAR_OVERLAY_SELECTOR);
+        if (mobileSidebarOverlay instanceof HTMLElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setMobileSidebarOpen(false);
+          return;
+        }
+
         const outlineLink = event.target.closest(OUTLINE_LINK_SELECTOR);
         if (outlineLink instanceof HTMLElement) {
           if (event.defaultPrevented || isModifiedClick(event)) {
@@ -1037,6 +1159,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
           }
           event.preventDefault();
           event.stopPropagation();
+          setMobileSidebarOpen(false);
           void loadReaderPage(targetURL, true);
           return;
         }
@@ -1045,27 +1168,15 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         if (!(summaryElement instanceof HTMLElement)) {
           return;
         }
-        if (event.target.closest(TREE_ARROW_SELECTOR)) {
-          const detailsElement = summaryElement.parentElement;
-          if (detailsElement instanceof HTMLDetailsElement) {
-            window.requestAnimationFrame(() => {
-              if (!detailsElement.open) {
-                return;
-              }
-              const nestedDetails = detailsElement.querySelectorAll(TREE_DETAILS_SELECTOR);
-              const activeRow = queryActiveRow();
-              for (const nestedDetail of nestedDetails) {
-                if (!(nestedDetail instanceof HTMLDetailsElement) || nestedDetail === detailsElement) {
-                  continue;
-                }
-                if (activeRow instanceof HTMLElement && nestedDetail.contains(activeRow)) {
-                  nestedDetail.open = true;
-                  continue;
-                }
-                nestedDetail.open = false;
-              }
-            });
-          }
+        const detailsElement = summaryElement.parentElement;
+        if (!(detailsElement instanceof HTMLDetailsElement)) {
+          return;
+        }
+        const clickedArrow = event.target.closest(TREE_ARROW_SELECTOR) instanceof HTMLElement;
+        const hasDocumentLink = summaryElement.querySelector(DOC_LINK_SELECTOR) instanceof HTMLAnchorElement;
+        const allowSummaryToggle = clickedArrow || !hasDocumentLink;
+        if (allowSummaryToggle) {
+          syncNestedTreeStateAfterExpand(detailsElement);
           return;
         }
 
@@ -1084,6 +1195,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       if (!targetURL) {
         return;
       }
+      setMobileSidebarOpen(false);
       void loadReaderPage(targetURL, false);
     });
   } catch {
@@ -1091,11 +1203,32 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   }
 
   try {
+    window.addEventListener("keydown", (event) => {
+      if (!(event instanceof KeyboardEvent)) {
+        return;
+      }
+      if (event.key !== "Escape") {
+        return;
+      }
+      setMobileSidebarOpen(false);
+    });
+  } catch {
+    // no-op: mobile sidebar enhancement should never block rendering.
+  }
+
+  try {
     const readerMain = document.querySelector(MAIN_SELECTOR);
     if (readerMain instanceof HTMLElement) {
       readerMain.addEventListener("scroll", scheduleOutlineActiveSync, { passive: true });
     }
-    window.addEventListener("resize", refreshOutlineRegistry, { passive: true });
+    window.addEventListener("resize", () => {
+      if (!isMobileSidebarViewport()) {
+        setMobileSidebarOpen(false);
+      } else {
+        syncMobileSidebarDOMState();
+      }
+      refreshOutlineRegistry();
+    }, { passive: true });
   } catch {
     // no-op: outline enhancement should never block rendering.
   }

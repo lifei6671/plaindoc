@@ -2,6 +2,18 @@
 <header class="yt-header">
   <div class="yt-header-inner">
     <div class="yt-header-left">
+      <button
+        type="button"
+        class="yt-nav-toggle"
+        data-yt-nav-toggle
+        aria-controls="yt-sidebar"
+        aria-expanded="false"
+        aria-label="打开分类导航"
+      >
+        <span class="yt-nav-toggle-bar" aria-hidden="true"></span>
+        <span class="yt-nav-toggle-bar" aria-hidden="true"></span>
+        <span class="yt-nav-toggle-bar" aria-hidden="true"></span>
+      </button>
       <a href="/" class="yt-brand" aria-label="{{ .SiteName }} 首页">
         <img src="/assets/favicon.png" alt="{{ .SiteName }} Logo" class="yt-brand-logo" loading="eager" decoding="async">
         <span class="yt-brand-badge">Docs</span>
@@ -9,7 +21,7 @@
     </div>
 
     {{ if .SearchEnabled }}
-      <div class="yt-header-center">
+      <div id="yt-search-panel" class="yt-header-center" data-yt-search-panel>
         <div class="yt-header-search-wrap">
           <form class="yt-header-search-form" action="{{ .SearchActionURL }}" method="get" role="search">
             <input
@@ -28,6 +40,29 @@
     {{ end }}
 
     <div class="yt-header-right">
+      {{ if .SearchEnabled }}
+        <button
+          type="button"
+          class="yt-search-toggle"
+          data-yt-search-toggle
+          aria-controls="yt-search-panel"
+          aria-expanded="false"
+          aria-label="打开搜索"
+        >
+          <svg
+            class="yt-search-toggle-icon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.8"></circle>
+            <path d="M16 16L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+          </svg>
+        </button>
+      {{ end }}
+
       {{ if and .IsAuthenticated .CanManageSpace }}
         <a
           href="{{ .AdminURL }}/spaces"

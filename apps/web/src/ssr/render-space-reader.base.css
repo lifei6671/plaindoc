@@ -38,11 +38,29 @@ a {
   flex-shrink: 0;
   background: #fff;
 }
+.reader-sidebar__header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .reader-sidebar__title {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
   color: #111827;
+}
+.reader-sidebar__close {
+  display: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
 .reader-sidebar__tree-scroll {
   min-height: 0;
@@ -286,6 +304,12 @@ a {
   overflow-y: auto;
   overflow-x: hidden;
 }
+.reader-mobile-bar {
+  display: none;
+}
+.reader-mobile-overlay {
+  display: none;
+}
 .reader-main[data-reader-outline="1"] {
   display: grid;
   grid-template-columns: minmax(0, 1024px) 260px;
@@ -408,11 +432,12 @@ a {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .reader-article-meta__text {
-  display: inline-flex;
-  align-items: center;
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .reader-article-actions {
   margin-top: 14px;
@@ -650,6 +675,9 @@ a {
   .reader-progress,
   .reader-sidebar,
   .reader-outline,
+  .reader-mobile-bar,
+  .reader-mobile-overlay,
+  .reader-sidebar__close,
   .reader-article-actions,
   .reader-attachment__actions,
   .reader-floating-tooltip {
@@ -731,29 +759,119 @@ a {
 @media (max-width: 1024px) {
   body {
     overflow: auto;
+    overflow-x: hidden;
+  }
+  body.reader-mobile-sidebar-open {
+    overflow: hidden;
   }
   .reader-layout {
-    grid-template-columns: 1fr;
+    display: block;
     height: auto;
     overflow: visible;
   }
   .reader-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid #dbe2ea;
-    position: static;
-    height: auto;
-    max-height: 38vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(86vw, 340px);
+    height: 100dvh;
+    max-height: none;
+    transform: translateX(-104%);
+    transition: transform 0.2s ease;
+    z-index: 120;
+    border-right: 1px solid #dbe2ea;
+    border-bottom: 0;
+    box-shadow: 0 24px 40px rgba(15, 23, 42, 0.24);
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  body.reader-mobile-sidebar-open .reader-sidebar {
+    transform: translateX(0);
+  }
+  .reader-sidebar__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .reader-main {
     height: auto;
     overflow: visible;
-    padding: 16px;
+    padding: 16px 12px 24px;
   }
   .reader-main[data-reader-outline="1"] {
-    padding-right: 16px;
+    padding-right: 12px;
+  }
+  #plaindoc-preview-body table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+  }
+  #plaindoc-preview-body thead th {
+    white-space: normal;
+  }
+  #plaindoc-preview-body th,
+  #plaindoc-preview-body td {
+    padding: 8px 10px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .reader-outline {
     display: none;
+  }
+  .reader-mobile-bar {
+    position: sticky;
+    top: 0;
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid #dbe2ea;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(6px);
+    margin-bottom: 12px;
+    padding: 8px;
+  }
+  .reader-mobile-bar__toggle {
+    min-height: 32px;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    background: #fff;
+    color: #1f2937;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 600;
+    padding: 0 12px;
+    cursor: pointer;
+  }
+  .reader-mobile-bar__title {
+    min-width: 0;
+    flex: 1;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .reader-mobile-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    background: rgba(15, 23, 42, 0.42);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    display: block;
+  }
+  body.reader-mobile-sidebar-open .reader-mobile-overlay {
+    opacity: 1;
+    pointer-events: auto;
   }
   .reader-article-title {
     font-size: 24px;

@@ -462,9 +462,24 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
           <span className="reader-progress__bar" />
         </div>
         <div className="reader-layout">
-          <aside className="reader-sidebar" data-reader-hook="sidebar">
+          <aside
+            id="plaindoc-reader-sidebar"
+            className="reader-sidebar"
+            data-reader-hook="sidebar"
+            aria-label={`${spaceTitle} 文档目录`}
+          >
             <div className="reader-sidebar__header">
-              <h2 className="reader-sidebar__title">{spaceTitle}</h2>
+              <div className="reader-sidebar__header-row">
+                <h2 className="reader-sidebar__title">{spaceTitle}</h2>
+                <button
+                  type="button"
+                  className="reader-sidebar__close"
+                  data-reader-hook="mobile-sidebar-close"
+                  aria-label="关闭目录"
+                >
+                  ×
+                </button>
+              </div>
             </div>
             <div className="reader-sidebar__tree-scroll">
               <ReaderTree
@@ -482,6 +497,20 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             data-reader-hook="main"
             data-reader-outline={hasReaderOutline ? "1" : undefined}
           >
+            <div className="reader-mobile-bar" data-reader-hook="mobile-bar">
+              <button
+                type="button"
+                className="reader-mobile-bar__toggle"
+                data-reader-hook="mobile-sidebar-open"
+                aria-controls="plaindoc-reader-sidebar"
+                aria-expanded="false"
+              >
+                目录
+              </button>
+              <span className="reader-mobile-bar__title" data-reader-hook="mobile-bar-title" title={articleTitle}>
+                {articleTitle}
+              </span>
+            </div>
             {hasReaderOutline ? (
               <aside className="reader-outline" data-reader-hook="outline" aria-label="文档大纲">
                 <div className="reader-outline__title">文档大纲</div>
@@ -659,6 +688,13 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             </div>
           </main>
         </div>
+        <button
+          type="button"
+          className="reader-mobile-overlay"
+          data-reader-hook="mobile-overlay"
+          aria-label="关闭目录"
+          hidden
+        />
         <script
           id="plaindoc-reader-state"
           type="application/json"

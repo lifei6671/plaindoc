@@ -1,5 +1,9 @@
 {{ define "youtube_sidebar" }}
-<aside class="yt-sidebar" aria-label="侧边导航">
+<aside id="yt-sidebar" class="yt-sidebar" data-yt-sidebar aria-label="侧边导航">
+  <div class="yt-sidebar-mobile-head">
+    <p class="yt-sidebar-mobile-title">分类导航</p>
+    <button type="button" class="yt-sidebar-close" data-yt-sidebar-close aria-label="关闭分类导航">×</button>
+  </div>
   <nav class="yt-sidebar-nav">
     {{ range .Categories }}
       <a class="yt-sidebar-item{{ if .IsActive }} is-active{{ end }}" href="{{ .URL }}">
