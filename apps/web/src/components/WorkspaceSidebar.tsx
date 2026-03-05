@@ -1,10 +1,12 @@
 import { memo } from "react";
 import type {
   CreateNodeResult,
+  DocumentShareConfig,
   DocumentTemplateDetail,
   DocumentTemplateSummary,
   NodeType,
   TreeNode,
+  UpdateDocumentShareInput,
   Visibility
 } from "../data-access";
 import { WorkspaceTree } from "./WorkspaceTree";
@@ -24,6 +26,9 @@ interface WorkspaceSidebarProps {
   onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
   onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
+  onGetDocumentShareConfig: (docId: string) => Promise<DocumentShareConfig>;
+  onUpdateDocumentShareConfig: (docId: string, input: UpdateDocumentShareInput) => Promise<DocumentShareConfig>;
+  onDisableDocumentShare: (docId: string) => Promise<void>;
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
@@ -40,6 +45,9 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   onListDocumentTemplates,
   onGetDocumentTemplate,
   onUpdateDocumentIdentifier,
+  onGetDocumentShareConfig,
+  onUpdateDocumentShareConfig,
+  onDisableDocumentShare,
   onUpdateDocumentVisibility,
   onRenameNode,
   onDeleteNode,
@@ -59,6 +67,9 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
         onListDocumentTemplates={onListDocumentTemplates}
         onGetDocumentTemplate={onGetDocumentTemplate}
         onUpdateDocumentIdentifier={onUpdateDocumentIdentifier}
+        onGetDocumentShareConfig={onGetDocumentShareConfig}
+        onUpdateDocumentShareConfig={onUpdateDocumentShareConfig}
+        onDisableDocumentShare={onDisableDocumentShare}
         onUpdateDocumentVisibility={onUpdateDocumentVisibility}
         onRenameNode={onRenameNode}
         onDeleteNode={onDeleteNode}

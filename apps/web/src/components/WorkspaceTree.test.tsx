@@ -3,9 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CreateNodeResult,
+  DocumentShareConfig,
   DocumentTemplateDetail,
   DocumentTemplateSummary,
   NodeType,
+  UpdateDocumentShareInput,
   Visibility
 } from "../data-access";
 import { WorkspaceTree } from "./WorkspaceTree";
@@ -96,6 +98,35 @@ function createProps(overrides?: {
   const onUpdateDocumentVisibility = vi
     .fn<(docId: string, visibility: Visibility) => Promise<void>>()
     .mockResolvedValue(undefined);
+  const onGetDocumentShareConfig = vi.fn<(docId: string) => Promise<DocumentShareConfig>>().mockResolvedValue({
+    enabled: false,
+    shareId: "share-doc-default",
+    documentId: "doc-default",
+    spaceId: "space-default",
+    mode: "public",
+    hasPassword: false,
+    passwordHint: "",
+    expiresAt: null,
+    accessVersion: 1,
+    createdAt: "2026-03-05T00:00:00Z",
+    updatedAt: "2026-03-05T00:00:00Z"
+  });
+  const onUpdateDocumentShareConfig = vi
+    .fn<(docId: string, input: UpdateDocumentShareInput) => Promise<DocumentShareConfig>>()
+    .mockResolvedValue({
+      enabled: true,
+      shareId: "share-doc-default",
+      documentId: "doc-default",
+      spaceId: "space-default",
+      mode: "public",
+      hasPassword: false,
+      passwordHint: "",
+      expiresAt: null,
+      accessVersion: 1,
+      createdAt: "2026-03-05T00:00:00Z",
+      updatedAt: "2026-03-05T00:00:00Z"
+    });
+  const onDisableDocumentShare = vi.fn<(docId: string) => Promise<void>>().mockResolvedValue(undefined);
   const onRenameNode = vi.fn<(nodeId: string, title: string) => Promise<void>>().mockResolvedValue(undefined);
   const onDeleteNode = vi.fn<(nodeId: string) => Promise<void>>().mockResolvedValue(undefined);
   const onMoveNode = vi
@@ -110,6 +141,9 @@ function createProps(overrides?: {
     onListDocumentTemplates,
     onGetDocumentTemplate,
     onUpdateDocumentIdentifier,
+    onGetDocumentShareConfig,
+    onUpdateDocumentShareConfig,
+    onDisableDocumentShare,
     onUpdateDocumentVisibility,
     onRenameNode,
     onDeleteNode,

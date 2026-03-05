@@ -71,3 +71,19 @@ func IsValidEntityStatus(value EntityStatus) bool {
 		return false
 	}
 }
+
+type DocumentShareMode string
+
+const (
+	DocumentShareModePublic   DocumentShareMode = "public"
+	DocumentShareModePassword DocumentShareMode = "password"
+)
+
+func IsValidDocumentShareMode(value DocumentShareMode) bool {
+	switch value {
+	case DocumentShareModePublic, DocumentShareModePassword:
+		return true
+	default:
+		return false
+	}
+}

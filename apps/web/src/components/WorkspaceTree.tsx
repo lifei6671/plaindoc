@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   PencilLine,
   Plus,
+  Share2,
   Trash2,
   Users
 } from "lucide-react";
@@ -38,10 +39,13 @@ import {
 } from "react-complex-tree";
 import type {
   CreateNodeResult,
+  DocumentShareConfig,
+  DocumentShareMode,
   DocumentTemplateDetail,
   DocumentTemplateSummary,
   NodeType,
   TreeNode,
+  UpdateDocumentShareInput,
   Visibility
 } from "../data-access";
 import { formatError } from "../editor/status-utils";
@@ -94,6 +98,9 @@ interface WorkspaceTreeProps {
   onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
   onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
+  onGetDocumentShareConfig: (docId: string) => Promise<DocumentShareConfig>;
+  onUpdateDocumentShareConfig: (docId: string, input: UpdateDocumentShareInput) => Promise<DocumentShareConfig>;
+  onDisableDocumentShare: (docId: string) => Promise<void>;
   onUpdateDocumentVisibility: (docId: string, visibility: Visibility) => Promise<void>;
   onRenameNode: (nodeId: string, title: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
@@ -115,6 +122,18 @@ interface CreateNodeDialogState {
   title: string;
   documentIdentifier: string;
   templateId: string;
+}
+
+interface EditDocumentShareDialogState {
+  nodeId: string;
+  documentId: string;
+  title: string;
+  enabled: boolean;
+  mode: DocumentShareMode;
+  password: string;
+  passwordHint: string;
+  expiresAtLocal: string;
+  hasPassword: boolean;
 }
 
 function mergeClassNames(...classNames: Array<string | false | null | undefined>): string {
@@ -145,6 +164,41 @@ function validateDocumentIdentifier(rawValue: string, options: { allowEmpty: boo
     return { value: null, error: "该标识为系统保留词，请更换其他标识" };
   }
   return { value: normalizedValue, error: null };
+}
+
+function toLocalDateTimeInputValue(value: string | null | undefined): string {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  if (!rawValue) {
+    return "";
+  }
+  const parsedDate = new Date(rawValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "";
+  }
+  const pad = (input: number): string => String(input).padStart(2, "0");
+  return [
+    parsedDate.getFullYear(),
+    "-",
+    pad(parsedDate.getMonth() + 1),
+    "-",
+    pad(parsedDate.getDate()),
+    "T",
+    pad(parsedDate.getHours()),
+    ":",
+    pad(parsedDate.getMinutes())
+  ].join("");
+}
+
+function fromLocalDateTimeInputValue(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsedDate = new Date(normalized);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+  return parsedDate.toISOString();
 }
 
 // 收集可展开节点：用于在树结构刷新后过滤无效展开项。
@@ -437,6 +491,9 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   onListDocumentTemplates,
   onGetDocumentTemplate,
   onUpdateDocumentIdentifier,
+  onGetDocumentShareConfig,
+  onUpdateDocumentShareConfig,
+  onDisableDocumentShare,
   onUpdateDocumentVisibility,
   onRenameNode,
   onDeleteNode,
@@ -511,6 +568,12 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const [editIdentifierDialogDocumentID, setEditIdentifierDialogDocumentID] = useState("");
   const [editIdentifierDialogTitle, setEditIdentifierDialogTitle] = useState(DEFAULT_DOCUMENT_TITLE);
   const [editIdentifierDialogValue, setEditIdentifierDialogValue] = useState("");
+  const [documentShareConfigByDocumentID, setDocumentShareConfigByDocumentID] = useState<
+    Record<string, DocumentShareConfig>
+  >({});
+  const [loadingDocumentShareDocumentIDs, setLoadingDocumentShareDocumentIDs] = useState<string[]>([]);
+  const [editDocumentShareDialog, setEditDocumentShareDialog] = useState<EditDocumentShareDialogState | null>(null);
+  const [isEditDocumentShareDialogSubmitting, setIsEditDocumentShareDialogSubmitting] = useState(false);
   // 文档可见性更新中的节点：用于在树节点上展示细粒度 loading 状态。
   const [updatingVisibilityNodeIds, setUpdatingVisibilityNodeIds] = useState<string[]>([]);
   const [updatingIdentifierNodeIds, setUpdatingIdentifierNodeIds] = useState<string[]>([]);
@@ -523,6 +586,10 @@ export const WorkspaceTree = memo(function WorkspaceTree({
   const updatingIdentifierNodeIdSet = useMemo(
     () => new Set(updatingIdentifierNodeIds),
     [updatingIdentifierNodeIds]
+  );
+  const loadingDocumentShareDocumentIDSet = useMemo(
+    () => new Set(loadingDocumentShareDocumentIDs),
+    [loadingDocumentShareDocumentIDs]
   );
   const documentTemplateOptions = useMemo(
     () =>
@@ -1245,6 +1312,169 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     updatingIdentifierNodeIdSet
   ]);
 
+  const loadDocumentShareConfig = useCallback(
+    async (documentId: string, options?: { force?: boolean }): Promise<DocumentShareConfig> => {
+      const normalizedDocumentID = documentId.trim();
+      if (!normalizedDocumentID) {
+        throw new Error("文档 ID 不存在");
+      }
+      if (!options?.force) {
+        const cached = documentShareConfigByDocumentID[normalizedDocumentID];
+        if (cached) {
+          return cached;
+        }
+      }
+      setLoadingDocumentShareDocumentIDs((previousDocumentIDs) =>
+        previousDocumentIDs.includes(normalizedDocumentID)
+          ? previousDocumentIDs
+          : [...previousDocumentIDs, normalizedDocumentID]
+      );
+      try {
+        const config = await onGetDocumentShareConfig(normalizedDocumentID);
+        setDocumentShareConfigByDocumentID((previousConfigMap) => ({
+          ...previousConfigMap,
+          [normalizedDocumentID]: config
+        }));
+        return config;
+      } finally {
+        setLoadingDocumentShareDocumentIDs((previousDocumentIDs) =>
+          previousDocumentIDs.filter((candidateDocumentID) => candidateDocumentID !== normalizedDocumentID)
+        );
+      }
+    },
+    [documentShareConfigByDocumentID, onGetDocumentShareConfig]
+  );
+
+  useEffect(() => {
+    if (!openActionNodeId) {
+      return;
+    }
+    const currentNode = nodeById.get(openActionNodeId);
+    if (!currentNode || currentNode.type !== "doc") {
+      return;
+    }
+    const documentID = (currentNode.documentId ?? currentNode.id ?? "").trim();
+    if (!documentID) {
+      return;
+    }
+    if (loadingDocumentShareDocumentIDSet.has(documentID) || documentShareConfigByDocumentID[documentID]) {
+      return;
+    }
+    void loadDocumentShareConfig(documentID).catch(() => {
+      // 菜单展示阶段若读取失败，只在打开弹窗时提示，避免悬停即打断用户。
+    });
+  }, [
+    documentShareConfigByDocumentID,
+    loadDocumentShareConfig,
+    loadingDocumentShareDocumentIDSet,
+    nodeById,
+    openActionNodeId
+  ]);
+
+  const openEditDocumentShareDialog = useCallback(
+    async (nodeId: string): Promise<void> => {
+      const currentNode = nodeById.get(nodeId);
+      if (!currentNode || currentNode.type !== "doc") {
+        toast.error("仅文档支持分享设置");
+        return;
+      }
+      const documentID = (currentNode.documentId ?? currentNode.id ?? "").trim();
+      if (!documentID) {
+        toast.error("文档 ID 不存在");
+        return;
+      }
+
+      try {
+        const config = await loadDocumentShareConfig(documentID, { force: true });
+        setEditDocumentShareDialog({
+          nodeId,
+          documentId: documentID,
+          title: currentNode.title?.trim() || DEFAULT_DOCUMENT_TITLE,
+          enabled: config.enabled,
+          mode: config.mode,
+          password: "",
+          passwordHint: config.passwordHint ?? "",
+          expiresAtLocal: toLocalDateTimeInputValue(config.expiresAt),
+          hasPassword: config.hasPassword
+        });
+        setOpenActionNodeId(null);
+      } catch (error) {
+        toast.error(`读取分享配置失败：${formatError(error)}`);
+      }
+    },
+    [loadDocumentShareConfig, nodeById]
+  );
+
+  const closeEditDocumentShareDialog = useCallback(() => {
+    if (isEditDocumentShareDialogSubmitting) {
+      return;
+    }
+    setEditDocumentShareDialog(null);
+  }, [isEditDocumentShareDialogSubmitting]);
+
+  const handleSaveDocumentShareConfig = useCallback(async (): Promise<void> => {
+    if (!editDocumentShareDialog || isEditDocumentShareDialogSubmitting) {
+      return;
+    }
+    const targetDocumentID = editDocumentShareDialog.documentId.trim();
+    if (!targetDocumentID) {
+      return;
+    }
+
+    const payload: UpdateDocumentShareInput = {
+      enabled: editDocumentShareDialog.enabled,
+      mode: editDocumentShareDialog.mode,
+      passwordHint: editDocumentShareDialog.passwordHint.trim(),
+      expiresAt: fromLocalDateTimeInputValue(editDocumentShareDialog.expiresAtLocal)
+    };
+
+    if (editDocumentShareDialog.mode === "password") {
+      const normalizedPassword = editDocumentShareDialog.password.trim();
+      if (!editDocumentShareDialog.hasPassword && !normalizedPassword) {
+        toast.error("密码分享至少需要设置 6 位密码");
+        return;
+      }
+      if (normalizedPassword && normalizedPassword.length < 6) {
+        toast.error("密码长度至少 6 位");
+        return;
+      }
+      if (normalizedPassword) {
+        payload.password = normalizedPassword;
+      }
+    }
+
+    setIsEditDocumentShareDialogSubmitting(true);
+    try {
+      if (!editDocumentShareDialog.enabled) {
+        await onDisableDocumentShare(targetDocumentID);
+        const nextConfig = await loadDocumentShareConfig(targetDocumentID, { force: true });
+        setDocumentShareConfigByDocumentID((previousConfigMap) => ({
+          ...previousConfigMap,
+          [targetDocumentID]: nextConfig
+        }));
+        toast.success("已取消文档分享");
+      } else {
+        const updated = await onUpdateDocumentShareConfig(targetDocumentID, payload);
+        setDocumentShareConfigByDocumentID((previousConfigMap) => ({
+          ...previousConfigMap,
+          [targetDocumentID]: updated
+        }));
+        toast.success(updated.mode === "password" ? "密码分享配置已更新" : "公开分享配置已更新");
+      }
+      setEditDocumentShareDialog(null);
+    } catch (error) {
+      toast.error(`保存分享配置失败：${formatError(error)}`);
+    } finally {
+      setIsEditDocumentShareDialogSubmitting(false);
+    }
+  }, [
+    editDocumentShareDialog,
+    isEditDocumentShareDialogSubmitting,
+    loadDocumentShareConfig,
+    onDisableDocumentShare,
+    onUpdateDocumentShareConfig
+  ]);
+
   const canDragItems = useCallback(
     (draggingItems: TreeItem<WorkspaceTreeItemData>[]): boolean => {
       if (!isDesktopDragEnabled || editingNodeId !== null) {
@@ -1388,6 +1618,13 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       const isCreatingDraftNode = creatingDraftNodeIdSet.has(nodeId);
       const isUpdatingVisibility = updatingVisibilityNodeIdSet.has(nodeId);
       const isUpdatingIdentifier = updatingIdentifierNodeIdSet.has(nodeId);
+      const currentShareConfig =
+        currentNode?.type === "doc" && currentDocumentID ? documentShareConfigByDocumentID[currentDocumentID] : null;
+      const isLoadingShareConfig =
+        currentNode?.type === "doc" && currentDocumentID
+          ? loadingDocumentShareDocumentIDSet.has(currentDocumentID)
+          : false;
+      const isCurrentDocumentShared = currentShareConfig?.enabled === true;
       const currentDocumentVisibility: Visibility =
         currentNode?.type === "doc" ? currentNode.visibility ?? "member" : "member";
       const nodeTitleText = (currentNode?.title ?? item.data.title ?? "").trim() || "未命名文档";
@@ -1642,6 +1879,23 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                         <div className="my-1 h-px bg-[#eceff3]" />
                         <button
                           type="button"
+                          className="inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] hover:bg-[#f0f2f4] focus-visible:outline-none"
+                          role="menuitem"
+                          onMouseDown={stopTreeItemEvent}
+                          onClick={(event) => {
+                            stopTreeItemEvent(event);
+                            void runActionMenuTask(() => openEditDocumentShareDialog(nodeId));
+                          }}
+                        >
+                          <Share2 size={14} />
+                          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                            <span>分享设置</span>
+                            {isLoadingShareConfig ? <LoaderCircle size={13} className="animate-spin" /> : null}
+                            {!isLoadingShareConfig && isCurrentDocumentShared ? <Check size={13} /> : null}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
                           className={mergeClassNames(
                             "inline-flex min-h-[34px] w-full items-center gap-2 rounded-[8px] border-0 bg-transparent px-2.5 text-left text-[13px] text-[#2f2f30] focus-visible:outline-none",
                             isUpdatingIdentifier ? "cursor-not-allowed opacity-60" : "hover:bg-[#f0f2f4]"
@@ -1773,14 +2027,17 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       handleCreateSiblingDocument,
       handleDeleteNode,
       openEditDocumentIdentifierDialog,
+      openEditDocumentShareDialog,
       handleRenameNode,
       handleUpdateNodeVisibility,
       cancelInlineEdit,
       commitInlineEdit,
+      documentShareConfigByDocumentID,
       editingNodeId,
       nodeById,
       removeDraftNode,
       editingNodeTitle,
+      loadingDocumentShareDocumentIDSet,
       openActionNodeId,
       runActionMenuTask,
       stopTreeItemPropagation,
@@ -2062,6 +2319,139 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                 }}
               >
                 保存
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {editDocumentShareDialog !== null ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) {
+              return;
+            }
+            closeEditDocumentShareDialog();
+          }}
+        >
+          <div
+            className="w-full max-w-[460px] rounded-[14px] bg-white p-5 shadow-[0_22px_48px_rgba(15,23,42,0.28)]"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="mb-4">
+              <h3 className="m-0 text-[16px] font-semibold text-[#1f2328]">分享文档</h3>
+              <p className="mt-1 mb-0 text-[13px] leading-[1.55] text-[#5f6468]">
+                当前文档：<span className="font-medium text-[#1f2328]">{editDocumentShareDialog.title}</span>
+              </p>
+            </div>
+            <label className="mb-3 flex items-center gap-2 text-[13px] text-[#1f2328]">
+              <input
+                type="checkbox"
+                checked={editDocumentShareDialog.enabled}
+                disabled={isEditDocumentShareDialogSubmitting}
+                onChange={(event) => {
+                  const nextEnabled = event.target.checked;
+                  setEditDocumentShareDialog((previousState) =>
+                    previousState ? { ...previousState, enabled: nextEnabled } : previousState
+                  );
+                }}
+              />
+              <span>启用分享</span>
+            </label>
+            {editDocumentShareDialog.enabled ? (
+              <>
+                <label className="mb-3 block">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">分享模式</span>
+                  <select
+                    value={editDocumentShareDialog.mode}
+                    className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                    disabled={isEditDocumentShareDialogSubmitting}
+                    onChange={(event) => {
+                      const mode = event.target.value === "password" ? "password" : "public";
+                      setEditDocumentShareDialog((previousState) =>
+                        previousState ? { ...previousState, mode } : previousState
+                      );
+                    }}
+                  >
+                    <option value="public">公开分享</option>
+                    <option value="password">密码分享</option>
+                  </select>
+                </label>
+                {editDocumentShareDialog.mode === "password" ? (
+                  <label className="mb-3 block">
+                    <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">
+                      访问密码
+                      {editDocumentShareDialog.hasPassword ? "（留空表示不修改）" : "（至少 6 位）"}
+                    </span>
+                    <input
+                      type="password"
+                      value={editDocumentShareDialog.password}
+                      className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                      disabled={isEditDocumentShareDialogSubmitting}
+                      placeholder={editDocumentShareDialog.hasPassword ? "留空表示不修改密码" : "请输入访问密码"}
+                      onChange={(event) => {
+                        const nextPassword = event.target.value;
+                        setEditDocumentShareDialog((previousState) =>
+                          previousState ? { ...previousState, password: nextPassword } : previousState
+                        );
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <label className="mb-3 block">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">密码提示（可空）</span>
+                  <input
+                    value={editDocumentShareDialog.passwordHint}
+                    className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                    disabled={isEditDocumentShareDialogSubmitting}
+                    placeholder="可选，帮助访问者回忆密码"
+                    onChange={(event) => {
+                      const nextPasswordHint = event.target.value;
+                      setEditDocumentShareDialog((previousState) =>
+                        previousState ? { ...previousState, passwordHint: nextPasswordHint } : previousState
+                      );
+                    }}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">失效时间（可空）</span>
+                  <input
+                    type="datetime-local"
+                    value={editDocumentShareDialog.expiresAtLocal}
+                    className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                    disabled={isEditDocumentShareDialogSubmitting}
+                    onChange={(event) => {
+                      const nextExpiresAtLocal = event.target.value;
+                      setEditDocumentShareDialog((previousState) =>
+                        previousState ? { ...previousState, expiresAtLocal: nextExpiresAtLocal } : previousState
+                      );
+                    }}
+                  />
+                </label>
+              </>
+            ) : (
+              <p className="mt-0 mb-0 text-[12px] text-[#6b7280]">关闭后，分享链接将立即失效。</p>
+            )}
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-[8px] border border-[#d0d5db] bg-white px-3 text-[13px] text-[#344054] hover:bg-[#f8fafc] focus-visible:outline-none"
+                onClick={closeEditDocumentShareDialog}
+                disabled={isEditDocumentShareDialogSubmitting}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-[8px] border-0 bg-[#3b82f6] px-3 text-[13px] font-medium text-white hover:bg-[#2563eb] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => {
+                  void handleSaveDocumentShareConfig();
+                }}
+                disabled={isEditDocumentShareDialogSubmitting}
+              >
+                {isEditDocumentShareDialogSubmitting ? "保存中..." : "保存"}
               </button>
             </div>
           </div>

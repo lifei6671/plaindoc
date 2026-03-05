@@ -10,6 +10,8 @@ import {
   type AdminDocumentImageAssetDeleteResult,
   type AdminDocumentImageAssetListInput,
   type AdminDocumentImageAssetListResult,
+  type AdminDocumentShareListInput,
+  type AdminDocumentShareListResult,
   type AdminDocumentTemplate,
   type AdminDocumentTemplateScene,
   type AdminDocumentTemplateSceneListInput,
@@ -59,6 +61,7 @@ import {
   type Document,
   type DocumentAttachment,
   type DocumentAttachmentAccessLink,
+  type DocumentShareConfig,
   type DocumentGateway,
   type DocumentTemplateDetail,
   type DocumentTemplateGateway,
@@ -75,6 +78,7 @@ import {
   type Theme,
   type ThemeGateway,
   type TreeNode,
+  type UpdateDocumentShareInput,
   type UpdateDocumentIdentifierResult,
   type UpdateNodeInput,
   type UploadLocalImageResult,
@@ -219,6 +223,57 @@ function normalizeAuthLoginOptions(value: unknown): AuthLoginOptions {
     allowUserRegister,
     passwordResetEnabled,
     providers
+  };
+}
+
+function normalizeDocumentShareMode(value: unknown): "public" | "password" {
+  return value === "password" ? "password" : "public";
+}
+
+function normalizeDocumentShareConfig(value: unknown): DocumentShareConfig {
+  if (!value || typeof value !== "object") {
+    return {
+      enabled: false,
+      shareId: "",
+      documentId: "",
+      spaceId: "",
+      mode: "public",
+      passwordHint: "",
+      hasPassword: false,
+      expiresAt: null,
+      disabledAt: null,
+      accessVersion: 1,
+      createdAt: "",
+      updatedAt: ""
+    };
+  }
+  const record = value as Record<string, unknown>;
+  const enabled = record.enabled === true;
+  const shareId = typeof record.shareId === "string" ? record.shareId.trim() : "";
+  const documentId = typeof record.documentId === "string" ? record.documentId.trim() : "";
+  const spaceId = typeof record.spaceId === "string" ? record.spaceId.trim() : "";
+  const passwordHint = typeof record.passwordHint === "string" ? record.passwordHint : "";
+  const hasPassword = record.hasPassword === true;
+  const accessVersion = Number(record.accessVersion);
+  const createdAt = typeof record.createdAt === "string" ? record.createdAt.trim() : "";
+  const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt.trim() : "";
+  const expiresAt =
+    typeof record.expiresAt === "string" && record.expiresAt.trim() ? record.expiresAt.trim() : null;
+  const disabledAt =
+    typeof record.disabledAt === "string" && record.disabledAt.trim() ? record.disabledAt.trim() : null;
+  return {
+    enabled,
+    shareId,
+    documentId,
+    spaceId,
+    mode: normalizeDocumentShareMode(record.mode),
+    passwordHint,
+    hasPassword,
+    expiresAt,
+    disabledAt,
+    accessVersion: Number.isFinite(accessVersion) && accessVersion > 0 ? Math.trunc(accessVersion) : 1,
+    createdAt,
+    updatedAt
   };
 }
 
@@ -797,6 +852,49 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         body: JSON.stringify({
           identifier
         })
+      });
+    },
+    async getShareConfig(docId: string) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      const payload = await request<DocumentShareConfig>(`/docs/${encodeURIComponent(documentID)}/share`);
+      return normalizeDocumentShareConfig(payload);
+    },
+    async updateShareConfig(docId: string, input: UpdateDocumentShareInput) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      const payload: Record<string, unknown> = {
+        enabled: input.enabled === true
+      };
+      if (typeof input.mode === "string" && (input.mode === "public" || input.mode === "password")) {
+        payload.mode = input.mode;
+      }
+      if (typeof input.password === "string") {
+        payload.password = input.password;
+      }
+      if (typeof input.passwordHint === "string") {
+        payload.passwordHint = input.passwordHint;
+      }
+      if ("expiresAt" in input) {
+        payload.expiresAt = input.expiresAt ?? null;
+      }
+      const result = await request<DocumentShareConfig>(`/docs/${encodeURIComponent(documentID)}/share`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+      return normalizeDocumentShareConfig(result);
+    },
+    async disableShare(docId: string) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      await request<void>(`/docs/${encodeURIComponent(documentID)}/share`, {
+        method: "DELETE"
       });
     },
     async localizeRemoteImages(input: LocalizeRemoteImagesInput) {
@@ -1558,6 +1656,75 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       const queryText = query.toString();
       const path = queryText ? `/admin/documents?${queryText}` : "/admin/documents";
       return request<AdminDocumentListResult>(path);
+    },
+    async listDocumentShares(input: AdminDocumentShareListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.view === "string" && (input.view === "all" || input.view === "mine")) {
+        query.set("view", input.view);
+      }
+      if (typeof input.keyword === "string" && input.keyword.trim()) {
+        query.set("keyword", input.keyword.trim());
+      }
+      if (typeof input.spaceId === "string" && input.spaceId.trim()) {
+        query.set("spaceId", input.spaceId.trim());
+      }
+      if (typeof input.mode === "string" && input.mode.trim()) {
+        query.set("mode", input.mode);
+      }
+      if (typeof input.expired === "string" && input.expired.trim()) {
+        query.set("expired", input.expired);
+      }
+      if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
+        query.set("page", String(Math.trunc(input.page)));
+      }
+      if (typeof input.pageSize === "number" && Number.isFinite(input.pageSize) && input.pageSize > 0) {
+        query.set("pageSize", String(Math.trunc(input.pageSize)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/admin/document-shares?${queryText}` : "/admin/document-shares";
+      return request<AdminDocumentShareListResult>(path);
+    },
+    async updateDocumentShare(input: {
+      shareId: string;
+      mode?: "public" | "password";
+      password?: string;
+      passwordHint?: string;
+      expiresAt?: string | null;
+    }) {
+      const shareID = input.shareId.trim();
+      if (!shareID) {
+        throw new Error("分享 ID 不能为空");
+      }
+      const payload: Record<string, unknown> = {};
+      if (typeof input.mode === "string" && (input.mode === "public" || input.mode === "password")) {
+        payload.mode = input.mode;
+      }
+      if (typeof input.password === "string") {
+        payload.password = input.password;
+      }
+      if (typeof input.passwordHint === "string") {
+        payload.passwordHint = input.passwordHint;
+      }
+      if ("expiresAt" in input) {
+        payload.expiresAt = input.expiresAt ?? null;
+      }
+      const result = await request<DocumentShareConfig>(
+        `/admin/document-shares/${encodeURIComponent(shareID)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        }
+      );
+      return normalizeDocumentShareConfig(result);
+    },
+    async deleteDocumentShare(shareId: string) {
+      const shareID = shareId.trim();
+      if (!shareID) {
+        throw new Error("分享 ID 不能为空");
+      }
+      await request<void>(`/admin/document-shares/${encodeURIComponent(shareID)}`, {
+        method: "DELETE"
+      });
     },
     async updateDocumentStatus(input: { documentId: string; status: "active" | "banned"; reason?: string }) {
       const targetDocumentID = input.documentId.trim();

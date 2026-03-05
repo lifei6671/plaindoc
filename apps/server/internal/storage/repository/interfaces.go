@@ -749,6 +749,55 @@ type AdminDocumentListRecord struct {
 	SpaceOwnerEmail  string
 }
 
+// DocumentShareAccessRecord 分享访问解析记录。
+type DocumentShareAccessRecord struct {
+	ShareID          string
+	DocumentID       string
+	SpaceID          string
+	Mode             models.DocumentShareMode
+	PasswordHash     *string
+	PasswordHint     string
+	ExpiresAt        *time.Time
+	DisabledAt       *time.Time
+	AccessVersion    int
+	DocumentRouteKey string
+}
+
+// DocumentShareAdminView 后台分享中心视图类型。
+type DocumentShareAdminView string
+
+const (
+	DocumentShareAdminViewAll  DocumentShareAdminView = "all"
+	DocumentShareAdminViewMine DocumentShareAdminView = "mine"
+)
+
+// ListAdminDocumentSharesParams 管理后台分享中心分页查询参数。
+type ListAdminDocumentSharesParams struct {
+	ActorUserID      string
+	RestrictToScopes bool
+	View             DocumentShareAdminView
+	Keyword          string
+	SpaceID          string
+	Mode             models.DocumentShareMode
+	Expired          string
+	Limit            int
+	Offset           int
+}
+
+// AdminDocumentShareListRecord 管理后台分享中心列表项。
+type AdminDocumentShareListRecord struct {
+	Share            models.DocumentShare
+	DocumentRouteKey string
+	DocumentTitle    string
+	SpaceName        string
+	SpaceOwnerID     string
+	SpaceOwnerName   string
+	SpaceOwnerEmail  string
+	CreatedByName    string
+	CreatedByEmail   string
+	IsExpired        bool
+}
+
 // ListAdminDocumentAttachmentsParams 管理后台文档附件分页查询参数。
 type ListAdminDocumentAttachmentsParams struct {
 	ActorUserID      string
@@ -852,6 +901,19 @@ type DocumentRepository interface {
 	SoftDelete(ctx context.Context, documentID string, deletedAt time.Time) (bool, error)
 	HardDelete(ctx context.Context, documentID string) (bool, error)
 	UpdateWithVersion(ctx context.Context, document *models.Document, baseVersion int) (bool, error)
+}
+
+// DocumentShareRepository 文档分享仓储接口。
+type DocumentShareRepository interface {
+	Create(ctx context.Context, share *models.DocumentShare) error
+	Update(ctx context.Context, share *models.DocumentShare) (bool, error)
+	GetByDocumentID(ctx context.Context, documentID string) (*models.DocumentShare, error)
+	GetByShareID(ctx context.Context, shareID string) (*models.DocumentShare, error)
+	ResolveBySpaceAndDocKey(ctx context.Context, spaceID string, rawDocKey string) (*DocumentShareAccessRecord, error)
+	ListForAdmin(
+		ctx context.Context,
+		params ListAdminDocumentSharesParams,
+	) ([]AdminDocumentShareListRecord, int64, error)
 }
 
 // DocumentAttachmentRepository 文档附件仓储接口。

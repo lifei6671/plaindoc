@@ -114,6 +114,7 @@ func newRouter(
 	spaceRepo := repository.NewGormSpaceRepository(db, searchIndexJobRepo)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
 	documentRepo := repository.NewGormDocumentRepository(db, searchIndexJobRepo)
+	documentShareRepo := repository.NewGormDocumentShareRepository(db)
 	documentAttachmentRepo := repository.NewGormDocumentAttachmentRepository(db)
 	documentImageAssetRepo := repository.NewGormDocumentImageAssetRepository(db)
 	documentTemplateRepo := repository.NewGormDocumentTemplateRepository(db)
@@ -211,6 +212,19 @@ func newRouter(
 	)
 	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
+	documentShareService := service.NewDocumentShareService(
+		db,
+		documentShareRepo,
+		documentAttachmentRepo,
+		spaceRepo,
+		imageHostingService,
+	)
+	documentShareAccessTokenService := service.NewDocumentShareAccessTokenService(cfg.JWT.Secret, 0)
+	adminDocumentShareService := service.NewAdminDocumentShareService(
+		documentShareRepo,
+		documentShareService,
+		adminAccessService,
+	)
 	documentAttachmentCleanupService := service.NewDocumentAttachmentCleanupService(
 		db,
 		documentAttachmentRepo,
@@ -235,6 +249,12 @@ func newRouter(
 		readerRenderCache,
 		searchIndexService,
 	)
+	workspaceDocumentShareHandler := handler.NewWorkspaceDocumentShareHandler(workspaceHandler, documentShareService)
+	documentSharePageHandler := handler.NewDocumentSharePageHandler(
+		documentShareService,
+		documentShareAccessTokenService,
+		readerPageHandler,
+	)
 
 	// ---- SSR 页面与静态资源路由（不走 /api）----
 	// 模板静态资源（CSS/字体/图片）统一挂在 /assets。
@@ -257,6 +277,10 @@ func newRouter(
 	router.GET("/explore/:categoryId", homeHandler.Explore)
 	// 首页全文检索落地页：显示可见文档检索结果。
 	router.GET("/search", homeHandler.Search)
+	// 文档单页分享：支持公开/密码分享访问。
+	router.GET("/s/:spaceId/:docKey", documentSharePageHandler.Page)
+	// 分享密码校验接口：验证成功后写入免密 Cookie。
+	router.POST("/s/:spaceId/:docKey/verify", documentSharePageHandler.Verify)
 	// 空间阅读入口：自动跳转到首篇可读文档。
 	router.GET("/r/:spaceId", readerPageHandler.Space)
 	// 文档阅读页：优先走 SSR worker 渲染，失败时降级 HTML 壳页。
@@ -406,6 +430,12 @@ func newRouter(
 		api.GET("/docs/:docId", accessHandler.GetDocument)
 		// 更新文档阅读标识（slug）。
 		api.PATCH("/docs/:docId/identifier", workspaceHandler.UpdateDocumentIdentifier)
+		// 获取文档分享配置。
+		api.GET("/docs/:docId/share", workspaceDocumentShareHandler.GetDocumentShare)
+		// 创建或更新文档分享配置。
+		api.PUT("/docs/:docId/share", workspaceDocumentShareHandler.UpsertDocumentShare)
+		// 取消文档分享。
+		api.DELETE("/docs/:docId/share", workspaceDocumentShareHandler.DeleteDocumentShare)
 		// 保存文档（包含版本冲突检测链路）。
 		api.PUT("/docs/:docId", workspaceHandler.SaveDocument)
 		// 外链图片转存（编辑器粘贴链路前端失败时的服务端兜底）。
@@ -433,6 +463,16 @@ func newRouter(
 		api.PUT("/docs/:docId/visibility", accessHandler.UpdateDocumentVisibility)
 		// 使用签名链接下载或预览文档附件。
 		api.GET("/attachment-downloads/:token", workspaceHandler.ServeDocumentAttachmentByToken)
+		// 分享态附件访问链接（下载/预览）。
+		api.POST(
+			"/shares/:spaceId/:docKey/attachments/:attachmentId/access-link",
+			documentSharePageHandler.CreateAttachmentAccessLink,
+		)
+		// 分享态附件下载入口（无脚本场景）。
+		api.GET(
+			"/shares/:spaceId/:docKey/attachments/:attachmentId/download",
+			documentSharePageHandler.RedirectAttachmentDownload,
+		)
 
 		// ---- 后台治理 API 依赖装配 ----
 		adminHandler := handler.NewAdminHandler(adminAccessService, userRepo)
@@ -487,6 +527,7 @@ func newRouter(
 			imageHostingService,
 		)
 		adminDocumentImageAssetHandler := handler.NewAdminDocumentImageAssetHandler(adminDocumentImageAssetService)
+		adminDocumentShareHandler := handler.NewAdminDocumentShareHandler(adminDocumentShareService)
 		adminSearchAnalyzerService := service.NewAdminSearchAnalyzerService(
 			searchAnalyzerDictEntryRepo,
 			systemConfigRepo,
@@ -695,6 +736,9 @@ func newRouter(
 
 			// ---- 文档治理 ----
 			adminAPI.GET("/documents", adminDocumentHandler.ListDocuments)
+			adminAPI.GET("/document-shares", adminDocumentShareHandler.ListShares)
+			adminAPI.PATCH("/document-shares/:shareId", adminDocumentShareHandler.UpdateShare)
+			adminAPI.DELETE("/document-shares/:shareId", adminDocumentShareHandler.DisableShare)
 			adminAPI.PATCH(
 				"/documents/:documentId/status",
 				middleware.RequireAdminOperationToken(

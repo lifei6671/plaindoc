@@ -54,6 +54,15 @@ export interface ReaderAccessPayload {
   requiresLogin?: boolean;
 }
 
+export interface ReaderSharePayload {
+  enabled: boolean;
+  shareId?: string;
+  spaceId?: string;
+  documentRouteKey?: string;
+  basePath?: string;
+  attachmentBasePath?: string;
+}
+
 export interface ReaderPagePayload {
   space: ReaderSpacePayload;
   document: ReaderDocumentPayload;
@@ -63,4 +72,5 @@ export interface ReaderPagePayload {
   requestOrigin?: string;
   viewer: ReaderViewerPayload;
   access?: ReaderAccessPayload;
+  share?: ReaderSharePayload;
 }

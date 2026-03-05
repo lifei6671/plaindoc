@@ -51,6 +51,7 @@ interface ReaderTreeProps {
   nodes: ReaderTreeNode[];
   spaceId: string;
   activeDocId: string;
+  linkBasePath: string;
   depth?: number;
 }
 
@@ -180,7 +181,7 @@ function renderVisibilityMarker(visibilityInput: unknown) {
   );
 }
 
-function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps) {
+function ReaderTree({ nodes, spaceId, activeDocId, linkBasePath, depth = 0 }: ReaderTreeProps) {
   if (!nodes.length) {
     return <p className="reader-tree__label reader-tree__label--folder">暂无目录</p>;
   }
@@ -228,7 +229,7 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
             data-reader-label-active={isActive ? "1" : undefined}
             data-reader-doc-link={isDocumentNode ? "1" : undefined}
             data-reader-doc-id={isDocumentNode ? resolvedDocumentID : undefined}
-            href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentRouteKey)}`}
+            href={`${linkBasePath}/${encodeURIComponent(resolvedDocumentRouteKey)}`}
           >
             {visibilityMarker}
             <span
@@ -264,7 +265,13 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
                   </div>
                 </summary>
                 {hasChildren ? (
-                  <ReaderTree nodes={node.children} spaceId={spaceId} activeDocId={activeDocId} depth={depth + 1} />
+                  <ReaderTree
+                    nodes={node.children}
+                    spaceId={spaceId}
+                    activeDocId={activeDocId}
+                    linkBasePath={linkBasePath}
+                    depth={depth + 1}
+                  />
                 ) : null}
               </details>
             </li>
@@ -281,7 +288,7 @@ function ReaderTree({ nodes, spaceId, activeDocId, depth = 0 }: ReaderTreeProps)
                 data-reader-doc-link="1"
                 data-reader-doc-id={resolvedDocumentID}
                 style={rowStyle}
-                href={`/r/${encodeURIComponent(spaceId)}/${encodeURIComponent(resolvedDocumentRouteKey)}`}
+                href={`${linkBasePath}/${encodeURIComponent(resolvedDocumentRouteKey)}`}
               >
                 {rowContent}
               </a>
@@ -349,24 +356,79 @@ function normalizeReaderRequestOrigin(value: string | undefined): string {
   }
 }
 
+function normalizeReaderPathPrefix(value: string | undefined, fallbackValue: string): string {
+  const fallback = fallbackValue.trim();
+  const normalized = (value ?? "").trim();
+  if (!normalized) {
+    return fallback;
+  }
+  if (!normalized.startsWith("/")) {
+    return fallback;
+  }
+  const trimmed = normalized.replace(/\/+$/, "");
+  if (trimmed) {
+    return trimmed;
+  }
+  return fallback || "/";
+}
+
+function resolveShareAttachmentBasePath(payload: ReaderPagePayload): string | null {
+  if (!payload.share || payload.share.enabled !== true) {
+    return null;
+  }
+  const normalizedBasePath = normalizeReaderPathPrefix(payload.share.attachmentBasePath, "");
+  return normalizedBasePath ? normalizedBasePath : null;
+}
+
 function buildAttachmentDownloadHref(
+  payload: ReaderPagePayload,
   documentID: string,
   attachmentID: string,
   requestOrigin: string | undefined
 ): string {
-  const normalizedDocumentID = documentID.trim();
   const normalizedAttachmentID = attachmentID.trim();
-  if (!normalizedDocumentID || !normalizedAttachmentID) {
+  if (!normalizedAttachmentID) {
     return "";
   }
-  const downloadPath =
+  const shareAttachmentBasePath = resolveShareAttachmentBasePath(payload);
+  const downloadPath = shareAttachmentBasePath
+    ? `${shareAttachmentBasePath}/${encodeURIComponent(normalizedAttachmentID)}/download`
+    : "/api/docs/" +
+      encodeURIComponent(documentID.trim()) +
+      "/attachments/" +
+      encodeURIComponent(normalizedAttachmentID) +
+      "/download";
+  const origin = normalizeReaderRequestOrigin(requestOrigin);
+  return origin ? `${origin}${downloadPath}` : downloadPath;
+}
+
+function buildAttachmentAccessLinkPath(
+  payload: ReaderPagePayload,
+  documentID: string,
+  attachmentID: string,
+  purpose: "download" | "preview"
+): string {
+  const normalizedAttachmentID = attachmentID.trim();
+  if (!normalizedAttachmentID) {
+    return "";
+  }
+  const queryText = `purpose=${encodeURIComponent(purpose)}`;
+  const shareAttachmentBasePath = resolveShareAttachmentBasePath(payload);
+  if (shareAttachmentBasePath) {
+    return `${shareAttachmentBasePath}/${encodeURIComponent(normalizedAttachmentID)}/access-link?${queryText}`;
+  }
+  const normalizedDocumentID = documentID.trim();
+  if (!normalizedDocumentID) {
+    return "";
+  }
+  return (
     "/api/docs/" +
     encodeURIComponent(normalizedDocumentID) +
     "/attachments/" +
     encodeURIComponent(normalizedAttachmentID) +
-    "/download";
-  const origin = normalizeReaderRequestOrigin(requestOrigin);
-  return origin ? `${origin}${downloadPath}` : downloadPath;
+    "/access-link?" +
+    queryText
+  );
 }
 
 function resolveAttachmentPreviewLabel(previewKind: ReaderDocumentAttachmentPayload["previewKind"]): string {
@@ -408,7 +470,11 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const renderedAt = new Date(startedAt);
   const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
   const documentRouteKey = (payload.document.routeKey || payload.document.id || "").trim() || payload.document.id;
-  const canonicalPath = `/r/${encodeURIComponent(payload.space.id)}/${encodeURIComponent(documentRouteKey)}`;
+  const shareEnabled = payload.share?.enabled === true;
+  const readerBasePath = shareEnabled
+    ? normalizeReaderPathPrefix(payload.share?.basePath, `/s/${encodeURIComponent(payload.space.id)}`)
+    : `/r/${encodeURIComponent(payload.space.id)}`;
+  const canonicalPath = `${readerBasePath}/${encodeURIComponent(documentRouteKey)}`;
 
   const resolvedTheme = resolvePreviewTheme(
     payload.document.themeId || DEFAULT_PREVIEW_THEME_TEMPLATE.id,
@@ -432,7 +498,8 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const readerOutlineItems = hasDeniedAccess ? [] : buildReaderOutlineItems(payload.document.contentMd);
   const hasReaderOutline = readerOutlineItems.length > 0;
   const documentAttachments = hasDeniedAccess ? [] : (Array.isArray(payload.attachments) ? payload.attachments : []);
-  const spaceLandingPath = `/r/${encodeURIComponent(payload.space.id)}`;
+  const showSidebarTree = !shareEnabled;
+  const spaceLandingPath = shareEnabled ? canonicalPath : `/r/${encodeURIComponent(payload.space.id)}`;
   const loginPath = `/login?redirect=${encodeURIComponent(canonicalPath)}`;
 
   const appMarkup = renderToStaticMarkup(
@@ -461,56 +528,62 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
         >
           <span className="reader-progress__bar" />
         </div>
-        <div className="reader-layout">
-          <aside
-            id="plaindoc-reader-sidebar"
-            className="reader-sidebar"
-            data-reader-hook="sidebar"
-            aria-label={`${spaceTitle} 文档目录`}
-          >
-            <div className="reader-sidebar__header">
-              <div className="reader-sidebar__header-row">
-                <h2 className="reader-sidebar__title">{spaceTitle}</h2>
-                <button
-                  type="button"
-                  className="reader-sidebar__close"
-                  data-reader-hook="mobile-sidebar-close"
-                  aria-label="关闭目录"
-                >
-                  ×
-                </button>
+        <div className={`reader-layout${showSidebarTree ? "" : " reader-layout--without-sidebar"}`}>
+          {showSidebarTree ? (
+            <aside
+              id="plaindoc-reader-sidebar"
+              className="reader-sidebar"
+              data-reader-hook="sidebar"
+              aria-label={`${spaceTitle} 文档目录`}
+            >
+              <div className="reader-sidebar__header">
+                <div className="reader-sidebar__header-row">
+                  <h2 className="reader-sidebar__title">{spaceTitle}</h2>
+                  <button
+                    type="button"
+                    className="reader-sidebar__close"
+                    data-reader-hook="mobile-sidebar-close"
+                    aria-label="关闭目录"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="reader-sidebar__tree-scroll">
-              <ReaderTree
-                nodes={payload.tree}
-                spaceId={payload.space.id}
-                activeDocId={payload.activeDocId || payload.document.id}
-              />
-            </div>
-            <div className="reader-sidebar__footer" role="note" aria-label="发布信息">
-              本文档使用 <a href="https://github.com/lifei6671/plaindoc" title="PlainDoc" target="_blank">PlainDoc</a> 发布
-            </div>
-          </aside>
+              <div className="reader-sidebar__tree-scroll">
+                <ReaderTree
+                  nodes={payload.tree}
+                  spaceId={payload.space.id}
+                  activeDocId={payload.activeDocId || payload.document.id}
+                  linkBasePath={readerBasePath}
+                />
+              </div>
+              <div className="reader-sidebar__footer" role="note" aria-label="发布信息">
+                本文档使用 <a href="https://github.com/lifei6671/plaindoc" title="PlainDoc" target="_blank">PlainDoc</a>{" "}
+                发布
+              </div>
+            </aside>
+          ) : null}
           <main
             className="reader-main"
             data-reader-hook="main"
             data-reader-outline={hasReaderOutline ? "1" : undefined}
           >
-            <div className="reader-mobile-bar" data-reader-hook="mobile-bar">
-              <button
-                type="button"
-                className="reader-mobile-bar__toggle"
-                data-reader-hook="mobile-sidebar-open"
-                aria-controls="plaindoc-reader-sidebar"
-                aria-expanded="false"
-              >
-                目录
-              </button>
-              <span className="reader-mobile-bar__title" data-reader-hook="mobile-bar-title" title={articleTitle}>
-                {articleTitle}
-              </span>
-            </div>
+            {showSidebarTree ? (
+              <div className="reader-mobile-bar" data-reader-hook="mobile-bar">
+                <button
+                  type="button"
+                  className="reader-mobile-bar__toggle"
+                  data-reader-hook="mobile-sidebar-open"
+                  aria-controls="plaindoc-reader-sidebar"
+                  aria-expanded="false"
+                >
+                  目录
+                </button>
+                <span className="reader-mobile-bar__title" data-reader-hook="mobile-bar-title" title={articleTitle}>
+                  {articleTitle}
+                </span>
+              </div>
+            ) : null}
             {hasReaderOutline ? (
               <aside className="reader-outline" data-reader-hook="outline" aria-label="文档大纲">
                 <div className="reader-outline__title">文档大纲</div>
@@ -622,9 +695,22 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                           const mimeType = (attachment.mimeType ?? "").trim() || "application/octet-stream";
                           const documentID = (attachment.documentId ?? "").trim() || payload.document.id;
                           const downloadHref = buildAttachmentDownloadHref(
+                            payload,
                             documentID,
                             attachmentID,
                             payload.requestOrigin
+                          );
+                          const downloadAccessLinkPath = buildAttachmentAccessLinkPath(
+                            payload,
+                            documentID,
+                            attachmentID,
+                            "download"
+                          );
+                          const previewAccessLinkPath = buildAttachmentAccessLinkPath(
+                            payload,
+                            documentID,
+                            attachmentID,
+                            "preview"
                           );
                           const previewKind = normalizeAttachmentPreviewKind(attachment.previewKind);
                           const previewSupported = attachment.previewSupported === true;
@@ -659,6 +745,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                                   data-reader-attachment-purpose="download"
                                   data-reader-attachment-id={attachmentID}
                                   data-reader-doc-id={documentID}
+                                  data-reader-attachment-access-link-path={downloadAccessLinkPath || undefined}
                                 >
                                   <Download size={14} aria-hidden="true" />
                                   <span>下载</span>
@@ -671,6 +758,8 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                                     data-reader-attachment-purpose="preview"
                                     data-reader-attachment-id={attachmentID}
                                     data-reader-doc-id={documentID}
+                                    data-reader-attachment-access-link-path={previewAccessLinkPath || undefined}
+                                    data-reader-attachment-preview-direct={shareEnabled ? "1" : undefined}
                                   >
                                     <Eye size={14} aria-hidden="true" />
                                     <span>预览</span>
@@ -688,13 +777,15 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             </div>
           </main>
         </div>
-        <button
-          type="button"
-          className="reader-mobile-overlay"
-          data-reader-hook="mobile-overlay"
-          aria-label="关闭目录"
-          hidden
-        />
+        {showSidebarTree ? (
+          <button
+            type="button"
+            className="reader-mobile-overlay"
+            data-reader-hook="mobile-overlay"
+            aria-label="关闭目录"
+            hidden
+          />
+        ) : null}
         <script
           id="plaindoc-reader-state"
           type="application/json"

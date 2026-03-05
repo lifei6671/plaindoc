@@ -48,6 +48,7 @@ type readerPagePayload struct {
 	RequestOrigin string                                      `json:"requestOrigin,omitempty"`
 	Viewer        readerPageViewerIdentity                    `json:"viewer"`
 	Access        *readerPageAccessState                      `json:"access,omitempty"`
+	Share         *readerPageShareState                       `json:"share,omitempty"`
 }
 
 type readerPageAccessState struct {
@@ -55,6 +56,15 @@ type readerPageAccessState struct {
 	Title         string `json:"title"`
 	Description   string `json:"description"`
 	RequiresLogin bool   `json:"requiresLogin"`
+}
+
+type readerPageShareState struct {
+	Enabled            bool   `json:"enabled"`
+	ShareID            string `json:"shareId,omitempty"`
+	SpaceID            string `json:"spaceId,omitempty"`
+	DocumentRouteKey   string `json:"documentRouteKey,omitempty"`
+	BasePath           string `json:"basePath,omitempty"`
+	AttachmentBasePath string `json:"attachmentBasePath,omitempty"`
 }
 
 const (

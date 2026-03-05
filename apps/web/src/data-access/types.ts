@@ -125,6 +125,7 @@ export interface DocumentRevision {
 }
 
 export type DocumentAttachmentPreviewKind = "none" | "image" | "pdf" | "office" | "text";
+export type DocumentShareMode = "public" | "password";
 
 export interface DocumentAttachment {
   attachmentId: string;
@@ -149,6 +150,29 @@ export interface DocumentAttachmentAccessLink {
   previewKind: DocumentAttachmentPreviewKind;
   requiresAuth: boolean;
   expiresAt?: string;
+}
+
+export interface DocumentShareConfig {
+  enabled: boolean;
+  shareId: string;
+  documentId: string;
+  spaceId: string;
+  mode: DocumentShareMode;
+  passwordHint: string;
+  hasPassword: boolean;
+  expiresAt?: string | null;
+  disabledAt?: string | null;
+  accessVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateDocumentShareInput {
+  enabled: boolean;
+  mode?: DocumentShareMode;
+  password?: string;
+  passwordHint?: string;
+  expiresAt?: string | null;
 }
 
 export interface CreateSpaceInput {
@@ -262,6 +286,9 @@ export interface DocumentGateway {
   getDocument(docId: string): Promise<Document>;
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
   updateDocumentIdentifier(docId: string, identifier: string | null): Promise<UpdateDocumentIdentifierResult>;
+  getShareConfig(docId: string): Promise<DocumentShareConfig>;
+  updateShareConfig(docId: string, input: UpdateDocumentShareInput): Promise<DocumentShareConfig>;
+  disableShare(docId: string): Promise<void>;
   localizeRemoteImages(input: LocalizeRemoteImagesInput): Promise<LocalizeRemoteImagesResult>;
   listRevisions(docId: string): Promise<DocumentRevision[]>;
   listAttachments(docId: string): Promise<DocumentAttachment[]>;
@@ -483,6 +510,51 @@ export interface AdminDocument {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AdminDocumentShareView = "all" | "mine";
+
+export interface AdminDocumentShare {
+  shareId: string;
+  documentId: string;
+  documentRouteKey?: string;
+  documentTitle: string;
+  spaceId: string;
+  spaceName: string;
+  spaceOwnerUserId: string;
+  spaceOwnerName: string;
+  spaceOwnerEmail: string;
+  mode: DocumentShareMode;
+  passwordHint: string;
+  hasPassword: boolean;
+  expiresAt?: string | null;
+  accessVersion: number;
+  createdByUserId?: string | null;
+  createdByName: string;
+  createdByEmail: string;
+  updatedByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isExpired: boolean;
+}
+
+export interface AdminDocumentShareListInput {
+  view?: AdminDocumentShareView;
+  keyword?: string;
+  spaceId?: string;
+  mode?: "all" | DocumentShareMode;
+  expired?: "all" | "yes" | "no";
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminDocumentShareListResult {
+  items: AdminDocumentShare[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
 }
 
 export interface AdminDocumentListInput {
@@ -961,6 +1033,15 @@ export interface AdminGateway {
   transferSpaceOwnership(input: { spaceId: string; targetUserId?: string; targetEmail?: string }): Promise<AdminSpace>;
   deleteSpace(spaceId: string): Promise<void>;
   listDocuments(input?: AdminDocumentListInput): Promise<AdminDocumentListResult>;
+  listDocumentShares(input?: AdminDocumentShareListInput): Promise<AdminDocumentShareListResult>;
+  updateDocumentShare(input: {
+    shareId: string;
+    mode?: DocumentShareMode;
+    password?: string;
+    passwordHint?: string;
+    expiresAt?: string | null;
+  }): Promise<DocumentShareConfig>;
+  deleteDocumentShare(shareId: string): Promise<void>;
   updateDocumentStatus(input: { documentId: string; status: "active" | "banned"; reason?: string }): Promise<AdminDocument>;
   deleteDocument(documentId: string): Promise<void>;
   listDocumentAttachments(input?: AdminDocumentAttachmentListInput): Promise<AdminDocumentAttachmentListResult>;

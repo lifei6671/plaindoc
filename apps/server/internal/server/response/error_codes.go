@@ -82,6 +82,7 @@ const (
 	CodeSpaceCategoryNotFound  = "SPACE_CATEGORY_NOT_FOUND"
 	CodeNodeNotFound           = "NODE_NOT_FOUND"
 	CodeTemplateNotFound       = "TEMPLATE_NOT_FOUND"
+	CodeDocumentShareNotFound  = "DOCUMENT_SHARE_NOT_FOUND"
 
 	// 4000 段：冲突与并发状态。
 	CodeEmailAlreadyExists          = "EMAIL_ALREADY_EXISTS"
@@ -117,6 +118,12 @@ const (
 	CodePasswordUnchanged             = "PASSWORD_UNCHANGED"
 	CodeDocumentIdentifierReserved    = "DOCUMENT_IDENTIFIER_RESERVED"
 	CodeTemplateBuiltinImmutable      = "TEMPLATE_BUILTIN_IMMUTABLE"
+	CodeDocumentShareExpired          = "DOCUMENT_SHARE_EXPIRED"
+	CodeDocumentShareDisabled         = "DOCUMENT_SHARE_DISABLED"
+	CodeDocumentSharePasswordRequired = "DOCUMENT_SHARE_PASSWORD_REQUIRED"
+	CodeDocumentSharePasswordInvalid  = "DOCUMENT_SHARE_PASSWORD_INVALID"
+	CodeDocumentSharePasswordTooShort = "DOCUMENT_SHARE_PASSWORD_TOO_SHORT"
+	CodeDocumentShareAccessDenied     = "DOCUMENT_SHARE_ACCESS_DENIED"
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout = "REQUEST_TIMEOUT"
@@ -200,6 +207,7 @@ var errorCodeRegistry = map[string]int{
 	CodeSpaceCategoryNotFound:  3012,
 	CodeNodeNotFound:           3013,
 	CodeTemplateNotFound:       3014,
+	CodeDocumentShareNotFound:  3015,
 
 	// 4000 段：冲突与并发状态。
 	CodeEmailAlreadyExists:          4001,
@@ -235,6 +243,12 @@ var errorCodeRegistry = map[string]int{
 	CodePasswordUnchanged:             5016,
 	CodeDocumentIdentifierReserved:    5017,
 	CodeTemplateBuiltinImmutable:      5018,
+	CodeDocumentShareExpired:          5019,
+	CodeDocumentShareDisabled:         5020,
+	CodeDocumentSharePasswordRequired: 5021,
+	CodeDocumentSharePasswordInvalid:  5022,
+	CodeDocumentSharePasswordTooShort: 5023,
+	CodeDocumentShareAccessDenied:     5024,
 
 	// 9000 段：系统级错误。
 	CodeRequestTimeout: 9001,

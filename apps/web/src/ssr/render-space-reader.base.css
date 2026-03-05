@@ -20,6 +20,9 @@ a {
   height: 100vh;
   overflow: hidden;
 }
+.reader-layout--without-sidebar {
+  grid-template-columns: minmax(0, 1fr);
+}
 .reader-sidebar {
   border-right: 1px solid #dbe2ea;
   background: #fff;

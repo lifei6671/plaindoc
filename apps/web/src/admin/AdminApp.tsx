@@ -5,6 +5,7 @@ import {
   History,
   Image,
   LayoutDashboard,
+  Link2,
   LoaderCircle,
   LogOut,
   Paperclip,
@@ -47,6 +48,7 @@ import { AdminSystemConfigsPage } from "./pages/AdminSystemConfigsPage";
 import { AdminAuditsPage } from "./pages/AdminAuditsPage";
 import { AdminProfilePage } from "./pages/AdminProfilePage";
 import { AdminSearchAnalyzersPage } from "./pages/AdminSearchAnalyzersPage";
+import { AdminDocumentSharesPage } from "./pages/AdminDocumentSharesPage";
 
 type AdminMenuKey =
   | "dashboard"
@@ -54,6 +56,7 @@ type AdminMenuKey =
   | "users"
   | "spaces"
   | "documents"
+  | "shares"
   | "attachments"
   | "images"
   | "document-templates"
@@ -131,6 +134,13 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
       description: "筛选文档并处理违规内容",
       path: "/admin/documents",
       icon: FileText
+    },
+    {
+      key: "shares",
+      label: "分享中心",
+      description: "管理分享文档与我的分享",
+      path: "/admin/document-shares",
+      icon: Link2
     },
     {
       key: "attachments",
@@ -248,6 +258,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         title: "文档管理",
         description: "文档检索、状态变更和内容治理。",
         todo: ["实现多条件搜索", "支持封禁/删除", "支持按空间过滤"]
+      };
+    case "shares":
+      return {
+        title: "分享中心",
+        description: "管理分享配置并支持取消/延期/修改密码。",
+        todo: ["支持 all/mine 视图", "支持模式切换", "支持取消分享"]
       };
     case "attachments":
       return {
@@ -377,7 +393,7 @@ const DASHBOARD_TODO: readonly DashboardTodo[] = [
 const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
   { label: "账号", keys: ["profile"] },
-  { label: "内容管理", keys: ["users", "spaces", "documents", "attachments", "images"] },
+  { label: "内容管理", keys: ["users", "spaces", "documents", "shares", "attachments", "images"] },
   { label: "系统治理", keys: ["document-templates", "themes", "system", "search-analyzers", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
@@ -878,6 +894,8 @@ export function AdminApp({
                 <AdminSpacesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "documents" ? (
                 <AdminDocumentsPage dataGateway={dataGateway} />
+              ) : activeMenuItem?.key === "shares" ? (
+                <AdminDocumentSharesPage dataGateway={dataGateway} currentUserRoles={adminIdentity.roles} />
               ) : activeMenuItem?.key === "attachments" ? (
                 <AdminDocumentAttachmentsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "images" ? (

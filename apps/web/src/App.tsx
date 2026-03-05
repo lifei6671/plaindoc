@@ -81,8 +81,10 @@ import {
   type AuthUnauthorizedEventDetail,
   type CreateNodeResult,
   type DocumentAttachment,
+  type DocumentShareConfig,
   type DocumentTemplateDetail,
   type DocumentTemplateSummary,
+  type UpdateDocumentShareInput,
 } from "./data-access";
 import {
   DEFAULT_PREVIEW_THEME_ID,
@@ -2569,6 +2571,35 @@ export default function App() {
     [updateDocumentIdentifier]
   );
 
+  const handleGetWorkspaceDocumentShareConfig = useCallback(
+    async (docId: string): Promise<DocumentShareConfig> => {
+      return dataGateway.document.getShareConfig(docId);
+    },
+    [dataGateway.document]
+  );
+
+  const handleUpdateWorkspaceDocumentShareConfig = useCallback(
+    async (docId: string, input: UpdateDocumentShareInput): Promise<DocumentShareConfig> => {
+      const updated = await dataGateway.document.updateShareConfig(docId, input);
+      if (!updated.enabled) {
+        setStatusMessage("文档分享已关闭");
+        return updated;
+      }
+      const modeLabel = updated.mode === "password" ? "密码分享" : "公开分享";
+      setStatusMessage(`文档分享已更新：${modeLabel}`);
+      return updated;
+    },
+    [dataGateway.document]
+  );
+
+  const handleDisableWorkspaceDocumentShare = useCallback(
+    async (docId: string): Promise<void> => {
+      await dataGateway.document.disableShare(docId);
+      setStatusMessage("文档分享已关闭");
+    },
+    [dataGateway.document]
+  );
+
   // 侧栏拖拽移动：按起始宽度和鼠标偏移计算目标宽度。
   const handleWorkspaceSidebarResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = workspaceSidebarResizeStateRef.current;
@@ -3311,6 +3342,9 @@ export default function App() {
             onListDocumentTemplates={loadWorkspaceDocumentTemplates}
             onGetDocumentTemplate={loadWorkspaceDocumentTemplateDetail}
             onUpdateDocumentIdentifier={handleUpdateWorkspaceDocumentIdentifier}
+            onGetDocumentShareConfig={handleGetWorkspaceDocumentShareConfig}
+            onUpdateDocumentShareConfig={handleUpdateWorkspaceDocumentShareConfig}
+            onDisableDocumentShare={handleDisableWorkspaceDocumentShare}
             onUpdateDocumentVisibility={handleUpdateWorkspaceDocumentVisibility}
             onRenameNode={handleRenameWorkspaceNode}
             onDeleteNode={handleDeleteWorkspaceNode}
