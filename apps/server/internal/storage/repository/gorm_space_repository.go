@@ -304,19 +304,23 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 	viewerUserID := strings.TrimSpace(params.ViewerUserID)
 	categoryID := strings.TrimSpace(params.CategoryID)
 
-	baseQuery := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Joins("LEFT JOIN users AS u ON u.user_id = s.owner_user_id").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive)
+	// 首页空间展示与阅读页权限必须一致：
+	// 至少存在一篇当前访问者可读（有效状态）的文档时，空间才进入首页/分类列表。
+	const normalizedSpaceVisibilityExpr = "CASE WHEN s.visibility IN ('public','authenticated','member') THEN s.visibility ELSE 'member' END"
+	const normalizedDocumentVisibilityExpr = "CASE WHEN d.visibility IN ('public','authenticated','member') THEN d.visibility ELSE 'member' END"
+	const normalizedDocumentStatusExpr = "CASE WHEN d.status IN ('active','banned','deleted') THEN d.status ELSE 'active' END"
 
-	if categoryID != "" {
-		baseQuery = baseQuery.Where("s.category_id = ?", categoryID)
-	}
-
-	if viewerUserID == "" {
-		baseQuery = baseQuery.Where("s.visibility = ?", models.VisibilityPublic)
-	} else {
-		baseQuery = baseQuery.
+	// 统一首页空间可见性基础过滤，供 count/list 复用。
+	// 这样 count 可以只保留必要 JOIN，避免和列表查询一样携带展示字段 JOIN。
+	applyHomepageCommonFilters := func(query *gorm.DB) *gorm.DB {
+		query = query.Where("s.status = ?", models.EntityStatusActive)
+		if categoryID != "" {
+			query = query.Where("s.category_id = ?", categoryID)
+		}
+		if viewerUserID == "" {
+			return query.Where("s.visibility = ?", models.VisibilityPublic)
+		}
+		return query.
 			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", viewerUserID).
 			Where(
 				"(s.visibility IN ? OR (s.visibility = ? AND (s.owner_user_id = ? OR sm.id IS NOT NULL)))",
@@ -326,57 +330,61 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 			)
 	}
 
-	// 首页空间展示与阅读页权限必须一致：
-	// 至少存在一篇当前访问者可读（有效状态）的文档时，空间才进入首页/分类列表。
-	const normalizedSpaceVisibilityExpr = "CASE WHEN s.visibility IN ('public','authenticated','member') THEN s.visibility ELSE 'member' END"
-	const normalizedDocumentVisibilityExpr = "CASE WHEN d.visibility IN ('public','authenticated','member') THEN d.visibility ELSE 'member' END"
-	const normalizedDocumentStatusExpr = "CASE WHEN d.status IN ('active','banned','deleted') THEN d.status ELSE 'active' END"
+	buildDocumentVisibilityQuery := func() *gorm.DB {
+		query := r.db.WithContext(ctx).
+			Table("documents AS d").
+			Select("1").
+			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+			Where("n.space_id = s.space_id").
+			Where(normalizedDocumentStatusExpr+" = ?", models.EntityStatusActive)
 
-	documentVisibilityQuery := r.db.WithContext(ctx).
-		Table("documents AS d").
-		Select("1").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Where("n.space_id = s.space_id").
-		Where(normalizedDocumentStatusExpr+" = ?", models.EntityStatusActive)
-
-	if viewerUserID == "" {
-		documentVisibilityQuery = documentVisibilityQuery.Where(
-			normalizedSpaceVisibilityExpr+" = ? AND "+normalizedDocumentVisibilityExpr+" = ?",
-			models.VisibilityPublic,
-			models.VisibilityPublic,
-		)
-	} else {
-		documentVisibilityQuery = documentVisibilityQuery.
-			Joins("LEFT JOIN space_members AS sm_doc ON sm_doc.space_id = s.space_id AND sm_doc.user_id = ?", viewerUserID).
-			Where(
-				"("+
-					"s.owner_user_id = ? OR "+
-					"(("+normalizedSpaceVisibilityExpr+" IN (?,?)) AND ("+normalizedDocumentVisibilityExpr+" IN (?,?))) OR "+
-					"(("+normalizedSpaceVisibilityExpr+" = ? OR "+normalizedDocumentVisibilityExpr+" = ?) AND sm_doc.id IS NOT NULL)"+
-					")",
-				viewerUserID,
+		if viewerUserID == "" {
+			return query.Where(
+				normalizedSpaceVisibilityExpr+" = ? AND "+normalizedDocumentVisibilityExpr+" = ?",
 				models.VisibilityPublic,
-				models.VisibilityAuthenticated,
 				models.VisibilityPublic,
-				models.VisibilityAuthenticated,
-				models.VisibilityMember,
-				models.VisibilityMember,
 			)
+		}
+
+		// 已登录场景复用外层 space_members 别名 `sm`，避免子查询重复 LEFT JOIN 成员表。
+		// 可读条件化简为：
+		// 1) 空间 owner；
+		// 2) 空间成员（member 空间/文档均可读）；
+		// 3) 非成员时仅允许 public/authenticated 组合。
+		return query.Where(
+			"("+
+				"s.owner_user_id = ? OR "+
+				"sm.id IS NOT NULL OR "+
+				"(("+normalizedSpaceVisibilityExpr+" IN (?,?)) AND ("+normalizedDocumentVisibilityExpr+" IN (?,?)))"+
+				")",
+			viewerUserID,
+			models.VisibilityPublic,
+			models.VisibilityAuthenticated,
+			models.VisibilityPublic,
+			models.VisibilityAuthenticated,
+		)
 	}
 
-	// 空间无文档时也允许展示（点击后会进入“无可读文档”的友好提示），
-	// 仅在存在文档时要求至少有一篇可读文档。
-	spaceHasAnyDocumentQuery := r.db.WithContext(ctx).
-		Table("documents AS d_any").
-		Select("1").
-		Joins("JOIN nodes AS n_any ON n_any.node_id = d_any.node_id").
-		Where("n_any.space_id = s.space_id").
-		Where("d_any.deleted_at IS NULL")
-
-	baseQuery = baseQuery.Where("(NOT EXISTS (?) OR EXISTS (?))", spaceHasAnyDocumentQuery, documentVisibilityQuery)
+	buildSpaceHasAnyDocumentQuery := func() *gorm.DB {
+		// 空间无文档时也允许展示（点击后会进入“无可读文档”的友好提示），
+		// 仅在存在文档时要求至少有一篇可读文档。
+		return r.db.WithContext(ctx).
+			Table("documents AS d_any").
+			Select("1").
+			Joins("JOIN nodes AS n_any ON n_any.node_id = d_any.node_id").
+			Where("n_any.space_id = s.space_id").
+			Where("d_any.deleted_at IS NULL")
+	}
 
 	var total int64
-	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	countQuery := r.db.WithContext(ctx).Table("spaces AS s")
+	countQuery = applyHomepageCommonFilters(countQuery)
+	countQuery = countQuery.Where(
+		"(NOT EXISTS (?) OR EXISTS (?))",
+		buildSpaceHasAnyDocumentQuery(),
+		buildDocumentVisibilityQuery(),
+	)
+	if err := countQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -388,6 +396,16 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 	if offset < 0 {
 		offset = 0
 	}
+
+	listQuery := r.db.WithContext(ctx).
+		Table("spaces AS s").
+		Joins("LEFT JOIN users AS u ON u.user_id = s.owner_user_id")
+	listQuery = applyHomepageCommonFilters(listQuery)
+	listQuery = listQuery.Where(
+		"(NOT EXISTS (?) OR EXISTS (?))",
+		buildSpaceHasAnyDocumentQuery(),
+		buildDocumentVisibilityQuery(),
+	)
 
 	type homepageSpaceRow struct {
 		ID           int64               `gorm:"column:id"`
@@ -415,7 +433,7 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 	}
 
 	var rows []homepageSpaceRow
-	if err := baseQuery.Session(&gorm.Session{}).
+	if err := listQuery.Session(&gorm.Session{}).
 		Select(
 			"s.id",
 			"s.space_id",

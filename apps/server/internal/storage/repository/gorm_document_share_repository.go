@@ -272,72 +272,54 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 		return nil, 0, fmt.Errorf("document share repository db is nil")
 	}
 
-	baseQuery := r.db.WithContext(ctx).
-		Table("document_shares AS ds").
-		Joins("JOIN documents AS d ON d.document_id = ds.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Joins("JOIN users AS uo ON uo.user_id = s.owner_user_id").
-		Joins("LEFT JOIN users AS uc ON uc.user_id = ds.created_by_user_id")
-
-	baseQuery = baseQuery.Where("ds.disabled_at IS NULL")
-	baseQuery = baseQuery.Where("d.deleted_at IS NULL")
-	baseQuery = baseQuery.Where("s.deleted_at IS NULL")
-
 	actorUserID := strings.TrimSpace(params.ActorUserID)
-	if params.RestrictToScopes {
-		baseQuery = baseQuery.Where(
-			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
-			actorUserID,
-			actorUserID,
-		)
-	}
-
 	view := normalizeDocumentShareAdminView(params.View)
-	if view == DocumentShareAdminViewMine {
-		baseQuery = baseQuery.Where("ds.created_by_user_id = ?", actorUserID)
-	}
-
-	keyword := strings.ToLower(strings.TrimSpace(params.Keyword))
-	if keyword != "" {
-		likeKeyword := "%" + keyword + "%"
-		baseQuery = baseQuery.Where(
-			"LOWER(ds.share_id) LIKE ? OR LOWER(ds.document_id) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(COALESCE(n.reader_slug, '')) LIKE ? OR LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(uo.user_id) LIKE ? OR LOWER(uo.email) LIKE ? OR LOWER(uo.name) LIKE ? OR LOWER(COALESCE(uc.user_id, '')) LIKE ? OR LOWER(COALESCE(uc.email, '')) LIKE ? OR LOWER(COALESCE(uc.name, '')) LIKE ?",
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-			likeKeyword,
-		)
-	}
-
+	keyword := strings.TrimSpace(params.Keyword)
 	spaceID := strings.TrimSpace(params.SpaceID)
-	if spaceID != "" {
-		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
-	}
-
 	mode := normalizeDocumentShareMode(params.Mode)
-	if mode != "" {
-		baseQuery = baseQuery.Where("ds.mode = ?", mode)
-	}
-
 	now := time.Now().UTC()
-	switch normalizeDocumentShareExpiredFilter(params.Expired) {
-	case "yes":
-		baseQuery = baseQuery.Where("ds.expires_at IS NOT NULL AND ds.expires_at <= ?", now)
-	case "no":
-		baseQuery = baseQuery.Where("(ds.expires_at IS NULL OR ds.expires_at > ?)", now)
+	expiredFilter := normalizeDocumentShareExpiredFilter(params.Expired)
+
+	applyCommonFilters := func(query *gorm.DB) *gorm.DB {
+		query = query.Where("ds.disabled_at IS NULL")
+		query = query.Where("d.deleted_at IS NULL")
+		query = query.Where("s.deleted_at IS NULL")
+		if params.RestrictToScopes {
+			query = query.Where(
+				"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+				actorUserID,
+				actorUserID,
+			)
+		}
+		if view == DocumentShareAdminViewMine {
+			query = query.Where("ds.created_by_user_id = ?", actorUserID)
+		}
+		if keyword != "" {
+			query = query.Where("d.title LIKE ?", "%"+keyword+"%")
+		}
+		if spaceID != "" {
+			query = query.Where("s.space_id = ?", spaceID)
+		}
+		if mode != "" {
+			query = query.Where("ds.mode = ?", mode)
+		}
+		switch expiredFilter {
+		case "yes":
+			query = query.Where("ds.expires_at IS NOT NULL AND ds.expires_at <= ?", now)
+		case "no":
+			query = query.Where("(ds.expires_at IS NULL OR ds.expires_at > ?)", now)
+		}
+		return query
 	}
 
 	var total int64
-	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	countQuery := r.db.WithContext(ctx).
+		Table("document_shares AS ds").
+		Joins("JOIN documents AS d ON d.document_id = ds.document_id").
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("JOIN spaces AS s ON s.space_id = n.space_id")
+	countQuery = applyCommonFilters(countQuery)
+	if err := countQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -350,8 +332,17 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 		offset = 0
 	}
 
+	listQuery := r.db.WithContext(ctx).
+		Table("document_shares AS ds").
+		Joins("JOIN documents AS d ON d.document_id = ds.document_id").
+		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
+		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
+		Joins("JOIN users AS uo ON uo.user_id = s.owner_user_id").
+		Joins("LEFT JOIN users AS uc ON uc.user_id = ds.created_by_user_id")
+	listQuery = applyCommonFilters(listQuery)
+
 	rows := make([]adminDocumentShareListRow, 0, limit)
-	if err := baseQuery.Session(&gorm.Session{}).
+	if err := listQuery.Session(&gorm.Session{}).
 		Select(
 			"ds.id, ds.share_id, ds.document_id, ds.space_id, ds.mode, ds.password_hash, ds.password_hint, " +
 				"ds.expires_at, ds.disabled_at, ds.access_version, ds.created_by_user_id, ds.updated_by_user_id, " +

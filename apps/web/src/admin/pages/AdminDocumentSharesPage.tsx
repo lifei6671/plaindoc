@@ -424,9 +424,8 @@ export function AdminDocumentSharesPage({ dataGateway, currentUserRoles }: Admin
                   <button
                     key={menu.key}
                     type="button"
-                    className={`w-full appearance-none rounded-lg border border-transparent px-3 py-2.5 text-left shadow-none outline-none transition focus-visible:ring-2 focus-visible:ring-sky-200 ${
-                      isActive ? "bg-slate-200 text-slate-900" : "text-slate-700 hover:bg-slate-200/70"
-                    }`}
+                    className={`w-full appearance-none rounded-lg border border-transparent px-3 py-2.5 text-left shadow-none outline-none transition focus-visible:ring-2 focus-visible:ring-sky-200 ${isActive ? "bg-slate-200 text-slate-900" : "text-slate-700 hover:bg-slate-200/70"
+                      }`}
                     onClick={() => handleChangeMenu(menu.key)}
                     disabled={loading}
                   >
@@ -485,7 +484,7 @@ export function AdminDocumentSharesPage({ dataGateway, currentUserRoles }: Admin
                       id="admin-document-shares-search"
                       value={keywordInput}
                       onChange={(event) => setKeywordInput(event.target.value)}
-                      placeholder="分享 ID / 文档标题 / 创建人"
+                      placeholder="文档标题"
                       autoComplete="off"
                     />
                   </div>
