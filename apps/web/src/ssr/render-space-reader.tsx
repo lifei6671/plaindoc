@@ -431,6 +431,42 @@ function buildAttachmentAccessLinkPath(
   );
 }
 
+function buildAttachmentPreviewPagePath(
+  payload: ReaderPagePayload,
+  documentID: string,
+  attachmentID: string
+): string {
+  const normalizedAttachmentID = attachmentID.trim();
+  if (!normalizedAttachmentID) {
+    return "";
+  }
+  if (payload.share?.enabled === true) {
+    const shareSpaceID = (payload.share.spaceId ?? payload.space.id ?? "").trim();
+    const shareDocKey = (payload.share.documentRouteKey ?? payload.document.routeKey ?? payload.document.id ?? "").trim();
+    if (!shareSpaceID || !shareDocKey) {
+      return "";
+    }
+    return (
+      "/preview/shares/" +
+      encodeURIComponent(shareSpaceID) +
+      "/" +
+      encodeURIComponent(shareDocKey) +
+      "/attachments/" +
+      encodeURIComponent(normalizedAttachmentID)
+    );
+  }
+  const normalizedDocumentID = documentID.trim();
+  if (!normalizedDocumentID) {
+    return "";
+  }
+  return (
+    "/preview/docs/" +
+    encodeURIComponent(normalizedDocumentID) +
+    "/attachments/" +
+    encodeURIComponent(normalizedAttachmentID)
+  );
+}
+
 function resolveAttachmentPreviewLabel(previewKind: ReaderDocumentAttachmentPayload["previewKind"]): string {
   switch (previewKind) {
     case "image":
@@ -712,6 +748,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                             attachmentID,
                             "preview"
                           );
+                          const previewPagePath = buildAttachmentPreviewPagePath(payload, documentID, attachmentID);
                           const previewKind = normalizeAttachmentPreviewKind(attachment.previewKind);
                           const previewSupported = attachment.previewSupported === true;
                           return (
@@ -759,7 +796,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                                     data-reader-attachment-id={attachmentID}
                                     data-reader-doc-id={documentID}
                                     data-reader-attachment-access-link-path={previewAccessLinkPath || undefined}
-                                    data-reader-attachment-preview-direct={shareEnabled ? "1" : undefined}
+                                    data-reader-attachment-preview-page-path={previewPagePath || undefined}
                                   >
                                     <Eye size={14} aria-hidden="true" />
                                     <span>预览</span>

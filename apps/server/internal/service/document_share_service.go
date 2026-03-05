@@ -64,13 +64,13 @@ type UpsertDocumentShareInput struct {
 
 // UpdateDocumentShareByIDInput 定义按 share_id 更新分享配置入参。
 type UpdateDocumentShareByIDInput struct {
-	ShareID       string
-	ActorUserID   string
-	Mode          *models.DocumentShareMode
-	Password      *string
-	PasswordHint  *string
-	ExpiresAtSet  bool
-	ExpiresAt     *time.Time
+	ShareID      string
+	ActorUserID  string
+	Mode         *models.DocumentShareMode
+	Password     *string
+	PasswordHint *string
+	ExpiresAtSet bool
+	ExpiresAt    *time.Time
 }
 
 // ResolveDocumentShareResult 定义分享访问解析结果。
@@ -94,10 +94,14 @@ type DocumentSharePageResult struct {
 
 // DocumentShareAttachmentAccessResult 表示分享态附件访问链接结果。
 type DocumentShareAttachmentAccessResult struct {
-	URL            string
-	Purpose        DocumentShareAttachmentPurpose
-	PreviewKind    string
-	PreviewEnabled bool
+	URL             string
+	Purpose         DocumentShareAttachmentPurpose
+	PreviewKind     string
+	PreviewEnabled  bool
+	StorageProvider string
+	ObjectKey       string
+	FileName        string
+	MimeType        string
 }
 
 // ListAdminDocumentSharesInput 定义后台分享中心查询参数。
@@ -123,12 +127,12 @@ type ListAdminDocumentSharesResult struct {
 
 // DocumentShareService 封装文档分享配置与分享态读取能力。
 type DocumentShareService struct {
-	shareRepo             repository.DocumentShareRepository
-	readerPageRepo        repository.ReaderPageRepository
+	shareRepo              repository.DocumentShareRepository
+	readerPageRepo         repository.ReaderPageRepository
 	documentAttachmentRepo repository.DocumentAttachmentRepository
-	spaceRepo             repository.SpaceRepository
-	imageHostingService   *ImageHostingService
-	nowFn                 func() time.Time
+	spaceRepo              repository.SpaceRepository
+	imageHostingService    *ImageHostingService
+	nowFn                  func() time.Time
 }
 
 // NewDocumentShareService 创建文档分享服务。
@@ -555,10 +559,14 @@ func (s *DocumentShareService) BuildAttachmentAccessURLByRouteKey(
 		return DocumentShareAttachmentAccessResult{}, ErrDocumentShareNotFound
 	}
 	return DocumentShareAttachmentAccessResult{
-		URL:            attachmentURL,
-		Purpose:        normalizedPurpose,
-		PreviewKind:    previewKind,
-		PreviewEnabled: previewSupported,
+		URL:             attachmentURL,
+		Purpose:         normalizedPurpose,
+		PreviewKind:     previewKind,
+		PreviewEnabled:  previewSupported,
+		StorageProvider: strings.TrimSpace(targetAttachment.StorageProvider),
+		ObjectKey:       strings.TrimSpace(targetAttachment.ObjectKey),
+		FileName:        strings.TrimSpace(targetAttachment.FileName),
+		MimeType:        strings.TrimSpace(targetAttachment.MimeType),
 	}, nil
 }
 

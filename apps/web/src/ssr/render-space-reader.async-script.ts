@@ -522,7 +522,11 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     return true;
   };
 
-  const buildAttachmentPreviewPageURL = (documentID, attachmentID) => {
+  const buildAttachmentPreviewPageURL = (documentID, attachmentID, customPreviewPagePath) => {
+    const normalizedCustomPath = typeof customPreviewPagePath === "string" ? customPreviewPagePath.trim() : "";
+    if (normalizedCustomPath) {
+      return normalizedCustomPath;
+    }
     const normalizedDocumentID = typeof documentID === "string" ? documentID.trim() : "";
     const normalizedAttachmentID = typeof attachmentID === "string" ? attachmentID.trim() : "";
     if (!normalizedDocumentID || !normalizedAttachmentID) {
@@ -544,6 +548,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     const attachmentID = (actionButton.getAttribute("data-reader-attachment-id") || "").trim();
     const purposeValue = (actionButton.getAttribute("data-reader-attachment-purpose") || "").trim();
     const customAccessLinkPath = (actionButton.getAttribute("data-reader-attachment-access-link-path") || "").trim();
+    const customPreviewPagePath = (actionButton.getAttribute("data-reader-attachment-preview-page-path") || "").trim();
     const previewDirectMode = (actionButton.getAttribute("data-reader-attachment-preview-direct") || "").trim() === "1";
     const purpose = purposeValue === "preview" ? "preview" : "download";
     if (!documentID || !attachmentID) {
@@ -551,7 +556,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       return;
     }
     if (purpose === "preview" && !previewDirectMode) {
-      const previewPageURL = buildAttachmentPreviewPageURL(documentID, attachmentID);
+      const previewPageURL = buildAttachmentPreviewPageURL(documentID, attachmentID, customPreviewPagePath);
       if (!previewPageURL || !triggerAttachmentNavigation(previewPageURL, "preview")) {
         setAttachmentStatus("打开预览页失败，请稍后重试。", true);
         return;

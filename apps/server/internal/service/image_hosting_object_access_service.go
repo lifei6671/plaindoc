@@ -36,7 +36,11 @@ func (s *ImageHostingService) BuildObjectReadURL(
 
 	objectKey := normalizeObjectStorageKey(input.ObjectKey)
 	if config.DownloadStrategy(provider) == ImageHostingDownloadStrategyPublic {
-		return buildPublicObjectReadURL(config, provider, objectKey, input.ObjectURL), nil
+		publicURL := buildPublicObjectReadURL(config, provider, objectKey, input.ObjectURL)
+		if contentDisposition := buildObjectReadContentDisposition(input.Purpose, input.FileName); contentDisposition != "" {
+			publicURL = appendObjectReadContentDisposition(publicURL, contentDisposition)
+		}
+		return publicURL, nil
 	}
 	if objectKey == "" {
 		return "", errors.New("object key is empty")
@@ -70,6 +74,25 @@ func buildPublicObjectReadURL(
 	default:
 		return ""
 	}
+}
+
+func appendObjectReadContentDisposition(rawURL string, contentDisposition string) string {
+	normalizedURL := strings.TrimSpace(rawURL)
+	if normalizedURL == "" {
+		return ""
+	}
+	dispositionValue := strings.TrimSpace(contentDisposition)
+	if dispositionValue == "" {
+		return normalizedURL
+	}
+	parsedURL, err := url.Parse(normalizedURL)
+	if err != nil {
+		return normalizedURL
+	}
+	queryValues := parsedURL.Query()
+	queryValues.Set("response-content-disposition", dispositionValue)
+	parsedURL.RawQuery = queryValues.Encode()
+	return parsedURL.String()
 }
 
 func buildCloudflareR2SignedObjectReadURL(

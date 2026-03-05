@@ -5,14 +5,16 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
 type documentAttachmentPreviewPageData struct {
-	DocumentID   string
-	AttachmentID string
+	DocumentID     string
+	AttachmentID   string
+	AccessLinkPath string
 }
 
 var documentAttachmentPreviewPageTemplate = template.Must(
@@ -187,7 +189,7 @@ var documentAttachmentPreviewPageTemplate = template.Must(
       }
     </style>
   </head>
-  <body data-doc-id="{{.DocumentID}}" data-attachment-id="{{.AttachmentID}}">
+  <body data-doc-id="{{.DocumentID}}" data-attachment-id="{{.AttachmentID}}" data-access-link-path="{{.AccessLinkPath}}">
     <div class="preview-toast-viewport" id="preview-toast-viewport" aria-live="polite" aria-atomic="true"></div>
     <div class="preview-page">
       <header class="preview-toolbar">
@@ -209,6 +211,7 @@ var documentAttachmentPreviewPageTemplate = template.Must(
         const body = document.body;
         const documentID = (body.getAttribute("data-doc-id") || "").trim();
         const attachmentID = (body.getAttribute("data-attachment-id") || "").trim();
+        const accessLinkPath = (body.getAttribute("data-access-link-path") || "").trim();
         const toastViewport = document.getElementById("preview-toast-viewport");
         const contentNode = document.getElementById("preview-content");
         const metaNode = document.getElementById("preview-meta");
@@ -389,13 +392,15 @@ var documentAttachmentPreviewPageTemplate = template.Must(
         };
 
         const requestAttachmentAccessLink = async (purpose) => {
-          const requestPath =
-            "/api/docs/" +
-            encodeURIComponent(documentID) +
-            "/attachments/" +
-            encodeURIComponent(attachmentID) +
-            "/access-link?purpose=" +
-            encodeURIComponent(purpose);
+          const queryText = "purpose=" + encodeURIComponent(purpose);
+          const requestPath = accessLinkPath
+            ? accessLinkPath + (accessLinkPath.indexOf("?") >= 0 ? "&" : "?") + queryText
+            : "/api/docs/" +
+              encodeURIComponent(documentID) +
+              "/attachments/" +
+              encodeURIComponent(attachmentID) +
+              "/access-link?" +
+              queryText;
           const response = await fetch(requestPath, {
             method: "POST",
             credentials: "include",
@@ -539,8 +544,9 @@ func (h *workspaceHandler) DocumentAttachmentPreviewPage(c *gin.Context) {
 	c.Header("Cache-Control", "private, no-store, max-age=0")
 
 	pageHTML, err := buildDocumentAttachmentPreviewPageHTML(documentAttachmentPreviewPageData{
-		DocumentID:   documentID,
-		AttachmentID: attachmentID,
+		DocumentID:     documentID,
+		AttachmentID:   attachmentID,
+		AccessLinkPath: buildWorkspaceDocumentAttachmentAccessLinkPath(documentID, attachmentID),
 	})
 	if err != nil {
 		setRequestErrmsg(c, err, "渲染附件预览页失败")
@@ -554,9 +560,22 @@ func buildDocumentAttachmentPreviewPageHTML(data documentAttachmentPreviewPageDa
 	if strings.TrimSpace(data.DocumentID) == "" || strings.TrimSpace(data.AttachmentID) == "" {
 		return "", errors.New("document id or attachment id is empty")
 	}
+	accessLinkPath := strings.TrimSpace(data.AccessLinkPath)
+	if accessLinkPath == "" {
+		accessLinkPath = buildWorkspaceDocumentAttachmentAccessLinkPath(data.DocumentID, data.AttachmentID)
+	}
+	data.AccessLinkPath = accessLinkPath
 	var builder bytes.Buffer
 	if err := documentAttachmentPreviewPageTemplate.Execute(&builder, data); err != nil {
 		return "", err
 	}
 	return builder.String(), nil
+}
+
+func buildWorkspaceDocumentAttachmentAccessLinkPath(documentID string, attachmentID string) string {
+	return "/api/docs/" +
+		url.PathEscape(strings.TrimSpace(documentID)) +
+		"/attachments/" +
+		url.PathEscape(strings.TrimSpace(attachmentID)) +
+		"/access-link"
 }

@@ -617,6 +617,10 @@ func (h *workspaceHandler) RedirectDocumentAttachmentDownload(c *gin.Context) {
 	}
 
 	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
+	isLocalStorageProvider := strings.EqualFold(
+		strings.TrimSpace(attachment.StorageProvider),
+		string(service.ImageHostingProviderLocal),
+	)
 	if publicReadable {
 		config := service.DefaultImageHostingConfig()
 		if h.imageHostingService != nil {
@@ -636,8 +640,12 @@ func (h *workspaceHandler) RedirectDocumentAttachmentDownload(c *gin.Context) {
 			setRequestErrmsg(c, publicDownloadURLErr, "生成附件公开链接失败")
 		}
 		if publicDownloadURL != "" {
-			c.Redirect(http.StatusTemporaryRedirect, publicDownloadURL)
-			return
+			if isLocalStorageProvider {
+				// 本地存储下载需要附带 Content-Disposition，需继续走 token 下载链路。
+			} else {
+				c.Redirect(http.StatusTemporaryRedirect, publicDownloadURL)
+				return
+			}
 		}
 	}
 
@@ -716,6 +724,10 @@ func (h *workspaceHandler) CreateDocumentAttachmentAccessLink(c *gin.Context) {
 	}
 
 	publicReadable := h.isDocumentPubliclyReadable(c.Request.Context(), documentID)
+	isLocalStorageProvider := strings.EqualFold(
+		strings.TrimSpace(attachment.StorageProvider),
+		string(service.ImageHostingProviderLocal),
+	)
 	if publicReadable {
 		config := service.DefaultImageHostingConfig()
 		if h.imageHostingService != nil {
@@ -735,6 +747,19 @@ func (h *workspaceHandler) CreateDocumentAttachmentAccessLink(c *gin.Context) {
 			setRequestErrmsg(c, publicDownloadURLErr, "生成附件公开链接失败")
 		}
 		if publicDownloadURL != "" {
+			if purpose == workspaceDocumentAttachmentPurposeDownload && isLocalStorageProvider {
+				response.JSON(c, http.StatusOK, workspaceDocumentAttachmentAccessLinkResponse{
+					URL: "/api/docs/" +
+						url.PathEscape(documentID) +
+						"/attachments/" +
+						url.PathEscape(attachmentID) +
+						"/download",
+					Purpose:      string(purpose),
+					PreviewKind:  normalizeDocumentAttachmentPreviewKind(attachment.PreviewKind),
+					RequiresAuth: false,
+				})
+				return
+			}
 			response.JSON(c, http.StatusOK, workspaceDocumentAttachmentAccessLinkResponse{
 				URL:          publicDownloadURL,
 				Purpose:      string(purpose),

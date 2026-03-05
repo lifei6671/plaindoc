@@ -287,6 +287,8 @@ func newRouter(
 	router.GET("/r/:spaceId/:docId", readerPageHandler.Page)
 	// 文档附件预览页：页面内部按 purpose=preview 动态获取可访问链接。
 	router.GET("/preview/docs/:docId/attachments/:attachmentId", workspaceHandler.DocumentAttachmentPreviewPage)
+	// 分享态附件预览页：页面内部按分享 access-link 获取可访问链接。
+	router.GET("/preview/shares/:spaceId/:docKey/attachments/:attachmentId", documentSharePageHandler.AttachmentPreviewPage)
 	// 页面层登出入口：与 SSR 页面交互保持一致。
 	router.POST("/logout", homeHandler.Logout)
 	// 本地图片公开访问路径（不带 /api），便于前端 Markdown 直接渲染。

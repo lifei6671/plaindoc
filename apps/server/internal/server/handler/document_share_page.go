@@ -6,6 +6,9 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,9 +23,9 @@ const (
 )
 
 type documentSharePageHandler struct {
-	documentShareService      *service.DocumentShareService
-	accessTokenService        *service.DocumentShareAccessTokenService
-	readerRenderer            *readerPageHandler
+	documentShareService *service.DocumentShareService
+	accessTokenService   *service.DocumentShareAccessTokenService
+	readerRenderer       *readerPageHandler
 }
 
 type verifyDocumentShareRequest struct {
@@ -251,11 +254,70 @@ func (h *documentSharePageHandler) CreateAttachmentAccessLink(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, documentShareAttachmentAccessLinkResponse{
-		URL:            strings.TrimSpace(accessLink.URL),
+		URL:            resolveDocumentShareAttachmentAccessURL(spaceID, resolveDocumentShareCanonicalDocKey(resolvedShare), attachmentID, purpose, accessLink),
 		Purpose:        string(accessLink.Purpose),
 		PreviewKind:    strings.TrimSpace(accessLink.PreviewKind),
 		PreviewEnabled: accessLink.PreviewEnabled,
 	})
+}
+
+// AttachmentPreviewPage 渲染分享态附件在线预览页。
+func (h *documentSharePageHandler) AttachmentPreviewPage(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if h == nil || h.documentShareService == nil {
+		setRequestErrmsgText(c, "分享附件预览页初始化失败: document share service is nil")
+		c.Data(http.StatusInternalServerError, "text/html; charset=utf-8", []byte(documentAttachmentPreviewPageUnavailableHTML))
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	docKey := strings.TrimSpace(c.Param("docKey"))
+	attachmentID := strings.TrimSpace(c.Param("attachmentId"))
+	if spaceID == "" {
+		response.DocumentShareErrSpaceIDRequired.Write(c)
+		return
+	}
+	if docKey == "" {
+		response.DocumentShareErrShareNotFound.Write(c)
+		return
+	}
+	if attachmentID == "" {
+		response.DocumentShareErrAttachmentIDRequired.Write(c)
+		return
+	}
+
+	resolvedShare, err := h.ensureShareAttachmentAccess(c, spaceID, docKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "校验分享附件预览访问权限失败")
+		if !writeMappedDocumentShareError(c, err) {
+			response.InternalError(c)
+		}
+		return
+	}
+
+	canonicalDocKey := resolveDocumentShareCanonicalDocKey(resolvedShare)
+	if canonicalDocKey != "" && canonicalDocKey != docKey {
+		c.Redirect(http.StatusSeeOther, buildDocumentShareAttachmentPreviewPagePath(spaceID, canonicalDocKey, attachmentID))
+		return
+	}
+
+	appendVaryHeader(c, "Cookie")
+	appendVaryHeader(c, "Authorization")
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+
+	pageHTML, err := buildDocumentAttachmentPreviewPageHTML(documentAttachmentPreviewPageData{
+		DocumentID:     strings.TrimSpace(resolvedShare.DocumentID),
+		AttachmentID:   attachmentID,
+		AccessLinkPath: buildDocumentShareAttachmentAccessLinkPath(spaceID, canonicalDocKey, attachmentID),
+	})
+	if err != nil {
+		setRequestErrmsg(c, err, "渲染分享附件预览页失败")
+		c.Data(http.StatusInternalServerError, "text/html; charset=utf-8", []byte(documentAttachmentPreviewPageUnavailableHTML))
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(pageHTML))
 }
 
 // RedirectAttachmentDownload 提供分享态附件下载跳转。
@@ -302,6 +364,13 @@ func (h *documentSharePageHandler) RedirectAttachmentDownload(c *gin.Context) {
 		if !writeMappedDocumentShareError(c, err) {
 			response.InternalError(c)
 		}
+		return
+	}
+	if strings.EqualFold(
+		strings.TrimSpace(accessLink.StorageProvider),
+		string(service.ImageHostingProviderLocal),
+	) {
+		serveDocumentShareLocalAttachmentDownload(c, accessLink)
 		return
 	}
 	if strings.TrimSpace(accessLink.URL) == "" {
@@ -436,6 +505,110 @@ func buildDocumentSharePagePath(spaceID string, docKey string) string {
 
 func buildDocumentShareAttachmentBasePath(spaceID string, docKey string) string {
 	return "/api/shares/" + url.PathEscape(strings.TrimSpace(spaceID)) + "/" + url.PathEscape(strings.TrimSpace(docKey)) + "/attachments"
+}
+
+func buildDocumentShareAttachmentAccessLinkPath(spaceID string, docKey string, attachmentID string) string {
+	return buildDocumentShareAttachmentBasePath(spaceID, docKey) + "/" + url.PathEscape(strings.TrimSpace(attachmentID)) + "/access-link"
+}
+
+func buildDocumentShareAttachmentDownloadPath(spaceID string, docKey string, attachmentID string) string {
+	return buildDocumentShareAttachmentBasePath(spaceID, docKey) + "/" + url.PathEscape(strings.TrimSpace(attachmentID)) + "/download"
+}
+
+func buildDocumentShareAttachmentPreviewPagePath(spaceID string, docKey string, attachmentID string) string {
+	return "/preview/shares/" +
+		url.PathEscape(strings.TrimSpace(spaceID)) +
+		"/" +
+		url.PathEscape(strings.TrimSpace(docKey)) +
+		"/attachments/" +
+		url.PathEscape(strings.TrimSpace(attachmentID))
+}
+
+func resolveDocumentShareAttachmentAccessURL(
+	spaceID string,
+	docKey string,
+	attachmentID string,
+	purpose service.DocumentShareAttachmentPurpose,
+	accessLink service.DocumentShareAttachmentAccessResult,
+) string {
+	if purpose == service.DocumentShareAttachmentPurposeDownload && strings.EqualFold(
+		strings.TrimSpace(accessLink.StorageProvider),
+		string(service.ImageHostingProviderLocal),
+	) {
+		return buildDocumentShareAttachmentDownloadPath(spaceID, docKey, attachmentID)
+	}
+	return strings.TrimSpace(accessLink.URL)
+}
+
+func serveDocumentShareLocalAttachmentDownload(
+	c *gin.Context,
+	accessLink service.DocumentShareAttachmentAccessResult,
+) {
+	objectKey := strings.TrimSpace(accessLink.ObjectKey)
+	targetPath, err := resolveDocumentShareLocalAttachmentTargetPath(objectKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "解析分享本地附件目标路径失败")
+		response.DocumentShareErrShareNotFound.Write(c)
+		return
+	}
+	fileInfo, err := os.Stat(targetPath)
+	if err != nil {
+		setRequestErrmsg(c, err, "读取分享本地附件文件失败")
+		if errors.Is(err, os.ErrNotExist) {
+			response.DocumentShareErrShareNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if fileInfo.IsDir() {
+		response.DocumentShareErrShareNotFound.Write(c)
+		return
+	}
+
+	fileName := strings.TrimSpace(accessLink.FileName)
+	if fileName == "" {
+		fileName = strings.TrimSpace(path.Base(objectKey))
+	}
+	if fileName == "" {
+		fileName = "attachment"
+	}
+	mimeType := strings.TrimSpace(accessLink.MimeType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	c.Header(
+		"Content-Disposition",
+		fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(fileName)),
+	)
+	c.Header("Content-Type", mimeType)
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+	c.File(targetPath)
+}
+
+func resolveDocumentShareLocalAttachmentTargetPath(objectKey string) (string, error) {
+	normalizedObjectKey := strings.TrimSpace(strings.TrimPrefix(objectKey, "/"))
+	if normalizedObjectKey == "" {
+		return "", errors.New("object key is empty")
+	}
+	cleanObjectKey := path.Clean(normalizedObjectKey)
+	if cleanObjectKey == "." || cleanObjectKey == "/" || strings.HasPrefix(cleanObjectKey, "../") {
+		return "", errors.New("object key is invalid")
+	}
+	localRootDir := defaultLocalImageStorageRoot
+	targetPath := filepath.Join(localRootDir, filepath.FromSlash(cleanObjectKey))
+	targetAbsPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", err
+	}
+	rootAbsPath, err := filepath.Abs(localRootDir)
+	if err != nil {
+		return "", err
+	}
+	if !isPathWithinRoot(rootAbsPath, targetAbsPath) {
+		return "", errors.New("object key is out of root")
+	}
+	return targetAbsPath, nil
 }
 
 func parseDocumentShareAttachmentPurpose(raw string) (service.DocumentShareAttachmentPurpose, error) {
