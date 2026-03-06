@@ -7,6 +7,7 @@ import type {
   DocumentTemplateDetail,
   DocumentTemplateSummary,
   NodeType,
+  TreeNode,
   UpdateDocumentShareInput,
   Visibility
 } from "../data-access";
@@ -57,6 +58,8 @@ function buildTemplateDetail(input: Partial<DocumentTemplateDetail>): DocumentTe
 }
 
 function createProps(overrides?: {
+  nodes?: TreeNode[];
+  activeDocId?: string | null;
   officeCreationEnabled?: boolean;
   onCreateNode?: (input: {
     parentId: string | null;
@@ -137,8 +140,8 @@ function createProps(overrides?: {
     .mockResolvedValue(undefined);
 
   return {
-    nodes: [],
-    activeDocId: null,
+    nodes: overrides?.nodes ?? [],
+    activeDocId: overrides?.activeDocId ?? null,
     officeCreationEnabled: overrides?.officeCreationEnabled ?? false,
     onOpenDocument,
     onCreateNode,
@@ -314,6 +317,10 @@ describe("WorkspaceTree", () => {
 
     await user.click(screen.getByRole("button", { name: "新建第一篇文档" }));
     expect(await screen.findByLabelText("文档格式")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: "打开目录快捷菜单" }));
+    expect(screen.getByRole("menuitem", { name: "新建 Word" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "新建表格" })).toBeInTheDocument();
     unmount();
 
     const disabledProps = createProps({ officeCreationEnabled: false });
@@ -321,6 +328,10 @@ describe("WorkspaceTree", () => {
 
     await user.click(screen.getByRole("button", { name: "新建第一篇文档" }));
     expect(screen.queryByLabelText("文档格式")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: "打开目录快捷菜单" }));
+    expect(screen.queryByRole("menuitem", { name: "新建 Word" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "新建表格" })).not.toBeInTheDocument();
   });
 
   it("forwards office format and disables markdown template selection when non-markdown is selected", async () => {
@@ -369,5 +380,98 @@ describe("WorkspaceTree", () => {
       templateId: undefined,
       format: "docx"
     });
+  });
+
+  it("creates office documents from quick-create submenu", async () => {
+    const onCreateNode = vi
+      .fn<
+        (input: {
+          parentId: string | null;
+          type: NodeType;
+          title: string;
+          documentIdentifier?: string;
+          templateId?: string;
+          format?: "markdown" | "docx" | "xlsx";
+        }) => Promise<CreateNodeResult>
+      >()
+      .mockResolvedValue({
+        nodeId: "node-xlsx",
+        docId: "doc-xlsx"
+      });
+
+    const props = createProps({
+      officeCreationEnabled: true,
+      onCreateNode
+    });
+    const user = userEvent.setup();
+    render(<WorkspaceTree {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "打开目录快捷菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "新建表格" }));
+
+    await screen.findByRole("heading", { name: "新建文档" });
+    expect(screen.getByLabelText("文档格式")).toHaveValue("xlsx");
+
+    await user.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => {
+      expect(onCreateNode).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreateNode).toHaveBeenCalledWith({
+      parentId: null,
+      type: "doc",
+      title: "未命名文档",
+      documentIdentifier: undefined,
+      templateId: undefined,
+      format: "xlsx"
+    });
+  });
+
+  it("shows format indicators for markdown, word and excel documents in tree", async () => {
+    const props = createProps({
+      nodes: [
+        {
+          id: "node-md",
+          documentId: "doc-md",
+          documentFormat: "markdown",
+          spaceId: "space-1",
+          parentId: null,
+          type: "doc",
+          title: "Markdown 文档",
+          sort: 1,
+          visibility: "member",
+          children: []
+        },
+        {
+          id: "node-docx",
+          documentId: "doc-docx",
+          documentFormat: "docx",
+          spaceId: "space-1",
+          parentId: null,
+          type: "doc",
+          title: "Word 文档",
+          sort: 2,
+          visibility: "member",
+          children: []
+        },
+        {
+          id: "node-xlsx",
+          documentId: "doc-xlsx",
+          documentFormat: "xlsx",
+          spaceId: "space-1",
+          parentId: null,
+          type: "doc",
+          title: "Excel 文档",
+          sort: 3,
+          visibility: "member",
+          children: []
+        }
+      ]
+    });
+
+    render(<WorkspaceTree {...props} />);
+
+    expect(screen.getByLabelText("文档格式：Markdown")).toBeInTheDocument();
+    expect(screen.getByLabelText("文档格式：Word")).toBeInTheDocument();
+    expect(screen.getByLabelText("文档格式：Excel")).toBeInTheDocument();
   });
 });

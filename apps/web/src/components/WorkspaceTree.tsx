@@ -2,6 +2,9 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  FileCode2,
+  FileSpreadsheet,
+  FileText,
   FilePlus2,
   FolderPlus,
   Globe,
@@ -88,6 +91,46 @@ const DOCUMENT_FORMAT_OPTIONS: Array<{
     description: "使用 ONLYOFFICE 编辑 .xlsx。"
   }
 ];
+
+function normalizeDocumentFormat(value: DocumentFormat | undefined): DocumentFormat {
+  if (value === "docx" || value === "xlsx") {
+    return value;
+  }
+  return "markdown";
+}
+
+function resolveDocumentFormatLabel(value: DocumentFormat): string {
+  switch (value) {
+    case "docx":
+      return "Word";
+    case "xlsx":
+      return "Excel";
+    default:
+      return "Markdown";
+  }
+}
+
+function resolveDocumentFormatIconClassName(value: DocumentFormat): string {
+  switch (value) {
+    case "docx":
+      return "text-[#1d4ed8]";
+    case "xlsx":
+      return "text-[#166534]";
+    default:
+      return "text-[#475569]";
+  }
+}
+
+function renderDocumentFormatIcon(value: DocumentFormat): ReactNode {
+  switch (value) {
+    case "docx":
+      return <FileText size={14} />;
+    case "xlsx":
+      return <FileSpreadsheet size={14} />;
+    default:
+      return <FileCode2 size={14} />;
+  }
+}
 
 interface WorkspaceTreeItemData {
   nodeId: string | null;
@@ -489,6 +532,7 @@ function mergeDraftNodesIntoTree(
       parentId: draftNode.parentId,
       type: draftNode.type,
       title: draftNode.title,
+      documentFormat: draftNode.type === "doc" ? normalizeDocumentFormat(draftNode.format) : undefined,
       sort: Number.MAX_SAFE_INTEGER,
       children: []
     };
@@ -1226,16 +1270,19 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     [nodeById, onUpdateDocumentVisibility, updatingVisibilityNodeIdSet]
   );
 
-  const handleCreateRootDocument = useCallback(async () => {
+  const handleCreateRootDocument = useCallback(async (format: DocumentFormat = "markdown") => {
+    const normalizedFormat = normalizeDocumentFormat(format);
     setCreateNodeDialog({
       parentId: null,
       type: "doc",
       title: DEFAULT_DOCUMENT_TITLE,
       documentIdentifier: "",
       templateId: "",
-      format: "markdown"
+      format: normalizedFormat
     });
-    void loadDocumentTemplates();
+    if (normalizedFormat === "markdown") {
+      void loadDocumentTemplates();
+    }
   }, [loadDocumentTemplates]);
 
   const closeCreateNodeDialog = useCallback(() => {
@@ -1663,6 +1710,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           ? loadingDocumentShareDocumentIDSet.has(currentDocumentID)
           : false;
       const isCurrentDocumentShared = currentShareConfig?.enabled === true;
+      const currentDocumentFormat =
+        currentNode?.type === "doc" ? normalizeDocumentFormat(currentNode.documentFormat) : "markdown";
       const currentDocumentVisibility: Visibility =
         currentNode?.type === "doc" ? currentNode.visibility ?? "member" : "member";
       const nodeTitleText = (currentNode?.title ?? item.data.title ?? "").trim() || "未命名文档";
@@ -1776,6 +1825,24 @@ export const WorkspaceTree = memo(function WorkspaceTree({
                 />
               ) : (
                 <>
+                  {currentNode?.type === "doc" ? (
+                    <Tooltip delayDuration={120}>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={mergeClassNames(
+                            "mr-1 inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center",
+                            resolveDocumentFormatIconClassName(currentDocumentFormat)
+                          )}
+                          aria-label={`文档格式：${resolveDocumentFormatLabel(currentDocumentFormat)}`}
+                        >
+                          {renderDocumentFormatIcon(currentDocumentFormat)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        文档格式：{resolveDocumentFormatLabel(currentDocumentFormat)}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   {currentNode?.type === "doc" ? (
                     (() => {
                       const marker = resolveVisibilityMarkerConfig(currentDocumentVisibility);
@@ -2565,6 +2632,28 @@ export const WorkspaceTree = memo(function WorkspaceTree({
               <FilePlus2 size={14} className="mr-2" />
               <span>新建文档</span>
             </DropdownMenuItem>
+            {officeCreationEnabled ? (
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onSelect={() => {
+                  void handleCreateRootDocument("docx");
+                }}
+              >
+                <FileText size={14} className="mr-2" />
+                <span>新建 Word</span>
+              </DropdownMenuItem>
+            ) : null}
+            {officeCreationEnabled ? (
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onSelect={() => {
+                  void handleCreateRootDocument("xlsx");
+                }}
+              >
+                <FileSpreadsheet size={14} className="mr-2" />
+                <span>新建表格</span>
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

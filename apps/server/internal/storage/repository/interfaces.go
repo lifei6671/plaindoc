@@ -298,6 +298,7 @@ type SitemapPublicDocumentSourceRecord struct {
 	SpaceID           string
 	DocumentID        string
 	DocumentRouteKey  string
+	DocumentFormat    models.DocumentFormat
 	DocumentContentMD string
 	SpaceUpdatedAt    time.Time
 	DocumentUpdatedAt time.Time
@@ -784,6 +785,7 @@ type DocumentShareAccessRecord struct {
 	ShareID          string
 	DocumentID       string
 	SpaceID          string
+	DocumentFormat   models.DocumentFormat
 	Mode             models.DocumentShareMode
 	PasswordHash     *string
 	PasswordHint     string
@@ -819,6 +821,7 @@ type AdminDocumentShareListRecord struct {
 	Share            models.DocumentShare
 	DocumentRouteKey string
 	DocumentTitle    string
+	DocumentFormat   models.DocumentFormat
 	SpaceName        string
 	SpaceOwnerID     string
 	SpaceOwnerName   string

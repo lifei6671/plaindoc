@@ -35,6 +35,7 @@ type documentShareAccessRow struct {
 	ShareID          string  `gorm:"column:share_id"`
 	DocumentID       string  `gorm:"column:document_id"`
 	SpaceID          string  `gorm:"column:space_id"`
+	DocumentFormat   string  `gorm:"column:document_format"`
 	Mode             string  `gorm:"column:mode"`
 	PasswordHash     *string `gorm:"column:password_hash"`
 	PasswordHint     string  `gorm:"column:password_hint"`
@@ -62,6 +63,7 @@ type adminDocumentShareListRow struct {
 
 	DocumentRouteKey string `gorm:"column:document_route_key"`
 	DocumentTitle    string `gorm:"column:document_title"`
+	DocumentFormat   string `gorm:"column:document_format"`
 	SpaceName        string `gorm:"column:space_name"`
 	SpaceOwnerID     string `gorm:"column:space_owner_user_id"`
 	SpaceOwnerName   string `gorm:"column:space_owner_name"`
@@ -219,6 +221,7 @@ func (r *gormDocumentShareRepository) ResolveBySpaceAndDocKey(
 			"ds.share_id",
 			"ds.document_id",
 			"ds.space_id",
+			"d.format AS document_format",
 			"ds.mode",
 			"ds.password_hash",
 			"ds.password_hint",
@@ -254,6 +257,7 @@ func (r *gormDocumentShareRepository) ResolveBySpaceAndDocKey(
 		ShareID:          strings.TrimSpace(row.ShareID),
 		DocumentID:       strings.TrimSpace(row.DocumentID),
 		SpaceID:          strings.TrimSpace(row.SpaceID),
+		DocumentFormat:   models.NormalizeDocumentFormat(models.DocumentFormat(row.DocumentFormat)),
 		Mode:             mode,
 		PasswordHash:     trimOptionalString(row.PasswordHash),
 		PasswordHint:     strings.TrimSpace(row.PasswordHint),
@@ -344,12 +348,12 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 	rows := make([]adminDocumentShareListRow, 0, limit)
 	if err := listQuery.Session(&gorm.Session{}).
 		Select(
-			"ds.id, ds.share_id, ds.document_id, ds.space_id, ds.mode, ds.password_hash, ds.password_hint, " +
-				"ds.expires_at, ds.disabled_at, ds.access_version, ds.created_by_user_id, ds.updated_by_user_id, " +
-				"ds.created_at, ds.updated_at, COALESCE(NULLIF(TRIM(n.reader_slug), ''), d.document_id) AS document_route_key, " +
-				"d.title AS document_title, s.name AS space_name, s.owner_user_id AS space_owner_user_id, " +
-				"uo.name AS space_owner_name, uo.email AS space_owner_email, " +
-				"COALESCE(uc.name, '') AS created_by_name, COALESCE(uc.email, '') AS created_by_email, " +
+			"ds.id, ds.share_id, ds.document_id, ds.space_id, ds.mode, ds.password_hash, ds.password_hint, "+
+				"ds.expires_at, ds.disabled_at, ds.access_version, ds.created_by_user_id, ds.updated_by_user_id, "+
+				"ds.created_at, ds.updated_at, COALESCE(NULLIF(TRIM(n.reader_slug), ''), d.document_id) AS document_route_key, "+
+				"d.title AS document_title, d.format AS document_format, s.name AS space_name, s.owner_user_id AS space_owner_user_id, "+
+				"uo.name AS space_owner_name, uo.email AS space_owner_email, "+
+				"COALESCE(uc.name, '') AS created_by_name, COALESCE(uc.email, '') AS created_by_email, "+
 				"CASE WHEN ds.expires_at IS NOT NULL AND ds.expires_at <= ? THEN 1 ELSE 0 END AS is_expired",
 			now,
 		).
@@ -382,6 +386,7 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 			Share:            share,
 			DocumentRouteKey: strings.TrimSpace(row.DocumentRouteKey),
 			DocumentTitle:    strings.TrimSpace(row.DocumentTitle),
+			DocumentFormat:   models.NormalizeDocumentFormat(models.DocumentFormat(row.DocumentFormat)),
 			SpaceName:        strings.TrimSpace(row.SpaceName),
 			SpaceOwnerID:     strings.TrimSpace(row.SpaceOwnerID),
 			SpaceOwnerName:   strings.TrimSpace(row.SpaceOwnerName),

@@ -150,11 +150,11 @@ Office 文档统一按格式过滤：
 
 ### 4.2 仓储与服务层
 
-- [ ] 让以下仓储查询统一返回文档格式字段：
+- [x] 让以下仓储查询统一返回文档格式字段：
   - [x] `apps/server/internal/storage/repository/gorm_workspace_repository.go`
   - [x] `apps/server/internal/storage/repository/gorm_document_repository.go`
   - [x] `apps/server/internal/storage/repository/gorm_reader_page_repository.go`
-  - [ ] `apps/server/internal/storage/repository/gorm_document_share_repository.go`
+  - [x] `apps/server/internal/storage/repository/gorm_document_share_repository.go`
 - [x] 新增 Office 文档正文读取/写回仓储接口
 - [x] 新增 Office 文档版本写回事务：
   - 下载 ONLYOFFICE 输出文件
@@ -180,44 +180,44 @@ Office 文档统一按格式过滤：
 
 ### 4.4 工作区前端
 
-- [ ] 左侧“新建文档”子菜单新增：
+- [x] 左侧“新建文档”子菜单新增：
   - `新建 Word`
   - `新建表格`
 - [x] 创建节点弹窗增加格式选择：`Markdown / Word / Excel`
-- [ ] 空间树节点增加格式标识与图标
+- [x] 空间树节点增加格式标识与图标
 - [x] `useWorkspace.openDocument()` 改为 format-aware
 - [x] `App.tsx` 编辑工作台拆成双模式：
   - Markdown：现有 CodeMirror + Preview
   - Office：DocEditor 容器
 - [x] Office 模式隐藏 Markdown 工具栏、预览区、TOC、滚动同步、外链图片转存
 - [x] Office 模式不走现有自动保存与冲突提示 footer
-- [ ] 为 Office 编辑页补加载态、回源失败态、权限拒绝态
-- [ ] 在前端对 ONLYOFFICE script 加载失败与 session 过期做明确提示
+- [x] 为 Office 编辑页补加载态、回源失败态、权限拒绝态
+- [x] 在前端对 ONLYOFFICE script 加载失败与 session 过期做明确提示
 
 ### 4.5 阅读页与分享阅读页
 
 - [ ] `ReaderPageService` 增加格式判别，按格式构建不同 view model
 - [ ] `DocumentShareService` 增加格式判别，按格式构建不同分享页 view model
-- [ ] `apps/web/src/ssr/render-space-reader.tsx` 改为双模式：
+- [x] `apps/web/src/ssr/render-space-reader.tsx` 改为双模式：
   - Markdown 输出 HTML 正文
   - Office 输出阅读容器与只读状态数据
-- [ ] `apps/web/src/ssr/render-space-reader.async-script.ts` 增加 Office 只读挂载逻辑
-- [ ] 分享页复用 Office 只读模式，不允许编辑写回
-- [ ] Office 阅读页/分享页隐藏 Markdown 导出与 PDF 打印按钮
-- [ ] Office 阅读页/分享页保留下载原文件能力
-- [ ] 公开 Office 阅读页与分享页增加 `robots noindex` 配置
+- [x] `apps/web/src/ssr/render-space-reader.async-script.ts` 增加 Office 只读挂载逻辑
+- [x] 分享页复用 Office 只读模式，不允许编辑写回
+- [x] Office 阅读页/分享页隐藏 Markdown 导出与 PDF 打印按钮
+- [x] Office 阅读页/分享页保留下载原文件能力
+- [x] 公开 Office 阅读页与分享页增加 `robots noindex` 配置
 
 ### 4.6 搜索与 sitemap 排除
 
-- [ ] 在索引源查询中过滤非 Markdown：
-  - `apps/server/internal/storage/repository/gorm_search_index_source_repository.go`
-- [ ] 在 SQL fallback 搜索中过滤非 Markdown：
-  - `apps/server/internal/storage/repository/gorm_search_visibility_repository.go`
-- [ ] 在首页搜索 metadata 汇总中过滤非 Markdown：
-  - `apps/server/internal/storage/repository/gorm_home_search_repository.go`
-- [ ] 在 sitemap 源查询中过滤非 Markdown：
-  - `apps/server/internal/storage/repository/gorm_sitemap_repository.go`
-- [ ] `apps/server/internal/service/sitemap_service.go` 保持二次保护，避免误入 sitemap
+- [x] 在索引源查询中过滤非 Markdown：
+  - [x] `apps/server/internal/storage/repository/gorm_search_index_source_repository.go`
+- [x] 在 SQL fallback 搜索中过滤非 Markdown：
+  - [x] `apps/server/internal/storage/repository/gorm_search_visibility_repository.go`
+- [x] 在首页搜索 metadata 汇总中过滤非 Markdown：
+  - [x] `apps/server/internal/storage/repository/gorm_home_search_repository.go`
+- [x] 在 sitemap 源查询中过滤非 Markdown：
+  - [x] `apps/server/internal/storage/repository/gorm_sitemap_repository.go`
+- [x] `apps/server/internal/service/sitemap_service.go` 保持二次保护，避免误入 sitemap
 
 ### 4.7 首页与阅读入口联动
 
@@ -246,14 +246,14 @@ Office 文档统一按格式过滤：
   - [x] 创建 Office 文档
   - [x] 工作区编辑配置生成
   - [x] callback 成功/失败
-  - [ ] Office 阅读页
-  - [ ] Office 分享阅读页
-  - [ ] 搜索与 sitemap 排除
-- [ ] 前端测试：
+  - [x] Office 阅读页
+  - [x] Office 分享阅读页
+  - [x] 搜索与 sitemap 排除
+- [x] 前端测试：
   - [x] 创建弹窗格式选择
   - [x] 工作区格式切换
-  - [ ] 阅读/分享只读挂载
-  - [ ] Markdown 功能按格式禁用
+  - [x] 阅读/分享只读挂载
+  - [x] Markdown 功能按格式禁用
 - [ ] 更新 `docs/README.md` 索引
 - [ ] 后续把最终结果并入 `BACKEND_DEVELOPER_GUIDE.md` 与 `FRONTEND_DEVELOPER_GUIDE.md`
 

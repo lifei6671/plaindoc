@@ -54,6 +54,7 @@ func (r *gormHomeSearchRepository) ListActiveDocumentMetadataByDocumentIDs(
 		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
 		Where("d.document_id IN ?", normalizedDocumentIDs).
 		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
+		Where("d.format = ?", models.DocumentFormatMarkdown).
 		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
 		Find(&rows).Error; err != nil {
 		return nil, err

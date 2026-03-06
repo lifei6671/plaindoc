@@ -129,6 +129,75 @@ func (h *documentSharePageHandler) Page(c *gin.Context) {
 	)
 }
 
+// GetOnlyOfficeViewConfig 返回分享页 Office 文档只读配置。
+func (h *documentSharePageHandler) GetOnlyOfficeViewConfig(c *gin.Context) {
+	if h == nil || h.documentShareService == nil || h.readerRenderer == nil ||
+		h.readerRenderer.onlyOfficeConfigService == nil || h.readerRenderer.onlyOfficeTokenService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	docKey := strings.TrimSpace(c.Param("docKey"))
+	if spaceID == "" {
+		response.DocumentShareErrSpaceIDRequired.Write(c)
+		return
+	}
+	if docKey == "" {
+		response.DocumentShareErrShareNotFound.Write(c)
+		return
+	}
+
+	appendVaryHeader(c, "Cookie")
+	appendVaryHeader(c, "Authorization")
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+
+	resolvedShare, err := h.ensureShareAttachmentAccess(c, spaceID, docKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "校验分享 Office 阅读权限失败")
+		if !writeMappedDocumentShareError(c, err) {
+			response.InternalError(c)
+		}
+		return
+	}
+
+	canonicalDocKey := resolveDocumentShareCanonicalDocKey(resolvedShare)
+	pageResult, err := h.documentShareService.BuildReaderPageByRouteKey(c.Request.Context(), spaceID, canonicalDocKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "构建分享 Office 阅读页数据失败")
+		if errors.Is(err, service.ErrDocumentShareNotFound) {
+			response.DocumentShareErrShareNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	viewer := h.readerRenderer.resolveOptionalViewerIdentity(c)
+	configPayload, err := buildOnlyOfficeViewConfig(
+		c.Request.Context(),
+		h.readerRenderer.onlyOfficeConfigService,
+		h.readerRenderer.onlyOfficeTokenService,
+		pageResult.Page.Document,
+		viewer.UserID,
+		viewer.Name,
+	)
+	if err != nil {
+		setRequestErrmsg(c, err, "生成分享 Office 只读配置失败")
+		switch {
+		case errors.Is(err, errOnlyOfficeViewConfigNotOfficeDocument):
+			response.Error(c, http.StatusBadRequest, response.CodeInvalidOperation, "当前分享文档不是 Office 文档")
+		case errors.Is(err, errOnlyOfficeViewConfigDisabled):
+			response.Error(c, http.StatusBadRequest, response.CodeInvalidRequest, "ONLYOFFICE 阅读能力未启用")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, configPayload)
+}
+
 // Verify 校验密码分享访问密码并下发免密 Cookie。
 func (h *documentSharePageHandler) Verify(c *gin.Context) {
 	if h == nil || h.documentShareService == nil || h.accessTokenService == nil {

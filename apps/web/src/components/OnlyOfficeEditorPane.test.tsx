@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnlyOfficeEditorPane } from "./OnlyOfficeEditorPane";
 
@@ -114,5 +114,56 @@ describe("OnlyOfficeEditorPane", () => {
     unmount();
 
     expect(destroyEditor).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows explicit permission/session hint for unauthorized errors", async () => {
+    render(
+      <OnlyOfficeEditorPane
+        documentId="doc-office-2"
+        documentTitle="季度计划"
+        documentFormat="docx"
+        editConfig={null}
+        isConfigLoading={false}
+        errorMessage="获取 ONLYOFFICE 编辑配置失败：401 Unauthorized"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("登录会话已过期，请刷新页面后重新登录。")).toBeInTheDocument();
+    });
+  });
+
+  it("shows explicit hint when onlyoffice script loading fails", async () => {
+    render(
+      <OnlyOfficeEditorPane
+        documentId="doc-office-3"
+        documentTitle="季度计划"
+        documentFormat="xlsx"
+        editConfig={null}
+        isConfigLoading={false}
+        errorMessage="加载 ONLYOFFICE 脚本失败"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("ONLYOFFICE 脚本加载失败，请检查 Document Server 连接后重试。")).toBeInTheDocument();
+    });
+  });
+
+  it("maps onlyoffice rights error to permission denied hint", async () => {
+    render(
+      <OnlyOfficeEditorPane
+        documentId="doc-office-4"
+        documentTitle="季度计划"
+        documentFormat="docx"
+        editConfig={null}
+        isConfigLoading={false}
+        errorMessage="You are trying to perform an action you do not have rights for."
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("当前账号没有该文档的编辑权限。")).toBeInTheDocument();
+    });
   });
 });

@@ -36,6 +36,17 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const ATTACHMENT_LINK_SELECTOR = "a[data-reader-attachment-link='1']";
   const EXPORT_ACTION_SELECTOR = "button[data-reader-export-action]";
   const EXPORT_ACTION_BUSY_CLASS = "reader-article-action--busy";
+  const OFFICE_EDITOR_SELECTOR = "[data-reader-office-editor='1']";
+  const OFFICE_PLACEHOLDER_SELECTOR = "[data-reader-office-placeholder='1']";
+  const OFFICE_TITLE_SELECTOR = "[data-reader-office-title='1']";
+  const OFFICE_MESSAGE_SELECTOR = "[data-reader-office-message='1']";
+  const OFFICE_DOWNLOAD_SELECTOR = "a[data-reader-office-download='1']";
+  const OFFICE_PANE_SELECTOR = ".reader-office-pane";
+  const OFFICE_EDITOR_HIDDEN_CLASS = "office-pane__editor--hidden";
+  const OFFICE_PLACEHOLDER_ERROR_CLASS = "office-pane__placeholder--error";
+  const ONLYOFFICE_SCRIPT_LOADER_GLOBAL_KEY = "__plaindocOnlyOfficeScriptLoaders__";
+  const OFFICE_PANE_MIN_HEIGHT = 360;
+  const OFFICE_PANE_BOTTOM_GAP = 24;
   const PREVIEW_HEADING_SELECTOR =
     "#plaindoc-preview-body h1, #plaindoc-preview-body h2, #plaindoc-preview-body h3, #plaindoc-preview-body h4, #plaindoc-preview-body h5, #plaindoc-preview-body h6";
   const OUTLINE_SCROLL_OFFSET = 16;
@@ -162,6 +173,398 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       return null;
     }
     return resolveJSONPayload(stateNode.textContent || "");
+  };
+
+  const isRecord = (value) => value !== null && typeof value === "object";
+  const isOfficeDocumentFormat = (value) => value === "docx" || value === "xlsx";
+  const resolveOfficeDocumentLabel = (value) => (value === "xlsx" ? "Excel 文档" : "Word 文档");
+
+  const cloneOnlyOfficeConfigPayload = (input) => {
+    if (typeof structuredClone === "function") {
+      return structuredClone(input);
+    }
+    return JSON.parse(JSON.stringify(input));
+  };
+
+  const toOnlyOfficeEventHandler = (value) => (typeof value === "function" ? value : null);
+
+  const resolveOnlyOfficeErrorMessage = (event) => {
+    if (isRecord(event)) {
+      const directMessage = typeof event.message === "string" ? event.message.trim() : "";
+      if (directMessage) {
+        return directMessage;
+      }
+      if (isRecord(event.data)) {
+        const detail = event.data;
+        const description =
+          typeof detail.errorDescription === "string"
+            ? detail.errorDescription.trim()
+            : typeof detail.errorMessage === "string"
+              ? detail.errorMessage.trim()
+              : typeof detail.message === "string"
+                ? detail.message.trim()
+                : "";
+        if (description) {
+          return description;
+        }
+      }
+    }
+    return "ONLYOFFICE 阅读器发生错误";
+  };
+
+  const attachOnlyOfficeRuntimeEvents = (config, runtimeHandlers) => {
+    const existingEvents = isRecord(config.events) ? config.events : {};
+    const onDocumentReady = toOnlyOfficeEventHandler(existingEvents.onDocumentReady);
+    const onError = toOnlyOfficeEventHandler(existingEvents.onError);
+
+    return {
+      ...config,
+      events: {
+        ...existingEvents,
+        onDocumentReady: (...args) => {
+          if (onDocumentReady) {
+            onDocumentReady(...args);
+          }
+          runtimeHandlers.onDocumentReady();
+        },
+        onError: (event, ...args) => {
+          if (onError) {
+            onError(event, ...args);
+          }
+          runtimeHandlers.onError(resolveOnlyOfficeErrorMessage(event));
+        }
+      }
+    };
+  };
+
+  const resolveOnlyOfficeLoaderMap = () => {
+    const target = window;
+    const existing = target[ONLYOFFICE_SCRIPT_LOADER_GLOBAL_KEY];
+    if (existing instanceof Map) {
+      return existing;
+    }
+    const next = new Map();
+    target[ONLYOFFICE_SCRIPT_LOADER_GLOBAL_KEY] = next;
+    return next;
+  };
+
+  const buildOnlyOfficeApiScriptURL = (documentServerUrl) => {
+    const normalizedBaseURL = typeof documentServerUrl === "string" ? documentServerUrl.trim().replace(/\\/+$/, "") : "";
+    if (!normalizedBaseURL) {
+      return "";
+    }
+    return normalizedBaseURL + "/web-apps/apps/api/documents/api.js";
+  };
+
+  const findOnlyOfficeScriptElement = (scriptURL) =>
+    Array.from(document.querySelectorAll("script[data-onlyoffice-api]")).find(
+      (node) => node instanceof HTMLScriptElement && node.dataset.onlyofficeApi === scriptURL
+    );
+
+  const loadOnlyOfficeApiScript = (documentServerUrl) => {
+    if (typeof window.DocsAPI?.DocEditor === "function") {
+      return Promise.resolve();
+    }
+
+    const scriptURL = buildOnlyOfficeApiScriptURL(documentServerUrl);
+    if (!scriptURL) {
+      return Promise.reject(new Error("ONLYOFFICE 服务地址为空"));
+    }
+
+    const loaders = resolveOnlyOfficeLoaderMap();
+    const cachedLoader = loaders.get(scriptURL);
+    if (cachedLoader) {
+      return cachedLoader;
+    }
+
+    const loader = new Promise((resolve, reject) => {
+      const handleLoad = () => {
+        if (typeof window.DocsAPI?.DocEditor !== "function") {
+          reject(new Error("ONLYOFFICE Docs API 未就绪"));
+          return;
+        }
+        resolve();
+      };
+      const handleError = () => {
+        loaders.delete(scriptURL);
+        reject(new Error("加载 ONLYOFFICE 脚本失败"));
+      };
+
+      const existingScript = findOnlyOfficeScriptElement(scriptURL);
+      const scriptElement = existingScript || document.createElement("script");
+      scriptElement.addEventListener("load", handleLoad, { once: true });
+      scriptElement.addEventListener("error", handleError, { once: true });
+
+      if (!existingScript) {
+        scriptElement.src = scriptURL;
+        scriptElement.async = true;
+        scriptElement.defer = true;
+        scriptElement.dataset.onlyofficeApi = scriptURL;
+        document.head.appendChild(scriptElement);
+      }
+    });
+
+    loaders.set(scriptURL, loader);
+    return loader;
+  };
+
+  let activeOnlyOfficeReader = null;
+  let onlyOfficeReaderSeq = 0;
+  let officePaneHeightRafID = 0;
+
+  const resolveOfficeEditorNode = () => document.querySelector(OFFICE_EDITOR_SELECTOR);
+  const resolveOfficePlaceholderNode = () => document.querySelector(OFFICE_PLACEHOLDER_SELECTOR);
+  const resolveOfficePaneNode = () => document.querySelector(OFFICE_PANE_SELECTOR);
+
+  const syncOfficePaneViewportHeight = () => {
+    const officePaneNode = resolveOfficePaneNode();
+    if (!(officePaneNode instanceof HTMLElement)) {
+      return;
+    }
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (viewportHeight <= 0) {
+      return;
+    }
+    const paneRect = officePaneNode.getBoundingClientRect();
+    let nextHeight = Math.floor(viewportHeight - paneRect.top - OFFICE_PANE_BOTTOM_GAP);
+    if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
+      nextHeight = OFFICE_PANE_MIN_HEIGHT;
+    }
+    if (nextHeight < OFFICE_PANE_MIN_HEIGHT) {
+      nextHeight = OFFICE_PANE_MIN_HEIGHT;
+    }
+    officePaneNode.style.setProperty("--reader-office-pane-height", String(nextHeight) + "px");
+  };
+
+  const scheduleOfficePaneViewportHeightSync = () => {
+    if (officePaneHeightRafID) {
+      window.cancelAnimationFrame(officePaneHeightRafID);
+    }
+    officePaneHeightRafID = window.requestAnimationFrame(() => {
+      officePaneHeightRafID = 0;
+      syncOfficePaneViewportHeight();
+    });
+  };
+
+  const setOfficeDownloadLink = (downloadURL, fileName) => {
+    const downloadNode = document.querySelector(OFFICE_DOWNLOAD_SELECTOR);
+    if (!(downloadNode instanceof HTMLAnchorElement)) {
+      return;
+    }
+    const normalizedURL = typeof downloadURL === "string" ? downloadURL.trim() : "";
+    if (!normalizedURL) {
+      downloadNode.removeAttribute("href");
+      downloadNode.removeAttribute("download");
+      downloadNode.setAttribute("aria-disabled", "true");
+      return;
+    }
+    downloadNode.href = normalizedURL;
+    downloadNode.rel = "noopener noreferrer";
+    downloadNode.setAttribute("aria-disabled", "false");
+    const normalizedFileName = typeof fileName === "string" ? fileName.trim() : "";
+    if (normalizedFileName) {
+      downloadNode.setAttribute("download", normalizedFileName);
+    } else {
+      downloadNode.removeAttribute("download");
+    }
+  };
+
+  const setOfficePlaceholderState = (status, title, message) => {
+    const editorNode = resolveOfficeEditorNode();
+    if (editorNode instanceof HTMLElement) {
+      editorNode.classList.toggle(OFFICE_EDITOR_HIDDEN_CLASS, status !== "ready");
+    }
+
+    const placeholderNode = resolveOfficePlaceholderNode();
+    if (!(placeholderNode instanceof HTMLElement)) {
+      return;
+    }
+    // 不使用 hidden 属性，因为样式里的 display:flex 会覆盖 UA 默认的 [hidden]{display:none}。
+    // 显式切换 display，避免“已就绪文案仍覆盖编辑器”的情况。
+    placeholderNode.style.display = status === "ready" ? "none" : "flex";
+    placeholderNode.setAttribute("aria-hidden", status === "ready" ? "true" : "false");
+    placeholderNode.setAttribute("data-reader-office-status", status);
+    placeholderNode.classList.toggle(OFFICE_PLACEHOLDER_ERROR_CLASS, status === "error");
+
+    const titleNode = document.querySelector(OFFICE_TITLE_SELECTOR);
+    if (titleNode instanceof HTMLElement && typeof title === "string" && title.trim()) {
+      titleNode.textContent = title.trim();
+    }
+    const messageNode = document.querySelector(OFFICE_MESSAGE_SELECTOR);
+    if (messageNode instanceof HTMLElement && typeof message === "string" && message.trim()) {
+      messageNode.textContent = message.trim();
+    }
+  };
+
+  const destroyOnlyOfficeReader = () => {
+    if (activeOnlyOfficeReader && typeof activeOnlyOfficeReader.destroyEditor === "function") {
+      activeOnlyOfficeReader.destroyEditor();
+    }
+    activeOnlyOfficeReader = null;
+    const editorNode = resolveOfficeEditorNode();
+    if (editorNode instanceof HTMLElement) {
+      editorNode.classList.add(OFFICE_EDITOR_HIDDEN_CLASS);
+    }
+  };
+
+  const resolveOnlyOfficeViewConfigPath = (payload) => {
+    if (!payload || typeof payload !== "object") {
+      return "";
+    }
+    const documentData = payload.document && typeof payload.document === "object" ? payload.document : null;
+    if (!documentData || !isOfficeDocumentFormat(documentData.format)) {
+      return "";
+    }
+    const spaceData = payload.space && typeof payload.space === "object" ? payload.space : null;
+    const spaceID = typeof spaceData?.id === "string" ? spaceData.id.trim() : "";
+    const shareData = payload.share && typeof payload.share === "object" ? payload.share : null;
+    const docKey = shareData && typeof shareData.documentRouteKey === "string" && shareData.documentRouteKey.trim()
+      ? shareData.documentRouteKey.trim()
+      : typeof documentData.routeKey === "string" && documentData.routeKey.trim()
+        ? documentData.routeKey.trim()
+        : typeof documentData.id === "string"
+          ? documentData.id.trim()
+          : "";
+    if (!spaceID || !docKey) {
+      return "";
+    }
+    if (shareData && shareData.enabled === true) {
+      return "/api/shares/" + encodeURIComponent(spaceID) + "/" + encodeURIComponent(docKey) + "/onlyoffice/view-config";
+    }
+    return (
+      "/api/reader/spaces/" +
+      encodeURIComponent(spaceID) +
+      "/docs/" +
+      encodeURIComponent(docKey) +
+      "/onlyoffice/view-config"
+    );
+  };
+
+  const fetchOnlyOfficeViewConfig = async () => {
+    const payload = resolveReaderStatePayload();
+    const requestPath = resolveOnlyOfficeViewConfigPath(payload);
+    if (!requestPath) {
+      throw new Error("当前页面不是 Office 文档");
+    }
+    const response = await fetch(requestPath, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "X-Requested-With": "plaindoc-reader-async"
+      }
+    });
+    const rawResponseText = await response.text();
+    const responsePayload = resolveJSONPayload(rawResponseText);
+    const responseData = resolveJsonResultData(responsePayload);
+    const responseCode =
+      responsePayload && typeof responsePayload === "object" && typeof responsePayload.code === "number"
+        ? responsePayload.code
+        : 0;
+    const responseMessage =
+      responsePayload && typeof responsePayload === "object" && typeof responsePayload.message === "string"
+        ? responsePayload.message.trim()
+        : "";
+    const documentServerUrl =
+      responseData && typeof responseData === "object" && typeof responseData.documentServerUrl === "string"
+        ? responseData.documentServerUrl.trim()
+        : "";
+    const config = responseData && typeof responseData === "object" && isRecord(responseData.config) ? responseData.config : null;
+    if (!response.ok || responseCode !== 0 || !documentServerUrl || !config) {
+      throw new Error(responseMessage || "获取 ONLYOFFICE 阅读配置失败");
+    }
+    return {
+      documentServerUrl,
+      config
+    };
+  };
+
+  const syncOnlyOfficeReader = async () => {
+    const payload = resolveReaderStatePayload();
+    const documentData = payload && typeof payload === "object" && payload.document && typeof payload.document === "object"
+      ? payload.document
+      : null;
+    const format = documentData ? documentData.format : "";
+
+    onlyOfficeReaderSeq += 1;
+    const currentSeq = onlyOfficeReaderSeq;
+    destroyOnlyOfficeReader();
+    setOfficeDownloadLink("", "");
+
+    if (!isOfficeDocumentFormat(format)) {
+      const officePaneNode = resolveOfficePaneNode();
+      if (officePaneNode instanceof HTMLElement) {
+        officePaneNode.style.removeProperty("--reader-office-pane-height");
+      }
+      return;
+    }
+
+    const editorNode = resolveOfficeEditorNode();
+    const placeholderNode = resolveOfficePlaceholderNode();
+    if (!(editorNode instanceof HTMLElement) || !(placeholderNode instanceof HTMLElement)) {
+      return;
+    }
+
+    const officeTitle = resolveOfficeDocumentLabel(format);
+    scheduleOfficePaneViewportHeightSync();
+    setOfficePlaceholderState("loading", officeTitle, "正在获取 ONLYOFFICE 阅读配置...");
+
+    try {
+      const viewConfig = await fetchOnlyOfficeViewConfig();
+      if (currentSeq !== onlyOfficeReaderSeq) {
+        return;
+      }
+
+      const documentConfig = isRecord(viewConfig.config.document) ? viewConfig.config.document : null;
+      const downloadURL = documentConfig && typeof documentConfig.url === "string" ? documentConfig.url.trim() : "";
+      const downloadFileName = documentConfig && typeof documentConfig.title === "string" ? documentConfig.title.trim() : "";
+      setOfficeDownloadLink(downloadURL, downloadFileName);
+
+      setOfficePlaceholderState("loading", officeTitle, "正在加载 ONLYOFFICE 阅读器...");
+      await loadOnlyOfficeApiScript(viewConfig.documentServerUrl);
+      if (currentSeq !== onlyOfficeReaderSeq) {
+        return;
+      }
+
+      const DocEditor = window.DocsAPI?.DocEditor;
+      if (typeof DocEditor !== "function") {
+        throw new Error("ONLYOFFICE Docs API 未就绪");
+      }
+
+      const runtimeConfig = attachOnlyOfficeRuntimeEvents(
+        cloneOnlyOfficeConfigPayload(viewConfig.config),
+        {
+          onDocumentReady: () => {
+            if (currentSeq !== onlyOfficeReaderSeq) {
+              return;
+            }
+            setOfficePlaceholderState("ready", officeTitle, "ONLYOFFICE 阅读器已就绪");
+          },
+          onError: (message) => {
+            if (currentSeq !== onlyOfficeReaderSeq) {
+              return;
+            }
+            destroyOnlyOfficeReader();
+            setOfficePlaceholderState("error", officeTitle, message || "ONLYOFFICE 阅读器初始化失败");
+          }
+        }
+      );
+
+      editorNode.classList.add(OFFICE_EDITOR_HIDDEN_CLASS);
+      activeOnlyOfficeReader = new DocEditor(editorNode.id, runtimeConfig);
+      scheduleOfficePaneViewportHeightSync();
+      setOfficePlaceholderState("loading", officeTitle, "正在初始化文档...");
+    } catch (error) {
+      if (currentSeq !== onlyOfficeReaderSeq) {
+        return;
+      }
+      const message =
+        error && typeof error === "object" && "message" in error && typeof error.message === "string"
+          ? error.message
+          : "加载 ONLYOFFICE 阅读器失败";
+      destroyOnlyOfficeReader();
+      setOfficePlaceholderState("error", officeTitle, message);
+    }
   };
 
   const resolveExportBaseURL = (payload) => {
@@ -735,6 +1138,23 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     } else {
       currentCanonicalNode.href = targetURL.toString();
     }
+
+    const nextRobotsNode = nextDocument.querySelector("meta[name='robots']");
+    let currentRobotsNode = document.querySelector("meta[name='robots']");
+    const nextRobotsContent =
+      nextRobotsNode instanceof HTMLMetaElement ? (nextRobotsNode.getAttribute("content") || "").trim() : "";
+    if (!nextRobotsContent) {
+      if (currentRobotsNode instanceof HTMLMetaElement) {
+        currentRobotsNode.remove();
+      }
+      return;
+    }
+    if (!(currentRobotsNode instanceof HTMLMetaElement)) {
+      currentRobotsNode = document.createElement("meta");
+      currentRobotsNode.setAttribute("name", "robots");
+      document.head.appendChild(currentRobotsNode);
+    }
+    currentRobotsNode.setAttribute("content", nextRobotsContent);
   };
 
   const syncMobileBarTitle = (nextDocument) => {
@@ -1023,6 +1443,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         return;
       }
       const parsedDocument = new DOMParser().parseFromString(htmlText, "text/html");
+      destroyOnlyOfficeReader();
       if (!replaceArticleShell(parsedDocument)) {
         window.location.assign(targetURL.toString());
         return;
@@ -1049,6 +1470,8 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         readerMain.scrollTop = 0;
       }
       refreshOutlineRegistry();
+      scheduleOfficePaneViewportHeightSync();
+      await syncOnlyOfficeReader();
       if (pushHistory) {
         window.history.pushState({ reader: true }, "", targetURL.toString());
       }
@@ -1074,6 +1497,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     markActiveTreeItemByPathname(window.location.pathname);
     refreshOutlineRegistry();
     setMobileSidebarOpen(false);
+    void syncOnlyOfficeReader();
   } catch {
     // no-op: initialization enhancement should never block rendering.
   }
@@ -1236,6 +1660,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         syncMobileSidebarDOMState();
       }
       refreshOutlineRegistry();
+      scheduleOfficePaneViewportHeightSync();
     }, { passive: true });
   } catch {
     // no-op: outline enhancement should never block rendering.

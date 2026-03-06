@@ -18,6 +18,7 @@ type sitemapTestRecord struct {
 	SpaceID            string
 	NodeID             string
 	DocumentID         string
+	DocumentFormat     string
 	SpaceVisibility    string
 	SpaceStatus        string
 	SpaceUpdatedAt     string
@@ -122,6 +123,15 @@ func TestRouter_Sitemap_OnlyIncludesFullyPublicNonEmptyContent(t *testing.T) {
 		DocumentStatus:     "deleted",
 		ContentMD:          "# hidden by deleted status",
 	})
+	seedSitemapRecord(t, database, ownerUserID, now, sitemapTestRecord{
+		SpaceID:            "space-public-office",
+		NodeID:             "node-public-office",
+		DocumentID:         "doc-public-office",
+		DocumentFormat:     "docx",
+		SpaceVisibility:    "public",
+		DocumentVisibility: "public",
+		ContentMD:          "# office placeholder",
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/sitemap.xml", nil)
 	rec := serve(req)
@@ -169,6 +179,8 @@ func TestRouter_Sitemap_OnlyIncludesFullyPublicNonEmptyContent(t *testing.T) {
 		"http://example.com/r/space-public-doc-member/doc-public-doc-member",
 		"http://example.com/r/space-public-doc-banned/doc-public-doc-banned",
 		"http://example.com/r/space-public-doc-deleted/doc-public-doc-deleted",
+		"http://example.com/r/space-public-office",
+		"http://example.com/r/space-public-office/doc-public-office",
 	}
 	for _, unexpected := range unexpectedLocs {
 		if _, ok := locSet[unexpected]; ok {
@@ -313,6 +325,10 @@ func seedSitemapRecord(
 	if documentStatus == "" {
 		documentStatus = "active"
 	}
+	documentFormat := strings.TrimSpace(record.DocumentFormat)
+	if documentFormat == "" {
+		documentFormat = "markdown"
+	}
 
 	spaceUpdatedAt := now
 	if strings.TrimSpace(record.SpaceUpdatedAt) != "" {
@@ -352,6 +368,7 @@ func seedSitemapRecord(
 		"document_id":        record.DocumentID,
 		"node_id":            record.NodeID,
 		"theme_id":           "default",
+		"format":             documentFormat,
 		"title":              record.DocumentID,
 		"content_md":         record.ContentMD,
 		"version":            1,

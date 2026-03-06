@@ -1,5 +1,16 @@
 import katexStyleText from "katex/dist/katex.min.css?inline";
-import { ChevronDown, Download, Eye, FileText, Lock, LockOpen, Paperclip, Printer } from "lucide-react";
+import {
+  ChevronDown,
+  Download,
+  Eye,
+  FileSpreadsheet,
+  FileText,
+  LoaderCircle,
+  Lock,
+  LockOpen,
+  Paperclip,
+  Printer
+} from "lucide-react";
 import MarkdownIt from "markdown-it";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
@@ -142,6 +153,21 @@ function normalizeReaderVisibility(value: unknown): ReaderVisibility {
     return value;
   }
   return "member";
+}
+
+function isOfficeDocumentFormat(value: unknown): value is "docx" | "xlsx" {
+  return value === "docx" || value === "xlsx";
+}
+
+function resolveOfficeDocumentLabel(value: unknown): string {
+  return value === "xlsx" ? "Excel 文档" : "Word 文档";
+}
+
+function renderOfficeDocumentIcon(value: unknown) {
+  if (value === "xlsx") {
+    return <FileSpreadsheet size={20} />;
+  }
+  return <FileText size={20} />;
 }
 
 function renderVisibilityMarker(visibilityInput: unknown) {
@@ -505,6 +531,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const startedAt = Date.now();
   const renderedAt = new Date(startedAt);
   const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+  const isOfficeDocument = isOfficeDocumentFormat(payload.document.format);
   const documentRouteKey = (payload.document.routeKey || payload.document.id || "").trim() || payload.document.id;
   const shareEnabled = payload.share?.enabled === true;
   const readerBasePath = shareEnabled
@@ -531,12 +558,13 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const authorNickname = payload.document.authorNickname.trim() || "未知作者";
   const documentMeta = `空间：${spaceTitle} · 作者：${authorNickname} · ${updatedMeta}`;
   const documentVisibilityMarker = hasDeniedAccess ? null : renderVisibilityMarker(payload.document.visibility);
-  const readerOutlineItems = hasDeniedAccess ? [] : buildReaderOutlineItems(payload.document.contentMd);
+  const readerOutlineItems = hasDeniedAccess || isOfficeDocument ? [] : buildReaderOutlineItems(payload.document.contentMd);
   const hasReaderOutline = readerOutlineItems.length > 0;
   const documentAttachments = hasDeniedAccess ? [] : (Array.isArray(payload.attachments) ? payload.attachments : []);
   const showSidebarTree = !shareEnabled;
   const spaceLandingPath = shareEnabled ? canonicalPath : `/r/${encodeURIComponent(payload.space.id)}`;
   const loginPath = `/login?redirect=${encodeURIComponent(canonicalPath)}`;
+  const shouldNoIndex = isOfficeDocument;
 
   const appMarkup = renderToStaticMarkup(
     <html lang="zh-CN">
@@ -545,6 +573,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{seoTitle}</title>
         <link rel="canonical" href={canonicalPath} />
+        {shouldNoIndex ? <meta name="robots" content="noindex, nofollow" /> : null}
         {/* 字体样式最先注入，确保后续 body/code 字体声明可即时命中 Google Sans Code。 */}
         <style id="plaindoc-reader-google-sans-code-style">{readerGoogleSansCodeStyleText}</style>
         <style id="plaindoc-reader-app-style">{appStyleText}</style>
@@ -642,7 +671,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             ) : null}
             <div
               id="plaindoc-reader-article-shell"
-              className="reader-article-shell"
+              className={`reader-article-shell${isOfficeDocument ? " reader-article-shell--office" : ""}`}
               data-reader-hook="article-shell"
             >
               {!hasDeniedAccess ? (
@@ -652,23 +681,36 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                     {documentVisibilityMarker}
                     <span className="reader-article-meta__text">{documentMeta}</span>
                   </div>
-                  <div className="reader-article-actions" role="group" aria-label="导出操作">
-                    <button
-                      type="button"
-                      className="reader-article-action"
-                      data-reader-export-action="markdown"
-                    >
-                      <FileText size={14} aria-hidden="true" />
-                      <span>导出 Markdown</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="reader-article-action reader-article-action--primary"
-                      data-reader-export-action="pdf"
-                    >
-                      <Printer size={14} aria-hidden="true" />
-                      <span>导出 PDF</span>
-                    </button>
+                  <div className="reader-article-actions" role="group" aria-label={isOfficeDocument ? "文档操作" : "导出操作"}>
+                    {isOfficeDocument ? (
+                      <a
+                        className="reader-article-action reader-article-action--primary"
+                        data-reader-office-download="1"
+                        aria-disabled="true"
+                      >
+                        <Download size={14} aria-hidden="true" />
+                        <span>下载原文件</span>
+                      </a>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="reader-article-action"
+                          data-reader-export-action="markdown"
+                        >
+                          <FileText size={14} aria-hidden="true" />
+                          <span>导出 Markdown</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="reader-article-action reader-article-action--primary"
+                          data-reader-export-action="pdf"
+                        >
+                          <Printer size={14} aria-hidden="true" />
+                          <span>导出 PDF</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </header>
               ) : null}
@@ -697,18 +739,47 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                 </section>
               ) : (
                 <>
-                  <article
-                    id={PREVIEW_BODY_ID}
-                    className={`markdown-body ${PREVIEW_BODY_CLASS} ${previewThemeClassName}`}
-                  >
-                    <ReactMarkdown
-                      remarkPlugins={markdownRenderer.remarkPlugins}
-                      rehypePlugins={markdownRenderer.rehypePlugins}
-                      components={markdownRenderer.components}
+                  {isOfficeDocument ? (
+                    <section className="office-pane reader-office-pane" aria-label={resolveOfficeDocumentLabel(payload.document.format)}>
+                      <div className="office-pane__surface">
+                        <div
+                          id="plaindoc-reader-onlyoffice-editor"
+                          className="office-pane__editor office-pane__editor--hidden"
+                          data-reader-office-editor="1"
+                          aria-label={resolveOfficeDocumentLabel(payload.document.format)}
+                        />
+                        <div
+                          className="office-pane__placeholder"
+                          data-reader-office-placeholder="1"
+                          data-reader-office-status="loading"
+                        >
+                          <div className="office-pane__placeholder-icon" aria-hidden="true">
+                            {renderOfficeDocumentIcon(payload.document.format)}
+                            <LoaderCircle size={14} className="office-pane__spinner" />
+                          </div>
+                          <h2 className="office-pane__placeholder-title" data-reader-office-title="1">
+                            {resolveOfficeDocumentLabel(payload.document.format)}
+                          </h2>
+                          <p className="office-pane__placeholder-description" data-reader-office-message="1">
+                            正在加载 ONLYOFFICE 阅读器...
+                          </p>
+                        </div>
+                      </div>
+                    </section>
+                  ) : (
+                    <article
+                      id={PREVIEW_BODY_ID}
+                      className={`markdown-body ${PREVIEW_BODY_CLASS} ${previewThemeClassName}`}
                     >
-                      {payload.document.contentMd}
-                    </ReactMarkdown>
-                  </article>
+                      <ReactMarkdown
+                        remarkPlugins={markdownRenderer.remarkPlugins}
+                        rehypePlugins={markdownRenderer.rehypePlugins}
+                        components={markdownRenderer.components}
+                      >
+                        {payload.document.contentMd}
+                      </ReactMarkdown>
+                    </article>
+                  )}
                   {documentAttachments.length > 0 ? (
                     <section className="reader-attachments" aria-label="文档附件">
                       <div className="reader-attachments__header">

@@ -310,6 +310,7 @@ func TestRouter_HomeSearchEnabled_ShowsSearchBoxAndResults(t *testing.T) {
 		NodeID:     "01homesearchdocnode000000000001",
 		DocumentID: "01homesearchdocument00000000001",
 		Title:      "检索命中文档",
+		Format:     "markdown",
 		Visibility: "public",
 	})
 	seedHomepageDocument(t, database, homepageSeedDocumentInput{
@@ -317,7 +318,16 @@ func TestRouter_HomeSearchEnabled_ShowsSearchBoxAndResults(t *testing.T) {
 		NodeID:     "01homesearchdocnode000000000002",
 		DocumentID: "01homesearchdocument00000000002",
 		Title:      "不应被匿名检索命中",
+		Format:     "markdown",
 		Visibility: "member",
+	})
+	seedHomepageDocument(t, database, homepageSeedDocumentInput{
+		SpaceID:    "01homesearchspace000000000001",
+		NodeID:     "01homesearchdocnode000000000003",
+		DocumentID: "01homesearchdocument00000000003",
+		Title:      "命中办公表格",
+		Format:     "xlsx",
+		Visibility: "public",
 	})
 
 	homeReq := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -347,6 +357,9 @@ func TestRouter_HomeSearchEnabled_ShowsSearchBoxAndResults(t *testing.T) {
 	}
 	if strings.Contains(searchBody, "/r/01homesearchspace000000000002/01homesearchdocument00000000002") {
 		t.Fatalf("expected anonymous search result excludes member-only document, body=%s", searchBody)
+	}
+	if strings.Contains(searchBody, "/r/01homesearchspace000000000001/01homesearchdocument00000000003") {
+		t.Fatalf("expected homepage search excludes office document, body=%s", searchBody)
 	}
 }
 
@@ -459,6 +472,7 @@ type homepageSeedDocumentInput struct {
 	NodeID     string
 	DocumentID string
 	Title      string
+	Format     string
 	Visibility string
 }
 
@@ -529,6 +543,10 @@ func seedHomepageDocument(t *testing.T, database *storage.Database, input homepa
 	t.Helper()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	documentFormat := input.Format
+	if strings.TrimSpace(documentFormat) == "" {
+		documentFormat = "markdown"
+	}
 	if err := database.ORM.Table("nodes").Create(map[string]any{
 		"node_id":        input.NodeID,
 		"space_id":       input.SpaceID,
@@ -546,6 +564,7 @@ func seedHomepageDocument(t *testing.T, database *storage.Database, input homepa
 		"document_id": input.DocumentID,
 		"node_id":     input.NodeID,
 		"theme_id":    "default",
+		"format":      documentFormat,
 		"visibility":  input.Visibility,
 		"status":      "active",
 		"title":       input.Title,

@@ -238,6 +238,74 @@ func TestGormSearchVisibilityRepository_ResolveUserRoleLevel(t *testing.T) {
 	})
 }
 
+func TestGormSearchVisibilityRepository_FiltersNonMarkdownDocuments(t *testing.T) {
+	database := openDocumentFormatFilterRepositoryTestDB(
+		t,
+		"file:test-search-visibility-format-filter?mode=memory&cache=shared",
+	)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedDocumentFormatFilterUser(t, database, "search-owner-1", now)
+	seedDocumentFormatFilterSpace(t, database, "search-space-1", "search-owner-1", models.VisibilityPublic, now)
+	seedDocumentFormatFilterDocument(
+		t,
+		database,
+		documentFormatFilterSeedDocument{
+			SpaceID:    "search-space-1",
+			NodeID:     "search-node-md-1",
+			DocumentID: "search-doc-md-1",
+			Title:      "预算命中文档",
+			ContentMD:  "# 预算 命中",
+			Format:     models.DocumentFormatMarkdown,
+			Visibility: models.VisibilityPublic,
+			Now:        now,
+		},
+	)
+	seedDocumentFormatFilterDocument(
+		t,
+		database,
+		documentFormatFilterSeedDocument{
+			SpaceID:    "search-space-1",
+			NodeID:     "search-node-office-1",
+			DocumentID: "search-doc-office-1",
+			Title:      "预算表",
+			ContentMD:  "# 预算 命中",
+			Format:     models.DocumentFormatXLSX,
+			Visibility: models.VisibilityPublic,
+			Now:        now,
+		},
+	)
+
+	repo := NewGormSearchVisibilityRepository(database.ORM)
+
+	rows, total, err := repo.SearchVisibleDocuments(ctx, SearchVisibleDocumentsParams{
+		Terms:         []string{"预算"},
+		ScopeSpaceIDs: []string{"search-space-1"},
+		Limit:         10,
+	})
+	if err != nil {
+		t.Fatalf("search visible documents failed: %v", err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].DocumentID != "search-doc-md-1" {
+		t.Fatalf("expected only markdown document visible, total=%d rows=%+v", total, rows)
+	}
+
+	documentIDs, err := repo.FilterVisibleDocumentIDsByCandidates(ctx, SearchVisibleDocumentIDsByCandidatesParams{
+		CandidateDocumentIDs: []string{"search-doc-md-1", "search-doc-office-1"},
+		ScopeSpaceIDs:        []string{"search-space-1"},
+	})
+	if err != nil {
+		t.Fatalf("filter visible candidate document ids failed: %v", err)
+	}
+	if len(documentIDs) != 1 || documentIDs[0] != "search-doc-md-1" {
+		t.Fatalf("expected only markdown candidate survives visibility filter, got %+v", documentIDs)
+	}
+}
+
 func assertScopeContains(t *testing.T, scopes []string, expected string) {
 	t.Helper()
 	for _, item := range scopes {

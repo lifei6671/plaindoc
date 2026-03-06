@@ -18,6 +18,7 @@ type sitemapPublicDocumentSourceRow struct {
 	SpaceUpdatedAtRaw    string  `gorm:"column:space_updated_at"`
 	DocumentID           string  `gorm:"column:document_id"`
 	ReaderSlug           *string `gorm:"column:reader_slug"`
+	DocumentFormat       string  `gorm:"column:document_format"`
 	DocumentContentMD    string  `gorm:"column:document_content_md"`
 	DocumentUpdatedAtRaw string  `gorm:"column:document_updated_at"`
 }
@@ -42,6 +43,7 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 			"s.updated_at AS space_updated_at",
 			"d.document_id AS document_id",
 			"n.reader_slug AS reader_slug",
+			"d.format AS document_format",
 			"d.content_md AS document_content_md",
 			"d.updated_at AS document_updated_at",
 		).
@@ -54,6 +56,7 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 		Where("d.visibility = ?", models.VisibilityPublic).
 		Where("d.status = ?", models.EntityStatusActive).
 		Where("d.deleted_at IS NULL").
+		Where("d.format = ?", models.DocumentFormatMarkdown).
 		Order("s.space_id ASC, d.document_id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -65,6 +68,7 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 			SpaceID:           strings.TrimSpace(row.SpaceID),
 			DocumentID:        strings.TrimSpace(row.DocumentID),
 			DocumentRouteKey:  resolveSitemapDocumentRouteKey(strings.TrimSpace(row.DocumentID), row.ReaderSlug),
+			DocumentFormat:    models.NormalizeDocumentFormat(models.DocumentFormat(row.DocumentFormat)),
 			DocumentContentMD: row.DocumentContentMD,
 			SpaceUpdatedAt:    parseRecordTime(row.SpaceUpdatedAtRaw),
 			DocumentUpdatedAt: parseRecordTime(row.DocumentUpdatedAtRaw),

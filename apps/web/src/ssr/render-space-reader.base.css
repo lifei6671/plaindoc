@@ -477,6 +477,16 @@ a {
   opacity: 0.65;
   cursor: not-allowed;
 }
+.reader-article-shell--office .reader-office-pane {
+  height: var(--reader-office-pane-height, calc(100dvh - 210px));
+  min-height: 420px;
+}
+.reader-article-shell--office .reader-office-pane .office-pane__surface {
+  height: 100%;
+}
+.reader-article-shell--office .reader-office-pane .office-pane__editor {
+  min-height: 0;
+}
 .reader-access-denied {
   padding: 30px 24px 34px;
 }
@@ -878,6 +888,9 @@ a {
   }
   .reader-article-title {
     font-size: 24px;
+  }
+  .reader-article-shell--office .reader-office-pane {
+    min-height: 360px;
   }
   .reader-attachments {
     margin: 0 16px 20px;

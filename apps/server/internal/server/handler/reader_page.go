@@ -25,12 +25,14 @@ import (
 )
 
 type readerPageHandler struct {
-	authService       *service.AuthService
-	readerPageService *service.ReaderPageService
-	dispatcher        *pool.Dispatcher
-	renderCache       *rendercache.Cache
-	logger            *slog.Logger
-	webOrigin         string
+	authService             *service.AuthService
+	readerPageService       *service.ReaderPageService
+	dispatcher              *pool.Dispatcher
+	renderCache             *rendercache.Cache
+	logger                  *slog.Logger
+	webOrigin               string
+	onlyOfficeConfigService *service.OnlyOfficeConfigService
+	onlyOfficeTokenService  *service.OnlyOfficeDocumentTokenService
 }
 
 type readerPageViewerIdentity struct {
@@ -80,14 +82,18 @@ func NewReaderPageHandler(
 	renderCache *rendercache.Cache,
 	logger *slog.Logger,
 	webOrigin string,
+	onlyOfficeConfigService *service.OnlyOfficeConfigService,
+	onlyOfficeTokenService *service.OnlyOfficeDocumentTokenService,
 ) *readerPageHandler {
 	return &readerPageHandler{
-		authService:       authService,
-		readerPageService: readerPageService,
-		dispatcher:        dispatcher,
-		renderCache:       renderCache,
-		logger:            logger,
-		webOrigin:         normalizeWebOrigin(webOrigin),
+		authService:             authService,
+		readerPageService:       readerPageService,
+		dispatcher:              dispatcher,
+		renderCache:             renderCache,
+		logger:                  logger,
+		webOrigin:               normalizeWebOrigin(webOrigin),
+		onlyOfficeConfigService: onlyOfficeConfigService,
+		onlyOfficeTokenService:  onlyOfficeTokenService,
 	}
 }
 
@@ -249,6 +255,74 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 		Viewer:        viewer,
 	}
 	h.renderReaderPayload(c, http.StatusOK, spaceID, documentID, payload, true)
+}
+
+// GetOnlyOfficeViewConfig 返回阅读页 Office 文档只读配置。
+func (h *readerPageHandler) GetOnlyOfficeViewConfig(c *gin.Context) {
+	if h == nil || h.readerPageService == nil || h.onlyOfficeConfigService == nil || h.onlyOfficeTokenService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidSpaceID, "空间 ID 不能为空")
+		return
+	}
+	if documentID == "" {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidDocumentID, "文档 ID 不能为空")
+		return
+	}
+
+	appendVaryHeader(c, "Authorization")
+	appendVaryHeader(c, "Cookie")
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+
+	viewer := h.resolveOptionalViewerIdentity(c)
+	viewModel, err := h.readerPageService.BuildPage(
+		c.Request.Context(),
+		spaceID,
+		documentID,
+		viewer.UserID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound), errors.Is(err, service.ErrDocumentNotFound):
+			response.Error(c, http.StatusNotFound, response.CodeDocumentNotFound, "文档不存在，或已被删除")
+		case errors.Is(err, service.ErrViewerLoginRequired):
+			response.Error(c, http.StatusForbidden, response.CodeUnauthorized, "当前文档需要登录后访问")
+		case errors.Is(err, service.ErrSpaceAccessDenied), errors.Is(err, service.ErrDocumentAccessDenied):
+			response.Error(c, http.StatusForbidden, response.CodeForbidden, "你没有权限访问该文档")
+		default:
+			h.logError("reader onlyoffice view config build failed", err, "space_id", spaceID, "document_id", documentID)
+			response.InternalError(c)
+		}
+		return
+	}
+
+	configPayload, err := buildOnlyOfficeViewConfig(
+		c.Request.Context(),
+		h.onlyOfficeConfigService,
+		h.onlyOfficeTokenService,
+		viewModel.Document,
+		viewer.UserID,
+		viewer.Name,
+	)
+	if err != nil {
+		h.logError("reader onlyoffice view config resolve failed", err, "space_id", spaceID, "document_id", documentID)
+		switch {
+		case errors.Is(err, errOnlyOfficeViewConfigNotOfficeDocument):
+			response.Error(c, http.StatusBadRequest, response.CodeInvalidOperation, "当前文档不是 Office 文档")
+		case errors.Is(err, errOnlyOfficeViewConfigDisabled):
+			response.Error(c, http.StatusBadRequest, response.CodeInvalidRequest, "ONLYOFFICE 阅读能力未启用")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, configPayload)
 }
 
 func (h *readerPageHandler) renderReaderPayload(
@@ -675,6 +749,10 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
 	escapedDocument := template.HTMLEscapeString(payload.Document.ContentMD)
 	escapedAccessTitle := template.HTMLEscapeString(accessTitle)
 	escapedAccessDescription := template.HTMLEscapeString(accessDescription)
+	robotsMeta := ""
+	if models.IsOfficeDocumentFormat(payload.Document.Format) {
+		robotsMeta = `    <meta name="robots" content="noindex, nofollow" />`
+	}
 
 	bodyContent := fmt.Sprintf("<pre>%s</pre>", escapedDocument)
 	headerContent := fmt.Sprintf(
@@ -704,6 +782,7 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+%s
     <title>%s</title>
     <link rel="preload" href="/assets/google-sans-code-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/assets/font-google-sans-code.css?v=20260224" />
@@ -727,7 +806,7 @@ func buildReaderFallbackHTML(payload readerPagePayload) string {
     </main>
     <script id="plaindoc-reader-initial-state" type="application/json">%s</script>
   </body>
-</html>`, escapedPageTitle, headerContent, bodyContent, stateJSON)
+</html>`, robotsMeta, escapedPageTitle, headerContent, bodyContent, stateJSON)
 }
 
 func escapeJSONForHTMLScript(rawJSON string) string {

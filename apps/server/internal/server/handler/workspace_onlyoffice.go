@@ -290,7 +290,7 @@ func (h *workspaceHandler) HandleOnlyOfficeCallback(c *gin.Context) {
 		return
 	}
 	if rawKey := strings.TrimSpace(req.Key); rawKey != "" &&
-		rawKey != buildOnlyOfficeDocumentKey(current.DocumentID, currentContentVersion) {
+		!matchesOnlyOfficeDocumentKey(rawKey, current.DocumentID, currentContentVersion) {
 		writeOnlyOfficeCallbackResult(c, 0)
 		return
 	}
@@ -498,7 +498,58 @@ func buildOnlyOfficeAbsoluteURL(baseURL string, routePath string, query neturl.V
 }
 
 func buildOnlyOfficeDocumentKey(documentID string, contentVersion int) string {
-	return strings.TrimSpace(documentID) + ":" + fmt.Sprintf("%d", contentVersion)
+	normalizedDocumentID := normalizeOnlyOfficeDocumentKeySegment(documentID)
+	normalizedContentVersion := contentVersion
+	if normalizedContentVersion <= 0 {
+		normalizedContentVersion = 1
+	}
+	return fmt.Sprintf("%s-v%d", normalizedDocumentID, normalizedContentVersion)
+}
+
+func matchesOnlyOfficeDocumentKey(rawKey string, documentID string, contentVersion int) bool {
+	normalizedRawKey := strings.TrimSpace(rawKey)
+	if normalizedRawKey == "" {
+		return false
+	}
+	if normalizedRawKey == buildOnlyOfficeDocumentKey(documentID, contentVersion) {
+		return true
+	}
+	// 兼容历史 key 形态，保障升级期间已打开会话仍可正常 callback。
+	legacyKey := strings.TrimSpace(documentID) + ":" + fmt.Sprintf("%d", contentVersion)
+	return normalizedRawKey == legacyKey
+}
+
+func normalizeOnlyOfficeDocumentKeySegment(value string) string {
+	const maxSegmentLength = 96
+
+	normalizedValue := strings.TrimSpace(value)
+	if normalizedValue == "" {
+		return "doc"
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(normalizedValue))
+	for _, ch := range normalizedValue {
+		if (ch >= '0' && ch <= '9') ||
+			(ch >= 'A' && ch <= 'Z') ||
+			(ch >= 'a' && ch <= 'z') ||
+			ch == '-' ||
+			ch == '.' ||
+			ch == '_' ||
+			ch == '=' {
+			builder.WriteRune(ch)
+			continue
+		}
+		builder.WriteRune('_')
+	}
+	sanitized := strings.Trim(builder.String(), "_")
+	if sanitized == "" {
+		sanitized = "doc"
+	}
+	if len(sanitized) > maxSegmentLength {
+		sanitized = sanitized[:maxSegmentLength]
+	}
+	return sanitized
 }
 
 func buildOnlyOfficeUserDisplayName(session service.AuthSession) string {

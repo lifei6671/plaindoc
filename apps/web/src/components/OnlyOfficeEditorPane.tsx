@@ -78,7 +78,7 @@ export const OnlyOfficeEditorPane = memo(function OnlyOfficeEditorPane({
     if (errorMessage) {
       const nextState: OnlyOfficeEditorPaneState = {
         status: "error",
-        message: errorMessage
+        message: normalizeOnlyOfficeErrorMessage(errorMessage)
       };
       publishState(nextState);
       return;
@@ -148,7 +148,7 @@ export const OnlyOfficeEditorPane = memo(function OnlyOfficeEditorPane({
               }
               publishState({
                 status: "error",
-                message
+                message: normalizeOnlyOfficeErrorMessage(message)
               });
             }
           }
@@ -165,10 +165,11 @@ export const OnlyOfficeEditorPane = memo(function OnlyOfficeEditorPane({
         }
         const nextState: OnlyOfficeEditorPaneState = {
           status: "error",
-          message:
+          message: normalizeOnlyOfficeErrorMessage(
             error instanceof Error && error.message.trim()
               ? error.message
               : "加载 ONLYOFFICE 编辑器失败"
+          )
         };
         publishState(nextState);
       }
@@ -386,4 +387,44 @@ function resolveOnlyOfficePlaceholderIcon(
     default:
       return <FileText size={20} />;
   }
+}
+
+function normalizeOnlyOfficeErrorMessage(message: string): string {
+  const normalizedMessage = message.trim();
+  if (!normalizedMessage) {
+    return "加载 ONLYOFFICE 编辑器失败";
+  }
+
+  const lowerMessage = normalizedMessage.toLowerCase();
+  if (
+    lowerMessage.includes("401") ||
+    lowerMessage.includes("unauthorized") ||
+    lowerMessage.includes("token expired") ||
+    lowerMessage.includes("session expired") ||
+    lowerMessage.includes("会话过期") ||
+    lowerMessage.includes("登录失效")
+  ) {
+    return "登录会话已过期，请刷新页面后重新登录。";
+  }
+  if (
+    lowerMessage.includes("403") ||
+    lowerMessage.includes("forbidden") ||
+    lowerMessage.includes("permission denied") ||
+    lowerMessage.includes("access denied") ||
+    lowerMessage.includes("do not have rights") ||
+    lowerMessage.includes("you are trying to perform an action you do not have rights") ||
+    lowerMessage.includes("权限不足") ||
+    lowerMessage.includes("无权限")
+  ) {
+    return "当前账号没有该文档的编辑权限。";
+  }
+  if (
+    lowerMessage.includes("加载 onlyoffice 脚本失败") ||
+    lowerMessage.includes("docs api 未就绪") ||
+    lowerMessage.includes("script") ||
+    lowerMessage.includes("network")
+  ) {
+    return "ONLYOFFICE 脚本加载失败，请检查 Document Server 连接后重试。";
+  }
+  return normalizedMessage;
 }

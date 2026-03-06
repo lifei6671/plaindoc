@@ -140,7 +140,8 @@ func (r *gormSearchIndexSourceRepository) baseActiveDocumentsQuery(ctx context.C
 		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
 		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
 		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive)
+		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
+		Where("d.format = ?", models.DocumentFormatMarkdown)
 }
 
 func (r *gormSearchIndexSourceRepository) selectSearchIndexSourceColumns(query *gorm.DB) *gorm.DB {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
 )
@@ -87,6 +88,9 @@ func (s *SitemapService) ListPublicDocuments(
 		spaceID := strings.TrimSpace(row.SpaceID)
 		documentID := strings.TrimSpace(row.DocumentID)
 		if spaceID == "" || documentID == "" {
+			continue
+		}
+		if models.NormalizeDocumentFormat(row.DocumentFormat) != models.DocumentFormatMarkdown {
 			continue
 		}
 		// 过滤空白内容文档，避免无内容页面进入 sitemap。

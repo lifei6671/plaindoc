@@ -201,6 +201,10 @@ func newRouter(
 	)
 	// sitemap Handler：承接 /sitemap.xml 输出。
 	sitemapHandler := handler.NewSitemapHandler(sitemapService, cfg.WebOrigin)
+	// 图床配置与上传服务：既服务 API 上传入口，也服务公开图片回源路径。
+	imageHostingService := service.NewImageHostingService(systemConfigRepo)
+	onlyOfficeConfigService := service.NewOnlyOfficeConfigService(systemConfigRepo)
+	onlyOfficeDocumentTokenService := service.NewOnlyOfficeDocumentTokenService(cfg.JWT.Secret, 0)
 	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
 	readerPageHandler := handler.NewReaderPageHandler(
 		authService,
@@ -209,10 +213,9 @@ func newRouter(
 		readerRenderCache,
 		logger,
 		cfg.WebOrigin,
+		onlyOfficeConfigService,
+		onlyOfficeDocumentTokenService,
 	)
-	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
-	imageHostingService := service.NewImageHostingService(systemConfigRepo)
-	onlyOfficeConfigService := service.NewOnlyOfficeConfigService(systemConfigRepo)
 	documentShareService := service.NewDocumentShareService(
 		db,
 		documentShareRepo,
@@ -235,7 +238,6 @@ func newRouter(
 	documentTemplateService := service.NewDocumentTemplateService(documentTemplateRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
 	onlyOfficeHandler := handler.NewOnlyOfficeHandler(authService, onlyOfficeConfigService)
-	onlyOfficeDocumentTokenService := service.NewOnlyOfficeDocumentTokenService(cfg.JWT.Secret, 0)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
 	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache, searchIndexService)
 	documentTemplateHandler := handler.NewDocumentTemplateHandler(documentTemplateService)
@@ -437,6 +439,8 @@ func newRouter(
 		api.PUT("/spaces/:spaceId/visibility", accessHandler.UpdateSpaceVisibility)
 		// 读取文档正文。
 		api.GET("/docs/:docId", accessHandler.GetDocument)
+		// 阅读页 Office 文档只读配置。
+		api.GET("/reader/spaces/:spaceId/docs/:docId/onlyoffice/view-config", readerPageHandler.GetOnlyOfficeViewConfig)
 		// 生成 ONLYOFFICE 编辑配置。
 		api.GET("/docs/:docId/onlyoffice/edit-config", workspaceHandler.GetOnlyOfficeEditConfig)
 		// ONLYOFFICE Document Server 拉取正文文件。
@@ -482,6 +486,11 @@ func newRouter(
 		api.POST(
 			"/shares/:spaceId/:docKey/attachments/:attachmentId/access-link",
 			documentSharePageHandler.CreateAttachmentAccessLink,
+		)
+		// 分享页 Office 文档只读配置。
+		api.GET(
+			"/shares/:spaceId/:docKey/onlyoffice/view-config",
+			documentSharePageHandler.GetOnlyOfficeViewConfig,
 		)
 		// 分享态附件下载入口（无脚本场景）。
 		api.GET(

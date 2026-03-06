@@ -10,7 +10,7 @@ RELEASE_DIR := $(ROOT_DIR)/release
 ENV_FILE ?= apps/server/.env
 SERVER_ENV := APP_ENV=development
 APP_ADDR ?= :8080
-WEB_ORIGIN ?= http://localhost:3001
+WEB_ORIGIN ?= http://192.168.31.58:3001
 
 SSR_WORKER_ENTRY_REL := apps/web/dist-ssr/worker-entry.js
 SSR_WORKER_ENTRY_ABS := $(ROOT_DIR)/$(SSR_WORKER_ENTRY_REL)
