@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type {
   CreateNodeResult,
   Document,
+  DocumentFormat,
   MoveNodeInput,
   Space,
   TreeNode,
@@ -22,6 +23,7 @@ const DEFAULT_SPACE_NAME = "默认空间";
 const DEFAULT_ACTIVE_SPACE_NAME = "未命名空间";
 const DEFAULT_DOCUMENT_TITLE = "未命名文档";
 const DEFAULT_DOCUMENT_THEME_ID = "default";
+const DEFAULT_DOCUMENT_FORMAT: DocumentFormat = "markdown";
 
 // 规范化文档标题：空字符串或全空白时回退默认值。
 function resolveDocumentTitle(title: string, fallbackTitle: string): string {
@@ -94,8 +96,13 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
   const [workspaceTree, setWorkspaceTree] = useState<TreeNode[]>([]);
   // 当前打开文档的身份与内容快照。
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
+  const [activeDocumentFormat, setActiveDocumentFormat] =
+    useState<DocumentFormat>(DEFAULT_DOCUMENT_FORMAT);
   const [activeDocumentTitle, setActiveDocumentTitle] = useState(initialDocumentTitle);
   const [activeDocumentThemeId, setActiveDocumentThemeId] = useState(DEFAULT_DOCUMENT_THEME_ID);
+  const [activeDocumentSourceFileName, setActiveDocumentSourceFileName] = useState<string | null>(null);
+  const [activeDocumentSourceMimeType, setActiveDocumentSourceMimeType] = useState<string | null>(null);
+  const [activeDocumentContentVersion, setActiveDocumentContentVersion] = useState(1);
   const [content, setContent] = useState(initialContent);
   const [baseVersion, setBaseVersion] = useState(0);
   const [lastSavedContent, setLastSavedContent] = useState(initialContent);
@@ -110,8 +117,12 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
       try {
         const document = await dataGateway.document.getDocument(docId);
         setActiveDocId(document.id);
+        setActiveDocumentFormat(document.format ?? DEFAULT_DOCUMENT_FORMAT);
         setActiveDocumentTitle(resolveDocumentTitle(document.title, defaultDocumentTitle));
         setActiveDocumentThemeId(document.themeId || DEFAULT_DOCUMENT_THEME_ID);
+        setActiveDocumentSourceFileName(document.sourceFileName ?? null);
+        setActiveDocumentSourceMimeType(document.sourceMimeType ?? null);
+        setActiveDocumentContentVersion(document.contentVersion ?? document.version ?? 1);
         setContent(document.contentMd);
         setBaseVersion(document.version);
         setLastSavedContent(document.contentMd);
@@ -259,7 +270,8 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
           type: input.type,
           title: normalizedTitle,
           documentIdentifier: input.documentIdentifier,
-          templateId: input.templateId
+          templateId: input.templateId,
+          format: input.format
         });
         await reloadTree(targetSpaceId);
         return created;
@@ -366,8 +378,12 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
 
         // 极端兜底：若仍找不到文档，清空当前激活态避免残留脏 ID。
         setActiveDocId(null);
+        setActiveDocumentFormat(DEFAULT_DOCUMENT_FORMAT);
         setActiveDocumentTitle(defaultDocumentTitle);
         setActiveDocumentThemeId(DEFAULT_DOCUMENT_THEME_ID);
+        setActiveDocumentSourceFileName(null);
+        setActiveDocumentSourceMimeType(null);
+        setActiveDocumentContentVersion(1);
         setContent(initialContent);
         setBaseVersion(0);
         setLastSavedContent(initialContent);
@@ -457,8 +473,12 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
         setActiveSpaceName(initialSpaceName);
         setWorkspaceTree([]);
         setActiveDocId(null);
+        setActiveDocumentFormat(DEFAULT_DOCUMENT_FORMAT);
         setActiveDocumentTitle(initialDocumentTitle);
         setActiveDocumentThemeId(DEFAULT_DOCUMENT_THEME_ID);
+        setActiveDocumentSourceFileName(null);
+        setActiveDocumentSourceMimeType(null);
+        setActiveDocumentContentVersion(1);
         setContent(initialContent);
         setBaseVersion(0);
         setLastSavedContent(initialContent);
@@ -474,8 +494,12 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
     activeSpaceName,
     workspaceTree,
     activeDocId,
+    activeDocumentFormat,
     activeDocumentTitle,
     activeDocumentThemeId,
+    activeDocumentSourceFileName,
+    activeDocumentSourceMimeType,
+    activeDocumentContentVersion,
     content,
     baseVersion,
     lastSavedContent,
@@ -496,8 +520,12 @@ export function useWorkspace(options: UseWorkspaceOptions): UseWorkspaceResult {
     moveNode,
     deleteSpace,
     setActiveSpaceName,
+    setActiveDocumentFormat,
     setActiveDocumentTitle,
     setActiveDocumentThemeId,
+    setActiveDocumentSourceFileName,
+    setActiveDocumentSourceMimeType,
+    setActiveDocumentContentVersion,
     setContent,
     setBaseVersion,
     setLastSavedContent,

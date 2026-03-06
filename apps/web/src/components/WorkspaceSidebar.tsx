@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type {
   CreateNodeResult,
+  DocumentFormat,
   DocumentShareConfig,
   DocumentTemplateDetail,
   DocumentTemplateSummary,
@@ -16,12 +17,14 @@ interface WorkspaceSidebarProps {
   activeSpaceName: string;
   workspaceTree: TreeNode[];
   onOpenDocument: (docId: string) => Promise<void>;
+  officeCreationEnabled: boolean;
   onCreateNode: (input: {
     parentId: string | null;
     type: NodeType;
     title: string;
     documentIdentifier?: string;
     templateId?: string;
+    format?: DocumentFormat;
   }) => Promise<CreateNodeResult>;
   onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
@@ -41,6 +44,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   activeSpaceName,
   workspaceTree,
   onOpenDocument,
+  officeCreationEnabled,
   onCreateNode,
   onListDocumentTemplates,
   onGetDocumentTemplate,
@@ -62,6 +66,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
       <WorkspaceTree
         nodes={workspaceTree}
         activeDocId={activeDocId}
+        officeCreationEnabled={officeCreationEnabled}
         onOpenDocument={onOpenDocument}
         onCreateNode={onCreateNode}
         onListDocumentTemplates={onListDocumentTemplates}

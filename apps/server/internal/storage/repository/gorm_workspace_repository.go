@@ -246,6 +246,7 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 		Title              string          `gorm:"column:title"`
 		Sort               int             `gorm:"column:sort"`
 		DocumentVisibility *string         `gorm:"column:document_visibility"`
+		DocumentFormat     *string         `gorm:"column:document_format"`
 	}
 
 	var rows []nodeRow
@@ -261,6 +262,7 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 			"n.title",
 			"n.sort",
 			"d.visibility AS document_visibility",
+			"d.format AS document_format",
 		).
 		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
 		Where("n.space_id = ?", strings.TrimSpace(spaceID)).
@@ -286,6 +288,7 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 			Title:              strings.TrimSpace(row.Title),
 			Sort:               row.Sort,
 			DocumentVisibility: trimOptionalString(row.DocumentVisibility),
+			DocumentFormat:     normalizeOptionalDocumentFormat(row.DocumentFormat),
 		})
 	}
 
@@ -383,6 +386,20 @@ func (r *gormWorkspaceRepository) CreateNode(
 			params.Node.ReaderSlug = &normalizedReaderSlug
 		}
 	}
+	if params.Document != nil {
+		params.Document.Format = models.NormalizeDocumentFormat(params.Document.Format)
+		if params.Document.ContentVersion <= 0 {
+			params.Document.ContentVersion = normalizeContentVersion(0, params.Document.Version)
+		}
+		params.Document.SourceBlobID = trimOptionalString(params.Document.SourceBlobID)
+		params.Document.SourceFileName = trimOptionalString(params.Document.SourceFileName)
+		params.Document.SourceMimeType = trimOptionalString(params.Document.SourceMimeType)
+		if params.Document.Format == models.DocumentFormatMarkdown {
+			params.Document.SourceBlobID = nil
+			params.Document.SourceFileName = nil
+			params.Document.SourceMimeType = nil
+		}
+	}
 
 	spaceID := strings.TrimSpace(params.TouchSpace)
 	if spaceID == "" {
@@ -407,6 +424,11 @@ func (r *gormWorkspaceRepository) CreateNode(
 		}
 		if params.Revision != nil {
 			if err := tx.Create(params.Revision).Error; err != nil {
+				return err
+			}
+		}
+		if params.FileRevision != nil {
+			if err := tx.Create(params.FileRevision).Error; err != nil {
 				return err
 			}
 		}
@@ -703,15 +725,20 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 	}
 
 	type documentRow struct {
-		DocumentID   string  `gorm:"column:document_id"`
-		NodeID       string  `gorm:"column:node_id"`
-		ReaderSlug   *string `gorm:"column:reader_slug"`
-		ThemeID      string  `gorm:"column:theme_id"`
-		Title        string  `gorm:"column:title"`
-		ContentMD    string  `gorm:"column:content_md"`
-		Version      int     `gorm:"column:version"`
-		SpaceID      string  `gorm:"column:space_id"`
-		UpdatedAtRaw string  `gorm:"column:updated_at"`
+		DocumentID     string                `gorm:"column:document_id"`
+		NodeID         string                `gorm:"column:node_id"`
+		ReaderSlug     *string               `gorm:"column:reader_slug"`
+		ThemeID        string                `gorm:"column:theme_id"`
+		Format         models.DocumentFormat `gorm:"column:format"`
+		Title          string                `gorm:"column:title"`
+		ContentMD      string                `gorm:"column:content_md"`
+		Version        int                   `gorm:"column:version"`
+		SourceBlobID   *string               `gorm:"column:source_blob_id"`
+		SourceFileName *string               `gorm:"column:source_file_name"`
+		SourceMimeType *string               `gorm:"column:source_mime_type"`
+		ContentVersion int                   `gorm:"column:content_version"`
+		SpaceID        string                `gorm:"column:space_id"`
+		UpdatedAtRaw   string                `gorm:"column:updated_at"`
 	}
 
 	var row documentRow
@@ -722,9 +749,14 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 			"d.node_id",
 			"n.reader_slug",
 			"d.theme_id",
+			"d.format",
 			"d.title",
 			"d.content_md",
 			"d.version",
+			"d.source_blob_id",
+			"d.source_file_name",
+			"d.source_mime_type",
+			"d.content_version",
 			"d.updated_at",
 			"n.space_id AS space_id",
 		).
@@ -735,15 +767,20 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 	}
 
 	return &WorkspaceDocumentRecord{
-		DocumentID:   strings.TrimSpace(row.DocumentID),
-		NodeID:       strings.TrimSpace(row.NodeID),
-		ReaderSlug:   trimOptionalString(row.ReaderSlug),
-		ThemeID:      strings.TrimSpace(row.ThemeID),
-		Title:        strings.TrimSpace(row.Title),
-		ContentMD:    row.ContentMD,
-		Version:      row.Version,
-		SpaceID:      strings.TrimSpace(row.SpaceID),
-		UpdatedAtRaw: row.UpdatedAtRaw,
+		DocumentID:     strings.TrimSpace(row.DocumentID),
+		NodeID:         strings.TrimSpace(row.NodeID),
+		ReaderSlug:     trimOptionalString(row.ReaderSlug),
+		ThemeID:        strings.TrimSpace(row.ThemeID),
+		Format:         models.NormalizeDocumentFormat(row.Format),
+		Title:          strings.TrimSpace(row.Title),
+		ContentMD:      row.ContentMD,
+		Version:        row.Version,
+		SourceBlobID:   trimOptionalString(row.SourceBlobID),
+		SourceFileName: trimOptionalString(row.SourceFileName),
+		SourceMimeType: trimOptionalString(row.SourceMimeType),
+		ContentVersion: normalizeContentVersion(row.ContentVersion, row.Version),
+		SpaceID:        strings.TrimSpace(row.SpaceID),
+		UpdatedAtRaw:   row.UpdatedAtRaw,
 	}, nil
 }
 
@@ -877,6 +914,7 @@ func (r *gormWorkspaceRepository) SaveDocument(
 			Updates(map[string]any{
 				"content_md":         params.ContentMD,
 				"version":            params.NextVersion,
+				"content_version":    params.NextVersion,
 				"updated_by_user_id": actorUserID,
 				"updated_at":         touchedAt,
 			})
@@ -893,6 +931,95 @@ func (r *gormWorkspaceRepository) SaveDocument(
 		}
 		if params.Revision != nil {
 			if err := tx.Create(params.Revision).Error; err != nil {
+				return err
+			}
+		}
+
+		if nodeID != "" {
+			nodeUpdates := map[string]any{
+				"updated_at": touchedAt,
+			}
+			if actorUserID != "" {
+				nodeUpdates["updated_by_user_id"] = actorUserID
+			}
+			if err := tx.Table("nodes").
+				Where("node_id = ?", nodeID).
+				Updates(nodeUpdates).Error; err != nil {
+				return err
+			}
+		}
+		if spaceID != "" {
+			if err := tx.Table("spaces").
+				Where("space_id = ?", spaceID).
+				Update("updated_at", touchedAt).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return saved, nil
+}
+
+func (r *gormWorkspaceRepository) SaveOfficeDocument(
+	ctx context.Context,
+	params WorkspaceSaveOfficeDocumentParams,
+) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("workspace repository db is nil")
+	}
+
+	documentID := strings.TrimSpace(params.DocumentID)
+	sourceBlobID := strings.TrimSpace(params.SourceBlobID)
+	if documentID == "" || sourceBlobID == "" || params.BaseContentVersion <= 0 {
+		return false, nil
+	}
+
+	nextVersion := params.NextVersion
+	if nextVersion <= 0 {
+		nextVersion = params.BaseContentVersion + 1
+	}
+	nextContentVersion := params.NextContentVersion
+	if nextContentVersion <= 0 {
+		nextContentVersion = params.BaseContentVersion + 1
+	}
+	touchedAt := params.TouchedAt
+	if touchedAt.IsZero() {
+		touchedAt = time.Now().UTC()
+	}
+
+	actorUserID := strings.TrimSpace(params.ActorUserID)
+	nodeID := strings.TrimSpace(params.NodeID)
+	spaceID := strings.TrimSpace(params.SpaceID)
+	saved := false
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updateResult := tx.Table("documents").
+			Where("document_id = ? AND content_version = ?", documentID, params.BaseContentVersion).
+			Updates(map[string]any{
+				"version":            nextVersion,
+				"content_version":    nextContentVersion,
+				"source_blob_id":     sourceBlobID,
+				"source_file_name":   trimOptionalString(pointerString(params.SourceFileName)),
+				"source_mime_type":   trimOptionalString(pointerString(params.SourceMimeType)),
+				"updated_by_user_id": trimOptionalString(pointerString(actorUserID)),
+				"updated_at":         touchedAt,
+			})
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+		if updateResult.RowsAffected == 0 {
+			return nil
+		}
+
+		saved = true
+		if err := r.enqueueDocumentUpsertInTx(ctx, tx, documentID); err != nil {
+			return err
+		}
+		if params.FileRevision != nil {
+			if err := tx.Create(params.FileRevision).Error; err != nil {
 				return err
 			}
 		}
@@ -977,6 +1104,10 @@ func (r *gormWorkspaceRepository) ListRevisionsByDocumentID(
 	return revisions, nil
 }
 
+func pointerString(value string) *string {
+	return &value
+}
+
 func (r *gormWorkspaceRepository) enqueueDocumentUpsertInTx(
 	ctx context.Context,
 	tx *gorm.DB,
@@ -1031,6 +1162,25 @@ func trimOptionalString(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func normalizeOptionalDocumentFormat(value *string) *models.DocumentFormat {
+	if value == nil {
+		return nil
+	}
+	normalized := models.NormalizeDocumentFormat(models.DocumentFormat(strings.TrimSpace(*value)))
+	return &normalized
+}
+
+func normalizeContentVersion(contentVersion int, version int) int {
+	switch {
+	case contentVersion > 0:
+		return contentVersion
+	case version > 0:
+		return version
+	default:
+		return 1
+	}
 }
 
 func optionalStringEqual(left *string, right *string) bool {

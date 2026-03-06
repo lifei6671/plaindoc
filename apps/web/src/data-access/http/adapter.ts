@@ -72,6 +72,9 @@ import {
   type LocalizeRemoteImagesInput,
   type LocalizeRemoteImagesResult,
   type MoveNodeInput,
+  type OnlyOfficeClientConfig,
+  type OnlyOfficeEditConfig,
+  type OnlyOfficeGateway,
   type SaveDocumentInput,
   type SaveDocumentResult,
   type Space,
@@ -799,6 +802,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       const documentIdentifier =
         typeof input.documentIdentifier === "string" ? input.documentIdentifier.trim() : "";
       const templateID = typeof input.templateId === "string" ? input.templateId.trim() : "";
+      const documentFormat = typeof input.format === "string" ? input.format.trim() : "";
       return request<CreateNodeResult>(`/spaces/${input.spaceId}/nodes`, {
         method: "POST",
         body: JSON.stringify({
@@ -806,7 +810,8 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
           type: input.type,
           title: input.title,
           documentIdentifier: documentIdentifier || undefined,
-          templateId: templateID || undefined
+          templateId: templateID || undefined,
+          format: documentFormat || undefined
         })
       });
     },
@@ -841,6 +846,13 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         method: "PUT",
         body: JSON.stringify(input)
       });
+    },
+    async getOnlyOfficeEditConfig(docId: string) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      return request<OnlyOfficeEditConfig>(`/docs/${encodeURIComponent(documentID)}/onlyoffice/edit-config`);
     },
     async updateDocumentIdentifier(docId: string, identifier: string | null) {
       const documentID = docId.trim();
@@ -2189,6 +2201,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
         | "search"
         | "auth"
         | "email"
+        | "onlyoffice"
         | "image-hosting"
         | "sitemap"
         | "data-retention";
@@ -2546,6 +2559,12 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     }
   };
 
+  const onlyOffice: OnlyOfficeGateway = {
+    async getConfig() {
+      return request<OnlyOfficeClientConfig>("/onlyoffice");
+    }
+  };
+
   // 远端驱动下仍复用本地 user_config：用于保存本机偏好配置。
   const userConfig = createIndexedDbUserConfigGateway();
 
@@ -2557,6 +2576,7 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     theme,
     admin,
     imageHosting,
+    onlyOffice,
     userConfig
   };
 }

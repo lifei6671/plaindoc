@@ -48,8 +48,11 @@ type workspaceHandler struct {
 	authService                *service.AuthService
 	visibilityService          *service.VisibilityService
 	imageHostingService        *service.ImageHostingService
+	onlyOfficeConfigService    *service.OnlyOfficeConfigService
+	onlyOfficeTokenService     *service.OnlyOfficeDocumentTokenService
 	attachmentTokenService     *service.DocumentAttachmentDownloadTokenService
 	localImageRootDir          string
+	onlyOfficeHTTPClient       *http.Client
 	remoteImageHTTPClient      *http.Client
 	remoteImageFailureCooldown time.Duration
 	remoteImageFailureMu       sync.Mutex
@@ -69,6 +72,7 @@ type workspaceTreeNodeResponse struct {
 	DocumentID         *string                     `json:"documentId,omitempty"`
 	DocumentIdentifier *string                     `json:"documentIdentifier,omitempty"`
 	DocumentRouteKey   *string                     `json:"documentRouteKey,omitempty"`
+	DocumentFormat     *models.DocumentFormat      `json:"documentFormat,omitempty"`
 	SpaceID            string                      `json:"spaceId"`
 	ParentID           *string                     `json:"parentId"`
 	Type               models.NodeType             `json:"type"`
@@ -79,13 +83,18 @@ type workspaceTreeNodeResponse struct {
 }
 
 type workspaceDocumentResponse struct {
-	ID        string `json:"id"`
-	NodeID    string `json:"nodeId"`
-	ThemeID   string `json:"themeId"`
-	Title     string `json:"title"`
-	ContentMD string `json:"contentMd"`
-	Version   int    `json:"version"`
-	UpdatedAt string `json:"updatedAt"`
+	ID             string                `json:"id"`
+	NodeID         string                `json:"nodeId"`
+	ThemeID        string                `json:"themeId"`
+	Format         models.DocumentFormat `json:"format"`
+	Title          string                `json:"title"`
+	ContentMD      string                `json:"contentMd"`
+	Version        int                   `json:"version"`
+	SourceBlobID   *string               `json:"sourceBlobId,omitempty"`
+	SourceFileName *string               `json:"sourceFileName,omitempty"`
+	SourceMimeType *string               `json:"sourceMimeType,omitempty"`
+	ContentVersion int                   `json:"contentVersion"`
+	UpdatedAt      string                `json:"updatedAt"`
 }
 
 type workspaceRevisionResponse struct {
@@ -99,14 +108,19 @@ type workspaceRevisionResponse struct {
 }
 
 type workspaceDocumentRow struct {
-	DocumentID   string `gorm:"column:document_id"`
-	NodeID       string `gorm:"column:node_id"`
-	ThemeID      string `gorm:"column:theme_id"`
-	Title        string `gorm:"column:title"`
-	ContentMD    string `gorm:"column:content_md"`
-	Version      int    `gorm:"column:version"`
-	SpaceID      string `gorm:"column:space_id"`
-	UpdatedAtRaw string `gorm:"column:updated_at"`
+	DocumentID     string                `gorm:"column:document_id"`
+	NodeID         string                `gorm:"column:node_id"`
+	ThemeID        string                `gorm:"column:theme_id"`
+	Format         models.DocumentFormat `gorm:"column:format"`
+	Title          string                `gorm:"column:title"`
+	ContentMD      string                `gorm:"column:content_md"`
+	Version        int                   `gorm:"column:version"`
+	SourceBlobID   *string               `gorm:"column:source_blob_id"`
+	SourceFileName *string               `gorm:"column:source_file_name"`
+	SourceMimeType *string               `gorm:"column:source_mime_type"`
+	ContentVersion int                   `gorm:"column:content_version"`
+	SpaceID        string                `gorm:"column:space_id"`
+	UpdatedAtRaw   string                `gorm:"column:updated_at"`
 }
 
 type createWorkspaceSpaceRequest struct {
@@ -114,11 +128,12 @@ type createWorkspaceSpaceRequest struct {
 }
 
 type createWorkspaceNodeRequest struct {
-	ParentID           *string         `json:"parentId"`
-	Type               models.NodeType `json:"type" binding:"required"`
-	Title              string          `json:"title" binding:"required"`
-	DocumentIdentifier *string         `json:"documentIdentifier"`
-	TemplateID         *string         `json:"templateId"`
+	ParentID           *string                `json:"parentId"`
+	Type               models.NodeType        `json:"type" binding:"required"`
+	Title              string                 `json:"title" binding:"required"`
+	DocumentIdentifier *string                `json:"documentIdentifier"`
+	TemplateID         *string                `json:"templateId"`
+	Format             *models.DocumentFormat `json:"format"`
 }
 
 type createWorkspaceNodeResponse struct {
@@ -169,6 +184,7 @@ type workspaceTreeNode struct {
 	DocumentID         *string
 	DocumentIdentifier *string
 	DocumentRouteKey   *string
+	DocumentFormat     *models.DocumentFormat
 	SpaceID            string
 	ParentID           *string
 	Type               models.NodeType
@@ -188,6 +204,8 @@ func NewWorkspaceHandler(
 	authService *service.AuthService,
 	visibilityService *service.VisibilityService,
 	imageHostingService *service.ImageHostingService,
+	onlyOfficeConfigService *service.OnlyOfficeConfigService,
+	onlyOfficeTokenService *service.OnlyOfficeDocumentTokenService,
 	attachmentTokenService *service.DocumentAttachmentDownloadTokenService,
 	renderCache *rendercache.Cache,
 	searchIndexServices ...*service.SearchIndexService,
@@ -207,8 +225,13 @@ func NewWorkspaceHandler(
 		authService:               authService,
 		visibilityService:         visibilityService,
 		imageHostingService:       imageHostingService,
+		onlyOfficeConfigService:   onlyOfficeConfigService,
+		onlyOfficeTokenService:    onlyOfficeTokenService,
 		attachmentTokenService:    attachmentTokenService,
 		localImageRootDir:         defaultLocalImageStorageRoot,
+		onlyOfficeHTTPClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
 		remoteImageHTTPClient: &http.Client{
 			Timeout: 12 * time.Second,
 		},
@@ -360,11 +383,13 @@ func (h *workspaceHandler) GetTree(c *gin.Context) {
 		documentIdentifier := normalizeOptionalString(row.ReaderSlug)
 		documentRouteKey := resolveWorkspaceDocumentRouteKey(documentID, documentIdentifier)
 		documentVisibility := normalizeWorkspaceDocumentVisibility(row.Type, row.DocumentVisibility)
+		documentFormat := normalizeWorkspaceTreeDocumentFormat(row.Type, row.DocumentFormat)
 		treeNodes[nodeID] = &workspaceTreeNode{
 			ID:                 nodeID,
 			DocumentID:         documentID,
 			DocumentIdentifier: documentIdentifier,
 			DocumentRouteKey:   documentRouteKey,
+			DocumentFormat:     documentFormat,
 			SpaceID:            strings.TrimSpace(row.SpaceID),
 			ParentID:           normalizeOptionalString(row.ParentNodeID),
 			Type:               normalizeWorkspaceNodeType(row.Type),
@@ -438,6 +463,36 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 		return
 	}
 
+	documentFormat, err := resolveCreateNodeDocumentFormat(req.Format)
+	if err != nil {
+		if errors.Is(err, errWorkspaceDocumentFormatInvalid) {
+			response.WorkspaceErrDocumentFormatInvalid.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if req.Type != models.NodeTypeDoc && req.Format != nil {
+		response.WorkspaceErrCreateNodeRequest.Write(c)
+		return
+	}
+	if req.Type == models.NodeTypeDoc && documentFormat != models.DocumentFormatMarkdown {
+		if h.onlyOfficeConfigService == nil {
+			response.WorkspaceErrOnlyOfficeDisabled.Write(c)
+			return
+		}
+		onlyOfficeConfig, err := h.onlyOfficeConfigService.GetConfig(c.Request.Context())
+		if err != nil {
+			setRequestErrmsg(c, err, "读取 ONLYOFFICE 配置失败")
+			response.InternalError(c)
+			return
+		}
+		if !onlyOfficeConfig.Enabled {
+			response.WorkspaceErrOnlyOfficeDisabled.Write(c)
+			return
+		}
+	}
+
 	templateID := ""
 	if req.TemplateID != nil {
 		templateID = strings.TrimSpace(*req.TemplateID)
@@ -449,6 +504,10 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 
 	var selectedTemplate *service.DocumentTemplateDetail
 	if req.Type == models.NodeTypeDoc && templateID != "" {
+		if documentFormat != models.DocumentFormatMarkdown {
+			response.WorkspaceErrCreateNodeRequest.Write(c)
+			return
+		}
 		if h.documentTemplateService == nil {
 			response.InternalError(c)
 			return
@@ -545,6 +604,7 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 
 	var doc *models.Document
 	var revision *models.DocumentRevision
+	var fileRevision *models.DocumentFileRevision
 	if req.Type == models.NodeTypeDoc {
 		initialContent := ""
 		if selectedTemplate != nil {
@@ -558,32 +618,68 @@ func (h *workspaceHandler) CreateNode(c *gin.Context) {
 			Visibility:      defaultDocumentVisibility,
 			Status:          models.EntityStatusActive,
 			Title:           title,
+			Format:          documentFormat,
 			ContentMD:       initialContent,
 			Version:         1,
+			ContentVersion:  1,
 			CreatedByUserID: &actorUserID,
 			UpdatedByUserID: &actorUserID,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		revision = &models.DocumentRevision{
-			DocumentRevisionID: strings.ToLower(ulid.Make().String()),
-			DocumentID:         documentID,
-			Version:            1,
-			ContentMD:          initialContent,
-			BaseVersion:        0,
-			EditorUserID:       &actorUserID,
-			Source:             models.RevisionSourceRemote,
-			CreatedAt:          now,
+		if documentFormat == models.DocumentFormatMarkdown {
+			revision = &models.DocumentRevision{
+				DocumentRevisionID: strings.ToLower(ulid.Make().String()),
+				DocumentID:         documentID,
+				Version:            1,
+				ContentMD:          initialContent,
+				BaseVersion:        0,
+				EditorUserID:       &actorUserID,
+				Source:             models.RevisionSourceRemote,
+				CreatedAt:          now,
+			}
+		} else {
+			sourceBlob, sourceFileName, sourceMimeType, bootstrapErr := h.bootstrapOfficeDocumentSource(
+				c.Request.Context(),
+				spaceID,
+				documentID,
+				actorUserID,
+				title,
+				documentFormat,
+				now,
+			)
+			if bootstrapErr != nil {
+				setRequestErrmsg(c, bootstrapErr, "初始化 Office 文档模板失败")
+				response.InternalError(c)
+				return
+			}
+			doc.ContentMD = ""
+			doc.SourceBlobID = &sourceBlob.BlobID
+			doc.SourceFileName = &sourceFileName
+			doc.SourceMimeType = &sourceMimeType
+			fileRevision = &models.DocumentFileRevision{
+				DocumentFileRevisionID: strings.ToLower(ulid.Make().String()),
+				DocumentID:             documentID,
+				BlobID:                 sourceBlob.BlobID,
+				FileName:               sourceFileName,
+				MimeType:               sourceMimeType,
+				Version:                1,
+				BaseVersion:            0,
+				EditorUserID:           &actorUserID,
+				Source:                 models.RevisionSourceRemote,
+				CreatedAt:              now,
+			}
 		}
 		responseBody.DocID = documentID
 	}
 
 	if err := h.workspaceRepo.CreateNode(c.Request.Context(), repository.WorkspaceCreateNodeParams{
-		Node:       node,
-		Document:   doc,
-		Revision:   revision,
-		TouchSpace: spaceID,
-		TouchedAt:  now,
+		Node:         node,
+		Document:     doc,
+		Revision:     revision,
+		FileRevision: fileRevision,
+		TouchSpace:   spaceID,
+		TouchedAt:    now,
 	}); err != nil {
 		setRequestErrmsg(c, err, "创建目录节点失败")
 		if isWorkspaceUniqueConstraintError(err) && readerSlug != nil {
@@ -898,14 +994,19 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 		return
 	}
 	current := workspaceDocumentRow{
-		DocumentID:   currentRecord.DocumentID,
-		NodeID:       currentRecord.NodeID,
-		ThemeID:      currentRecord.ThemeID,
-		Title:        currentRecord.Title,
-		ContentMD:    currentRecord.ContentMD,
-		Version:      currentRecord.Version,
-		SpaceID:      currentRecord.SpaceID,
-		UpdatedAtRaw: currentRecord.UpdatedAtRaw,
+		DocumentID:     currentRecord.DocumentID,
+		NodeID:         currentRecord.NodeID,
+		ThemeID:        currentRecord.ThemeID,
+		Format:         currentRecord.Format,
+		Title:          currentRecord.Title,
+		ContentMD:      currentRecord.ContentMD,
+		Version:        currentRecord.Version,
+		SourceBlobID:   currentRecord.SourceBlobID,
+		SourceFileName: currentRecord.SourceFileName,
+		SourceMimeType: currentRecord.SourceMimeType,
+		ContentVersion: currentRecord.ContentVersion,
+		SpaceID:        currentRecord.SpaceID,
+		UpdatedAtRaw:   currentRecord.UpdatedAtRaw,
 	}
 
 	spaceID := strings.TrimSpace(current.SpaceID)
@@ -923,6 +1024,10 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 
 	if current.Version != req.BaseVersion {
 		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(current))
+		return
+	}
+	if current.Format != models.DocumentFormatMarkdown {
+		response.WorkspaceErrMarkdownOnlyOperation.Write(c)
 		return
 	}
 
@@ -960,14 +1065,19 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 			return
 		}
 		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(workspaceDocumentRow{
-			DocumentID:   latestRecord.DocumentID,
-			NodeID:       latestRecord.NodeID,
-			ThemeID:      latestRecord.ThemeID,
-			Title:        latestRecord.Title,
-			ContentMD:    latestRecord.ContentMD,
-			Version:      latestRecord.Version,
-			SpaceID:      latestRecord.SpaceID,
-			UpdatedAtRaw: latestRecord.UpdatedAtRaw,
+			DocumentID:     latestRecord.DocumentID,
+			NodeID:         latestRecord.NodeID,
+			ThemeID:        latestRecord.ThemeID,
+			Format:         latestRecord.Format,
+			Title:          latestRecord.Title,
+			ContentMD:      latestRecord.ContentMD,
+			Version:        latestRecord.Version,
+			SourceBlobID:   latestRecord.SourceBlobID,
+			SourceFileName: latestRecord.SourceFileName,
+			SourceMimeType: latestRecord.SourceMimeType,
+			ContentVersion: latestRecord.ContentVersion,
+			SpaceID:        latestRecord.SpaceID,
+			UpdatedAtRaw:   latestRecord.UpdatedAtRaw,
 		}))
 		return
 	}
@@ -979,6 +1089,7 @@ func (h *workspaceHandler) SaveDocument(c *gin.Context) {
 
 	current.ContentMD = req.ContentMD
 	current.Version = nextVersion
+	current.ContentVersion = nextVersion
 	current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
 
 	if h != nil && h.documentImageAssetService != nil {
@@ -1138,6 +1249,10 @@ func (h *workspaceHandler) LocalizeDocumentRemoteImages(c *gin.Context) {
 		}
 		return
 	}
+	if currentRecord.Format != models.DocumentFormatMarkdown {
+		response.WorkspaceErrMarkdownOnlyOperation.Write(c)
+		return
+	}
 
 	localizedURLs := h.localizeRemoteImageURLs(c.Request.Context(), documentID, req.ImageURLs)
 	if len(localizedURLs) == 0 {
@@ -1210,28 +1325,35 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 	response.JSON(c, http.StatusOK, revisions)
 }
 
-func (h *workspaceHandler) requireActorUserID(c *gin.Context) (string, bool) {
+func (h *workspaceHandler) requireActorSession(c *gin.Context) (service.AuthSession, bool) {
 	if h == nil || h.authService == nil {
 		response.InternalError(c)
-		return "", false
+		return service.AuthSession{}, false
 	}
 	accessToken, ok := bearerTokenFromRequest(c)
 	if !ok {
 		response.WorkspaceErrAuthorizationTokenRequired.Write(c)
-		return "", false
+		return service.AuthSession{}, false
 	}
 
 	session, err := h.authService.Me(c.Request.Context(), accessToken)
 	if err != nil {
 		response.WorkspaceErrAccessToken.Write(c)
-		return "", false
+		return service.AuthSession{}, false
 	}
-	actorUserID := strings.TrimSpace(session.User.ID)
-	if actorUserID == "" {
+	if strings.TrimSpace(session.User.ID) == "" {
 		response.WorkspaceErrAccessToken.Write(c)
+		return service.AuthSession{}, false
+	}
+	return session, true
+}
+
+func (h *workspaceHandler) requireActorUserID(c *gin.Context) (string, bool) {
+	session, ok := h.requireActorSession(c)
+	if !ok {
 		return "", false
 	}
-	return actorUserID, true
+	return strings.TrimSpace(session.User.ID), true
 }
 
 func (h *workspaceHandler) ensureSpaceReadable(ctx context.Context, spaceID string, userID string) error {
@@ -1334,6 +1456,7 @@ func mapWorkspaceTreeResponses(nodes []*workspaceTreeNode) []workspaceTreeNodeRe
 			DocumentID:         node.DocumentID,
 			DocumentIdentifier: node.DocumentIdentifier,
 			DocumentRouteKey:   node.DocumentRouteKey,
+			DocumentFormat:     node.DocumentFormat,
 			SpaceID:            node.SpaceID,
 			ParentID:           node.ParentID,
 			Type:               normalizeWorkspaceNodeType(node.Type),
@@ -1348,13 +1471,18 @@ func mapWorkspaceTreeResponses(nodes []*workspaceTreeNode) []workspaceTreeNodeRe
 
 func mapWorkspaceDocumentResponse(row workspaceDocumentRow) workspaceDocumentResponse {
 	return workspaceDocumentResponse{
-		ID:        strings.TrimSpace(row.DocumentID),
-		NodeID:    strings.TrimSpace(row.NodeID),
-		ThemeID:   strings.TrimSpace(row.ThemeID),
-		Title:     strings.TrimSpace(row.Title),
-		ContentMD: row.ContentMD,
-		Version:   row.Version,
-		UpdatedAt: formatWorkspaceTime(row.UpdatedAtRaw),
+		ID:             strings.TrimSpace(row.DocumentID),
+		NodeID:         strings.TrimSpace(row.NodeID),
+		ThemeID:        strings.TrimSpace(row.ThemeID),
+		Format:         models.NormalizeDocumentFormat(row.Format),
+		Title:          strings.TrimSpace(row.Title),
+		ContentMD:      row.ContentMD,
+		Version:        row.Version,
+		SourceBlobID:   normalizeOptionalString(row.SourceBlobID),
+		SourceFileName: normalizeOptionalString(row.SourceFileName),
+		SourceMimeType: normalizeOptionalString(row.SourceMimeType),
+		ContentVersion: normalizeWorkspaceContentVersion(row.ContentVersion, row.Version),
+		UpdatedAt:      formatWorkspaceTime(row.UpdatedAtRaw),
 	}
 }
 
@@ -1461,6 +1589,32 @@ func normalizeWorkspaceDocumentVisibility(
 		visibility = models.VisibilityMember
 	}
 	return &visibility
+}
+
+func normalizeWorkspaceTreeDocumentFormat(
+	nodeType models.NodeType,
+	rawFormat *models.DocumentFormat,
+) *models.DocumentFormat {
+	if normalizeWorkspaceNodeType(nodeType) != models.NodeTypeDoc {
+		return nil
+	}
+	if rawFormat == nil {
+		format := models.DocumentFormatMarkdown
+		return &format
+	}
+	format := models.NormalizeDocumentFormat(*rawFormat)
+	return &format
+}
+
+func normalizeWorkspaceContentVersion(contentVersion int, version int) int {
+	switch {
+	case contentVersion > 0:
+		return contentVersion
+	case version > 0:
+		return version
+	default:
+		return 1
+	}
 }
 
 func normalizeWorkspaceNodeType(value models.NodeType) models.NodeType {

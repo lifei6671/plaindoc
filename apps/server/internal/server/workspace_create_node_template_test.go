@@ -70,12 +70,14 @@ func TestRouter_CreateNode_WithTemplateInitializesDocumentAndRevision(t *testing
 	}
 
 	var persistedDoc struct {
-		Title     string `gorm:"column:title"`
-		ContentMD string `gorm:"column:content_md"`
-		Version   int    `gorm:"column:version"`
+		Title          string `gorm:"column:title"`
+		Format         string `gorm:"column:format"`
+		ContentMD      string `gorm:"column:content_md"`
+		Version        int    `gorm:"column:version"`
+		ContentVersion int    `gorm:"column:content_version"`
 	}
 	if err := database.ORM.Table("documents").
-		Select("title", "content_md", "version").
+		Select("title", "format", "content_md", "version", "content_version").
 		Where("document_id = ?", payload.DocID).
 		Take(&persistedDoc).Error; err != nil {
 		t.Fatalf("query created document failed: %v", err)
@@ -88,6 +90,12 @@ func TestRouter_CreateNode_WithTemplateInitializesDocumentAndRevision(t *testing
 	}
 	if persistedDoc.Version != 1 {
 		t.Fatalf("expected created document version 1, got %d", persistedDoc.Version)
+	}
+	if persistedDoc.Format != "markdown" {
+		t.Fatalf("expected created document format markdown, got %q", persistedDoc.Format)
+	}
+	if persistedDoc.ContentVersion != 1 {
+		t.Fatalf("expected created document content version 1, got %d", persistedDoc.ContentVersion)
 	}
 
 	var persistedRevision struct {

@@ -332,10 +332,15 @@ type ReaderPageDocumentRecord struct {
 	NodeID         string
 	ReaderSlug     *string
 	ThemeID        string
+	Format         models.DocumentFormat
 	Visibility     string
 	Title          string
 	ContentMD      string
 	Version        int
+	SourceBlobID   *string
+	SourceFileName *string
+	SourceMimeType *string
+	ContentVersion int
 	AuthorNickname string
 	UpdatedAt      time.Time
 	SpaceID        string
@@ -351,6 +356,7 @@ type ReaderPageTreeNodeRecord struct {
 	Title              string
 	Sort               int
 	DocumentVisibility *string
+	DocumentFormat     *models.DocumentFormat
 }
 
 // ReaderPageRepository 阅读页数据仓储接口。
@@ -514,6 +520,7 @@ type WorkspaceTreeNodeRecord struct {
 	Title              string
 	Sort               int
 	DocumentVisibility *string
+	DocumentFormat     *models.DocumentFormat
 }
 
 // WorkspaceNodeRecord 工作区节点记录。
@@ -529,15 +536,20 @@ type WorkspaceNodeRecord struct {
 
 // WorkspaceDocumentRecord 工作区文档记录。
 type WorkspaceDocumentRecord struct {
-	DocumentID   string
-	NodeID       string
-	ReaderSlug   *string
-	ThemeID      string
-	Title        string
-	ContentMD    string
-	Version      int
-	SpaceID      string
-	UpdatedAtRaw string
+	DocumentID     string
+	NodeID         string
+	ReaderSlug     *string
+	ThemeID        string
+	Format         models.DocumentFormat
+	Title          string
+	ContentMD      string
+	Version        int
+	SourceBlobID   *string
+	SourceFileName *string
+	SourceMimeType *string
+	ContentVersion int
+	SpaceID        string
+	UpdatedAtRaw   string
 }
 
 // WorkspaceRevisionRecord 工作区文档修订记录。
@@ -553,11 +565,12 @@ type WorkspaceRevisionRecord struct {
 
 // WorkspaceCreateNodeParams 工作区创建节点参数。
 type WorkspaceCreateNodeParams struct {
-	Node       *models.Node
-	Document   *models.Document
-	Revision   *models.DocumentRevision
-	TouchSpace string
-	TouchedAt  time.Time
+	Node         *models.Node
+	Document     *models.Document
+	Revision     *models.DocumentRevision
+	FileRevision *models.DocumentFileRevision
+	TouchSpace   string
+	TouchedAt    time.Time
 }
 
 // WorkspaceUpdateNodeParams 工作区更新节点参数。
@@ -581,6 +594,22 @@ type WorkspaceSaveDocumentParams struct {
 	SpaceID     string
 	TouchedAt   time.Time
 	Revision    *models.DocumentRevision
+}
+
+// WorkspaceSaveOfficeDocumentParams 工作区保存 Office 文档参数。
+type WorkspaceSaveOfficeDocumentParams struct {
+	DocumentID         string
+	BaseContentVersion int
+	NextVersion        int
+	NextContentVersion int
+	SourceBlobID       string
+	SourceFileName     string
+	SourceMimeType     string
+	ActorUserID        string
+	NodeID             string
+	SpaceID            string
+	TouchedAt          time.Time
+	FileRevision       *models.DocumentFileRevision
 }
 
 // WorkspaceMoveNodeParams 工作区节点移动参数（支持同级重排与跨父级移动）。
@@ -622,6 +651,7 @@ type WorkspaceRepository interface {
 	GetDocumentByDocumentID(ctx context.Context, documentID string) (*WorkspaceDocumentRecord, error)
 	UpdateDocumentIdentifier(ctx context.Context, params WorkspaceUpdateDocumentIdentifierParams) (bool, error)
 	SaveDocument(ctx context.Context, params WorkspaceSaveDocumentParams) (bool, error)
+	SaveOfficeDocument(ctx context.Context, params WorkspaceSaveOfficeDocumentParams) (bool, error)
 	ListRevisionsByDocumentID(ctx context.Context, documentID string) ([]WorkspaceRevisionRecord, error)
 }
 

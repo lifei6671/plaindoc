@@ -16,28 +16,33 @@ type gormDocumentRepository struct {
 }
 
 type documentAccessRow struct {
-	ID                int64               `gorm:"column:id"`
-	DocumentID        string              `gorm:"column:document_id"`
-	NodeID            string              `gorm:"column:node_id"`
-	ThemeID           string              `gorm:"column:theme_id"`
-	DocumentVis       models.Visibility   `gorm:"column:document_visibility"`
-	DocumentStatus    models.EntityStatus `gorm:"column:document_status"`
-	DocumentBanReason string              `gorm:"column:document_banned_reason"`
-	DocumentBannedAt  *time.Time          `gorm:"column:document_banned_at"`
-	DocumentDeletedAt *time.Time          `gorm:"column:document_deleted_at"`
-	Title             string              `gorm:"column:title"`
-	ContentMD         string              `gorm:"column:content_md"`
-	Version           int                 `gorm:"column:version"`
-	CreatedByUserID   *string             `gorm:"column:created_by_user_id"`
-	UpdatedByUserID   *string             `gorm:"column:updated_by_user_id"`
-	SpaceID           string              `gorm:"column:space_id"`
-	SpaceName         string              `gorm:"column:space_name"`
-	SpaceVis          models.Visibility   `gorm:"column:space_visibility"`
-	SpaceStatus       models.EntityStatus `gorm:"column:space_status"`
-	SpaceBanReason    string              `gorm:"column:space_banned_reason"`
-	SpaceBannedAt     *time.Time          `gorm:"column:space_banned_at"`
-	SpaceDeletedAt    *time.Time          `gorm:"column:space_deleted_at"`
-	SpaceOwnerUser    string              `gorm:"column:space_owner_user_id"`
+	ID                int64                 `gorm:"column:id"`
+	DocumentID        string                `gorm:"column:document_id"`
+	NodeID            string                `gorm:"column:node_id"`
+	ThemeID           string                `gorm:"column:theme_id"`
+	Format            models.DocumentFormat `gorm:"column:format"`
+	DocumentVis       models.Visibility     `gorm:"column:document_visibility"`
+	DocumentStatus    models.EntityStatus   `gorm:"column:document_status"`
+	DocumentBanReason string                `gorm:"column:document_banned_reason"`
+	DocumentBannedAt  *time.Time            `gorm:"column:document_banned_at"`
+	DocumentDeletedAt *time.Time            `gorm:"column:document_deleted_at"`
+	Title             string                `gorm:"column:title"`
+	ContentMD         string                `gorm:"column:content_md"`
+	Version           int                   `gorm:"column:version"`
+	SourceBlobID      *string               `gorm:"column:source_blob_id"`
+	SourceFileName    *string               `gorm:"column:source_file_name"`
+	SourceMimeType    *string               `gorm:"column:source_mime_type"`
+	ContentVersion    int                   `gorm:"column:content_version"`
+	CreatedByUserID   *string               `gorm:"column:created_by_user_id"`
+	UpdatedByUserID   *string               `gorm:"column:updated_by_user_id"`
+	SpaceID           string                `gorm:"column:space_id"`
+	SpaceName         string                `gorm:"column:space_name"`
+	SpaceVis          models.Visibility     `gorm:"column:space_visibility"`
+	SpaceStatus       models.EntityStatus   `gorm:"column:space_status"`
+	SpaceBanReason    string                `gorm:"column:space_banned_reason"`
+	SpaceBannedAt     *time.Time            `gorm:"column:space_banned_at"`
+	SpaceDeletedAt    *time.Time            `gorm:"column:space_deleted_at"`
+	SpaceOwnerUser    string                `gorm:"column:space_owner_user_id"`
 }
 
 // NewGormDocumentRepository 创建基于 GORM 的文档仓储实现。
@@ -66,6 +71,16 @@ func (r *gormDocumentRepository) Create(ctx context.Context, document *models.Do
 		if !models.IsValidEntityStatus(document.Status) {
 			document.Status = models.EntityStatusActive
 		}
+		document.Format = models.NormalizeDocumentFormat(document.Format)
+		document.ContentVersion = normalizeContentVersion(document.ContentVersion, document.Version)
+		document.SourceBlobID = trimOptionalString(document.SourceBlobID)
+		document.SourceFileName = trimOptionalString(document.SourceFileName)
+		document.SourceMimeType = trimOptionalString(document.SourceMimeType)
+		if document.Format == models.DocumentFormatMarkdown {
+			document.SourceBlobID = nil
+			document.SourceFileName = nil
+			document.SourceMimeType = nil
+		}
 	}
 	return r.db.WithContext(ctx).Create(document).Error
 }
@@ -82,6 +97,7 @@ func (r *gormDocumentRepository) GetByDocumentID(ctx context.Context, documentID
 			"document_id",
 			"node_id",
 			"theme_id",
+			"format",
 			"visibility",
 			"status",
 			"banned_reason",
@@ -90,6 +106,10 @@ func (r *gormDocumentRepository) GetByDocumentID(ctx context.Context, documentID
 			"title",
 			"content_md",
 			"version",
+			"source_blob_id",
+			"source_file_name",
+			"source_mime_type",
+			"content_version",
 			"created_by_user_id",
 			"updated_by_user_id",
 		).
@@ -103,6 +123,11 @@ func (r *gormDocumentRepository) GetByDocumentID(ctx context.Context, documentID
 	if !models.IsValidEntityStatus(document.Status) {
 		document.Status = models.EntityStatusActive
 	}
+	document.Format = models.NormalizeDocumentFormat(document.Format)
+	document.ContentVersion = normalizeContentVersion(document.ContentVersion, document.Version)
+	document.SourceBlobID = trimOptionalString(document.SourceBlobID)
+	document.SourceFileName = trimOptionalString(document.SourceFileName)
+	document.SourceMimeType = trimOptionalString(document.SourceMimeType)
 	return &document, nil
 }
 
@@ -122,6 +147,7 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			"d.document_id AS document_id",
 			"d.node_id AS node_id",
 			"d.theme_id AS theme_id",
+			"d.format AS format",
 			"d.visibility AS document_visibility",
 			"d.status AS document_status",
 			"d.banned_reason AS document_banned_reason",
@@ -130,6 +156,10 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			"d.title AS title",
 			"d.content_md AS content_md",
 			"d.version AS version",
+			"d.source_blob_id AS source_blob_id",
+			"d.source_file_name AS source_file_name",
+			"d.source_mime_type AS source_mime_type",
+			"d.content_version AS content_version",
 			"d.created_by_user_id AS created_by_user_id",
 			"d.updated_by_user_id AS updated_by_user_id",
 			"s.space_id AS space_id",
@@ -167,6 +197,7 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			DocumentID:      row.DocumentID,
 			NodeID:          row.NodeID,
 			ThemeID:         row.ThemeID,
+			Format:          models.NormalizeDocumentFormat(row.Format),
 			Visibility:      row.DocumentVis,
 			Status:          row.DocumentStatus,
 			BannedReason:    row.DocumentBanReason,
@@ -175,6 +206,10 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 			Title:           row.Title,
 			ContentMD:       row.ContentMD,
 			Version:         row.Version,
+			SourceBlobID:    trimOptionalString(row.SourceBlobID),
+			SourceFileName:  trimOptionalString(row.SourceFileName),
+			SourceMimeType:  trimOptionalString(row.SourceMimeType),
+			ContentVersion:  normalizeContentVersion(row.ContentVersion, row.Version),
 			CreatedByUserID: row.CreatedByUserID,
 			UpdatedByUserID: row.UpdatedByUserID,
 		},
@@ -258,28 +293,33 @@ func (r *gormDocumentRepository) ListForAdmin(
 	}
 
 	type adminDocumentListRow struct {
-		ID              int64               `gorm:"column:id"`
-		DocumentID      string              `gorm:"column:document_id"`
-		NodeID          string              `gorm:"column:node_id"`
-		ReaderSlug      *string             `gorm:"column:reader_slug"`
-		ThemeID         string              `gorm:"column:theme_id"`
-		Visibility      models.Visibility   `gorm:"column:visibility"`
-		Status          models.EntityStatus `gorm:"column:status"`
-		BannedReason    string              `gorm:"column:banned_reason"`
-		BannedAt        *time.Time          `gorm:"column:banned_at"`
-		DeletedAt       *time.Time          `gorm:"column:deleted_at"`
-		Title           string              `gorm:"column:title"`
-		ContentMD       string              `gorm:"column:content_md"`
-		Version         int                 `gorm:"column:version"`
-		CreatedByUserID *string             `gorm:"column:created_by_user_id"`
-		UpdatedByUserID *string             `gorm:"column:updated_by_user_id"`
-		CreatedAtRaw    string              `gorm:"column:created_at"`
-		UpdatedAtRaw    string              `gorm:"column:updated_at"`
-		SpaceID         string              `gorm:"column:space_id"`
-		SpaceName       string              `gorm:"column:space_name"`
-		SpaceOwnerID    string              `gorm:"column:space_owner_user_id"`
-		SpaceOwnerName  string              `gorm:"column:space_owner_name"`
-		SpaceOwnerEmail string              `gorm:"column:space_owner_email"`
+		ID              int64                 `gorm:"column:id"`
+		DocumentID      string                `gorm:"column:document_id"`
+		NodeID          string                `gorm:"column:node_id"`
+		ReaderSlug      *string               `gorm:"column:reader_slug"`
+		ThemeID         string                `gorm:"column:theme_id"`
+		Format          models.DocumentFormat `gorm:"column:format"`
+		Visibility      models.Visibility     `gorm:"column:visibility"`
+		Status          models.EntityStatus   `gorm:"column:status"`
+		BannedReason    string                `gorm:"column:banned_reason"`
+		BannedAt        *time.Time            `gorm:"column:banned_at"`
+		DeletedAt       *time.Time            `gorm:"column:deleted_at"`
+		Title           string                `gorm:"column:title"`
+		ContentMD       string                `gorm:"column:content_md"`
+		Version         int                   `gorm:"column:version"`
+		SourceBlobID    *string               `gorm:"column:source_blob_id"`
+		SourceFileName  *string               `gorm:"column:source_file_name"`
+		SourceMimeType  *string               `gorm:"column:source_mime_type"`
+		ContentVersion  int                   `gorm:"column:content_version"`
+		CreatedByUserID *string               `gorm:"column:created_by_user_id"`
+		UpdatedByUserID *string               `gorm:"column:updated_by_user_id"`
+		CreatedAtRaw    string                `gorm:"column:created_at"`
+		UpdatedAtRaw    string                `gorm:"column:updated_at"`
+		SpaceID         string                `gorm:"column:space_id"`
+		SpaceName       string                `gorm:"column:space_name"`
+		SpaceOwnerID    string                `gorm:"column:space_owner_user_id"`
+		SpaceOwnerName  string                `gorm:"column:space_owner_name"`
+		SpaceOwnerEmail string                `gorm:"column:space_owner_email"`
 	}
 
 	var rows []adminDocumentListRow
@@ -290,6 +330,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 			"d.node_id",
 			"n.reader_slug AS reader_slug",
 			"d.theme_id",
+			"d.format",
 			"d.visibility",
 			"d.status",
 			"d.banned_reason",
@@ -298,6 +339,10 @@ func (r *gormDocumentRepository) ListForAdmin(
 			"d.title",
 			"d.content_md",
 			"d.version",
+			"d.source_blob_id",
+			"d.source_file_name",
+			"d.source_mime_type",
+			"d.content_version",
 			"d.created_by_user_id",
 			"d.updated_by_user_id",
 			"d.created_at",
@@ -322,6 +367,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 			DocumentID:      row.DocumentID,
 			NodeID:          row.NodeID,
 			ThemeID:         row.ThemeID,
+			Format:          models.NormalizeDocumentFormat(row.Format),
 			Visibility:      row.Visibility,
 			Status:          row.Status,
 			BannedReason:    row.BannedReason,
@@ -330,6 +376,10 @@ func (r *gormDocumentRepository) ListForAdmin(
 			Title:           row.Title,
 			ContentMD:       row.ContentMD,
 			Version:         row.Version,
+			SourceBlobID:    trimOptionalString(row.SourceBlobID),
+			SourceFileName:  trimOptionalString(row.SourceFileName),
+			SourceMimeType:  trimOptionalString(row.SourceMimeType),
+			ContentVersion:  normalizeContentVersion(row.ContentVersion, row.Version),
 			CreatedByUserID: row.CreatedByUserID,
 			UpdatedByUserID: row.UpdatedByUserID,
 			CreatedAt:       parseDocumentRecordTime(row.CreatedAtRaw),
@@ -413,6 +463,7 @@ func (r *gormDocumentRepository) UpdateVisibility(
 			"document_id",
 			"node_id",
 			"theme_id",
+			"format",
 			"visibility",
 			"status",
 			"banned_reason",
@@ -421,6 +472,10 @@ func (r *gormDocumentRepository) UpdateVisibility(
 			"title",
 			"content_md",
 			"version",
+			"source_blob_id",
+			"source_file_name",
+			"source_mime_type",
+			"content_version",
 			"created_by_user_id",
 			"updated_by_user_id",
 		).
@@ -436,6 +491,11 @@ func (r *gormDocumentRepository) UpdateVisibility(
 	if !models.IsValidEntityStatus(updated.Status) {
 		updated.Status = models.EntityStatusActive
 	}
+	updated.Format = models.NormalizeDocumentFormat(updated.Format)
+	updated.ContentVersion = normalizeContentVersion(updated.ContentVersion, updated.Version)
+	updated.SourceBlobID = trimOptionalString(updated.SourceBlobID)
+	updated.SourceFileName = trimOptionalString(updated.SourceFileName)
+	updated.SourceMimeType = trimOptionalString(updated.SourceMimeType)
 	return &updated, nil
 }
 
@@ -541,6 +601,11 @@ func (r *gormDocumentRepository) HardDelete(ctx context.Context, documentID stri
 
 	var documentDeleted bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Table("document_file_revisions").
+			Where("document_id = ?", normalizedDocumentID).
+			Delete(nil).Error; err != nil {
+			return err
+		}
 		if err := tx.Table("document_revisions").
 			Where("document_id = ?", normalizedDocumentID).
 			Delete(nil).Error; err != nil {
@@ -598,6 +663,8 @@ func (r *gormDocumentRepository) UpdateWithVersion(
 	if !models.IsValidEntityStatus(status) {
 		status = models.EntityStatusActive
 	}
+	documentFormat := models.NormalizeDocumentFormat(document.Format)
+	contentVersion := normalizeContentVersion(document.ContentVersion, document.Version)
 
 	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -607,9 +674,14 @@ func (r *gormDocumentRepository) UpdateWithVersion(
 				"title":              document.Title,
 				"content_md":         document.ContentMD,
 				"theme_id":           document.ThemeID,
+				"format":             documentFormat,
 				"visibility":         visibility,
 				"status":             status,
 				"version":            document.Version,
+				"source_blob_id":     trimOptionalString(document.SourceBlobID),
+				"source_file_name":   trimOptionalString(document.SourceFileName),
+				"source_mime_type":   trimOptionalString(document.SourceMimeType),
+				"content_version":    contentVersion,
 				"updated_by_user_id": document.UpdatedByUserID,
 				"updated_at":         gorm.Expr("CURRENT_TIMESTAMP"),
 			})

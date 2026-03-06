@@ -411,6 +411,8 @@ func (r *gormDocumentAttachmentRepository) ListOrphanBlobs(
 		).
 		Where("deleted_at IS NULL").
 		Where("NOT EXISTS (SELECT 1 FROM document_attachments WHERE document_attachments.blob_id = file_blobs.blob_id)").
+		Where("NOT EXISTS (SELECT 1 FROM documents WHERE documents.source_blob_id = file_blobs.blob_id)").
+		Where("NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE document_file_revisions.blob_id = file_blobs.blob_id)").
 		Order("created_at ASC, id ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -452,7 +454,12 @@ func (r *gormDocumentAttachmentRepository) HardDeleteBlobIfUnreferenced(
 
 	deleteResult := r.db.WithContext(ctx).
 		Where(
-			"blob_id = ? AND NOT EXISTS (SELECT 1 FROM document_attachments WHERE blob_id = ?)",
+			"blob_id = ? AND "+
+				"NOT EXISTS (SELECT 1 FROM document_attachments WHERE blob_id = ?) AND "+
+				"NOT EXISTS (SELECT 1 FROM documents WHERE source_blob_id = ?) AND "+
+				"NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE blob_id = ?)",
+			normalizedBlobID,
+			normalizedBlobID,
 			normalizedBlobID,
 			normalizedBlobID,
 		).
@@ -476,14 +483,28 @@ func (r *gormDocumentAttachmentRepository) CountActiveReferencesByBlobID(
 		return 0, nil
 	}
 
-	var total int64
+	type countRow struct {
+		Total int64 `gorm:"column:total"`
+	}
+
+	var row countRow
 	if err := r.db.WithContext(ctx).
-		Table("document_attachments").
-		Where("blob_id = ? AND status = ? AND deleted_at IS NULL", normalizedBlobID, models.EntityStatusActive).
-		Count(&total).Error; err != nil {
+		Raw(
+			"SELECT COALESCE(SUM(ref_count), 0) AS total FROM ("+
+				"SELECT COUNT(1) AS ref_count FROM document_attachments WHERE blob_id = ? "+
+				"UNION ALL "+
+				"SELECT COUNT(1) AS ref_count FROM documents WHERE source_blob_id = ? "+
+				"UNION ALL "+
+				"SELECT COUNT(1) AS ref_count FROM document_file_revisions WHERE blob_id = ?"+
+				") AS ref_counts",
+			normalizedBlobID,
+			normalizedBlobID,
+			normalizedBlobID,
+		).
+		Take(&row).Error; err != nil {
 		return 0, err
 	}
-	return total, nil
+	return row.Total, nil
 }
 
 func (r *gormDocumentAttachmentRepository) ListActiveReferencesByBlobID(

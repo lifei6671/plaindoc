@@ -34,8 +34,10 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	spaceID := "01kattachmentcleanupspace000001"
 	deletedNodeID := "01kattachmentcleanupnode0000001"
 	activeNodeID := "01kattachmentcleanupnode0000002"
+	activeOfficeNodeID := "01kattachmentcleanupnode0000003"
 	deletedDocID := "01kattachmentcleanupdoc00000001"
 	activeDocID := "01kattachmentcleanupdoc00000002"
+	activeOfficeDocID := "01kattachmentcleanupdoc00000003"
 
 	if err := database.ORM.WithContext(ctx).Table("users").Create(map[string]any{
 		"user_id":       userID,
@@ -83,9 +85,22 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 			"created_at":         now,
 			"updated_at":         now,
 		},
+		{
+			"node_id":            activeOfficeNodeID,
+			"space_id":           spaceID,
+			"parent_node_id":     nil,
+			"type":               "doc",
+			"title":              "Active Office Node",
+			"sort":               3,
+			"created_by_user_id": userID,
+			"updated_by_user_id": userID,
+			"created_at":         now,
+			"updated_at":         now,
+		},
 	}).Error; err != nil {
 		t.Fatalf("seed nodes failed: %v", err)
 	}
+	officeBlobID := "01kattachmentcleanupblob000004"
 	if err := database.ORM.WithContext(ctx).Table("documents").Create([]map[string]any{
 		{
 			"document_id":        deletedDocID,
@@ -122,6 +137,7 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	deletedBlobID := "01kattachmentcleanupblob000001"
 	activeBlobID := "01kattachmentcleanupblob000002"
 	orphanBlobID := "01kattachmentcleanupblob000003"
+	officeObjectKey := "images/cleanup/active-office.docx"
 	deletedObjectKey := "images/cleanup/deleted-file.txt"
 	activeObjectKey := "images/cleanup/active-file.txt"
 	orphanObjectKey := "images/cleanup/orphan-file.txt"
@@ -129,6 +145,7 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	deletedBlobPath := createAttachmentCleanupLocalFile(t, deletedObjectKey, "deleted")
 	activeBlobPath := createAttachmentCleanupLocalFile(t, activeObjectKey, "active")
 	orphanBlobPath := createAttachmentCleanupLocalFile(t, orphanObjectKey, "orphan")
+	officeBlobPath := createAttachmentCleanupLocalFile(t, officeObjectKey, "office")
 
 	if err := database.ORM.WithContext(ctx).Table("file_blobs").Create([]map[string]any{
 		{
@@ -170,8 +187,42 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 			"created_at":        now.Add(-2 * time.Hour),
 			"updated_at":        now.Add(-2 * time.Hour),
 		},
+		{
+			"blob_id":           officeBlobID,
+			"storage_provider":  "local",
+			"object_key":        officeObjectKey,
+			"object_url":        "/uploads/" + officeObjectKey,
+			"mime_type":         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"size_bytes":        6,
+			"content_hash_algo": "sha256",
+			"content_hash":      "hash-office",
+			"deleted_at":        nil,
+			"created_at":        now.Add(-2 * time.Hour),
+			"updated_at":        now.Add(-2 * time.Hour),
+		},
 	}).Error; err != nil {
 		t.Fatalf("seed file blobs failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("documents").Create(map[string]any{
+		"document_id":        activeOfficeDocID,
+		"node_id":            activeOfficeNodeID,
+		"theme_id":           "default",
+		"visibility":         "member",
+		"title":              "Active Office Doc",
+		"format":             "docx",
+		"content_md":         "",
+		"version":            1,
+		"source_blob_id":     officeBlobID,
+		"source_file_name":   "active-office.docx",
+		"source_mime_type":   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"content_version":    1,
+		"status":             "active",
+		"deleted_at":         nil,
+		"updated_by_user_id": userID,
+		"created_at":         now.Add(-2 * time.Hour),
+		"updated_at":         now.Add(-45 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("seed office document failed: %v", err)
 	}
 
 	if err := database.ORM.WithContext(ctx).Table("document_attachments").Create([]map[string]any{
@@ -218,6 +269,20 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	}).Error; err != nil {
 		t.Fatalf("seed attachments failed: %v", err)
 	}
+	if err := database.ORM.WithContext(ctx).Table("document_file_revisions").Create(map[string]any{
+		"document_file_revision_id": "01kattachmentcleanupfilerev00001",
+		"document_id":               activeOfficeDocID,
+		"blob_id":                   officeBlobID,
+		"file_name":                 "active-office.docx",
+		"mime_type":                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"version":                   1,
+		"base_version":              0,
+		"editor_user_id":            userID,
+		"source":                    "remote",
+		"created_at":                now.Add(-40 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("seed office file revisions failed: %v", err)
+	}
 
 	cleanupService := NewDocumentAttachmentCleanupService(
 		database.ORM,
@@ -240,6 +305,7 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", deletedBlobID, 0)
 	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", orphanBlobID, 0)
 	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", activeBlobID, 1)
+	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", officeBlobID, 1)
 
 	if _, err := os.Stat(deletedBlobPath); !isNotExistErr(err) {
 		t.Fatalf("expected deleted blob file removed, stat err=%v", err)
@@ -249,6 +315,9 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	}
 	if _, err := os.Stat(activeBlobPath); err != nil {
 		t.Fatalf("expected active blob file remains, stat err=%v", err)
+	}
+	if _, err := os.Stat(officeBlobPath); err != nil {
+		t.Fatalf("expected office blob file remains, stat err=%v", err)
 	}
 }
 

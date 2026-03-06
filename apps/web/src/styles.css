@@ -1726,6 +1726,106 @@ input[type="reset"]:not(:disabled) {
       serif);
 }
 
+.workspace--office .office-pane {
+  grid-column: 3 / 5;
+}
+
+.office-pane {
+  display: flex;
+  background: linear-gradient(180deg, #eef3f9 0%, #f8fafc 100%);
+}
+
+.office-pane__surface {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  padding: 16px;
+  background:
+    radial-gradient(1200px 480px at 0% 0%, rgba(148, 163, 184, 0.15) 0%, rgba(148, 163, 184, 0) 54%),
+    linear-gradient(180deg, #eef3f9 0%, #f8fafc 100%);
+}
+
+.office-pane__editor {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  border: 1px solid #dbe2ea;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+  transition: opacity 0.18s ease;
+}
+
+.office-pane__editor--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.office-pane__placeholder {
+  position: absolute;
+  inset: 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(241, 245, 249, 0.96) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px;
+  text-align: center;
+  color: #334155;
+}
+
+.office-pane__placeholder--error {
+  border-style: solid;
+  border-color: #fecaca;
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+  color: #991b1b;
+}
+
+.office-pane__placeholder-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dbe7f3;
+  color: #1e3a5f;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.24);
+}
+
+.office-pane__placeholder--error .office-pane__placeholder-icon {
+  background: #fee2e2;
+  color: #b91c1c;
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.22);
+}
+
+.office-pane__spinner {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  color: #2563eb;
+  animation: status-save-spin 0.9s linear infinite;
+}
+
+.office-pane__placeholder-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.office-pane__placeholder-description {
+  margin: 0;
+  max-width: 460px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 /* 预览视口容器：PC 全宽，移动端可在其上做窄屏模拟。 */
 .preview-viewport {
   width: 100%;
@@ -3105,6 +3205,10 @@ input[type="reset"]:not(:disabled) {
     grid-template-rows: minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
   }
 
+  .workspace--office .office-pane {
+    grid-column: 1;
+  }
+
   .workspace-sidebar-resizer {
     display: none;
   }
@@ -3129,6 +3233,15 @@ input[type="reset"]:not(:disabled) {
   #plaindoc-preview-pane.preview-pane--mobile .preview-body--mobile {
     width: min(100%, 420px);
     border-radius: 20px;
+  }
+
+  .office-pane__surface {
+    padding: 12px;
+  }
+
+  .office-pane__placeholder {
+    inset: 12px;
+    padding: 24px 18px;
   }
 
   /* 小屏下将底栏改为两行，避免信息拥挤。 */

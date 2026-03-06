@@ -57,12 +57,14 @@ function buildTemplateDetail(input: Partial<DocumentTemplateDetail>): DocumentTe
 }
 
 function createProps(overrides?: {
+  officeCreationEnabled?: boolean;
   onCreateNode?: (input: {
     parentId: string | null;
     type: NodeType;
     title: string;
     documentIdentifier?: string;
     templateId?: string;
+    format?: "markdown" | "docx" | "xlsx";
   }) => Promise<CreateNodeResult>;
   onListDocumentTemplates?: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate?: (templateId: string) => Promise<DocumentTemplateDetail>;
@@ -77,6 +79,7 @@ function createProps(overrides?: {
         title: string;
         documentIdentifier?: string;
         templateId?: string;
+        format?: "markdown" | "docx" | "xlsx";
       }) => Promise<CreateNodeResult>
     >().mockResolvedValue({
       nodeId: "node-created",
@@ -136,6 +139,7 @@ function createProps(overrides?: {
   return {
     nodes: [],
     activeDocId: null,
+    officeCreationEnabled: overrides?.officeCreationEnabled ?? false,
     onOpenDocument,
     onCreateNode,
     onListDocumentTemplates,
@@ -204,6 +208,7 @@ describe("WorkspaceTree", () => {
           title: string;
           documentIdentifier?: string;
           templateId?: string;
+          format?: "markdown" | "docx" | "xlsx";
         }) => Promise<CreateNodeResult>
       >()
       .mockResolvedValue({
@@ -300,5 +305,69 @@ describe("WorkspaceTree", () => {
     });
     expect(await screen.findByText("复盘模板")).toBeInTheDocument();
     expect(screen.getByText("# 事故时间线")).toBeInTheDocument();
+  });
+
+  it("shows office format selector only when office creation is enabled", async () => {
+    const enabledProps = createProps({ officeCreationEnabled: true });
+    const user = userEvent.setup();
+    const { unmount } = render(<WorkspaceTree {...enabledProps} />);
+
+    await user.click(screen.getByRole("button", { name: "新建第一篇文档" }));
+    expect(await screen.findByLabelText("文档格式")).toBeInTheDocument();
+    unmount();
+
+    const disabledProps = createProps({ officeCreationEnabled: false });
+    render(<WorkspaceTree {...disabledProps} />);
+
+    await user.click(screen.getByRole("button", { name: "新建第一篇文档" }));
+    expect(screen.queryByLabelText("文档格式")).not.toBeInTheDocument();
+  });
+
+  it("forwards office format and disables markdown template selection when non-markdown is selected", async () => {
+    const onCreateNode = vi
+      .fn<
+        (input: {
+          parentId: string | null;
+          type: NodeType;
+          title: string;
+          documentIdentifier?: string;
+          templateId?: string;
+          format?: "markdown" | "docx" | "xlsx";
+        }) => Promise<CreateNodeResult>
+      >()
+      .mockResolvedValue({
+        nodeId: "node-docx",
+        docId: "doc-docx"
+      });
+
+    const props = createProps({
+      officeCreationEnabled: true,
+      onCreateNode
+    });
+    const user = userEvent.setup();
+    render(<WorkspaceTree {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "新建第一篇文档" }));
+    await screen.findByRole("heading", { name: "新建文档" });
+
+    const formatSelect = screen.getByLabelText("文档格式");
+    await user.selectOptions(formatSelect, "docx");
+
+    expect(screen.queryByLabelText("模板（可选）")).not.toBeInTheDocument();
+    expect(screen.getByText("Office 文档会使用仓库内置空白模板初始化，不支持 Markdown 模板。")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(onCreateNode).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreateNode).toHaveBeenCalledWith({
+      parentId: null,
+      type: "doc",
+      title: "未命名文档",
+      documentIdentifier: undefined,
+      templateId: undefined,
+      format: "docx"
+    });
   });
 });

@@ -39,6 +39,7 @@ import {
 } from "react-complex-tree";
 import type {
   CreateNodeResult,
+  DocumentFormat,
   DocumentShareConfig,
   DocumentShareMode,
   DocumentTemplateDetail,
@@ -66,6 +67,27 @@ const DEFAULT_FOLDER_TITLE = "未命名目录";
 const MAX_DOCUMENT_IDENTIFIER_LENGTH = 80;
 const DOCUMENT_IDENTIFIER_PATTERN = /^[a-z0-9-]+$/;
 const RESERVED_DOCUMENT_IDENTIFIERS = new Set(["admin", "api", "explore", "login", "register", "search"]);
+const DOCUMENT_FORMAT_OPTIONS: Array<{
+  value: DocumentFormat;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "markdown",
+    label: "Markdown",
+    description: "沿用当前编辑器与模板能力。"
+  },
+  {
+    value: "docx",
+    label: "Word 文档",
+    description: "使用 ONLYOFFICE 编辑 .docx。"
+  },
+  {
+    value: "xlsx",
+    label: "Excel 表格",
+    description: "使用 ONLYOFFICE 编辑 .xlsx。"
+  }
+];
 
 interface WorkspaceTreeItemData {
   nodeId: string | null;
@@ -87,6 +109,7 @@ interface WorkspaceTreeRenderItemProps {
 interface WorkspaceTreeProps {
   nodes: TreeNode[];
   activeDocId: string | null;
+  officeCreationEnabled: boolean;
   onOpenDocument: (docId: string) => Promise<void>;
   onCreateNode: (input: {
     parentId: string | null;
@@ -94,6 +117,7 @@ interface WorkspaceTreeProps {
     title: string;
     documentIdentifier?: string;
     templateId?: string;
+    format?: DocumentFormat;
   }) => Promise<CreateNodeResult>;
   onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
@@ -114,6 +138,7 @@ interface PendingCreateDraftNode {
   title: string;
   documentIdentifier?: string;
   templateId?: string;
+  format?: DocumentFormat;
 }
 
 interface CreateNodeDialogState {
@@ -122,6 +147,7 @@ interface CreateNodeDialogState {
   title: string;
   documentIdentifier: string;
   templateId: string;
+  format: DocumentFormat;
 }
 
 interface EditDocumentShareDialogState {
@@ -486,6 +512,7 @@ function mergeDraftNodesIntoTree(
 export const WorkspaceTree = memo(function WorkspaceTree({
   nodes,
   activeDocId,
+  officeCreationEnabled,
   onOpenDocument,
   onCreateNode,
   onListDocumentTemplates,
@@ -621,12 +648,15 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     }
     return Array.from(grouped.values());
   }, [documentTemplateOptions]);
+  const showMarkdownTemplateControls = useMemo(() => {
+    return createNodeDialog?.type === "doc" && createNodeDialog.format === "markdown";
+  }, [createNodeDialog]);
   const selectedTemplateID = useMemo(() => {
-    if (!createNodeDialog || createNodeDialog.type !== "doc") {
+    if (!showMarkdownTemplateControls || !createNodeDialog) {
       return "";
     }
     return createNodeDialog.templateId.trim();
-  }, [createNodeDialog?.templateId, createNodeDialog?.type]);
+  }, [createNodeDialog, showMarkdownTemplateControls]);
   const selectedTemplateDetail = useMemo(() => {
     if (!selectedTemplateID) {
       return null;
@@ -980,7 +1010,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
           type: editingDraftNode.type,
           title: normalizedTitle,
           documentIdentifier: editingDraftNode.documentIdentifier,
-          templateId: editingDraftNode.templateId
+          templateId: editingDraftNode.templateId,
+          format: editingDraftNode.format
         });
         removeDraftNode(draftNodeID);
       } catch (error) {
@@ -1084,7 +1115,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE,
         documentIdentifier: "",
-        templateId: ""
+        templateId: "",
+        format: "markdown"
       });
       void loadDocumentTemplates();
       setOpenActionNodeId(null);
@@ -1103,7 +1135,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         type: "doc",
         title: DEFAULT_DOCUMENT_TITLE,
         documentIdentifier: "",
-        templateId: ""
+        templateId: "",
+        format: "markdown"
       });
       void loadDocumentTemplates();
       setOpenActionNodeId(null);
@@ -1118,7 +1151,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         type: "folder",
         title: DEFAULT_FOLDER_TITLE,
         documentIdentifier: "",
-        templateId: ""
+        templateId: "",
+        format: "markdown"
       });
       setOpenActionNodeId(null);
     },
@@ -1198,7 +1232,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
       type: "doc",
       title: DEFAULT_DOCUMENT_TITLE,
       documentIdentifier: "",
-      templateId: ""
+      templateId: "",
+      format: "markdown"
     });
     void loadDocumentTemplates();
   }, [loadDocumentTemplates]);
@@ -1216,6 +1251,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
     }
     const fallbackTitle = createNodeDialog.type === "folder" ? DEFAULT_FOLDER_TITLE : DEFAULT_DOCUMENT_TITLE;
     const normalizedTitle = createNodeDialog.title.trim() || fallbackTitle;
+    const normalizedFormat: DocumentFormat =
+      createNodeDialog.type === "doc" ? createNodeDialog.format : "markdown";
 
     let normalizedIdentifier: string | undefined;
     if (createNodeDialog.type === "doc") {
@@ -1234,7 +1271,8 @@ export const WorkspaceTree = memo(function WorkspaceTree({
         type: createNodeDialog.type,
         title: normalizedTitle,
         documentIdentifier: normalizedIdentifier,
-        templateId: createNodeDialog.templateId || undefined
+        templateId: normalizedFormat === "markdown" ? createNodeDialog.templateId || undefined : undefined,
+        format: createNodeDialog.type === "doc" && normalizedFormat !== "markdown" ? normalizedFormat : undefined
       });
       if (created.docId) {
         void onOpenDocument(created.docId).catch(() => {
@@ -2100,103 +2138,143 @@ export const WorkspaceTree = memo(function WorkspaceTree({
             </label>
             {createNodeDialog.type === "doc" ? (
               <>
-                <label className="mb-3 block">
-                  <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">模板（可选）</span>
-                  <select
-                    value={createNodeDialog.templateId}
-                    className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
-                    disabled={isCreateNodeDialogSubmitting || isDocumentTemplatesLoading}
-                    onChange={(event) => {
-                      const nextTemplateID = event.target.value;
-                      setCreateNodeDialog((previousDialog) =>
-                        previousDialog
-                          ? {
-                              ...previousDialog,
-                              templateId: nextTemplateID
-                            }
-                          : previousDialog
-                      );
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        closeCreateNodeDialog();
-                      }
-                    }}
-                  >
-                    <option value="">不使用模板</option>
-                    {groupedDocumentTemplateOptions.map((group) => (
-                      <optgroup key={group.sceneKey} label={group.sceneLabel}>
-                        {group.options.map((item) => (
-                          <option key={item.templateId} value={item.templateId}>
-                            {item.name} ({item.templateId})
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </label>
-                <p className="mt-0 mb-3 text-[12px] text-[#6b7280]">
-                  {isDocumentTemplatesLoading
-                    ? "模板加载中..."
-                    : documentTemplatesError
-                      ? `模板加载失败：${documentTemplatesError}`
-                      : documentTemplatesLoaded
-                        ? documentTemplateOptions.length > 0
-                          ? `当前可用模板 ${documentTemplateOptions.length} 个，按场景分组展示。`
-                          : "当前暂无可用模板，可联系管理员在后台「模板管理」中创建并启用模板。"
-                        : "将按需加载模板列表。"}
-                  {documentTemplatesError ? (
-                    <button
-                      type="button"
-                      className="ml-2 rounded border border-[#cdd5df] bg-white px-1.5 py-0.5 text-[11px] text-[#334155] hover:bg-[#f8fafc]"
-                      onClick={() => {
-                        void loadDocumentTemplates(true);
+                {officeCreationEnabled ? (
+                  <label className="mb-3 block">
+                    <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">文档格式</span>
+                    <select
+                      aria-label="文档格式"
+                      value={createNodeDialog.format}
+                      className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                      disabled={isCreateNodeDialogSubmitting}
+                      onChange={(event) => {
+                        const nextFormat = event.target.value as DocumentFormat;
+                        setCreateNodeDialog((previousDialog) =>
+                          previousDialog
+                            ? {
+                                ...previousDialog,
+                                format: nextFormat,
+                                templateId: nextFormat === "markdown" ? previousDialog.templateId : ""
+                              }
+                            : previousDialog
+                        );
                       }}
-                      disabled={isDocumentTemplatesLoading || isCreateNodeDialogSubmitting}
                     >
-                      重试
-                    </button>
-                  ) : null}
-                </p>
-                {createNodeDialog.templateId ? (
-                  <div className="mb-3 rounded-[10px] border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2.5">
-                    {isTemplatePreviewLoading ? (
-                      <p className="m-0 text-[12px] text-[#475467]">模板预览加载中...</p>
-                    ) : templatePreviewError ? (
-                      <p className="m-0 text-[12px] text-[#b42318]">
-                        模板预览加载失败：{templatePreviewError}
+                      {DOCUMENT_FORMAT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 mb-0 text-[12px] text-[#6b7280]">
+                      {DOCUMENT_FORMAT_OPTIONS.find((option) => option.value === createNodeDialog.format)?.description}
+                    </p>
+                  </label>
+                ) : null}
+                {showMarkdownTemplateControls ? (
+                  <>
+                    <label className="mb-3 block">
+                      <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">模板（可选）</span>
+                      <select
+                        value={createNodeDialog.templateId}
+                        className="h-9 w-full rounded-[9px] border border-[#ccd2d8] bg-white px-3 text-[13px] text-[#1f2328] outline-none transition-colors focus:border-[#8ea8c4]"
+                        disabled={isCreateNodeDialogSubmitting || isDocumentTemplatesLoading}
+                        onChange={(event) => {
+                          const nextTemplateID = event.target.value;
+                          setCreateNodeDialog((previousDialog) =>
+                            previousDialog
+                              ? {
+                                  ...previousDialog,
+                                  templateId: nextTemplateID
+                                }
+                              : previousDialog
+                          );
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            closeCreateNodeDialog();
+                          }
+                        }}
+                      >
+                        <option value="">不使用模板</option>
+                        {groupedDocumentTemplateOptions.map((group) => (
+                          <optgroup key={group.sceneKey} label={group.sceneLabel}>
+                            {group.options.map((item) => (
+                              <option key={item.templateId} value={item.templateId}>
+                                {item.name} ({item.templateId})
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="mt-0 mb-3 text-[12px] text-[#6b7280]">
+                      {isDocumentTemplatesLoading
+                        ? "模板加载中..."
+                        : documentTemplatesError
+                          ? `模板加载失败：${documentTemplatesError}`
+                          : documentTemplatesLoaded
+                            ? documentTemplateOptions.length > 0
+                              ? `当前可用模板 ${documentTemplateOptions.length} 个，按场景分组展示。`
+                              : "当前暂无可用模板，可联系管理员在后台「模板管理」中创建并启用模板。"
+                            : "将按需加载模板列表。"}
+                      {documentTemplatesError ? (
                         <button
                           type="button"
-                          className="ml-2 rounded border border-[#fecdd3] bg-white px-1.5 py-0.5 text-[11px] text-[#b42318] hover:bg-[#fff1f2]"
+                          className="ml-2 rounded border border-[#cdd5df] bg-white px-1.5 py-0.5 text-[11px] text-[#334155] hover:bg-[#f8fafc]"
                           onClick={() => {
-                            void loadDocumentTemplateDetail(selectedTemplateID, { forceReload: true });
+                            void loadDocumentTemplates(true);
                           }}
-                          disabled={isCreateNodeDialogSubmitting}
+                          disabled={isDocumentTemplatesLoading || isCreateNodeDialogSubmitting}
                         >
                           重试
                         </button>
-                      </p>
-                    ) : selectedTemplateDetail ? (
-                      <>
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <span className="text-[12px] font-medium text-[#0f172a]">{selectedTemplateDetail.name}</span>
-                          <span className="text-[11px] text-[#64748b]">{selectedTemplateDetail.sceneName}</span>
-                        </div>
-                        {selectedTemplateDetail.defaultTitle ? (
-                          <p className="mt-0 mb-2 text-[11px] text-[#475569]">
-                            默认标题：{selectedTemplateDetail.defaultTitle}
+                      ) : null}
+                    </p>
+                    {createNodeDialog.templateId ? (
+                      <div className="mb-3 rounded-[10px] border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2.5">
+                        {isTemplatePreviewLoading ? (
+                          <p className="m-0 text-[12px] text-[#475467]">模板预览加载中...</p>
+                        ) : templatePreviewError ? (
+                          <p className="m-0 text-[12px] text-[#b42318]">
+                            模板预览加载失败：{templatePreviewError}
+                            <button
+                              type="button"
+                              className="ml-2 rounded border border-[#fecdd3] bg-white px-1.5 py-0.5 text-[11px] text-[#b42318] hover:bg-[#fff1f2]"
+                              onClick={() => {
+                                void loadDocumentTemplateDetail(selectedTemplateID, { forceReload: true });
+                              }}
+                              disabled={isCreateNodeDialogSubmitting}
+                            >
+                              重试
+                            </button>
                           </p>
-                        ) : null}
-                        <pre className="m-0 max-h-[132px] overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-white px-2.5 py-2 text-[11px] leading-[1.5] text-[#334155]">
-                          {selectedTemplatePreviewText}
-                        </pre>
-                      </>
-                    ) : (
-                      <p className="m-0 text-[12px] text-[#475467]">模板预览不可用。</p>
-                    )}
-                  </div>
-                ) : null}
+                        ) : selectedTemplateDetail ? (
+                          <>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <span className="text-[12px] font-medium text-[#0f172a]">{selectedTemplateDetail.name}</span>
+                              <span className="text-[11px] text-[#64748b]">{selectedTemplateDetail.sceneName}</span>
+                            </div>
+                            {selectedTemplateDetail.defaultTitle ? (
+                              <p className="mt-0 mb-2 text-[11px] text-[#475569]">
+                                默认标题：{selectedTemplateDetail.defaultTitle}
+                              </p>
+                            ) : null}
+                            <pre className="m-0 max-h-[132px] overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-white px-2.5 py-2 text-[11px] leading-[1.5] text-[#334155]">
+                              {selectedTemplatePreviewText}
+                            </pre>
+                          </>
+                        ) : (
+                          <p className="m-0 text-[12px] text-[#475467]">模板预览不可用。</p>
+                        )}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="mt-0 mb-3 rounded-[10px] border border-[#dbeafe] bg-[#eff6ff] px-3 py-2.5 text-[12px] text-[#1d4ed8]">
+                    Office 文档会使用仓库内置空白模板初始化，不支持 Markdown 模板。
+                  </p>
+                )}
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-medium text-[#1f2328]">文档标识（可空）</span>
                   <input

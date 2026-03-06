@@ -34,6 +34,23 @@ function buildDocument(): Document {
   };
 }
 
+function buildOfficeDocument(): Document {
+  return {
+    id: "doc-1",
+    nodeId: "node-doc-1",
+    themeId: "default",
+    title: "季度计划",
+    contentMd: "",
+    version: 2,
+    contentVersion: 3,
+    format: "docx",
+    sourceFileName: "季度计划.docx",
+    sourceMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    updatedAt: "2026-03-05T10:30:00Z",
+    visibility: "member"
+  };
+}
+
 function createGatewayMocks() {
   const activeSpace: Space = {
     id: "space-1",
@@ -98,7 +115,8 @@ function createGatewayMocks() {
     activeSpace,
     mocks: {
       getTree,
-      createNode
+      createNode,
+      getDocument
     }
   };
 }
@@ -139,5 +157,64 @@ describe("useWorkspace", () => {
     });
     expect(mocks.getTree).toHaveBeenCalledWith(activeSpace.id);
     expect(mocks.getTree).toHaveBeenCalledTimes(2);
+  });
+
+  it("forwards document format when creating an office document node", async () => {
+    const { dataGateway, activeSpace, mocks } = createGatewayMocks();
+    const { result } = renderHook(() =>
+      useWorkspace({
+        dataGateway,
+        initialContent: "",
+        defaultDocumentTitle: "未命名文档"
+      })
+    );
+
+    await act(async () => {
+      await result.current.bootstrapWorkspace();
+    });
+
+    await act(async () => {
+      await result.current.createNode({
+        parentId: null,
+        type: "doc",
+        title: "季度预算",
+        format: "xlsx"
+      });
+    });
+
+    expect(mocks.createNode).toHaveBeenCalledWith({
+      spaceId: activeSpace.id,
+      parentId: null,
+      type: "doc",
+      title: "季度预算",
+      documentIdentifier: undefined,
+      templateId: undefined,
+      format: "xlsx"
+    });
+  });
+
+  it("hydrates active office document metadata when opening an office document", async () => {
+    const { dataGateway, mocks } = createGatewayMocks();
+    mocks.getDocument.mockResolvedValue(buildOfficeDocument());
+
+    const { result } = renderHook(() =>
+      useWorkspace({
+        dataGateway,
+        initialContent: "",
+        defaultDocumentTitle: "未命名文档"
+      })
+    );
+
+    await act(async () => {
+      await result.current.openDocument("doc-1");
+    });
+
+    expect(result.current.activeDocumentFormat).toBe("docx");
+    expect(result.current.activeDocumentSourceFileName).toBe("季度计划.docx");
+    expect(result.current.activeDocumentSourceMimeType).toBe(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+    expect(result.current.activeDocumentContentVersion).toBe(3);
+    expect(result.current.baseVersion).toBe(2);
   });
 });

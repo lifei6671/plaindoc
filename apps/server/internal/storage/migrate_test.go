@@ -48,6 +48,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		"document_templates",
 		"documents",
 		"document_revisions",
+		"document_file_revisions",
 		"node_permissions",
 		"document_permissions",
 	}
@@ -201,6 +202,24 @@ func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {
 	}
 	if err := orm.WithContext(ctx).Create(document).Error; err != nil {
 		return err
+	}
+
+	var persisted struct {
+		Format         string `gorm:"column:format"`
+		ContentVersion int    `gorm:"column:content_version"`
+	}
+	if err := orm.WithContext(ctx).
+		Table("documents").
+		Select("format", "content_version").
+		Where("document_id = ?", documentID).
+		Take(&persisted).Error; err != nil {
+		return err
+	}
+	if persisted.Format != string(models.DocumentFormatMarkdown) {
+		return gorm.ErrInvalidData
+	}
+	if persisted.ContentVersion != 1 {
+		return gorm.ErrInvalidData
 	}
 
 	return nil

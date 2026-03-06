@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Save,
+  Table2,
   type LucideIcon
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -44,6 +45,7 @@ type SystemConfigKey =
   | "data-retention"
   | "auth"
   | "email"
+  | "onlyoffice"
   | "image-hosting"
   | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
@@ -235,6 +237,12 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     icon: Mail
   },
   {
+    key: "onlyoffice",
+    label: "ONLYOFFICE",
+    description: "Office 编辑服务接入",
+    icon: Table2
+  },
+  {
     key: "image-hosting",
     label: "图床设置",
     description: "本地 / R2 / OSS",
@@ -424,6 +432,13 @@ const EMAIL_TEMPLATE: EmailSystemConfigValue = {
     connectTimeoutMs: 3000,
     sendTimeoutMs: 5000
   }
+};
+const ONLY_OFFICE_SECRET_MASK = "********";
+const ONLY_OFFICE_TEMPLATE: OnlyOfficeSystemConfigValue = {
+  enabled: false,
+  documentServerUrl: "",
+  callbackPublicBaseUrl: "",
+  jwtSecret: ""
 };
 
 const SEARCH_PROVIDER_OPTIONS: Array<{ value: SearchProvider; label: string }> = [
@@ -665,6 +680,13 @@ function parseSiteConfig(value: unknown): SiteSystemConfigValue {
   };
 }
 
+interface OnlyOfficeSystemConfigValue {
+  enabled: boolean;
+  documentServerUrl: string;
+  callbackPublicBaseUrl: string;
+  jwtSecret: string;
+}
+
 function parseEditorConfig(value: unknown): EditorSystemConfigValue {
   const payload = asRecord(value);
   if (!payload) {
@@ -702,6 +724,12 @@ function cloneEmailConfig(value: EmailSystemConfigValue): EmailSystemConfigValue
     ...value,
     passwordReset: { ...value.passwordReset },
     smtp: { ...value.smtp }
+  };
+}
+
+function cloneOnlyOfficeConfig(value: OnlyOfficeSystemConfigValue): OnlyOfficeSystemConfigValue {
+  return {
+    ...value
   };
 }
 
@@ -765,6 +793,20 @@ function parseEmailConfig(value: unknown): EmailSystemConfigValue {
   parsed.smtp.sendTimeoutMs = Math.min(30000, Math.max(100, parsed.smtp.sendTimeoutMs));
 
   return parsed;
+}
+
+function parseOnlyOfficeConfig(value: unknown): OnlyOfficeSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return cloneOnlyOfficeConfig(ONLY_OFFICE_TEMPLATE);
+  }
+
+  return {
+    enabled: typeof payload.enabled === "boolean" ? payload.enabled : ONLY_OFFICE_TEMPLATE.enabled,
+    documentServerUrl: parseString(payload.documentServerUrl, ONLY_OFFICE_TEMPLATE.documentServerUrl),
+    callbackPublicBaseUrl: parseString(payload.callbackPublicBaseUrl, ONLY_OFFICE_TEMPLATE.callbackPublicBaseUrl),
+    jwtSecret: parseString(payload.jwtSecret, ONLY_OFFICE_TEMPLATE.jwtSecret)
+  };
 }
 
 function cloneSearchConfig(value: SearchSystemConfigValue): SearchSystemConfigValue {
@@ -1153,6 +1195,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [editorDraft, setEditorDraft] = useState<EditorSystemConfigValue>({ ...EDITOR_TEMPLATE });
   const [securityDraft, setSecurityDraft] = useState<SecuritySystemConfigValue>({ ...SECURITY_TEMPLATE });
   const [emailDraft, setEmailDraft] = useState<EmailSystemConfigValue>(cloneEmailConfig(EMAIL_TEMPLATE));
+  const [onlyOfficeDraft, setOnlyOfficeDraft] = useState<OnlyOfficeSystemConfigValue>(
+    cloneOnlyOfficeConfig(ONLY_OFFICE_TEMPLATE)
+  );
   const [searchDraft, setSearchDraft] = useState<SearchSystemConfigValue>(cloneSearchConfig(SEARCH_TEMPLATE));
   const [dataRetentionDraft, setDataRetentionDraft] = useState<DataRetentionSystemConfigValue>({
     ...cloneDataRetentionConfig(DATA_RETENTION_TEMPLATE)
@@ -1171,6 +1216,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     "data-retention": false,
     auth: false,
     email: false,
+    onlyoffice: false,
     sitemap: false,
     "image-hosting": false
   });
@@ -1290,6 +1336,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     if (!dirtyKeys.email) {
       setEmailDraft(parseEmailConfig(findConfigValue("email")));
     }
+    if (!dirtyKeys.onlyoffice) {
+      setOnlyOfficeDraft(parseOnlyOfficeConfig(findConfigValue("onlyoffice")));
+    }
     if (!dirtyKeys.sitemap) {
       setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
     }
@@ -1352,6 +1401,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setEmailDraft(cloneEmailConfig(EMAIL_TEMPLATE));
         markDirty("email");
         return;
+      case "onlyoffice":
+        setOnlyOfficeDraft(cloneOnlyOfficeConfig(ONLY_OFFICE_TEMPLATE));
+        markDirty("onlyoffice");
+        return;
       case "sitemap":
         setSitemapDraft({ ...SITEMAP_TEMPLATE });
         markDirty("sitemap");
@@ -1398,6 +1451,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       case "email":
         setEmailDraft(parseEmailConfig(findConfigValue("email")));
         clearDirty("email");
+        return;
+      case "onlyoffice":
+        setOnlyOfficeDraft(parseOnlyOfficeConfig(findConfigValue("onlyoffice")));
+        clearDirty("onlyoffice");
         return;
       case "sitemap":
         setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
@@ -1452,6 +1509,8 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         return cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
       case "email":
         return cloneEmailConfig(emailDraft) as unknown as Record<string, unknown>;
+      case "onlyoffice":
+        return cloneOnlyOfficeConfig(onlyOfficeDraft) as unknown as Record<string, unknown>;
       case "sitemap":
         return {
           generationMode: sitemapDraft.generationMode,
@@ -1462,7 +1521,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return {};
     }
-  }, [authDraft, dataRetentionDraft, editorDraft, emailDraft, imageHostingDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
+  }, [authDraft, dataRetentionDraft, editorDraft, emailDraft, imageHostingDraft, onlyOfficeDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -3419,6 +3478,85 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                       ) : (
                         <p className="mt-3 text-sm text-slate-500">当前没有可编辑的 LDAP Provider，请先在配置中补充 providers。</p>
                       )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "onlyoffice" ? (
+                  <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <Checkbox
+                        checked={onlyOfficeDraft.enabled}
+                        onCheckedChange={(checked) => {
+                          setOnlyOfficeDraft((previous) => ({
+                            ...previous,
+                            enabled: checked === true
+                          }));
+                          markDirty("onlyoffice");
+                        }}
+                        disabled={saving}
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium text-slate-700">启用 ONLYOFFICE</span>
+                        <p className="text-xs text-slate-500">启用后，编辑器新建文档时才会显示 Word / Excel 选项。</p>
+                      </div>
+                    </label>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">Document Server 地址</span>
+                        <Input
+                          value={onlyOfficeDraft.documentServerUrl}
+                          onChange={(event) => {
+                            setOnlyOfficeDraft((previous) => ({
+                              ...previous,
+                              documentServerUrl: event.target.value
+                            }));
+                            markDirty("onlyoffice");
+                          }}
+                          placeholder="https://onlyoffice.example.com"
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">填写 ONLYOFFICE Docs 服务入口地址，启用时必须为外部可访问的 http/https URL。</p>
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">回调外部地址</span>
+                        <Input
+                          value={onlyOfficeDraft.callbackPublicBaseUrl}
+                          onChange={(event) => {
+                            setOnlyOfficeDraft((previous) => ({
+                              ...previous,
+                              callbackPublicBaseUrl: event.target.value
+                            }));
+                            markDirty("onlyoffice");
+                          }}
+                          placeholder="https://api.example.com"
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">用于拼接 ONLYOFFICE callback 与文件回源地址，建议填写后端对外可访问根地址。</p>
+                      </label>
+                      <label className="space-y-1.5 sm:col-span-2">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">JWT 密钥（可选）</span>
+                        <Input
+                          type="password"
+                          value={onlyOfficeDraft.jwtSecret}
+                          onChange={(event) => {
+                            setOnlyOfficeDraft((previous) => ({
+                              ...previous,
+                              jwtSecret: event.target.value
+                            }));
+                            markDirty("onlyoffice");
+                          }}
+                          placeholder="留空表示不启用签名"
+                          autoComplete="new-password"
+                          disabled={saving}
+                        />
+                        {onlyOfficeDraft.jwtSecret === ONLY_OFFICE_SECRET_MASK ? (
+                          <p className="text-xs text-slate-500">当前显示为已掩码值，保持不改可直接保存。</p>
+                        ) : (
+                          <p className="text-xs text-slate-500">如果 Document Server 开启 JWT 校验，请保持此处与服务端配置一致。</p>
+                        )}
+                      </label>
                     </div>
                   </div>
                 ) : null}

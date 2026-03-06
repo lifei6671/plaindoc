@@ -136,44 +136,44 @@ Office 文档统一按格式过滤：
 
 ### 4.1 数据库与模型
 
-- [ ] 为文档引入格式字段：`markdown/docx/xlsx`
-- [ ] 为 Office 文档引入正文文件引用字段：如 `source_blob_id`、`source_file_name`、`source_mime_type`
-- [ ] 为 Office 文档引入 `content_version` 或等价版本 key 字段
-- [ ] 新增 Office 修订表：如 `document_file_revisions`
-- [ ] 为 Markdown 旧数据补默认格式 `markdown`
-- [ ] 若主干代码尚无格式字段，补三套迁移：`sqlite/mysql/postgres`
-- [ ] 更新 Go 模型：
+- [x] 为文档引入格式字段：`markdown/docx/xlsx`
+- [x] 为 Office 文档引入正文文件引用字段：如 `source_blob_id`、`source_file_name`、`source_mime_type`
+- [x] 为 Office 文档引入 `content_version` 或等价版本 key 字段
+- [x] 新增 Office 修订表：如 `document_file_revisions`
+- [x] 为 Markdown 旧数据补默认格式 `markdown`
+- [x] 若主干代码尚无格式字段，补三套迁移：`sqlite/mysql/postgres`
+- [x] 更新 Go 模型：
   - `apps/server/internal/storage/models/document.go`
   - `apps/server/internal/storage/models/document_revision.go` 或新增 `document_file_revision.go`
-- [ ] 更新前端契约：
+- [x] 更新前端契约：
   - `apps/web/src/data-access/types.ts`
 
 ### 4.2 仓储与服务层
 
 - [ ] 让以下仓储查询统一返回文档格式字段：
-  - `apps/server/internal/storage/repository/gorm_workspace_repository.go`
-  - `apps/server/internal/storage/repository/gorm_document_repository.go`
-  - `apps/server/internal/storage/repository/gorm_reader_page_repository.go`
-  - `apps/server/internal/storage/repository/gorm_document_share_repository.go`
-- [ ] 新增 Office 文档正文读取/写回仓储接口
-- [ ] 新增 Office 文档版本写回事务：
+  - [x] `apps/server/internal/storage/repository/gorm_workspace_repository.go`
+  - [x] `apps/server/internal/storage/repository/gorm_document_repository.go`
+  - [x] `apps/server/internal/storage/repository/gorm_reader_page_repository.go`
+  - [ ] `apps/server/internal/storage/repository/gorm_document_share_repository.go`
+- [x] 新增 Office 文档正文读取/写回仓储接口
+- [x] 新增 Office 文档版本写回事务：
   - 下载 ONLYOFFICE 输出文件
   - 写入 blob
   - 写入 file revision
   - 更新 `documents.current_blob_id + content_version + updated_at`
-- [ ] 删除文档时补 Office 正文文件生命周期清理
+- [x] 删除文档时补 Office 正文文件生命周期清理
 - [ ] 让权限服务按“文档是否可读/可写”工作，不与 Markdown 耦合
 
 ### 4.3 工作区后端 API
 
-- [ ] `CreateNode` 增加格式入参
-- [ ] `GetDocument` 增加格式判别字段
-- [ ] `SaveDocument` 明确只对 `markdown` 可用；Office 文档请求直接拒绝
-- [ ] 新增工作区 ONLYOFFICE 编辑配置接口
-- [ ] 新增工作区 ONLYOFFICE callback 接口
-- [ ] 新增 Office 正文文件受控访问接口，供 Document Server 拉取
+- [x] `CreateNode` 增加格式入参
+- [x] `GetDocument` 增加格式判别字段
+- [x] `SaveDocument` 明确只对 `markdown` 可用；Office 文档请求直接拒绝
+- [x] 新增工作区 ONLYOFFICE 编辑配置接口
+- [x] 新增工作区 ONLYOFFICE callback 接口
+- [x] 新增 Office 正文文件受控访问接口，供 Document Server 拉取
 - [ ] 文档重命名、标识、可见性接口保持复用，但要兼容 Office 文档
-- [ ] Markdown 专属接口加格式保护：
+- [x] Markdown 专属接口加格式保护：
   - 远程图片本地化
   - Markdown 主题
   - Markdown 模板初始化
@@ -183,14 +183,14 @@ Office 文档统一按格式过滤：
 - [ ] 左侧“新建文档”子菜单新增：
   - `新建 Word`
   - `新建表格`
-- [ ] 创建节点弹窗增加格式选择：`Markdown / Word / Excel`
+- [x] 创建节点弹窗增加格式选择：`Markdown / Word / Excel`
 - [ ] 空间树节点增加格式标识与图标
-- [ ] `useWorkspace.openDocument()` 改为 format-aware
-- [ ] `App.tsx` 编辑工作台拆成双模式：
+- [x] `useWorkspace.openDocument()` 改为 format-aware
+- [x] `App.tsx` 编辑工作台拆成双模式：
   - Markdown：现有 CodeMirror + Preview
   - Office：DocEditor 容器
-- [ ] Office 模式隐藏 Markdown 工具栏、预览区、TOC、滚动同步、外链图片转存
-- [ ] Office 模式不走现有自动保存与冲突提示 footer
+- [x] Office 模式隐藏 Markdown 工具栏、预览区、TOC、滚动同步、外链图片转存
+- [x] Office 模式不走现有自动保存与冲突提示 footer
 - [ ] 为 Office 编辑页补加载态、回源失败态、权限拒绝态
 - [ ] 在前端对 ONLYOFFICE script 加载失败与 session 过期做明确提示
 
@@ -233,27 +233,27 @@ Office 文档统一按格式过滤：
 - [ ] 管理端若支持批量操作，需按格式限制：
   - Markdown 主题设置仅对 Markdown
   - Markdown 模板能力仅对 Markdown
-- [ ] 系统配置中预留 ONLYOFFICE 连接参数：
+- [x] 系统配置中预留 ONLYOFFICE 连接参数：
   - Document Server 地址
   - JWT 密钥
   - 回调外部可达地址
 
 ### 4.9 测试与文档
 
-- [ ] 迁移测试：三库结构与回填数据验证
+- [x] 迁移测试：三库结构与回填数据验证
 - [ ] 仓储测试：Office 正文回写事务、版本递增、清理补偿
 - [ ] Handler/Service 测试：
-  - 创建 Office 文档
-  - 工作区编辑配置生成
-  - callback 成功/失败
-  - Office 阅读页
-  - Office 分享阅读页
-  - 搜索与 sitemap 排除
+  - [x] 创建 Office 文档
+  - [x] 工作区编辑配置生成
+  - [x] callback 成功/失败
+  - [ ] Office 阅读页
+  - [ ] Office 分享阅读页
+  - [ ] 搜索与 sitemap 排除
 - [ ] 前端测试：
-  - 创建弹窗格式选择
-  - 工作区格式切换
-  - 阅读/分享只读挂载
-  - Markdown 功能按格式禁用
+  - [x] 创建弹窗格式选择
+  - [x] 工作区格式切换
+  - [ ] 阅读/分享只读挂载
+  - [ ] Markdown 功能按格式禁用
 - [ ] 更新 `docs/README.md` 索引
 - [ ] 后续把最终结果并入 `BACKEND_DEVELOPER_GUIDE.md` 与 `FRONTEND_DEVELOPER_GUIDE.md`
 
@@ -261,13 +261,13 @@ Office 文档统一按格式过滤：
 
 ## 5. 建议实施顺序
 
-### Phase 0：结构准备
+### Phase 0：结构准备（已完成）
 
 1. 补格式字段与 Office 正文文件模型
 2. 补版本字段与 file revision 表
 3. 完成三库迁移与主干数据回填
 
-### Phase 1：工作区编辑
+### Phase 1：工作区编辑（已完成）
 
 1. 工作区创建 Office 文档
 2. 获取 Office 文档详情

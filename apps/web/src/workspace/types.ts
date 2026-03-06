@@ -3,6 +3,7 @@ import type {
   CreateNodeResult,
   DataGateway,
   Document,
+  DocumentFormat,
   NodeType,
   Space,
   TreeNode,
@@ -27,8 +28,12 @@ export interface WorkspaceState {
   activeSpaceName: string;
   workspaceTree: TreeNode[];
   activeDocId: string | null;
+  activeDocumentFormat: DocumentFormat;
   activeDocumentTitle: string;
   activeDocumentThemeId: string;
+  activeDocumentSourceFileName: string | null;
+  activeDocumentSourceMimeType: string | null;
+  activeDocumentContentVersion: number;
   content: string;
   baseVersion: number;
   lastSavedContent: string;
@@ -71,6 +76,7 @@ export interface WorkspaceCreateNodeInput {
   title: string;
   documentIdentifier?: string;
   templateId?: string;
+  format?: DocumentFormat;
 }
 
 // 工作区动作：统一封装目录树和文档加载行为。
@@ -93,8 +99,12 @@ export interface WorkspaceActions {
 // 工作区状态写入器：供保存链路复用，避免上层重复定义状态。
 export interface WorkspaceSetters {
   setActiveSpaceName: Dispatch<SetStateAction<string>>;
+  setActiveDocumentFormat: Dispatch<SetStateAction<DocumentFormat>>;
   setActiveDocumentTitle: Dispatch<SetStateAction<string>>;
   setActiveDocumentThemeId: Dispatch<SetStateAction<string>>;
+  setActiveDocumentSourceFileName: Dispatch<SetStateAction<string | null>>;
+  setActiveDocumentSourceMimeType: Dispatch<SetStateAction<string | null>>;
+  setActiveDocumentContentVersion: Dispatch<SetStateAction<number>>;
   setContent: Dispatch<SetStateAction<string>>;
   setBaseVersion: Dispatch<SetStateAction<number>>;
   setLastSavedContent: Dispatch<SetStateAction<string>>;

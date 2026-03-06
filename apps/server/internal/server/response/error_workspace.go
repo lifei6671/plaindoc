@@ -107,6 +107,18 @@ var (
 		Code:    CodeInvalidDocumentID,
 		Message: "文档 ID 不能为空",
 	}
+	// WorkspaceErrDocumentFormatInvalid 对应场景：invalid document format
+	WorkspaceErrDocumentFormatInvalid = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidRequest,
+		Message: "文档格式无效",
+	}
+	// WorkspaceErrOnlyOfficeDisabled 对应场景：ONLYOFFICE disabled when creating office document
+	WorkspaceErrOnlyOfficeDisabled = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidRequest,
+		Message: "ONLYOFFICE 未启用，当前不可创建 Office 文档",
+	}
 	// WorkspaceErrSaveDocumentRequest 对应场景：invalid save document request
 	WorkspaceErrSaveDocumentRequest = ErrorTemplate{
 		Status:  http.StatusBadRequest,
@@ -124,6 +136,12 @@ var (
 		Status:  http.StatusBadRequest,
 		Code:    CodeInvalidRequest,
 		Message: "baseVersion 参数不能为空",
+	}
+	// WorkspaceErrMarkdownOnlyOperation 对应场景：operation only supports markdown document
+	WorkspaceErrMarkdownOnlyOperation = ErrorTemplate{
+		Status:  http.StatusBadRequest,
+		Code:    CodeInvalidRequest,
+		Message: "当前文档格式不支持该操作",
 	}
 	// WorkspaceErrDocumentNotFound 对应场景：document not found
 	WorkspaceErrDocumentNotFound = ErrorTemplate{

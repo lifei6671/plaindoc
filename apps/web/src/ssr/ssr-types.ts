@@ -3,6 +3,7 @@ export interface ReaderTreeNode {
   documentId?: string;
   documentIdentifier?: string;
   documentRouteKey?: string;
+  documentFormat?: "markdown" | "docx" | "xlsx";
   parentId?: string | null;
   type: "folder" | "doc";
   title: string;
@@ -23,10 +24,15 @@ export interface ReaderDocumentPayload {
   identifier?: string;
   routeKey: string;
   themeId: string;
+  format?: "markdown" | "docx" | "xlsx";
   visibility: "public" | "authenticated" | "member";
   title: string;
   contentMd: string;
   version: number;
+  sourceBlobId?: string;
+  sourceFileName?: string;
+  sourceMimeType?: string;
+  contentVersion?: number;
   authorNickname: string;
   updatedAt: string;
 }

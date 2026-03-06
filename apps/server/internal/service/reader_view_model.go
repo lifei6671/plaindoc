@@ -8,6 +8,7 @@ type ReaderTreeNodeViewModel struct {
 	DocumentID         *string                   `json:"documentId,omitempty"`
 	DocumentIdentifier *string                   `json:"documentIdentifier,omitempty"`
 	DocumentRouteKey   *string                   `json:"documentRouteKey,omitempty"`
+	DocumentFormat     *models.DocumentFormat    `json:"documentFormat,omitempty"`
 	ParentID           *string                   `json:"parentId,omitempty"`
 	Type               models.NodeType           `json:"type"`
 	Title              string                    `json:"title"`
@@ -18,17 +19,22 @@ type ReaderTreeNodeViewModel struct {
 
 // ReaderDocumentViewModel 表示阅读页正文数据。
 type ReaderDocumentViewModel struct {
-	ID             string            `json:"id"`
-	NodeID         string            `json:"nodeId"`
-	Identifier     string            `json:"identifier,omitempty"`
-	RouteKey       string            `json:"routeKey"`
-	ThemeID        string            `json:"themeId"`
-	Visibility     models.Visibility `json:"visibility"`
-	Title          string            `json:"title"`
-	ContentMD      string            `json:"contentMd"`
-	Version        int               `json:"version"`
-	AuthorNickname string            `json:"authorNickname"`
-	UpdatedAt      string            `json:"updatedAt"`
+	ID             string                `json:"id"`
+	NodeID         string                `json:"nodeId"`
+	Identifier     string                `json:"identifier,omitempty"`
+	RouteKey       string                `json:"routeKey"`
+	ThemeID        string                `json:"themeId"`
+	Format         models.DocumentFormat `json:"format"`
+	Visibility     models.Visibility     `json:"visibility"`
+	Title          string                `json:"title"`
+	ContentMD      string                `json:"contentMd"`
+	Version        int                   `json:"version"`
+	SourceBlobID   *string               `json:"sourceBlobId,omitempty"`
+	SourceFileName *string               `json:"sourceFileName,omitempty"`
+	SourceMimeType *string               `json:"sourceMimeType,omitempty"`
+	ContentVersion int                   `json:"contentVersion"`
+	AuthorNickname string                `json:"authorNickname"`
+	UpdatedAt      string                `json:"updatedAt"`
 }
 
 // ReaderDocumentAttachmentViewModel 表示阅读页附件元数据。

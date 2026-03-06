@@ -60,14 +60,19 @@ type spaceAccessResponse struct {
 }
 
 type documentAccessResponse struct {
-	ID         string `json:"id"`
-	NodeID     string `json:"nodeId"`
-	ThemeID    string `json:"themeId"`
-	Visibility string `json:"visibility"`
-	Title      string `json:"title"`
-	ContentMD  string `json:"contentMd"`
-	Version    int    `json:"version"`
-	UpdatedAt  string `json:"updatedAt"`
+	ID             string                `json:"id"`
+	NodeID         string                `json:"nodeId"`
+	ThemeID        string                `json:"themeId"`
+	Format         models.DocumentFormat `json:"format"`
+	Visibility     string                `json:"visibility"`
+	Title          string                `json:"title"`
+	ContentMD      string                `json:"contentMd"`
+	Version        int                   `json:"version"`
+	SourceBlobID   *string               `json:"sourceBlobId,omitempty"`
+	SourceFileName *string               `json:"sourceFileName,omitempty"`
+	SourceMimeType *string               `json:"sourceMimeType,omitempty"`
+	ContentVersion int                   `json:"contentVersion"`
+	UpdatedAt      string                `json:"updatedAt"`
 }
 
 // NewAccessHandler 创建文档/空间公开访问处理器。
@@ -199,14 +204,19 @@ func (h *accessHandler) GetDocument(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, documentAccessResponse{
-		ID:         document.DocumentID,
-		NodeID:     document.NodeID,
-		ThemeID:    document.ThemeID,
-		Visibility: string(document.Visibility),
-		Title:      document.Title,
-		ContentMD:  document.ContentMD,
-		Version:    document.Version,
-		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		ID:             document.DocumentID,
+		NodeID:         document.NodeID,
+		ThemeID:        document.ThemeID,
+		Format:         models.NormalizeDocumentFormat(document.Format),
+		Visibility:     string(document.Visibility),
+		Title:          document.Title,
+		ContentMD:      document.ContentMD,
+		Version:        document.Version,
+		SourceBlobID:   normalizeOptionalAccessString(document.SourceBlobID),
+		SourceFileName: normalizeOptionalAccessString(document.SourceFileName),
+		SourceMimeType: normalizeOptionalAccessString(document.SourceMimeType),
+		ContentVersion: normalizeAccessContentVersion(document.ContentVersion, document.Version),
+		UpdatedAt:      formatAccessTime(document.UpdatedAt),
 	})
 }
 
@@ -249,15 +259,49 @@ func (h *accessHandler) UpdateDocumentVisibility(c *gin.Context) {
 		h.renderCache.PurgeDoc(document.DocumentID)
 	}
 	response.JSON(c, http.StatusOK, documentAccessResponse{
-		ID:         document.DocumentID,
-		NodeID:     document.NodeID,
-		ThemeID:    document.ThemeID,
-		Visibility: string(document.Visibility),
-		Title:      document.Title,
-		ContentMD:  document.ContentMD,
-		Version:    document.Version,
-		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		ID:             document.DocumentID,
+		NodeID:         document.NodeID,
+		ThemeID:        document.ThemeID,
+		Format:         models.NormalizeDocumentFormat(document.Format),
+		Visibility:     string(document.Visibility),
+		Title:          document.Title,
+		ContentMD:      document.ContentMD,
+		Version:        document.Version,
+		SourceBlobID:   normalizeOptionalAccessString(document.SourceBlobID),
+		SourceFileName: normalizeOptionalAccessString(document.SourceFileName),
+		SourceMimeType: normalizeOptionalAccessString(document.SourceMimeType),
+		ContentVersion: normalizeAccessContentVersion(document.ContentVersion, document.Version),
+		UpdatedAt:      formatAccessTime(document.UpdatedAt),
 	})
+}
+
+func normalizeOptionalAccessString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := *value
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func normalizeAccessContentVersion(contentVersion int, version int) int {
+	switch {
+	case contentVersion > 0:
+		return contentVersion
+	case version > 0:
+		return version
+	default:
+		return 1
+	}
+}
+
+func formatAccessTime(updatedAt time.Time) string {
+	if updatedAt.IsZero() {
+		return time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return updatedAt.UTC().Format(time.RFC3339Nano)
 }
 
 func (h *accessHandler) requireViewerUserID(c *gin.Context) (string, bool) {

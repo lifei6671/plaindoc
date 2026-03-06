@@ -16,17 +16,22 @@ type gormReaderPageRepository struct {
 }
 
 type readerPageDocumentRow struct {
-	DocumentID     string  `gorm:"column:document_id"`
-	NodeID         string  `gorm:"column:node_id"`
-	ReaderSlug     *string `gorm:"column:reader_slug"`
-	ThemeID        string  `gorm:"column:theme_id"`
-	Visibility     string  `gorm:"column:visibility"`
-	Title          string  `gorm:"column:title"`
-	ContentMD      string  `gorm:"column:content_md"`
-	Version        int     `gorm:"column:version"`
-	AuthorNickname string  `gorm:"column:author_nickname"`
-	UpdatedAtRaw   string  `gorm:"column:updated_at"`
-	SpaceID        string  `gorm:"column:space_id"`
+	DocumentID     string                `gorm:"column:document_id"`
+	NodeID         string                `gorm:"column:node_id"`
+	ReaderSlug     *string               `gorm:"column:reader_slug"`
+	ThemeID        string                `gorm:"column:theme_id"`
+	Format         models.DocumentFormat `gorm:"column:format"`
+	Visibility     string                `gorm:"column:visibility"`
+	Title          string                `gorm:"column:title"`
+	ContentMD      string                `gorm:"column:content_md"`
+	Version        int                   `gorm:"column:version"`
+	SourceBlobID   *string               `gorm:"column:source_blob_id"`
+	SourceFileName *string               `gorm:"column:source_file_name"`
+	SourceMimeType *string               `gorm:"column:source_mime_type"`
+	ContentVersion int                   `gorm:"column:content_version"`
+	AuthorNickname string                `gorm:"column:author_nickname"`
+	UpdatedAtRaw   string                `gorm:"column:updated_at"`
+	SpaceID        string                `gorm:"column:space_id"`
 }
 
 type readerPageTreeNodeRow struct {
@@ -38,6 +43,7 @@ type readerPageTreeNodeRow struct {
 	Title              string          `gorm:"column:title"`
 	Sort               int             `gorm:"column:sort"`
 	DocumentVisibility *string         `gorm:"column:document_visibility"`
+	DocumentFormat     *string         `gorm:"column:document_format"`
 }
 
 type readerPageDocumentIDRow struct {
@@ -150,10 +156,15 @@ func (r *gormReaderPageRepository) GetDocumentByDocumentID(
 			"d.node_id",
 			"n.reader_slug",
 			"d.theme_id",
+			"d.format",
 			"d.visibility",
 			"d.title",
 			"d.content_md",
 			"d.version",
+			"d.source_blob_id",
+			"d.source_file_name",
+			"d.source_mime_type",
+			"d.content_version",
 			"COALESCE(NULLIF(TRIM(u_creator.name), ''), '未知作者') AS author_nickname",
 			"d.updated_at",
 			"n.space_id AS space_id",
@@ -171,10 +182,15 @@ func (r *gormReaderPageRepository) GetDocumentByDocumentID(
 		NodeID:         strings.TrimSpace(row.NodeID),
 		ReaderSlug:     trimReaderOptionalString(row.ReaderSlug),
 		ThemeID:        strings.TrimSpace(row.ThemeID),
+		Format:         models.NormalizeDocumentFormat(row.Format),
 		Visibility:     strings.TrimSpace(row.Visibility),
 		Title:          strings.TrimSpace(row.Title),
 		ContentMD:      row.ContentMD,
 		Version:        row.Version,
+		SourceBlobID:   trimOptionalString(row.SourceBlobID),
+		SourceFileName: trimOptionalString(row.SourceFileName),
+		SourceMimeType: trimOptionalString(row.SourceMimeType),
+		ContentVersion: normalizeContentVersion(row.ContentVersion, row.Version),
 		AuthorNickname: strings.TrimSpace(row.AuthorNickname),
 		UpdatedAt:      parseRecordTime(row.UpdatedAtRaw),
 		SpaceID:        strings.TrimSpace(row.SpaceID),
@@ -242,6 +258,7 @@ func (r *gormReaderPageRepository) ListTreeNodesBySpaceID(
 			"n.title",
 			"n.sort",
 			"d.visibility AS document_visibility",
+			"d.format AS document_format",
 		).
 		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
 		Where("n.space_id = ?", normalizedSpaceID).
@@ -261,6 +278,7 @@ func (r *gormReaderPageRepository) ListTreeNodesBySpaceID(
 			Title:              strings.TrimSpace(row.Title),
 			Sort:               row.Sort,
 			DocumentVisibility: trimReaderOptionalString(row.DocumentVisibility),
+			DocumentFormat:     normalizeOptionalDocumentFormat(row.DocumentFormat),
 		})
 	}
 	return result, nil

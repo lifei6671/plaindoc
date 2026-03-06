@@ -1,5 +1,6 @@
 export type Role = "owner" | "collaborator" | "reader";
 export type NodeType = "folder" | "doc";
+export type DocumentFormat = "markdown" | "docx" | "xlsx";
 export type AdminRole = "platform_admin" | "space_admin";
 export type EntityStatus = "active" | "banned" | "deleted";
 export type Visibility = "public" | "authenticated" | "member";
@@ -94,6 +95,7 @@ export interface TreeNode {
   documentId?: string;
   documentIdentifier?: string;
   documentRouteKey?: string;
+  documentFormat?: DocumentFormat;
   spaceId: string;
   parentId: string | null;
   type: NodeType;
@@ -107,9 +109,14 @@ export interface Document {
   id: string;
   nodeId: string;
   themeId: string;
+  format?: DocumentFormat;
   title: string;
   contentMd: string;
   version: number;
+  sourceBlobId?: string;
+  sourceFileName?: string;
+  sourceMimeType?: string;
+  contentVersion?: number;
   updatedAt: string;
   visibility?: Visibility;
 }
@@ -186,6 +193,7 @@ export interface CreateNodeInput {
   title: string;
   documentIdentifier?: string;
   templateId?: string;
+  format?: DocumentFormat;
 }
 
 export interface CreateNodeResult {
@@ -215,6 +223,11 @@ export interface SaveDocumentInput {
 
 export interface SaveDocumentResult {
   document: Document;
+}
+
+export interface OnlyOfficeEditConfig {
+  documentServerUrl: string;
+  config: Record<string, unknown>;
 }
 
 export interface UpdateDocumentIdentifierResult {
@@ -285,6 +298,7 @@ export interface WorkspaceGateway {
 export interface DocumentGateway {
   getDocument(docId: string): Promise<Document>;
   saveDocument(input: SaveDocumentInput): Promise<SaveDocumentResult>;
+  getOnlyOfficeEditConfig(docId: string): Promise<OnlyOfficeEditConfig>;
   updateDocumentIdentifier(docId: string, identifier: string | null): Promise<UpdateDocumentIdentifierResult>;
   getShareConfig(docId: string): Promise<DocumentShareConfig>;
   updateShareConfig(docId: string, input: UpdateDocumentShareInput): Promise<DocumentShareConfig>;
@@ -497,6 +511,7 @@ export interface AdminDocument {
   documentId: string;
   documentRouteKey?: string;
   nodeId: string;
+  format?: DocumentFormat;
   title: string;
   spaceId: string;
   spaceName: string;
@@ -1128,6 +1143,7 @@ export interface AdminGateway {
       | "search"
       | "auth"
       | "email"
+      | "onlyoffice"
       | "image-hosting"
       | "sitemap"
       | "data-retention";
@@ -1214,6 +1230,14 @@ export interface ImageHostingGateway {
   ): Promise<UploadLocalImageResult>;
 }
 
+export interface OnlyOfficeClientConfig {
+  enabled: boolean;
+}
+
+export interface OnlyOfficeGateway {
+  getConfig(): Promise<OnlyOfficeClientConfig>;
+}
+
 export interface UserConfigGateway {
   // 读取配置：不存在时返回 null。
   getValue<T = unknown>(input: UserConfigGetInput): Promise<T | null>;
@@ -1229,5 +1253,6 @@ export interface DataGateway {
   theme: ThemeGateway;
   admin: AdminGateway;
   imageHosting: ImageHostingGateway;
+  onlyOffice: OnlyOfficeGateway;
   userConfig: UserConfigGateway;
 }

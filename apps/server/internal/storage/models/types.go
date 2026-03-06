@@ -15,6 +15,39 @@ const (
 	NodeTypeDoc    NodeType = "doc"
 )
 
+type DocumentFormat string
+
+const (
+	DocumentFormatMarkdown DocumentFormat = "markdown"
+	DocumentFormatDOCX     DocumentFormat = "docx"
+	DocumentFormatXLSX     DocumentFormat = "xlsx"
+)
+
+func IsValidDocumentFormat(value DocumentFormat) bool {
+	switch value {
+	case DocumentFormatMarkdown, DocumentFormatDOCX, DocumentFormatXLSX:
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeDocumentFormat(value DocumentFormat) DocumentFormat {
+	if !IsValidDocumentFormat(value) {
+		return DocumentFormatMarkdown
+	}
+	return value
+}
+
+func IsOfficeDocumentFormat(value DocumentFormat) bool {
+	switch NormalizeDocumentFormat(value) {
+	case DocumentFormatDOCX, DocumentFormatXLSX:
+		return true
+	default:
+		return false
+	}
+}
+
 type RevisionSource string
 
 const (

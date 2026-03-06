@@ -1163,40 +1163,7 @@ func (h *workspaceHandler) uploadDocumentAttachmentToProvider(
 		return "", "", errors.New("attachment content is empty")
 	}
 
-	switch provider {
-	case service.ImageHostingProviderLocal:
-		targetPath, pathErr := h.resolveLocalAttachmentTargetPath(objectKey)
-		if pathErr != nil {
-			return "", "", pathErr
-		}
-		targetDir := filepath.Dir(targetPath)
-		if mkdirErr := os.MkdirAll(targetDir, 0o755); mkdirErr != nil {
-			return "", "", mkdirErr
-		}
-		if saveErr := os.WriteFile(targetPath, fileContent, 0o644); saveErr != nil {
-			return "", "", saveErr
-		}
-		return resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads"), targetPath, nil
-	case service.ImageHostingProviderCloudflareR2:
-		uploadedURL, uploadErr := uploadImageToCloudflareR2(
-			c.Request.Context(),
-			fileContent,
-			contentType,
-			objectKey,
-			config,
-		)
-		return uploadedURL, "", uploadErr
-	case service.ImageHostingProviderAliyunOSS:
-		uploadedURL, uploadErr := uploadImageToAliyunOSS(
-			fileContent,
-			contentType,
-			objectKey,
-			config,
-		)
-		return uploadedURL, "", uploadErr
-	default:
-		return "", "", errors.New("unsupported attachment storage provider")
-	}
+	return h.uploadRawContentToProvider(c.Request.Context(), fileContent, contentType, objectKey, provider, config)
 }
 
 func buildDocumentAttachmentObjectKey(

@@ -3115,6 +3115,143 @@ func TestRouter_AdminSystemConfig_AuthConfigValidationAndSecretMasking(t *testin
 	}
 }
 
+func TestRouter_AdminSystemConfig_OnlyOfficeConfigValidationAndSecretMasking(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "config-onlyoffice-platform-admin@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+	if err := database.ORM.Table("system_configs").Where("config_key = ?", "onlyoffice").Delete(nil).Error; err != nil {
+		t.Fatalf("clear onlyoffice config before test failed: %v", err)
+	}
+
+	createBody := `{
+		"value": {
+			"enabled": true,
+			"documentServerUrl": "https://onlyoffice.example.com",
+			"callbackPublicBaseUrl": "https://api.example.com",
+			"jwtSecret": "onlyoffice-top-secret"
+		}
+	}`
+	createReq := httptest.NewRequest(http.MethodPut, "/api/admin/system-configs/onlyoffice", bytes.NewReader([]byte(createBody)))
+	createReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		createReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"onlyoffice",
+	)
+	createRec := serve(createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected create onlyoffice config status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	if decodeJSONResultCode(t, createRec.Body.Bytes()) != 0 {
+		t.Fatalf("expected create onlyoffice config success code=0, got body=%s", createRec.Body.String())
+	}
+	if strings.Contains(createRec.Body.String(), "onlyoffice-top-secret") {
+		t.Fatalf("expected response mask onlyoffice secret, body=%s", createRec.Body.String())
+	}
+
+	var storedRawJSON string
+	if err := database.ORM.Table("system_configs").
+		Select("config_value_json").
+		Where("config_key = ?", "onlyoffice").
+		Take(&storedRawJSON).Error; err != nil {
+		t.Fatalf("query onlyoffice config failed: %v", err)
+	}
+	if !strings.Contains(storedRawJSON, "onlyoffice-top-secret") {
+		t.Fatalf("expected onlyoffice config persist raw secret value, got %s", storedRawJSON)
+	}
+
+	updateBody := `{
+		"expectedVersion": 1,
+		"value": {
+			"enabled": true,
+			"documentServerUrl": "https://onlyoffice.example.com/",
+			"callbackPublicBaseUrl": "https://api.internal.example.com",
+			"jwtSecret": "********"
+		}
+	}`
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/admin/system-configs/onlyoffice", bytes.NewReader([]byte(updateBody)))
+	updateReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	updateReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		updateReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"onlyoffice",
+	)
+	updateRec := serve(updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected update onlyoffice config status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	if strings.Contains(updateRec.Body.String(), "onlyoffice-top-secret") {
+		t.Fatalf("expected update response mask onlyoffice secret, body=%s", updateRec.Body.String())
+	}
+
+	var updatedRawJSON string
+	if err := database.ORM.Table("system_configs").
+		Select("config_value_json").
+		Where("config_key = ?", "onlyoffice").
+		Take(&updatedRawJSON).Error; err != nil {
+		t.Fatalf("query updated onlyoffice config failed: %v", err)
+	}
+	if !strings.Contains(updatedRawJSON, "onlyoffice-top-secret") {
+		t.Fatalf("expected masked secret keep original stored secret, got %s", updatedRawJSON)
+	}
+	if !strings.Contains(updatedRawJSON, `"callbackPublicBaseUrl":"https://api.internal.example.com"`) {
+		t.Fatalf("expected updated callback base url persisted, got %s", updatedRawJSON)
+	}
+
+	invalidReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/admin/system-configs/onlyoffice",
+		bytes.NewReader([]byte(`{"expectedVersion":2,"value":{"enabled":true,"documentServerUrl":"","callbackPublicBaseUrl":"https://api.example.com","jwtSecret":""}}`)),
+	)
+	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	invalidReq.Header.Set("Content-Type", "application/json")
+	attachAdminOperationToken(
+		t,
+		serve,
+		invalidReq,
+		platformAdminToken,
+		"system_config.upsert",
+		"system_config",
+		"onlyoffice",
+	)
+	invalidRec := serve(invalidReq)
+	if invalidRec.Code != http.StatusOK {
+		t.Fatalf("expected invalid onlyoffice config status 200, got %d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+	if decodeJSONResultCode(t, invalidRec.Body.Bytes()) != response.ResolveErrorCode(response.CodeInvalidConfigValue) {
+		t.Fatalf(
+			"expected code %d, got %d body=%s",
+			response.ResolveErrorCode(response.CodeInvalidConfigValue),
+			decodeJSONResultCode(t, invalidRec.Body.Bytes()),
+			invalidRec.Body.String(),
+		)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/admin/system-configs", nil)
+	listReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	listRec := serve(listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected list system configs status 200, got %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	if strings.Contains(listRec.Body.String(), "onlyoffice-top-secret") {
+		t.Fatalf("expected list response never expose onlyoffice secret, body=%s", listRec.Body.String())
+	}
+}
+
 func TestRouter_AdminSystemConfig_TestLDAPConnectionPermissionAndValidation(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

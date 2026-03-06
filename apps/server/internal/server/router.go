@@ -212,6 +212,7 @@ func newRouter(
 	)
 	// 图床配置与上传 Handler：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
+	onlyOfficeConfigService := service.NewOnlyOfficeConfigService(systemConfigRepo)
 	documentShareService := service.NewDocumentShareService(
 		db,
 		documentShareRepo,
@@ -233,6 +234,8 @@ func newRouter(
 	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
 	documentTemplateService := service.NewDocumentTemplateService(documentTemplateRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
+	onlyOfficeHandler := handler.NewOnlyOfficeHandler(authService, onlyOfficeConfigService)
+	onlyOfficeDocumentTokenService := service.NewOnlyOfficeDocumentTokenService(cfg.JWT.Secret, 0)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
 	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache, searchIndexService)
 	documentTemplateHandler := handler.NewDocumentTemplateHandler(documentTemplateService)
@@ -245,6 +248,8 @@ func newRouter(
 		authService,
 		visibilityService,
 		imageHostingService,
+		onlyOfficeConfigService,
+		onlyOfficeDocumentTokenService,
 		documentAttachmentTokenService,
 		readerRenderCache,
 		searchIndexService,
@@ -398,6 +403,8 @@ func newRouter(
 
 		// 读取图床配置（用于前端展示上传能力与限制）。
 		api.GET("/image-hosting", imageHostingHandler.GetConfig)
+		// 读取 ONLYOFFICE 运行时开关（用于前端决定是否展示 Office 创建入口）。
+		api.GET("/onlyoffice", onlyOfficeHandler.GetConfig)
 		// 由后端分配图片对象 key（所有存储 provider 统一由后端生成文件名）。
 		api.POST("/uploads/images/object-key", imageHostingHandler.IssueImageObjectKey)
 		// 统一图片上传入口（按配置决定走本地或外部托管）。
@@ -430,6 +437,12 @@ func newRouter(
 		api.PUT("/spaces/:spaceId/visibility", accessHandler.UpdateSpaceVisibility)
 		// 读取文档正文。
 		api.GET("/docs/:docId", accessHandler.GetDocument)
+		// 生成 ONLYOFFICE 编辑配置。
+		api.GET("/docs/:docId/onlyoffice/edit-config", workspaceHandler.GetOnlyOfficeEditConfig)
+		// ONLYOFFICE Document Server 拉取正文文件。
+		api.GET("/docs/:docId/onlyoffice/source", workspaceHandler.ServeOnlyOfficeSourceDocument)
+		// ONLYOFFICE 保存回调。
+		api.POST("/docs/:docId/onlyoffice/callback", workspaceHandler.HandleOnlyOfficeCallback)
 		// 更新文档阅读标识（slug）。
 		api.PATCH("/docs/:docId/identifier", workspaceHandler.UpdateDocumentIdentifier)
 		// 获取文档分享配置。

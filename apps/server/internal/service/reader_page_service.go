@@ -19,16 +19,17 @@ type ReaderPageService struct {
 }
 
 type readerTreeNode struct {
-	ID           string
-	DocumentID   *string
-	ReaderSlug   *string
-	DocumentPath *string
-	ParentID     *string
-	Type         models.NodeType
-	Title        string
-	Sort         int
-	Visibility   *models.Visibility
-	Children     []*readerTreeNode
+	ID             string
+	DocumentID     *string
+	ReaderSlug     *string
+	DocumentPath   *string
+	DocumentFormat *models.DocumentFormat
+	ParentID       *string
+	Type           models.NodeType
+	Title          string
+	Sort           int
+	Visibility     *models.Visibility
+	Children       []*readerTreeNode
 }
 
 // NewReaderPageService 创建阅读页聚合服务。
@@ -194,10 +195,15 @@ func (s *ReaderPageService) BuildPage(
 			Identifier:     normalizeReaderString(documentIdentifier),
 			RouteKey:       documentRouteKey,
 			ThemeID:        strings.TrimSpace(documentRow.ThemeID),
+			Format:         models.NormalizeDocumentFormat(documentRow.Format),
 			Visibility:     normalizeReaderVisibility(documentRow.Visibility),
 			Title:          documentTitle,
 			ContentMD:      documentRow.ContentMD,
 			Version:        documentRow.Version,
+			SourceBlobID:   normalizeReaderOptionalString(documentRow.SourceBlobID),
+			SourceFileName: normalizeReaderOptionalString(documentRow.SourceFileName),
+			SourceMimeType: normalizeReaderOptionalString(documentRow.SourceMimeType),
+			ContentVersion: normalizeReaderContentVersion(documentRow.ContentVersion, documentRow.Version),
 			AuthorNickname: normalizeReaderAuthorNickname(documentRow.AuthorNickname),
 			UpdatedAt:      updatedAt,
 		},
@@ -317,17 +323,19 @@ func (s *ReaderPageService) loadTree(
 		readerSlug := normalizeReaderOptionalString(row.ReaderSlug)
 		documentPath := resolveReaderTreeDocumentRouteKey(documentID, readerSlug)
 		documentVisibility := normalizeReaderDocumentVisibility(row.Type, row.DocumentVisibility)
+		documentFormat := normalizeReaderTreeDocumentFormat(row.Type, row.DocumentFormat)
 		treeNodes[nodeID] = &readerTreeNode{
-			ID:           nodeID,
-			DocumentID:   documentID,
-			ReaderSlug:   readerSlug,
-			DocumentPath: documentPath,
-			ParentID:     normalizeReaderOptionalString(row.ParentNodeID),
-			Type:         normalizeReaderNodeType(row.Type),
-			Title:        strings.TrimSpace(row.Title),
-			Sort:         row.Sort,
-			Visibility:   documentVisibility,
-			Children:     make([]*readerTreeNode, 0),
+			ID:             nodeID,
+			DocumentID:     documentID,
+			ReaderSlug:     readerSlug,
+			DocumentPath:   documentPath,
+			DocumentFormat: documentFormat,
+			ParentID:       normalizeReaderOptionalString(row.ParentNodeID),
+			Type:           normalizeReaderNodeType(row.Type),
+			Title:          strings.TrimSpace(row.Title),
+			Sort:           row.Sort,
+			Visibility:     documentVisibility,
+			Children:       make([]*readerTreeNode, 0),
 		}
 	}
 
@@ -383,6 +391,7 @@ func mapReaderTreeNodes(nodes []*readerTreeNode) []ReaderTreeNodeViewModel {
 			DocumentID:         node.DocumentID,
 			DocumentIdentifier: node.ReaderSlug,
 			DocumentRouteKey:   node.DocumentPath,
+			DocumentFormat:     node.DocumentFormat,
 			ParentID:           node.ParentID,
 			Type:               normalizeReaderNodeType(node.Type),
 			Title:              node.Title,
@@ -511,6 +520,32 @@ func normalizeReaderDocumentVisibility(
 	}
 	visibility := normalizeReaderVisibility(*rawVisibility)
 	return &visibility
+}
+
+func normalizeReaderTreeDocumentFormat(
+	nodeType models.NodeType,
+	rawFormat *models.DocumentFormat,
+) *models.DocumentFormat {
+	if normalizeReaderNodeType(nodeType) != models.NodeTypeDoc {
+		return nil
+	}
+	if rawFormat == nil {
+		format := models.DocumentFormatMarkdown
+		return &format
+	}
+	format := models.NormalizeDocumentFormat(*rawFormat)
+	return &format
+}
+
+func normalizeReaderContentVersion(contentVersion int, version int) int {
+	switch {
+	case contentVersion > 0:
+		return contentVersion
+	case version > 0:
+		return version
+	default:
+		return 1
+	}
 }
 
 func normalizeReaderAuthorNickname(raw string) string {

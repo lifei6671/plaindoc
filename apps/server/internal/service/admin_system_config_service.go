@@ -27,6 +27,7 @@ var systemConfigValidators = map[string]func(map[string]any) error{
 	"security":                      validateSecurityConfig,
 	SystemConfigKeyAuth:             validateAuthConfig,
 	SystemConfigKeyEmail:            validateEmailConfig,
+	SystemConfigKeyOnlyOffice:       validateOnlyOfficeConfig,
 	SystemConfigKeyDataRetention:    validateDataRetentionConfig,
 	"image-hosting":                 validateImageHostingConfig,
 	searchconfig.SystemConfigKey:    validateSearchConfig,
@@ -214,6 +215,12 @@ func (s *AdminSystemConfigService) UpsertConfig(
 	}
 	if configKey == SystemConfigKeyEmail {
 		valueMap, err = normalizeEmailConfigSecretsForPersist(valueMap, existing)
+		if err != nil {
+			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
+		}
+	}
+	if configKey == SystemConfigKeyOnlyOffice {
+		valueMap, err = normalizeOnlyOfficeConfigSecretsForPersist(valueMap, existing)
 		if err != nil {
 			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 		}
@@ -771,6 +778,9 @@ func mapSystemConfigToRecord(value models.SystemConfig) (AdminSystemConfigRecord
 	}
 	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyEmail) {
 		payload = maskEmailConfigSecrets(payload)
+	}
+	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyOnlyOffice) {
+		payload = maskOnlyOfficeConfigSecrets(payload)
 	}
 
 	return AdminSystemConfigRecord{
