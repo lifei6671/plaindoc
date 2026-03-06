@@ -16,11 +16,14 @@
    - 工作区编辑
    - 前端阅读页 `GET /r/:spaceId/:docKey`
    - 分享阅读页 `GET /s/:spaceId/:docKey`
-3. Office 文档不参与：
+3. 编辑页面左侧“新建文档”子菜单需要新增两个入口：
+   - `新建 Word`
+   - `新建表格`
+4. Office 文档不参与：
    - 全文索引构建
    - 首页/空间检索结果
    - sitemap 生成
-4. Office 文档与 Markdown 文档共享：
+5. Office 文档与 Markdown 文档共享：
    - 空间树
    - 权限模型
    - 文档标识（`reader_slug` / route key）
@@ -177,6 +180,9 @@ Office 文档统一按格式过滤：
 
 ### 4.4 工作区前端
 
+- [ ] 左侧“新建文档”子菜单新增：
+  - `新建 Word`
+  - `新建表格`
 - [ ] 创建节点弹窗增加格式选择：`Markdown / Word / Excel`
 - [ ] 空间树节点增加格式标识与图标
 - [ ] `useWorkspace.openDocument()` 改为 format-aware
