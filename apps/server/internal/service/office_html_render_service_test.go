@@ -110,6 +110,7 @@ func TestRenderXLSXHTMLRendersTabsAndMergedCells(t *testing.T) {
 
 	for _, expected := range []string{
 		`class="office-xlsx-reader"`,
+		`data-office-xlsx-fullscreen-toggle="1"`,
 		`class="office-xlsx-tab office-xlsx-tab--active"`,
 		`data-office-sheet-tab="sheet-1"`,
 		`data-office-sheet-panel="sheet-2"`,

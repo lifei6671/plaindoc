@@ -49,8 +49,11 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const OFFICE_XLSX_PANEL_SELECTOR = "[data-office-sheet-panel]";
   const OFFICE_XLSX_TABLE_WRAP_SELECTOR = ".office-xlsx-sheet__table-wrap";
   const OFFICE_XLSX_TABLE_HEAD_SELECTOR = ".office-xlsx-sheet__table thead";
+  const OFFICE_XLSX_FULLSCREEN_TOGGLE_SELECTOR = "[data-office-xlsx-fullscreen-toggle='1']";
   const OFFICE_XLSX_TAB_ACTIVE_CLASS = "office-xlsx-tab--active";
   const OFFICE_XLSX_PANEL_ACTIVE_CLASS = "office-xlsx-sheet--active";
+  const OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS = "office-xlsx-reader--fullscreen-fallback";
+  const OFFICE_XLSX_FULLSCREEN_BODY_CLASS = "office-xlsx-fullscreen-active";
   const ONLYOFFICE_SCRIPT_LOADER_GLOBAL_KEY = "__plaindocOnlyOfficeScriptLoaders__";
   const OFFICE_PANE_MIN_HEIGHT = 360;
   const OFFICE_PANE_BOTTOM_GAP = 24;
@@ -102,6 +105,74 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const setMobileSidebarOpen = (nextOpen) => {
     mobileSidebarOpen = nextOpen === true;
     syncMobileSidebarDOMState();
+  };
+
+  const syncSpreadsheetFullscreenButtons = () => {
+    const readerNodes = Array.from(document.querySelectorAll(OFFICE_XLSX_READER_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement
+    );
+    let hasFullscreenReader = false;
+    for (const readerNode of readerNodes) {
+      if (!(readerNode instanceof HTMLElement)) {
+        continue;
+      }
+      const isFullscreen = readerNode.classList.contains(OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS);
+      if (isFullscreen) {
+        hasFullscreenReader = true;
+      }
+      const toggleNode = readerNode.querySelector(OFFICE_XLSX_FULLSCREEN_TOGGLE_SELECTOR);
+      if (!(toggleNode instanceof HTMLButtonElement)) {
+        continue;
+      }
+      const labelNode = toggleNode.querySelector(".office-xlsx-fullscreen-toggle__label");
+      if (labelNode instanceof HTMLElement) {
+        labelNode.textContent = isFullscreen ? "恢复普通视图" : "铺满窗口查看表格";
+      }
+      toggleNode.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+      toggleNode.setAttribute("aria-label", isFullscreen ? "恢复普通视图" : "铺满窗口查看表格");
+      toggleNode.title = isFullscreen ? "恢复普通视图" : "铺满窗口查看表格";
+    }
+    if (document.body instanceof HTMLElement) {
+      document.body.classList.toggle(OFFICE_XLSX_FULLSCREEN_BODY_CLASS, hasFullscreenReader);
+    }
+  };
+
+  const exitSpreadsheetFallbackFullscreen = () => {
+    const readerNodes = Array.from(document.querySelectorAll(OFFICE_XLSX_READER_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement
+    );
+    for (const readerNode of readerNodes) {
+      if (!(readerNode instanceof HTMLElement)) {
+        continue;
+      }
+      readerNode.classList.remove(OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS);
+    }
+    syncSpreadsheetFullscreenButtons();
+  };
+
+  const toggleSpreadsheetFullscreen = (readerNode) => {
+    if (!(readerNode instanceof HTMLElement)) {
+      return;
+    }
+    const isFallbackFullscreen = readerNode.classList.contains(OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS);
+    if (isFallbackFullscreen) {
+      readerNode.classList.remove(OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS);
+      syncSpreadsheetFullscreenButtons();
+      syncSpreadsheetStickyHeaders(readerNode);
+      return;
+    }
+    const readerNodes = Array.from(document.querySelectorAll(OFFICE_XLSX_READER_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement
+    );
+    for (const otherReaderNode of readerNodes) {
+      if (!(otherReaderNode instanceof HTMLElement) || otherReaderNode === readerNode) {
+        continue;
+      }
+      otherReaderNode.classList.remove(OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS);
+    }
+    readerNode.classList.add(OFFICE_XLSX_FULLSCREEN_FALLBACK_CLASS);
+    syncSpreadsheetFullscreenButtons();
+    syncSpreadsheetStickyHeaders(readerNode);
   };
 
   const syncNestedTreeStateAfterExpand = (detailsElement) => {
@@ -522,6 +593,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       activateSpreadsheetTab(readerNode, activeSheetKey, false);
     }
     syncSpreadsheetStickyHeaders(document);
+    syncSpreadsheetFullscreenButtons();
   };
 
   const resolveOnlyOfficeViewConfigPath = (payload) => {
@@ -1888,6 +1960,18 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
           return;
         }
 
+        const spreadsheetFullscreenToggle = event.target.closest(OFFICE_XLSX_FULLSCREEN_TOGGLE_SELECTOR);
+        if (spreadsheetFullscreenToggle instanceof HTMLButtonElement) {
+          const spreadsheetReader = spreadsheetFullscreenToggle.closest(OFFICE_XLSX_READER_SELECTOR);
+          if (!(spreadsheetReader instanceof HTMLElement)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          void toggleSpreadsheetFullscreen(spreadsheetReader);
+          return;
+        }
+
         const docLink = event.target.closest(DOC_LINK_SELECTOR);
         if (docLink instanceof HTMLAnchorElement) {
           if (event.defaultPrevented || isModifiedClick(event)) {
@@ -1950,6 +2034,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       if (event.key !== "Escape") {
         return;
       }
+      exitSpreadsheetFallbackFullscreen();
       setMobileSidebarOpen(false);
     });
   } catch {

@@ -569,7 +569,13 @@ func (s *OfficeHTMLRenderService) renderXLSXHTML(
 		}
 		builder.WriteString(`</section>`)
 	}
-	builder.WriteString(`</div></div>`)
+	builder.WriteString(`</div>`)
+	builder.WriteString(`<button type="button" class="office-xlsx-fullscreen-toggle" data-office-xlsx-fullscreen-toggle="1" aria-pressed="false" aria-label="铺满窗口查看表格" title="铺满窗口查看表格">`)
+	builder.WriteString(`<span class="office-xlsx-fullscreen-toggle__icon office-xlsx-fullscreen-toggle__icon--enter" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 6V2.5H6M10 2.5H13.5V6M13.5 10V13.5H10M6 13.5H2.5V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`)
+	builder.WriteString(`<span class="office-xlsx-fullscreen-toggle__icon office-xlsx-fullscreen-toggle__icon--exit" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 2.5H4A1.5 1.5 0 0 0 2.5 4v2M10 2.5h2A1.5 1.5 0 0 1 13.5 4v2M13.5 10v2a1.5 1.5 0 0 1-1.5 1.5h-2M2.5 10v2A1.5 1.5 0 0 0 4 13.5h2M6.5 6.5 4 4M9.5 6.5 12 4M6.5 9.5 4 12M9.5 9.5 12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`)
+	builder.WriteString(`<span class="office-xlsx-fullscreen-toggle__label">铺满窗口查看表格</span>`)
+	builder.WriteString(`</button>`)
+	builder.WriteString(`</div>`)
 	return builder.String(), nil
 }
 
