@@ -12,6 +12,7 @@ import {
 import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { showToast } from "../../components/ui/toast";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
 import {
   type AdminDocumentImageAsset,
   type AdminDocumentImageAssetDeleteResult,
@@ -220,6 +221,33 @@ function ImageAssetThumbnail({
         </div>
       )}
     </button>
+  );
+}
+
+function TooltipText({
+  value,
+  className,
+  side = "top"
+}: {
+  value: string;
+  className: string;
+  side?: "top" | "right" | "bottom" | "left";
+}) {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    return <p className={className}>-</p>;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <p className={className} tabIndex={0}>
+          {normalizedValue}
+        </p>
+      </TooltipTrigger>
+      <TooltipContent side={side} align="start" className="max-w-[420px] whitespace-pre-wrap break-all">
+        {normalizedValue}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -609,158 +637,196 @@ export function AdminDocumentImagesPage({ dataGateway }: AdminDocumentImagesPage
       </AdminBulkActionBar>
 
       <AdminTableContainer>
-        <table className="min-w-full table-fixed border-collapse text-sm">
-          <thead className="bg-slate-50/80 text-left text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="w-10 px-3 py-2 font-semibold">
-                <Checkbox
-                  checked={allSelectableChecked}
-                  disabled={selectionDisabled || selectableImageAssetIDs.length === 0}
-                  onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
-                  aria-label="全选图片资源"
-                />
-              </th>
-              <th className="w-[360px] px-3 py-2 font-semibold">图片资源</th>
-              <th className="w-[280px] px-3 py-2 font-semibold">所属文档</th>
-              <th className="w-[240px] px-3 py-2 font-semibold">所属空间</th>
-              <th className="w-[150px] px-3 py-2 font-semibold">存储</th>
-              <th className="w-[130px] px-3 py-2 font-semibold">状态</th>
-              <th className="w-[190px] px-3 py-2 font-semibold">最近引用</th>
-              <th className="w-[190px] px-3 py-2 font-semibold">更新时间</th>
-              <th className="w-[220px] px-3 py-2 font-semibold">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-slate-700">
-            {imagesState.items.length === 0 ? (
+        <TooltipProvider delayDuration={150}>
+          <table className="min-w-full table-fixed border-collapse text-sm">
+            <thead className="bg-slate-50/80 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <td className="px-3 py-9 text-center text-sm text-slate-500" colSpan={9}>
-                  {loading ? "正在加载图片资源..." : "暂无匹配的图片资源记录"}
-                </td>
+                <th className="w-10 px-3 py-2 font-semibold">
+                  <Checkbox
+                    checked={allSelectableChecked}
+                    disabled={selectionDisabled || selectableImageAssetIDs.length === 0}
+                    onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
+                    aria-label="全选图片资源"
+                  />
+                </th>
+                <th className="w-[360px] px-3 py-2 font-semibold">图片资源</th>
+                <th className="w-[280px] px-3 py-2 font-semibold">所属文档</th>
+                <th className="w-[240px] px-3 py-2 font-semibold">所属空间</th>
+                <th className="w-[150px] px-3 py-2 font-semibold">存储</th>
+                <th className="w-[130px] px-3 py-2 font-semibold">状态</th>
+                <th className="w-[190px] px-3 py-2 font-semibold">最近引用</th>
+                <th className="w-[190px] px-3 py-2 font-semibold">更新时间</th>
+                <th className="w-[220px] px-3 py-2 font-semibold">操作</th>
               </tr>
-            ) : (
-              imagesState.items.map((imageAsset) => {
-                const actioning = actioningImageAssetID === imageAsset.imageAssetId || batchActioning;
-                const isDeleted = imageAsset.status === "deleted";
-                const previewURL = resolveAbsoluteUrl(imageAsset.objectUrl);
-                return (
-                  <tr key={imageAsset.imageAssetId} className="align-top hover:bg-slate-50/60">
-                    <td className="px-3 py-2.5">
-                      <Checkbox
-                        checked={selectedImageAssetSet.has(imageAsset.imageAssetId)}
-                        disabled={selectionDisabled}
-                        onCheckedChange={(checked) => handleToggleSelectOne(imageAsset.imageAssetId, checked === true)}
-                        aria-label={`选择图片资源 ${imageAsset.imageAssetId}`}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-start gap-3">
-                        <ImageAssetThumbnail
-                          previewURL={previewURL}
-                          imageAssetID={imageAsset.imageAssetId}
-                          onOpen={() => openPathInNewTab(previewURL)}
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {imagesState.items.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-9 text-center text-sm text-slate-500" colSpan={9}>
+                    {loading ? "正在加载图片资源..." : "暂无匹配的图片资源记录"}
+                  </td>
+                </tr>
+              ) : (
+                imagesState.items.map((imageAsset) => {
+                  const actioning = actioningImageAssetID === imageAsset.imageAssetId || batchActioning;
+                  const isDeleted = imageAsset.status === "deleted";
+                  const isDocumentDeleted = imageAsset.documentStatus === "deleted";
+                  const previewURL = resolveAbsoluteUrl(imageAsset.objectUrl);
+                  const documentRouteKey = (imageAsset.documentRouteKey || imageAsset.documentId || "").trim();
+                  const documentReaderPath = buildDocumentReaderPath(imageAsset.spaceId, documentRouteKey);
+                  return (
+                    <tr key={imageAsset.imageAssetId} className="align-top hover:bg-slate-50/60">
+                      <td className="px-3 py-2.5">
+                        <Checkbox
+                          checked={selectedImageAssetSet.has(imageAsset.imageAssetId)}
+                          disabled={selectionDisabled}
+                          onCheckedChange={(checked) => handleToggleSelectOne(imageAsset.imageAssetId, checked === true)}
+                          aria-label={`选择图片资源 ${imageAsset.imageAssetId}`}
                         />
-                        <div className="min-w-0 space-y-1">
-                          <p className="line-clamp-1 break-all font-medium text-slate-900">{imageAsset.imageAssetId}</p>
-                          <p className="line-clamp-2 break-all text-xs text-slate-500">{imageAsset.objectKey || "-"}</p>
-                          <p className="line-clamp-2 break-all text-xs text-slate-500">{imageAsset.objectUrl || "-"}</p>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-start gap-3">
+                          <ImageAssetThumbnail
+                            previewURL={previewURL}
+                            imageAssetID={imageAsset.imageAssetId}
+                            onOpen={() => openPathInNewTab(previewURL)}
+                          />
+                          <div className="min-w-0 space-y-1">
+                            <TooltipText
+                              value={imageAsset.imageAssetId}
+                              className="line-clamp-1 break-all font-medium text-slate-900"
+                            />
+                            <TooltipText
+                              value={imageAsset.objectKey || "-"}
+                              className="line-clamp-2 break-all text-xs text-slate-500"
+                            />
+                            <TooltipText
+                              value={imageAsset.objectUrl || "-"}
+                              className="line-clamp-2 break-all text-xs text-slate-500"
+                            />
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="space-y-1">
-                        <p className="line-clamp-2 break-all text-sm font-medium text-slate-900">
-                          {imageAsset.documentTitle || imageAsset.documentId}
-                        </p>
-                        <p className="break-all text-xs text-slate-500">{imageAsset.documentId}</p>
-                        <p className="text-xs text-slate-500">{renderDocumentStatusLabel(imageAsset.documentStatus)}</p>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="space-y-1">
-                        <p className="line-clamp-2 break-all text-sm font-medium text-slate-900">
-                          {imageAsset.spaceName || imageAsset.spaceId}
-                        </p>
-                        <p className="break-all text-xs text-slate-500">{imageAsset.spaceId}</p>
-                        <p className="line-clamp-1 text-xs text-slate-500">
-                          所有者：{imageAsset.spaceOwnerName || imageAsset.spaceOwnerEmail || imageAsset.spaceOwnerUserId}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                        {renderStorageProviderLabel(imageAsset.storageProvider)}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Badge variant="outline" className={renderImageAssetStatusBadgeClass(imageAsset.status)}>
-                        {renderImageAssetStatusLabel(imageAsset.status)}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-slate-600">{formatDateTime(imageAsset.lastReferencedAt)}</td>
-                    <td className="px-3 py-2.5 text-xs text-slate-600">{formatDateTime(imageAsset.updatedAt)}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="inline-flex rounded-md">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 rounded-r-none border-r-0 px-2 text-xs"
-                          disabled={actioning || !previewURL}
-                          onClick={() => openPathInNewTab(previewURL)}
-                        >
-                          <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                          查看
-                        </Button>
-                        <DropdownMenu modal={false}>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 w-8 rounded-l-none px-0"
-                              disabled={actioning}
-                              aria-label="展开更多操作"
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="space-y-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <a
+                                className={`block line-clamp-2 break-all text-sm font-medium no-underline transition-colors hover:no-underline ${
+                                  isDocumentDeleted
+                                    ? "pointer-events-none text-slate-400"
+                                    : "text-slate-900 hover:text-sky-700"
+                                }`}
+                                href={documentReaderPath}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={isDocumentDeleted ? "已删除文档不可访问" : "打开文档阅读页"}
+                                aria-disabled={isDocumentDeleted}
+                              >
+                                {imageAsset.documentTitle || imageAsset.documentId}
+                              </a>
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="top"
+                              align="start"
+                              className="max-w-[360px] whitespace-pre-wrap break-all"
                             >
-                              <ChevronDown size={14} />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem
-                              disabled={isDeleted}
-                              onSelect={() =>
-                                openPathInNewTab(
-                                  buildDocumentReaderPath(
-                                    imageAsset.spaceId,
-                                    (imageAsset.documentRouteKey || imageAsset.documentId || "").trim()
+                              {imageAsset.documentTitle || imageAsset.documentId}
+                            </TooltipContent>
+                          </Tooltip>
+                          <TooltipText value={imageAsset.documentId} className="break-all text-xs text-slate-500" />
+                          <p className="text-xs text-slate-500">{renderDocumentStatusLabel(imageAsset.documentStatus)}</p>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="space-y-1">
+                          <TooltipText
+                            value={imageAsset.spaceName || imageAsset.spaceId}
+                            className="line-clamp-2 break-all text-sm font-medium text-slate-900"
+                          />
+                          <TooltipText value={imageAsset.spaceId} className="break-all text-xs text-slate-500" />
+                          <TooltipText
+                            value={`所有者：${imageAsset.spaceOwnerName || imageAsset.spaceOwnerEmail || imageAsset.spaceOwnerUserId}`}
+                            className="line-clamp-1 text-xs text-slate-500"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                          {renderStorageProviderLabel(imageAsset.storageProvider)}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="outline" className={renderImageAssetStatusBadgeClass(imageAsset.status)}>
+                          {renderImageAssetStatusLabel(imageAsset.status)}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-slate-600">{formatDateTime(imageAsset.lastReferencedAt)}</td>
+                      <td className="px-3 py-2.5 text-xs text-slate-600">{formatDateTime(imageAsset.updatedAt)}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="inline-flex rounded-md">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 rounded-r-none border-r-0 px-2 text-xs"
+                            disabled={actioning || !previewURL}
+                            onClick={() => openPathInNewTab(previewURL)}
+                          >
+                            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                            查看
+                          </Button>
+                          <DropdownMenu modal={false}>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 w-8 rounded-l-none px-0"
+                                disabled={actioning}
+                                aria-label="展开更多操作"
+                              >
+                                <ChevronDown size={14} />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem
+                                disabled={isDeleted}
+                                onSelect={() =>
+                                  openPathInNewTab(
+                                    buildDocumentReaderPath(
+                                      imageAsset.spaceId,
+                                      (imageAsset.documentRouteKey || imageAsset.documentId || "").trim()
+                                    )
                                   )
-                                )
-                              }
-                            >
-                              <ExternalLink size={14} className="mr-2" />
-                              <span>查看文档</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={actioning}
-                              onSelect={() => void handleDelete(imageAsset)}
-                              className="text-rose-600 focus:text-rose-600"
-                            >
-                              {actioning ? (
-                                <LoaderCircle size={14} className="mr-2 animate-spin" />
-                              ) : (
-                                <Trash2 size={14} className="mr-2" />
-                              )}
-                              <span>删除</span>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                                }
+                              >
+                                <ExternalLink size={14} className="mr-2" />
+                                <span>查看文档</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={actioning}
+                                onSelect={() => void handleDelete(imageAsset)}
+                                className="text-rose-600 focus:text-rose-600"
+                              >
+                                {actioning ? (
+                                  <LoaderCircle size={14} className="mr-2 animate-spin" />
+                                ) : (
+                                  <Trash2 size={14} className="mr-2" />
+                                )}
+                                <span>删除</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </TooltipProvider>
       </AdminTableContainer>
 
       <AdminPaginationFooter

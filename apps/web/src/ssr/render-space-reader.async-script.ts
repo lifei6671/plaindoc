@@ -44,6 +44,11 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const OFFICE_PANE_SELECTOR = ".reader-office-pane";
   const OFFICE_EDITOR_HIDDEN_CLASS = "office-pane__editor--hidden";
   const OFFICE_PLACEHOLDER_ERROR_CLASS = "office-pane__placeholder--error";
+  const OFFICE_XLSX_READER_SELECTOR = "[data-office-xlsx-reader='1']";
+  const OFFICE_XLSX_TAB_SELECTOR = "[data-office-sheet-tab]";
+  const OFFICE_XLSX_PANEL_SELECTOR = "[data-office-sheet-panel]";
+  const OFFICE_XLSX_TAB_ACTIVE_CLASS = "office-xlsx-tab--active";
+  const OFFICE_XLSX_PANEL_ACTIVE_CLASS = "office-xlsx-sheet--active";
   const ONLYOFFICE_SCRIPT_LOADER_GLOBAL_KEY = "__plaindocOnlyOfficeScriptLoaders__";
   const OFFICE_PANE_MIN_HEIGHT = 360;
   const OFFICE_PANE_BOTTOM_GAP = 24;
@@ -404,6 +409,77 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     const editorNode = resolveOfficeEditorNode();
     if (editorNode instanceof HTMLElement) {
       editorNode.classList.add(OFFICE_EDITOR_HIDDEN_CLASS);
+    }
+  };
+
+  const activateSpreadsheetTab = (readerNode, sheetKey, shouldFocus) => {
+    if (!(readerNode instanceof HTMLElement)) {
+      return;
+    }
+    const normalizedSheetKey = typeof sheetKey === "string" ? sheetKey.trim() : "";
+    if (!normalizedSheetKey) {
+      return;
+    }
+    const tabNodes = Array.from(readerNode.querySelectorAll(OFFICE_XLSX_TAB_SELECTOR)).filter(
+      (node) => node instanceof HTMLButtonElement
+    );
+    const panelNodes = Array.from(readerNode.querySelectorAll(OFFICE_XLSX_PANEL_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement
+    );
+    if (!tabNodes.length || !panelNodes.length) {
+      return;
+    }
+
+    for (const tabNode of tabNodes) {
+      if (!(tabNode instanceof HTMLButtonElement)) {
+        continue;
+      }
+      const isActive = (tabNode.getAttribute("data-office-sheet-tab") || "").trim() === normalizedSheetKey;
+      tabNode.classList.toggle(OFFICE_XLSX_TAB_ACTIVE_CLASS, isActive);
+      tabNode.setAttribute("aria-selected", isActive ? "true" : "false");
+      tabNode.tabIndex = isActive ? 0 : -1;
+      if (isActive && shouldFocus) {
+        tabNode.focus({ preventScroll: true });
+      }
+    }
+
+    for (const panelNode of panelNodes) {
+      if (!(panelNode instanceof HTMLElement)) {
+        continue;
+      }
+      const isActive = (panelNode.getAttribute("data-office-sheet-panel") || "").trim() === normalizedSheetKey;
+      panelNode.classList.toggle(OFFICE_XLSX_PANEL_ACTIVE_CLASS, isActive);
+      panelNode.hidden = !isActive;
+    }
+  };
+
+  const syncSpreadsheetTabs = () => {
+    const spreadsheetReaders = Array.from(document.querySelectorAll(OFFICE_XLSX_READER_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement
+    );
+    for (const readerNode of spreadsheetReaders) {
+      if (!(readerNode instanceof HTMLElement)) {
+        continue;
+      }
+      const tabNodes = Array.from(readerNode.querySelectorAll(OFFICE_XLSX_TAB_SELECTOR)).filter(
+        (node) => node instanceof HTMLButtonElement
+      );
+      if (!tabNodes.length) {
+        continue;
+      }
+      const activeTab =
+        tabNodes.find(
+          (tabNode) =>
+            tabNode instanceof HTMLButtonElement &&
+            (tabNode.classList.contains(OFFICE_XLSX_TAB_ACTIVE_CLASS) ||
+              (tabNode.getAttribute("aria-selected") || "").trim() === "true")
+        ) || tabNodes[0];
+      const activeSheetKey =
+        activeTab instanceof HTMLButtonElement ? (activeTab.getAttribute("data-office-sheet-tab") || "").trim() : "";
+      if (!activeSheetKey) {
+        continue;
+      }
+      activateSpreadsheetTab(readerNode, activeSheetKey, false);
     }
   };
 
@@ -1470,6 +1546,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         readerMain.scrollTop = 0;
       }
       refreshOutlineRegistry();
+      syncSpreadsheetTabs();
       scheduleOfficePaneViewportHeightSync();
       await syncOnlyOfficeReader();
       if (pushHistory) {
@@ -1497,6 +1574,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     markActiveTreeItemByPathname(window.location.pathname);
     refreshOutlineRegistry();
     setMobileSidebarOpen(false);
+    syncSpreadsheetTabs();
     void syncOnlyOfficeReader();
   } catch {
     // no-op: initialization enhancement should never block rendering.
@@ -1577,6 +1655,22 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
           event.preventDefault();
           event.stopPropagation();
           scrollToOutlineIndex(Math.max(0, Math.floor(outlineIndex)));
+          return;
+        }
+
+        const spreadsheetTab = event.target.closest(OFFICE_XLSX_TAB_SELECTOR);
+        if (spreadsheetTab instanceof HTMLButtonElement) {
+          if (event.defaultPrevented || isModifiedClick(event)) {
+            return;
+          }
+          const spreadsheetReader = spreadsheetTab.closest(OFFICE_XLSX_READER_SELECTOR);
+          const sheetKey = (spreadsheetTab.getAttribute("data-office-sheet-tab") || "").trim();
+          if (!(spreadsheetReader instanceof HTMLElement) || !sheetKey) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          activateSpreadsheetTab(spreadsheetReader, sheetKey, true);
           return;
         }
 

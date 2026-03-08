@@ -75,6 +75,24 @@ func TestRenderXLSXHTMLRendersTabsAndMergedCells(t *testing.T) {
 	if err := workbook.SetCellValue("Detail", "B2", 800); err != nil {
 		t.Fatalf("set detail B2 failed: %v", err)
 	}
+	if err := workbook.SetCellValue("Detail", "A3", "Total"); err != nil {
+		t.Fatalf("set detail A3 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Detail", "B3", "$1,000"); err != nil {
+		t.Fatalf("set detail B3 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Detail", "A4", "Margin"); err != nil {
+		t.Fatalf("set detail A4 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Detail", "B4", "12.5%"); err != nil {
+		t.Fatalf("set detail B4 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Detail", "A5", "Updated"); err != nil {
+		t.Fatalf("set detail A5 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Detail", "B5", "2026-03-08"); err != nil {
+		t.Fatalf("set detail B5 failed: %v", err)
+	}
 
 	var buffer bytes.Buffer
 	if err := workbook.Write(&buffer); err != nil {
@@ -94,11 +112,27 @@ func TestRenderXLSXHTMLRendersTabsAndMergedCells(t *testing.T) {
 		`class="office-xlsx-tab office-xlsx-tab--active"`,
 		`data-office-sheet-tab="sheet-1"`,
 		`data-office-sheet-panel="sheet-2"`,
+		`class="office-xlsx-sheet__axis office-xlsx-sheet__axis--corner"`,
+		`<col class="office-xlsx-sheet__axis-col" style="width:58px" />`,
+		`scope="col" class="office-xlsx-sheet__axis office-xlsx-sheet__axis--col">A</th>`,
+		`scope="row" class="office-xlsx-sheet__axis office-xlsx-sheet__axis--row">1</th>`,
+		`data-cell-ref="A1"`,
+		`office-xlsx-sheet__cell office-xlsx-sheet__cell--merged`,
+		`office-xlsx-sheet__row office-xlsx-sheet__row--header`,
+		`office-xlsx-sheet__cell office-xlsx-sheet__cell--header`,
+		`office-xlsx-sheet__cell office-xlsx-sheet__cell--numeric`,
+		`office-xlsx-sheet__row office-xlsx-sheet__row--summary`,
+		`office-xlsx-sheet__cell--currency`,
+		`office-xlsx-sheet__cell--percent`,
+		`office-xlsx-sheet__cell--date`,
 		`Summary`,
 		`Detail`,
 		`colspan="2"`,
 		`Budget`,
 		`Server`,
+		`Total`,
+		`12.5%`,
+		`2026-03-08`,
 		`800`,
 		`hidden`,
 	} {

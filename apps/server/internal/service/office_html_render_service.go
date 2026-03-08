@@ -69,6 +69,11 @@ type xlsxMergeSpan struct {
 	Value   string
 }
 
+type xlsxColumnRenderMeta struct {
+	Label   string
+	WidthPX int
+}
+
 // OfficeHTMLRenderTask 表示一次 Office 正文渲染任务。
 type OfficeHTMLRenderTask struct {
 	DocumentID     string
@@ -463,9 +468,6 @@ func renderXLSXHTML(sourceContent []byte) (string, error) {
 			builder.WriteString(` hidden`)
 		}
 		builder.WriteString(`>`)
-		builder.WriteString(`<header class="office-xlsx-sheet__header"><h2>`)
-		builder.WriteString(html.EscapeString(defaultIfBlank(sheet.Name, "未命名工作表")))
-		builder.WriteString(`</h2></header>`)
 		if sheet.HasTable {
 			builder.WriteString(sheet.TableHTML)
 		} else {
@@ -497,23 +499,67 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 	if maxRow == 0 || maxCol == 0 {
 		return "", false, nil
 	}
+	columnMetas := buildXLSXColumnRenderMetas(rows, mergeStarts, coveredCells, maxRow, maxCol)
+	headerRowIndex := detectXLSXHeaderRowIndex(rows, mergeStarts, coveredCells, maxRow, maxCol)
+	summaryRows := detectXLSXSummaryRows(rows, mergeStarts, coveredCells, maxRow, maxCol, headerRowIndex)
 
 	var builder strings.Builder
-	builder.WriteString(`<div class="office-xlsx-sheet__table-wrap"><table class="office-xlsx-sheet__table"><tbody>`)
+	builder.WriteString(`<div class="office-xlsx-sheet__table-wrap"><table class="office-xlsx-sheet__table"><colgroup>`)
+	builder.WriteString(`<col class="office-xlsx-sheet__axis-col" style="width:58px" />`)
+	for _, columnMeta := range columnMetas {
+		builder.WriteString(`<col class="office-xlsx-sheet__data-col" style="width:`)
+		builder.WriteString(strconv.Itoa(columnMeta.WidthPX))
+		builder.WriteString(`px" />`)
+	}
+	builder.WriteString(`</colgroup><thead><tr>`)
+	builder.WriteString(`<th class="office-xlsx-sheet__axis office-xlsx-sheet__axis--corner" aria-hidden="true"></th>`)
+	for _, columnMeta := range columnMetas {
+		builder.WriteString(`<th scope="col" class="office-xlsx-sheet__axis office-xlsx-sheet__axis--col">`)
+		builder.WriteString(html.EscapeString(columnMeta.Label))
+		builder.WriteString(`</th>`)
+	}
+	builder.WriteString(`</tr></thead><tbody>`)
 	hasVisibleCell := false
 	for rowIndex := 1; rowIndex <= maxRow; rowIndex++ {
-		builder.WriteString(`<tr>`)
+		builder.WriteString(`<tr class="office-xlsx-sheet__row`)
+		if rowIndex == headerRowIndex {
+			builder.WriteString(` office-xlsx-sheet__row--header`)
+		}
+		if _, ok := summaryRows[rowIndex]; ok {
+			builder.WriteString(` office-xlsx-sheet__row--summary`)
+		}
+		builder.WriteString(`">`)
+		builder.WriteString(`<th scope="row" class="office-xlsx-sheet__axis office-xlsx-sheet__axis--row">`)
+		builder.WriteString(strconv.Itoa(rowIndex))
+		builder.WriteString(`</th>`)
 		for columnIndex := 1; columnIndex <= maxCol; columnIndex++ {
 			cellKey := buildXLSXCellKey(rowIndex, columnIndex)
 			if _, covered := coveredCells[cellKey]; covered {
 				continue
 			}
 			value := resolveXLSXRowValue(rows, rowIndex, columnIndex)
+			cellRef := buildXLSXCellReference(rowIndex, columnIndex)
+			trimmedValue := strings.TrimSpace(value)
+			cellSemantics := classifyXLSXCellSemantics(trimmedValue)
 			if span, ok := mergeStarts[cellKey]; ok {
-				if value == "" {
-					value = span.Value
+				if trimmedValue == "" {
+					trimmedValue = span.Value
+					cellSemantics = classifyXLSXCellSemantics(trimmedValue)
 				}
-				builder.WriteString(`<td`)
+				builder.WriteString(`<td class="office-xlsx-sheet__cell office-xlsx-sheet__cell--merged`)
+				if rowIndex == headerRowIndex {
+					builder.WriteString(` office-xlsx-sheet__cell--header`)
+				}
+				if _, ok := summaryRows[rowIndex]; ok {
+					builder.WriteString(` office-xlsx-sheet__cell--summary`)
+				}
+				for _, semanticClass := range cellSemantics {
+					builder.WriteByte(' ')
+					builder.WriteString(semanticClass)
+				}
+				builder.WriteString(`" data-cell-ref="`)
+				builder.WriteString(html.EscapeString(cellRef))
+				builder.WriteString(`"`)
 				if span.Rowspan > 1 {
 					builder.WriteString(` rowspan="`)
 					builder.WriteString(strconv.Itoa(span.Rowspan))
@@ -525,15 +571,31 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 					builder.WriteString(`"`)
 				}
 				builder.WriteString(`>`)
-				builder.WriteString(html.EscapeString(strings.TrimSpace(value)))
+				builder.WriteString(html.EscapeString(trimmedValue))
 				builder.WriteString(`</td>`)
 				hasVisibleCell = true
 				continue
 			}
-			builder.WriteString(`<td>`)
-			builder.WriteString(html.EscapeString(strings.TrimSpace(value)))
+			builder.WriteString(`<td class="office-xlsx-sheet__cell`)
+			if trimmedValue == "" {
+				builder.WriteString(` office-xlsx-sheet__cell--empty`)
+			}
+			if rowIndex == headerRowIndex {
+				builder.WriteString(` office-xlsx-sheet__cell--header`)
+			}
+			if _, ok := summaryRows[rowIndex]; ok {
+				builder.WriteString(` office-xlsx-sheet__cell--summary`)
+			}
+			for _, semanticClass := range cellSemantics {
+				builder.WriteByte(' ')
+				builder.WriteString(semanticClass)
+			}
+			builder.WriteString(`" data-cell-ref="`)
+			builder.WriteString(html.EscapeString(cellRef))
+			builder.WriteString(`">`)
+			builder.WriteString(html.EscapeString(trimmedValue))
 			builder.WriteString(`</td>`)
-			if strings.TrimSpace(value) != "" {
+			if trimmedValue != "" {
 				hasVisibleCell = true
 			}
 		}
@@ -601,6 +663,330 @@ func resolveXLSXRowValue(rows [][]string, rowIndex int, columnIndex int) string 
 
 func buildXLSXCellKey(rowIndex int, columnIndex int) string {
 	return strconv.Itoa(rowIndex) + ":" + strconv.Itoa(columnIndex)
+}
+
+func buildXLSXCellReference(rowIndex int, columnIndex int) string {
+	columnLabel := buildXLSXColumnLabel(columnIndex)
+	if columnLabel == "" {
+		columnLabel = strconv.Itoa(columnIndex)
+	}
+	return columnLabel + strconv.Itoa(rowIndex)
+}
+
+func buildXLSXColumnLabel(columnIndex int) string {
+	if columnIndex <= 0 {
+		return ""
+	}
+	columnLabel, err := excelize.ColumnNumberToName(columnIndex)
+	if err != nil {
+		return strconv.Itoa(columnIndex)
+	}
+	return columnLabel
+}
+
+func buildXLSXColumnRenderMetas(
+	rows [][]string,
+	mergeStarts map[string]xlsxMergeSpan,
+	coveredCells map[string]struct{},
+	maxRow int,
+	maxCol int,
+) []xlsxColumnRenderMeta {
+	columnMetas := make([]xlsxColumnRenderMeta, 0, maxCol)
+	for columnIndex := 1; columnIndex <= maxCol; columnIndex++ {
+		maxDisplayWidth := 8
+		columnLabel := buildXLSXColumnLabel(columnIndex)
+		if columnLabel == "" {
+			columnLabel = strconv.Itoa(columnIndex)
+		}
+		if width := estimateXLSXDisplayWidth(columnLabel); width > maxDisplayWidth {
+			maxDisplayWidth = width
+		}
+		for rowIndex := 1; rowIndex <= maxRow; rowIndex++ {
+			cellKey := buildXLSXCellKey(rowIndex, columnIndex)
+			if _, covered := coveredCells[cellKey]; covered {
+				continue
+			}
+			value := strings.TrimSpace(resolveXLSXRowValue(rows, rowIndex, columnIndex))
+			if span, ok := mergeStarts[cellKey]; ok && value == "" {
+				value = strings.TrimSpace(span.Value)
+			}
+			if value == "" {
+				continue
+			}
+			displayWidth := estimateXLSXDisplayWidth(value)
+			if span, ok := mergeStarts[cellKey]; ok && span.Colspan > 1 {
+				displayWidth = max(4, displayWidth/span.Colspan)
+			}
+			if displayWidth > maxDisplayWidth {
+				maxDisplayWidth = displayWidth
+			}
+		}
+		columnMetas = append(columnMetas, xlsxColumnRenderMeta{
+			Label:   columnLabel,
+			WidthPX: clampXLSXColumnWidth(maxDisplayWidth*13 + 28),
+		})
+	}
+	return columnMetas
+}
+
+func detectXLSXHeaderRowIndex(
+	rows [][]string,
+	mergeStarts map[string]xlsxMergeSpan,
+	coveredCells map[string]struct{},
+	maxRow int,
+	maxCol int,
+) int {
+	maxInspectRow := min(maxRow, 6)
+	for rowIndex := 1; rowIndex <= maxInspectRow; rowIndex++ {
+		nonEmptyCount := 0
+		textCount := 0
+		numericCount := 0
+		for columnIndex := 1; columnIndex <= maxCol; columnIndex++ {
+			cellKey := buildXLSXCellKey(rowIndex, columnIndex)
+			if _, covered := coveredCells[cellKey]; covered {
+				continue
+			}
+			value := strings.TrimSpace(resolveXLSXRowValue(rows, rowIndex, columnIndex))
+			if span, ok := mergeStarts[cellKey]; ok && value == "" {
+				value = strings.TrimSpace(span.Value)
+			}
+			if value == "" {
+				continue
+			}
+			nonEmptyCount++
+			if isProbablyNumericXLSXCellValue(value) {
+				numericCount++
+			} else {
+				textCount++
+			}
+		}
+		if nonEmptyCount >= 2 && textCount >= numericCount && textCount > 0 {
+			return rowIndex
+		}
+	}
+	return 0
+}
+
+func detectXLSXSummaryRows(
+	rows [][]string,
+	mergeStarts map[string]xlsxMergeSpan,
+	coveredCells map[string]struct{},
+	maxRow int,
+	maxCol int,
+	headerRowIndex int,
+) map[int]struct{} {
+	summaryRows := make(map[int]struct{})
+	for rowIndex := 1; rowIndex <= maxRow; rowIndex++ {
+		if rowIndex == headerRowIndex {
+			continue
+		}
+		firstValue := strings.TrimSpace(resolveXLSXRowValue(rows, rowIndex, 1))
+		firstKey := buildXLSXCellKey(rowIndex, 1)
+		if span, ok := mergeStarts[firstKey]; ok && firstValue == "" {
+			firstValue = strings.TrimSpace(span.Value)
+		}
+		if !isLikelyXLSXSummaryLabel(firstValue) {
+			continue
+		}
+		numericCount := 0
+		for columnIndex := 2; columnIndex <= maxCol; columnIndex++ {
+			cellKey := buildXLSXCellKey(rowIndex, columnIndex)
+			if _, covered := coveredCells[cellKey]; covered {
+				continue
+			}
+			value := strings.TrimSpace(resolveXLSXRowValue(rows, rowIndex, columnIndex))
+			if span, ok := mergeStarts[cellKey]; ok && value == "" {
+				value = strings.TrimSpace(span.Value)
+			}
+			if isProbablyNumericXLSXCellValue(value) {
+				numericCount++
+			}
+		}
+		if numericCount > 0 {
+			summaryRows[rowIndex] = struct{}{}
+		}
+	}
+	return summaryRows
+}
+
+func estimateXLSXDisplayWidth(value string) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0
+	}
+	width := 0
+	for _, char := range trimmed {
+		switch {
+		case char <= 0x7f:
+			width++
+		case char >= 0x4e00 && char <= 0x9fff:
+			width += 2
+		default:
+			width += 2
+		}
+	}
+	return width
+}
+
+func classifyXLSXCellSemantics(value string) []string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	classes := make([]string, 0, 3)
+	if isProbablyNumericXLSXCellValue(trimmed) {
+		classes = append(classes, "office-xlsx-sheet__cell--numeric")
+	}
+	if isProbablyCurrencyXLSXCellValue(trimmed) {
+		classes = append(classes, "office-xlsx-sheet__cell--currency")
+	}
+	if isProbablyPercentXLSXCellValue(trimmed) {
+		classes = append(classes, "office-xlsx-sheet__cell--percent")
+	}
+	if isProbablyDateXLSXCellValue(trimmed) {
+		classes = append(classes, "office-xlsx-sheet__cell--date")
+	}
+	return classes
+}
+
+func clampXLSXColumnWidth(width int) int {
+	if width < 108 {
+		return 108
+	}
+	if width > 320 {
+		return 320
+	}
+	return width
+}
+
+func isProbablyNumericXLSXCellValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	normalized := normalizeXLSXNumericCandidate(trimmed)
+	if normalized == "" {
+		return false
+	}
+	if _, err := strconv.ParseFloat(normalized, 64); err == nil {
+		return true
+	}
+	return false
+}
+
+func normalizeXLSXNumericCandidate(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	normalized := strings.NewReplacer(
+		",", "",
+		" ", "",
+		"\u00a0", "",
+		"%", "",
+		"¥", "",
+		"￥", "",
+		"$", "",
+		"€", "",
+		"£", "",
+	).Replace(trimmed)
+	if strings.HasPrefix(normalized, "(") && strings.HasSuffix(normalized, ")") {
+		normalized = "-" + strings.TrimSuffix(strings.TrimPrefix(normalized, "("), ")")
+	}
+	return normalized
+}
+
+func isProbablyCurrencyXLSXCellValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if !(strings.ContainsAny(trimmed, "¥￥$€£") ||
+		strings.HasPrefix(strings.ToUpper(trimmed), "USD") ||
+		strings.HasPrefix(strings.ToUpper(trimmed), "CNY") ||
+		strings.HasPrefix(strings.ToUpper(trimmed), "RMB")) {
+		return false
+	}
+	return isProbablyNumericXLSXCellValue(trimmed)
+}
+
+func isProbablyPercentXLSXCellValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || !strings.Contains(trimmed, "%") {
+		return false
+	}
+	return isProbablyNumericXLSXCellValue(trimmed)
+}
+
+func isProbablyDateXLSXCellValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	dateLayouts := []string{
+		"2006-01-02",
+		"2006/01/02",
+		"2006.01.02",
+		"2006-1-2",
+		"2006/1/2",
+		"2006.1.2",
+		"2006-01-02 15:04",
+		"2006/01/02 15:04",
+		"2006-01-02 15:04:05",
+		"2006/01/02 15:04:05",
+		"01/02/2006",
+		"1/2/2006",
+		"01-02-2006",
+		"1-2-2006",
+	}
+	normalized := strings.NewReplacer("年", "-", "月", "-", "日", "", "T", " ").Replace(trimmed)
+	for _, layout := range dateLayouts {
+		if _, err := time.Parse(layout, normalized); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func isLikelyXLSXSummaryLabel(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		"合计",
+		"总计",
+		"小计",
+		"汇总",
+		"总额",
+		"总数",
+		"实收",
+		"应收",
+		"结余",
+		"balance",
+		"subtotal",
+		"total",
+		"sum",
+	} {
+		if strings.Contains(normalized, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func min(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func defaultIfBlank(value string, fallback string) string {
