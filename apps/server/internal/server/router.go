@@ -236,7 +236,12 @@ func newRouter(
 	)
 	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
 	documentTemplateService := service.NewDocumentTemplateService(documentTemplateRepo)
-	imageHostingHandler := handler.NewImageHostingHandler(authService, imageHostingService, spaceRepo)
+	imageHostingHandler := handler.NewImageHostingHandler(
+		authService,
+		imageHostingService,
+		documentAttachmentRepo,
+		spaceRepo,
+	)
 	onlyOfficeHandler := handler.NewOnlyOfficeHandler(authService, onlyOfficeConfigService)
 	documentAttachmentTokenService := service.NewDocumentAttachmentDownloadTokenService(cfg.JWT.Secret, 24*time.Hour)
 	accessHandler := handler.NewAccessHandler(authService, visibilityService, readerRenderCache, searchIndexService)

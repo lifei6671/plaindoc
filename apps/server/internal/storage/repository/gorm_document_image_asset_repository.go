@@ -19,6 +19,7 @@ type documentImageAssetRow struct {
 	ImageAssetID        string  `gorm:"column:image_asset_id"`
 	DocumentID          string  `gorm:"column:document_id"`
 	SpaceID             string  `gorm:"column:space_id"`
+	BlobID              *string `gorm:"column:blob_id"`
 	StorageProvider     string  `gorm:"column:storage_provider"`
 	ObjectKey           string  `gorm:"column:object_key"`
 	ObjectURL           string  `gorm:"column:object_url"`
@@ -118,6 +119,7 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 		DocumentID          string  `gorm:"column:document_id"`
 		ReaderSlug          *string `gorm:"column:reader_slug"`
 		SpaceID             string  `gorm:"column:space_id"`
+		BlobID              *string `gorm:"column:blob_id"`
 		StorageProvider     string  `gorm:"column:storage_provider"`
 		ObjectKey           string  `gorm:"column:object_key"`
 		ObjectURL           string  `gorm:"column:object_url"`
@@ -144,6 +146,7 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 			"dia.document_id",
 			"n.reader_slug AS reader_slug",
 			"dia.space_id",
+			"dia.blob_id",
 			"dia.storage_provider",
 			"dia.object_key",
 			"dia.object_url",
@@ -183,6 +186,7 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 				ImageAssetID:     strings.TrimSpace(row.ImageAssetID),
 				DocumentID:       strings.TrimSpace(row.DocumentID),
 				SpaceID:          strings.TrimSpace(row.SpaceID),
+				BlobID:           trimOptionalString(row.BlobID),
 				StorageProvider:  strings.TrimSpace(row.StorageProvider),
 				ObjectKey:        strings.TrimSpace(row.ObjectKey),
 				ObjectURL:        strings.TrimSpace(row.ObjectURL),
@@ -223,7 +227,7 @@ func (r *gormDocumentImageAssetRepository) GetByImageAssetID(
 	if err := r.db.WithContext(ctx).
 		Table("document_image_assets").
 		Select(
-			"id, image_asset_id, document_id, space_id, storage_provider, object_key, object_url, status, pending_cleanup_at, deleted_at, last_referenced_at, created_at, updated_at",
+			"id, image_asset_id, document_id, space_id, blob_id, storage_provider, object_key, object_url, status, pending_cleanup_at, deleted_at, last_referenced_at, created_at, updated_at",
 		).
 		Where("image_asset_id = ?", normalizedImageAssetID).
 		Take(&row).Error; err != nil {
@@ -239,6 +243,7 @@ func (r *gormDocumentImageAssetRepository) GetByImageAssetID(
 		ImageAssetID:     strings.TrimSpace(row.ImageAssetID),
 		DocumentID:       strings.TrimSpace(row.DocumentID),
 		SpaceID:          strings.TrimSpace(row.SpaceID),
+		BlobID:           trimOptionalString(row.BlobID),
 		StorageProvider:  strings.TrimSpace(row.StorageProvider),
 		ObjectKey:        strings.TrimSpace(row.ObjectKey),
 		ObjectURL:        strings.TrimSpace(row.ObjectURL),

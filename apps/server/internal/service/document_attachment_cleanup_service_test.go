@@ -137,14 +137,17 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	deletedBlobID := "01kattachmentcleanupblob000001"
 	activeBlobID := "01kattachmentcleanupblob000002"
 	orphanBlobID := "01kattachmentcleanupblob000003"
+	imageBlobID := "01kattachmentcleanupblob000005"
 	officeObjectKey := "images/cleanup/active-office.docx"
 	deletedObjectKey := "images/cleanup/deleted-file.txt"
 	activeObjectKey := "images/cleanup/active-file.txt"
 	orphanObjectKey := "images/cleanup/orphan-file.txt"
+	imageObjectKey := "images/cleanup/markdown-image.png"
 
 	deletedBlobPath := createAttachmentCleanupLocalFile(t, deletedObjectKey, "deleted")
 	activeBlobPath := createAttachmentCleanupLocalFile(t, activeObjectKey, "active")
 	orphanBlobPath := createAttachmentCleanupLocalFile(t, orphanObjectKey, "orphan")
+	imageBlobPath := createAttachmentCleanupLocalFile(t, imageObjectKey, "pngdata")
 	officeBlobPath := createAttachmentCleanupLocalFile(t, officeObjectKey, "office")
 
 	if err := database.ORM.WithContext(ctx).Table("file_blobs").Create([]map[string]any{
@@ -196,6 +199,19 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 			"size_bytes":        6,
 			"content_hash_algo": "sha256",
 			"content_hash":      "hash-office",
+			"deleted_at":        nil,
+			"created_at":        now.Add(-2 * time.Hour),
+			"updated_at":        now.Add(-2 * time.Hour),
+		},
+		{
+			"blob_id":           imageBlobID,
+			"storage_provider":  "local",
+			"object_key":        imageObjectKey,
+			"object_url":        "/uploads/" + imageObjectKey,
+			"mime_type":         "image/png",
+			"size_bytes":        7,
+			"content_hash_algo": "sha256",
+			"content_hash":      "hash-markdown-image",
 			"deleted_at":        nil,
 			"created_at":        now.Add(-2 * time.Hour),
 			"updated_at":        now.Add(-2 * time.Hour),
@@ -283,6 +299,23 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	}).Error; err != nil {
 		t.Fatalf("seed office file revisions failed: %v", err)
 	}
+	if err := database.ORM.WithContext(ctx).Table("document_image_assets").Create(map[string]any{
+		"image_asset_id":     "01kattachmentcleanupimage000001",
+		"document_id":        activeDocID,
+		"space_id":           spaceID,
+		"blob_id":            imageBlobID,
+		"storage_provider":   "local",
+		"object_key":         imageObjectKey,
+		"object_url":         "/uploads/" + imageObjectKey,
+		"status":             "active",
+		"deleted_at":         nil,
+		"pending_cleanup_at": nil,
+		"last_referenced_at": now.Add(-30 * time.Minute),
+		"created_at":         now.Add(-30 * time.Minute),
+		"updated_at":         now.Add(-30 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("seed document image asset failed: %v", err)
+	}
 
 	cleanupService := NewDocumentAttachmentCleanupService(
 		database.ORM,
@@ -306,6 +339,7 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", orphanBlobID, 0)
 	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", activeBlobID, 1)
 	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", officeBlobID, 1)
+	assertAttachmentCleanupCount(t, database, "file_blobs", "blob_id", imageBlobID, 1)
 
 	if _, err := os.Stat(deletedBlobPath); !isNotExistErr(err) {
 		t.Fatalf("expected deleted blob file removed, stat err=%v", err)
@@ -315,6 +349,9 @@ func TestDocumentAttachmentCleanupService_CleanupDeletedDocumentAttachments(t *t
 	}
 	if _, err := os.Stat(activeBlobPath); err != nil {
 		t.Fatalf("expected active blob file remains, stat err=%v", err)
+	}
+	if _, err := os.Stat(imageBlobPath); err != nil {
+		t.Fatalf("expected markdown image blob file remains, stat err=%v", err)
 	}
 	if _, err := os.Stat(officeBlobPath); err != nil {
 		t.Fatalf("expected office blob file remains, stat err=%v", err)

@@ -113,6 +113,36 @@ func TestRouter_ImageHostingConfigAndLocalUpload(t *testing.T) {
 		t.Fatalf("expected local upload url prefix /uploads/, got %s", uploadPayload.URL)
 	}
 
+	var blobCount int64
+	if err := database.ORM.Table("file_blobs").Count(&blobCount).Error; err != nil {
+		t.Fatalf("count file_blobs after first upload failed: %v", err)
+	}
+	if blobCount != 1 {
+		t.Fatalf("expected one file_blob after first upload, got %d", blobCount)
+	}
+
+	reuploadReq := buildImageUploadRequest(t, "/api/uploads/images", "demo-copy.png", imageBytes, map[string]string{
+		"spaceId": spaceID,
+	})
+	reuploadReq.Header.Set("Authorization", "Bearer "+accessToken)
+	reuploadRec := serve(reuploadReq)
+	if reuploadRec.Code != http.StatusOK {
+		t.Fatalf("expected second local upload status 200, got %d body=%s", reuploadRec.Code, reuploadRec.Body.String())
+	}
+	reuploadPayload := decodeJSONResultData[struct {
+		Key string `json:"key"`
+		URL string `json:"url"`
+	}](t, reuploadRec.Body.Bytes())
+	if reuploadPayload.Key != uploadPayload.Key || reuploadPayload.URL != uploadPayload.URL {
+		t.Fatalf("expected deduped upload reuse existing key/url, got first=%+v second=%+v", uploadPayload, reuploadPayload)
+	}
+	if err := database.ORM.Table("file_blobs").Count(&blobCount).Error; err != nil {
+		t.Fatalf("count file_blobs after second upload failed: %v", err)
+	}
+	if blobCount != 1 {
+		t.Fatalf("expected one file_blob after second upload, got %d", blobCount)
+	}
+
 	fetchUploadedReq := httptest.NewRequest(http.MethodGet, uploadPayload.URL, nil)
 	fetchUploadedRec := serve(fetchUploadedReq)
 	if fetchUploadedRec.Code != http.StatusOK {

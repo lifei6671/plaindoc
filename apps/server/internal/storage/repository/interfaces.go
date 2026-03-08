@@ -397,6 +397,7 @@ type DocumentAttachmentCleanupRepository interface {
 
 // DocumentImageAssetReferenceInput 文档图片引用输入项。
 type DocumentImageAssetReferenceInput struct {
+	BlobID          string
 	StorageProvider string
 	ObjectKey       string
 	ObjectURL       string
@@ -964,6 +965,11 @@ type DocumentAttachmentRepository interface {
 		contentHashAlgo string,
 		contentHash string,
 		sizeBytes int64,
+	) (*models.DocumentAttachmentBlob, error)
+	FindBlobByObject(
+		ctx context.Context,
+		storageProvider string,
+		objectKey string,
 	) (*models.DocumentAttachmentBlob, error)
 	GetBlobByBlobID(ctx context.Context, blobID string) (*models.DocumentAttachmentBlob, error)
 	ListOrphanBlobs(ctx context.Context, limit int) ([]models.DocumentAttachmentBlob, error)

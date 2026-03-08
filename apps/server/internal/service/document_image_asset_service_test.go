@@ -30,6 +30,7 @@ func TestDocumentImageAssetService_SyncDocumentImageAssets_SQLiteTextTimestampCo
 	spaceID := "01kdocumentimageassetspace000001"
 	nodeID := "01kdocumentimageassetnode0000001"
 	documentID := "01kdocumentimageassetdoc00000001"
+	blobID := "01kdocumentimageassetblob000001"
 	objectKey := "images/space-a/doc-a/sync-time.png"
 
 	if err := database.ORM.WithContext(ctx).Table("users").Create(map[string]any{
@@ -87,6 +88,20 @@ func TestDocumentImageAssetService_SyncDocumentImageAssets_SQLiteTextTimestampCo
 	}).Error; err != nil {
 		t.Fatalf("seed document failed: %v", err)
 	}
+	if err := database.ORM.WithContext(ctx).Table("file_blobs").Create(map[string]any{
+		"blob_id":           blobID,
+		"storage_provider":  "local",
+		"object_key":        objectKey,
+		"object_url":        "/uploads/" + objectKey,
+		"mime_type":         "image/png",
+		"size_bytes":        7,
+		"content_hash_algo": "sha256",
+		"content_hash":      "hash-sync-time-image",
+		"created_at":        now,
+		"updated_at":        now,
+	}).Error; err != nil {
+		t.Fatalf("seed file blob failed: %v", err)
+	}
 
 	legacyTimestamp := now.Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
 	if err := database.ORM.WithContext(ctx).Table("document_image_assets").Create(map[string]any{
@@ -128,17 +143,21 @@ func TestDocumentImageAssetService_SyncDocumentImageAssets_SQLiteTextTimestampCo
 	}
 
 	type statusRow struct {
-		Status string `gorm:"column:status"`
+		Status string  `gorm:"column:status"`
+		BlobID *string `gorm:"column:blob_id"`
 	}
 	var status statusRow
 	if err := database.ORM.WithContext(ctx).
 		Table("document_image_assets").
-		Select("status").
+		Select("status", "blob_id").
 		Where("document_id = ? AND storage_provider = ? AND object_key = ?", documentID, "local", objectKey).
 		Take(&status).Error; err != nil {
 		t.Fatalf("query document image asset status failed: %v", err)
 	}
 	if status.Status != "active" {
 		t.Fatalf("expected document image asset status active, got %q", status.Status)
+	}
+	if status.BlobID == nil || *status.BlobID != blobID {
+		t.Fatalf("expected document image asset blob_id %q, got %+v", blobID, status.BlobID)
 	}
 }

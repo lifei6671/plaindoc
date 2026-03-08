@@ -387,6 +387,41 @@ func (r *gormDocumentAttachmentRepository) GetBlobByBlobID(
 	return &blob, nil
 }
 
+func (r *gormDocumentAttachmentRepository) FindBlobByObject(
+	ctx context.Context,
+	storageProvider string,
+	objectKey string,
+) (*models.DocumentAttachmentBlob, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("document attachment repository db is nil")
+	}
+
+	normalizedStorageProvider := strings.ToLower(strings.TrimSpace(storageProvider))
+	normalizedObjectKey := strings.TrimSpace(objectKey)
+	if normalizedStorageProvider == "" || normalizedObjectKey == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	var row documentAttachmentBlobRow
+	if err := r.db.WithContext(ctx).
+		Table("file_blobs").
+		Select(
+			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
+				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+		).
+		Where(
+			"storage_provider = ? AND object_key = ? AND deleted_at IS NULL",
+			normalizedStorageProvider,
+			normalizedObjectKey,
+		).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+
+	blob := mapDocumentAttachmentBlobRow(row)
+	return &blob, nil
+}
+
 func (r *gormDocumentAttachmentRepository) ListOrphanBlobs(
 	ctx context.Context,
 	limit int,
@@ -406,13 +441,14 @@ func (r *gormDocumentAttachmentRepository) ListOrphanBlobs(
 	if err := r.db.WithContext(ctx).
 		Table("file_blobs").
 		Select(
-			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, " +
+			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
 				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
 		).
 		Where("deleted_at IS NULL").
 		Where("NOT EXISTS (SELECT 1 FROM document_attachments WHERE document_attachments.blob_id = file_blobs.blob_id)").
 		Where("NOT EXISTS (SELECT 1 FROM documents WHERE documents.source_blob_id = file_blobs.blob_id)").
 		Where("NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE document_file_revisions.blob_id = file_blobs.blob_id)").
+		Where("NOT EXISTS (SELECT 1 FROM document_image_assets WHERE document_image_assets.blob_id = file_blobs.blob_id AND document_image_assets.status = ? AND document_image_assets.deleted_at IS NULL)", documentImageAssetLifecycleStatusActive).
 		Order("created_at ASC, id ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -457,11 +493,14 @@ func (r *gormDocumentAttachmentRepository) HardDeleteBlobIfUnreferenced(
 			"blob_id = ? AND "+
 				"NOT EXISTS (SELECT 1 FROM document_attachments WHERE blob_id = ?) AND "+
 				"NOT EXISTS (SELECT 1 FROM documents WHERE source_blob_id = ?) AND "+
-				"NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE blob_id = ?)",
+				"NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE blob_id = ?) AND "+
+				"NOT EXISTS (SELECT 1 FROM document_image_assets WHERE blob_id = ? AND status = ? AND deleted_at IS NULL)",
 			normalizedBlobID,
 			normalizedBlobID,
 			normalizedBlobID,
 			normalizedBlobID,
+			normalizedBlobID,
+			documentImageAssetLifecycleStatusActive,
 		).
 		Delete(&models.DocumentAttachmentBlob{})
 	if deleteResult.Error != nil {
@@ -495,11 +534,15 @@ func (r *gormDocumentAttachmentRepository) CountActiveReferencesByBlobID(
 				"UNION ALL "+
 				"SELECT COUNT(1) AS ref_count FROM documents WHERE source_blob_id = ? "+
 				"UNION ALL "+
-				"SELECT COUNT(1) AS ref_count FROM document_file_revisions WHERE blob_id = ?"+
+				"SELECT COUNT(1) AS ref_count FROM document_file_revisions WHERE blob_id = ? "+
+				"UNION ALL "+
+				"SELECT COUNT(1) AS ref_count FROM document_image_assets WHERE blob_id = ? AND status = ? AND deleted_at IS NULL"+
 				") AS ref_counts",
 			normalizedBlobID,
 			normalizedBlobID,
 			normalizedBlobID,
+			normalizedBlobID,
+			documentImageAssetLifecycleStatusActive,
 		).
 		Take(&row).Error; err != nil {
 		return 0, err

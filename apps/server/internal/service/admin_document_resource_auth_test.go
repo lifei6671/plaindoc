@@ -578,6 +578,14 @@ func (s *stubDocumentAttachmentRepo) FindBlobByHash(
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (s *stubDocumentAttachmentRepo) FindBlobByObject(
+	_ context.Context,
+	_ string,
+	_ string,
+) (*models.DocumentAttachmentBlob, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+
 func (s *stubDocumentAttachmentRepo) GetBlobByBlobID(
 	_ context.Context,
 	_ string,

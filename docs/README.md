@@ -1,6 +1,6 @@
 # Docs 导航（精简版）
 
-**Last Updated**: 2026-03-06  
+**Last Updated**: 2026-03-08  
 **目标**: 文档收敛到“前端一份 + 后端一份”，减少重复、冲突与维护成本。
 
 ---
@@ -29,6 +29,8 @@
    阅读页文档自定义标识（slug）方案：兼容旧 URL、canonical 统一、编辑器文档树入口、sitemap/搜索联动与迁移测试清单。
 2. `ONLYOFFICE_INTEGRATION_TECHNICAL_PLAN.md`  
    ONLYOFFICE 一等文档方案：Word/Excel 作为文档节点接入，支持工作区编辑、前端阅读、分享阅读，并明确不参与搜索与 sitemap。
+3. `ONLYOFFICE_READER_HTML_RENDERING_TECHNICAL_PLAN.md`  
+   ONLYOFFICE 阅读页本地 HTML 渲染方案：编辑继续走 iframe，阅读/分享按配置切换 ONLYOFFICE 或本地 HTML，并复用 `documents`、`document_image_assets`、`file_blobs` 实现轻量落地。
 
 ---
 

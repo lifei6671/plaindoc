@@ -9,6 +9,7 @@ type DocumentImageAsset struct {
 	ImageAssetID     string     `gorm:"column:image_asset_id"`
 	DocumentID       string     `gorm:"column:document_id"`
 	SpaceID          string     `gorm:"column:space_id"`
+	BlobID           *string    `gorm:"column:blob_id"`
 	StorageProvider  string     `gorm:"column:storage_provider"`
 	ObjectKey        string     `gorm:"column:object_key"`
 	ObjectURL        string     `gorm:"column:object_url"`

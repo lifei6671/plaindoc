@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -25,8 +26,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"github.com/oklog/ulid/v2"
+	"gorm.io/gorm"
 )
 
 const (
@@ -41,10 +44,11 @@ var (
 )
 
 type imageHostingHandler struct {
-	authService         *service.AuthService
-	imageHostingService *service.ImageHostingService
-	spaceRepo           repository.SpaceRepository
-	localImageRootDir   string
+	authService            *service.AuthService
+	imageHostingService    *service.ImageHostingService
+	documentAttachmentRepo repository.DocumentAttachmentRepository
+	spaceRepo              repository.SpaceRepository
+	localImageRootDir      string
 }
 
 type imageHostingClientConfigResponse struct {
@@ -62,13 +66,15 @@ type imageHostingClientLocalConfig struct {
 func NewImageHostingHandler(
 	authService *service.AuthService,
 	imageHostingService *service.ImageHostingService,
+	documentAttachmentRepo repository.DocumentAttachmentRepository,
 	spaceRepo repository.SpaceRepository,
 ) *imageHostingHandler {
 	return &imageHostingHandler{
-		authService:         authService,
-		imageHostingService: imageHostingService,
-		spaceRepo:           spaceRepo,
-		localImageRootDir:   defaultLocalImageStorageRoot,
+		authService:            authService,
+		imageHostingService:    imageHostingService,
+		documentAttachmentRepo: documentAttachmentRepo,
+		spaceRepo:              spaceRepo,
+		localImageRootDir:      defaultLocalImageStorageRoot,
 	}
 }
 
@@ -193,7 +199,7 @@ type issueImageObjectKeyRequest struct {
 
 // UploadImage 接收本地图片上传并返回可访问地址。
 func (h *imageHostingHandler) UploadImage(c *gin.Context) {
-	if h == nil || h.authService == nil || h.imageHostingService == nil || h.spaceRepo == nil {
+	if h == nil || h.authService == nil || h.imageHostingService == nil || h.spaceRepo == nil || h.documentAttachmentRepo == nil {
 		response.InternalError(c)
 		return
 	}
@@ -286,6 +292,31 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
+	const contentHashAlgo = "sha256"
+	contentHashValue := sha256.Sum256(processedImage.Content)
+	contentHash := hex.EncodeToString(contentHashValue[:])
+	contentSize := int64(len(processedImage.Content))
+	existingBlob, err := h.documentAttachmentRepo.FindBlobByHash(
+		c.Request.Context(),
+		string(targetProvider),
+		contentHashAlgo,
+		contentHash,
+		contentSize,
+	)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		setRequestErrmsg(c, err, "查询已存在图片文件实体失败")
+		response.InternalError(c)
+		return
+	}
+	if existingBlob != nil {
+		response.JSON(c, http.StatusOK, gin.H{
+			"key":      strings.TrimSpace(existingBlob.ObjectKey),
+			"url":      strings.TrimSpace(existingBlob.ObjectURL),
+			"provider": strings.TrimSpace(existingBlob.StorageProvider),
+		})
+		return
+	}
+
 	// 生成按日期分层的对象 key，降低单目录文件数并便于管理。
 	objectKey, err := buildImageObjectKey(
 		fileHeader.Filename,
@@ -303,6 +334,7 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 	}
 
 	accessURL := ""
+	savedTargetPath := ""
 	switch targetProvider {
 	case service.ImageHostingProviderLocal:
 		localRootDir := strings.TrimSpace(h.localImageRootDir)
@@ -321,6 +353,7 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 			response.InternalError(c)
 			return
 		}
+		savedTargetPath = targetPath
 		accessURL = resolvePublicURL(config.Local.PublicBaseURL, objectKey, "/uploads")
 	case service.ImageHostingProviderCloudflareR2:
 		uploadedURL, uploadErr := uploadImageToCloudflareR2(
@@ -357,6 +390,55 @@ func (h *imageHostingHandler) UploadImage(c *gin.Context) {
 	if strings.TrimSpace(accessURL) == "" {
 		setRequestErrmsgText(c, "图片上传成功但访问地址为空")
 		response.InternalError(c)
+		return
+	}
+
+	now := time.Now().UTC()
+	blobCandidate := &models.DocumentAttachmentBlob{
+		BlobID:          strings.ToLower(ulid.Make().String()),
+		StorageProvider: string(targetProvider),
+		ObjectKey:       objectKey,
+		ObjectURL:       strings.TrimSpace(accessURL),
+		MimeType:        strings.TrimSpace(processedImage.ContentType),
+		SizeBytes:       contentSize,
+		ContentHashAlgo: contentHashAlgo,
+		ContentHash:     contentHash,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if blobCandidate.MimeType == "" {
+		blobCandidate.MimeType = "application/octet-stream"
+	}
+
+	if createBlobErr := h.documentAttachmentRepo.CreateBlob(c.Request.Context(), blobCandidate); createBlobErr != nil {
+		if savedTargetPath != "" {
+			if cleanupErr := os.Remove(savedTargetPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+				setRequestErrmsg(c, cleanupErr, "清理重复上传图片文件失败")
+			}
+		}
+		if !isLikelyUniqueConstraintError(createBlobErr) {
+			setRequestErrmsg(c, createBlobErr, "创建图片文件实体失败")
+			response.InternalError(c)
+			return
+		}
+
+		existingBlob, lookupErr := h.documentAttachmentRepo.FindBlobByHash(
+			c.Request.Context(),
+			string(targetProvider),
+			contentHashAlgo,
+			contentHash,
+			contentSize,
+		)
+		if lookupErr != nil {
+			setRequestErrmsg(c, lookupErr, "回查已存在图片文件实体失败")
+			response.InternalError(c)
+			return
+		}
+		response.JSON(c, http.StatusOK, gin.H{
+			"key":      strings.TrimSpace(existingBlob.ObjectKey),
+			"url":      strings.TrimSpace(existingBlob.ObjectURL),
+			"provider": strings.TrimSpace(existingBlob.StorageProvider),
+		})
 		return
 	}
 

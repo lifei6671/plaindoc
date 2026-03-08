@@ -22,13 +22,21 @@ type gormDocumentImageAssetLifecycleRepository struct {
 }
 
 type documentImageAssetLifecycleExistingRow struct {
-	ID              int64  `gorm:"column:id"`
-	StorageProvider string `gorm:"column:storage_provider"`
-	ObjectKey       string `gorm:"column:object_key"`
+	ID              int64   `gorm:"column:id"`
+	BlobID          *string `gorm:"column:blob_id"`
+	StorageProvider string  `gorm:"column:storage_provider"`
+	ObjectKey       string  `gorm:"column:object_key"`
 }
 
 type documentImageAssetLifecyclePendingCandidateRow struct {
-	ID              int64  `gorm:"column:id"`
+	ID              int64   `gorm:"column:id"`
+	BlobID          *string `gorm:"column:blob_id"`
+	StorageProvider string  `gorm:"column:storage_provider"`
+	ObjectKey       string  `gorm:"column:object_key"`
+}
+
+type documentImageAssetLifecycleBlobRow struct {
+	BlobID          string `gorm:"column:blob_id"`
 	StorageProvider string `gorm:"column:storage_provider"`
 	ObjectKey       string `gorm:"column:object_key"`
 }
@@ -57,11 +65,16 @@ func (r *gormDocumentImageAssetLifecycleRepository) SyncDocumentReferences(
 		referencedAt = time.Now().UTC()
 	}
 
-	normalizedRefs := normalizeDocumentImageAssetReferenceInputs(params.References)
+	referencesWithBlobIDs, err := r.resolveBlobIDsByObject(ctx, params.References)
+	if err != nil {
+		return err
+	}
+
+	normalizedRefs := normalizeDocumentImageAssetReferenceInputs(referencesWithBlobIDs)
 	existingAssets := make([]documentImageAssetLifecycleExistingRow, 0, len(normalizedRefs)+8)
 	if err := r.db.WithContext(ctx).
 		Table("document_image_assets").
-		Select("id, storage_provider, object_key").
+		Select("id, blob_id, storage_provider, object_key").
 		Where("document_id = ? AND status IN ?", documentID, []string{
 			documentImageAssetLifecycleStatusActive,
 			documentImageAssetLifecycleStatusPendingCleanup,
@@ -89,6 +102,7 @@ func (r *gormDocumentImageAssetLifecycleRepository) SyncDocumentReferences(
 				if err := tx.Model(&models.DocumentImageAsset{}).
 					Where("id = ?", existing.ID).
 					Updates(map[string]any{
+						"blob_id":            nullableTrimmedString(reference.BlobID),
 						"space_id":           spaceID,
 						"object_url":         reference.ObjectURL,
 						"status":             documentImageAssetLifecycleStatusActive,
@@ -107,6 +121,7 @@ func (r *gormDocumentImageAssetLifecycleRepository) SyncDocumentReferences(
 				ImageAssetID:     strings.ToLower(ulid.Make().String()),
 				DocumentID:       documentID,
 				SpaceID:          spaceID,
+				BlobID:           nullableTrimmedString(reference.BlobID),
 				StorageProvider:  reference.StorageProvider,
 				ObjectKey:        reference.ObjectKey,
 				ObjectURL:        reference.ObjectURL,
@@ -155,7 +170,7 @@ func (r *gormDocumentImageAssetLifecycleRepository) ListPendingCleanupCandidates
 	rows := make([]documentImageAssetLifecyclePendingCandidateRow, 0, limit)
 	if err := r.db.WithContext(ctx).
 		Table("document_image_assets").
-		Select("id, storage_provider, object_key").
+		Select("id, blob_id, storage_provider, object_key").
 		Where("status = ? AND pending_cleanup_at IS NOT NULL AND pending_cleanup_at <= ?",
 			documentImageAssetLifecycleStatusPendingCleanup,
 			cutoff,
@@ -304,6 +319,7 @@ func normalizeDocumentImageAssetReferenceInputs(
 	seen := make(map[string]struct{}, len(references))
 	for _, item := range references {
 		normalized := DocumentImageAssetReferenceInput{
+			BlobID:          strings.TrimSpace(item.BlobID),
 			StorageProvider: strings.ToLower(strings.TrimSpace(item.StorageProvider)),
 			ObjectKey:       strings.TrimSpace(item.ObjectKey),
 			ObjectURL:       strings.TrimSpace(item.ObjectURL),
@@ -322,4 +338,71 @@ func normalizeDocumentImageAssetReferenceInputs(
 		result = append(result, normalized)
 	}
 	return result
+}
+
+func (r *gormDocumentImageAssetLifecycleRepository) resolveBlobIDsByObject(
+	ctx context.Context,
+	references []DocumentImageAssetReferenceInput,
+) ([]DocumentImageAssetReferenceInput, error) {
+	if len(references) == 0 {
+		return []DocumentImageAssetReferenceInput{}, nil
+	}
+
+	groupedObjectKeys := make(map[string][]string)
+	for _, item := range references {
+		storageProvider := strings.ToLower(strings.TrimSpace(item.StorageProvider))
+		objectKey := strings.TrimSpace(item.ObjectKey)
+		if storageProvider == "" || objectKey == "" {
+			continue
+		}
+		groupedObjectKeys[storageProvider] = append(groupedObjectKeys[storageProvider], objectKey)
+	}
+
+	blobIDByIdentity := make(map[string]string, len(references))
+	for storageProvider, objectKeys := range groupedObjectKeys {
+		if len(objectKeys) == 0 {
+			continue
+		}
+		rows := make([]documentImageAssetLifecycleBlobRow, 0, len(objectKeys))
+		if err := r.db.WithContext(ctx).
+			Table("file_blobs").
+			Select("blob_id, storage_provider, object_key").
+			Where("deleted_at IS NULL AND storage_provider = ? AND object_key IN ?", storageProvider, objectKeys).
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			identityKey := buildDocumentImageAssetLifecycleIdentityKey(row.StorageProvider, row.ObjectKey)
+			if identityKey == "" {
+				continue
+			}
+			blobIDByIdentity[identityKey] = strings.TrimSpace(row.BlobID)
+		}
+	}
+
+	result := make([]DocumentImageAssetReferenceInput, 0, len(references))
+	for _, item := range references {
+		normalized := DocumentImageAssetReferenceInput{
+			StorageProvider: strings.ToLower(strings.TrimSpace(item.StorageProvider)),
+			ObjectKey:       strings.TrimSpace(item.ObjectKey),
+			ObjectURL:       strings.TrimSpace(item.ObjectURL),
+		}
+		identityKey := buildDocumentImageAssetLifecycleIdentityKey(
+			normalized.StorageProvider,
+			normalized.ObjectKey,
+		)
+		if blobID, ok := blobIDByIdentity[identityKey]; ok {
+			normalized.BlobID = blobID
+		}
+		result = append(result, normalized)
+	}
+	return result, nil
+}
+
+func nullableTrimmedString(value string) *string {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return nil
+	}
+	return &normalized
 }
