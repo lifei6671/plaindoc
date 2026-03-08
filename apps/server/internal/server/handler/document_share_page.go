@@ -103,13 +103,14 @@ func (h *documentSharePageHandler) Page(c *gin.Context) {
 
 	shareDocKey := resolveDocumentShareCanonicalDocKey(pageResult.Share)
 	payload := readerPagePayload{
-		Space:         pageResult.Page.Space,
-		Document:      pageResult.Page.Document,
-		Attachments:   pageResult.Page.Attachments,
-		Tree:          pageResult.Page.Tree,
-		ActiveDocID:   pageResult.Page.ActiveDocID,
-		RequestOrigin: resolveRequestOrigin(c),
-		Viewer:        h.readerRenderer.resolveOptionalViewerIdentity(c),
+		Space:           pageResult.Page.Space,
+		Document:        pageResult.Page.Document,
+		Attachments:     pageResult.Page.Attachments,
+		Tree:            pageResult.Page.Tree,
+		ActiveDocID:     pageResult.Page.ActiveDocID,
+		RequestOrigin:   resolveRequestOrigin(c),
+		Viewer:          h.readerRenderer.resolveOptionalViewerIdentity(c),
+		OfficeRendering: h.readerRenderer.resolveOfficeRenderingState(c.Request.Context()),
 		Share: &readerPageShareState{
 			Enabled:            true,
 			ShareID:            strings.TrimSpace(pageResult.Share.ShareID),

@@ -22,6 +22,7 @@ type searchIndexSourceRow struct {
 	SpaceID         string                    `gorm:"column:space_id"`
 	DocumentID      string                    `gorm:"column:document_id"`
 	NodeID          string                    `gorm:"column:node_id"`
+	Format          models.DocumentFormat     `gorm:"column:format"`
 	Title           string                    `gorm:"column:title"`
 	ContentMD       string                    `gorm:"column:content_md"`
 	SpaceVisibility string                    `gorm:"column:space_visibility"`
@@ -141,7 +142,13 @@ func (r *gormSearchIndexSourceRepository) baseActiveDocumentsQuery(ctx context.C
 		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
 		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
 		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.format = ?", models.DocumentFormatMarkdown)
+		Where(
+			"(d.format = ?) OR (d.format IN (?, ?) AND d.render_status = ? AND TRIM(d.content_md) <> '')",
+			models.DocumentFormatMarkdown,
+			models.DocumentFormatDOCX,
+			models.DocumentFormatXLSX,
+			models.DocumentRenderStatusSuccess,
+		)
 }
 
 func (r *gormSearchIndexSourceRepository) selectSearchIndexSourceColumns(query *gorm.DB) *gorm.DB {
@@ -149,6 +156,7 @@ func (r *gormSearchIndexSourceRepository) selectSearchIndexSourceColumns(query *
 		"s.space_id AS space_id",
 		"d.document_id AS document_id",
 		"d.node_id AS node_id",
+		"d.format AS format",
 		"d.title AS title",
 		"d.content_md AS content_md",
 		"s.visibility AS space_visibility",
@@ -173,6 +181,7 @@ func mapSearchIndexSourceRow(row searchIndexSourceRow) SearchIndexSourceDocument
 		SpaceID:         strings.TrimSpace(row.SpaceID),
 		DocumentID:      strings.TrimSpace(row.DocumentID),
 		NodeID:          strings.TrimSpace(row.NodeID),
+		Format:          row.Format,
 		Title:           strings.TrimSpace(row.Title),
 		ContentMD:       strings.TrimSpace(row.ContentMD),
 		SpaceVisibility: strings.TrimSpace(row.SpaceVisibility),

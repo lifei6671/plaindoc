@@ -28,6 +28,9 @@ export interface ReaderDocumentPayload {
   visibility: "public" | "authenticated" | "member";
   title: string;
   contentMd: string;
+  renderStatus?: "idle" | "pending" | "success" | "failed";
+  renderError?: string;
+  renderedAt?: string;
   version: number;
   sourceBlobId?: string;
   sourceFileName?: string;
@@ -77,6 +80,10 @@ export interface ReaderPagePayload {
   activeDocId: string;
   requestOrigin?: string;
   viewer: ReaderViewerPayload;
+  officeRendering?: {
+    independentRenderEnabled: boolean;
+    fallbackToOnlyOfficeOnRenderFailure: boolean;
+  };
   access?: ReaderAccessPayload;
   share?: ReaderSharePayload;
 }

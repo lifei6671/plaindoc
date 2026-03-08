@@ -257,6 +257,7 @@ type SearchIndexSourceDocumentRecord struct {
 	SpaceID         string
 	DocumentID      string
 	NodeID          string
+	Format          models.DocumentFormat
 	Title           string
 	ContentMD       string
 	SpaceVisibility string
@@ -337,6 +338,9 @@ type ReaderPageDocumentRecord struct {
 	Visibility     string
 	Title          string
 	ContentMD      string
+	RenderStatus   models.DocumentRenderStatus
+	RenderError    string
+	RenderedAt     *time.Time
 	Version        int
 	SourceBlobID   *string
 	SourceFileName *string
@@ -545,6 +549,9 @@ type WorkspaceDocumentRecord struct {
 	Format         models.DocumentFormat
 	Title          string
 	ContentMD      string
+	RenderStatus   models.DocumentRenderStatus
+	RenderError    string
+	RenderedAt     *time.Time
 	Version        int
 	SourceBlobID   *string
 	SourceFileName *string

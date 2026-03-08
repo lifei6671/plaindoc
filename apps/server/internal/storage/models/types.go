@@ -48,6 +48,31 @@ func IsOfficeDocumentFormat(value DocumentFormat) bool {
 	}
 }
 
+type DocumentRenderStatus string
+
+const (
+	DocumentRenderStatusIdle    DocumentRenderStatus = "idle"
+	DocumentRenderStatusPending DocumentRenderStatus = "pending"
+	DocumentRenderStatusSuccess DocumentRenderStatus = "success"
+	DocumentRenderStatusFailed  DocumentRenderStatus = "failed"
+)
+
+func IsValidDocumentRenderStatus(value DocumentRenderStatus) bool {
+	switch value {
+	case DocumentRenderStatusIdle, DocumentRenderStatusPending, DocumentRenderStatusSuccess, DocumentRenderStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeDocumentRenderStatus(value DocumentRenderStatus) DocumentRenderStatus {
+	if !IsValidDocumentRenderStatus(value) {
+		return DocumentRenderStatusIdle
+	}
+	return value
+}
+
 type RevisionSource string
 
 const (

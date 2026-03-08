@@ -69,6 +69,89 @@ func TestSearchIndexService_RebuildActiveProvider(t *testing.T) {
 	}
 }
 
+func TestSearchIndexService_RebuildActiveProvider_IndexesOfficeHTML(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-search-index-service-office-html?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	if err := storage.MigrateUp(context.Background(), database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+	if err := seedSearchIndexServiceFixture(database.ORM); err != nil {
+		t.Fatalf("seed fixture failed: %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("nodes").Create(map[string]any{
+		"node_id":        "search-node-office-1",
+		"space_id":       "search-space-1",
+		"parent_node_id": nil,
+		"type":           "doc",
+		"title":          "Office 阅读正文",
+		"sort":           2,
+		"created_at":     now,
+		"updated_at":     now,
+	}).Error; err != nil {
+		t.Fatalf("create office node failed: %v", err)
+	}
+	if err := database.ORM.Table("documents").Create(map[string]any{
+		"document_id":   "search-doc-office-1",
+		"node_id":       "search-node-office-1",
+		"theme_id":      "default",
+		"format":        "docx",
+		"visibility":    "public",
+		"status":        "active",
+		"title":         "Office 阅读正文",
+		"content_md":    `<article><h1>项目合同</h1><p>本地 渲染 命中</p></article>`,
+		"render_status": "success",
+		"version":       1,
+		"created_at":    now,
+		"updated_at":    now,
+	}).Error; err != nil {
+		t.Fatalf("create office document failed: %v", err)
+	}
+
+	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
+	searchConfigService := NewSearchConfigService(systemConfigRepo, SearchConfigServiceOptions{})
+	bleveProvider := searchprovider.NewBleveProvider(searchprovider.BleveProviderOptions{
+		DB:        database.ORM,
+		IndexPath: t.TempDir() + "/bleve-office-html",
+	})
+	indexService := NewSearchIndexService(
+		database.ORM,
+		searchConfigService,
+		bleveProvider,
+	)
+
+	rebuildResult, err := indexService.RebuildActiveProvider(context.Background())
+	if err != nil {
+		t.Fatalf("rebuild active provider failed: %v", err)
+	}
+	if rebuildResult.IndexedDocuments != 2 {
+		t.Fatalf("expected indexedDocuments=2 with office html included, got=%d", rebuildResult.IndexedDocuments)
+	}
+
+	searchResult, err := bleveProvider.Search(context.Background(), searchprovider.SearchRequest{
+		Query: "本 地 渲 染",
+		Page:  1,
+	})
+	if err != nil {
+		t.Fatalf("search office html failed: %v", err)
+	}
+	if searchResult.Total != 1 {
+		t.Fatalf("expected total=1 for office html, got=%d", searchResult.Total)
+	}
+	if len(searchResult.Hits) != 1 || searchResult.Hits[0].DocID != "search-doc-office-1" {
+		t.Fatalf("expected hit search-doc-office-1, got=%+v", searchResult.Hits)
+	}
+}
+
 func TestSearchIndexService_Status(t *testing.T) {
 	database, err := storage.OpenDatabase(storage.OpenConfig{
 		Driver: storage.DriverSQLite,

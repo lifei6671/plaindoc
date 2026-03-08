@@ -14,9 +14,13 @@ import (
 )
 
 const (
-	// SystemConfigKeyOnlyOffice ONLYOFFICE 系统配置键。
-	SystemConfigKeyOnlyOffice = "onlyoffice"
-	onlyOfficeSecretMask      = "********"
+	// SystemConfigKeyOnlyOfficeLegacy 旧版 ONLYOFFICE 系统配置键。
+	SystemConfigKeyOnlyOfficeLegacy = "onlyoffice"
+	// SystemConfigKeyOnlyOfficeIntegration ONLYOFFICE 接入配置键。
+	SystemConfigKeyOnlyOfficeIntegration = "onlyoffice-integration"
+	// SystemConfigKeyOfficeRendering Office 阅读渲染配置键。
+	SystemConfigKeyOfficeRendering = "office-rendering"
+	onlyOfficeSecretMask           = "********"
 )
 
 // OnlyOfficeConfig ONLYOFFICE 运行配置。
@@ -25,6 +29,14 @@ type OnlyOfficeConfig struct {
 	DocumentServerURL     string `json:"documentServerUrl"`
 	CallbackPublicBaseURL string `json:"callbackPublicBaseUrl"`
 	JWTSecret             string `json:"jwtSecret"`
+}
+
+// OfficeRenderingConfig Office 阅读渲染配置。
+type OfficeRenderingConfig struct {
+	IndependentRenderEnabled            bool `json:"independentRenderEnabled"`
+	RenderTimeoutSeconds                int  `json:"renderTimeoutSeconds"`
+	MaxRetryCount                       int  `json:"maxRetryCount"`
+	FallbackToOnlyOfficeOnRenderFailure bool `json:"fallbackToOnlyOfficeOnRenderFailure"`
 }
 
 // OnlyOfficeConfigService 统一读取 ONLYOFFICE 系统配置。
@@ -80,7 +92,98 @@ func (s *OnlyOfficeConfigService) GetConfig(ctx context.Context) (OnlyOfficeConf
 		return defaultConfig, nil
 	}
 
-	record, err := s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyOnlyOffice)
+	record, err := s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyOnlyOfficeIntegration)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return defaultConfig, err
+		}
+		record, err = s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyOnlyOfficeLegacy)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return defaultConfig, nil
+			}
+			return defaultConfig, err
+		}
+	}
+	if record == nil || strings.TrimSpace(record.ConfigValueJSON) == "" {
+		return defaultConfig, nil
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(record.ConfigValueJSON), &payload); err != nil {
+		return defaultConfig, err
+	}
+	return NormalizeOnlyOfficeConfig(payload), nil
+}
+
+// OfficeRenderingConfigService 统一读取 Office 阅读渲染配置。
+type OfficeRenderingConfigService struct {
+	systemConfigRepo repository.SystemConfigRepository
+}
+
+// NewOfficeRenderingConfigService 创建 Office 阅读渲染配置服务。
+func NewOfficeRenderingConfigService(systemConfigRepo repository.SystemConfigRepository) *OfficeRenderingConfigService {
+	return &OfficeRenderingConfigService{systemConfigRepo: systemConfigRepo}
+}
+
+// DefaultOfficeRenderingConfig 返回默认 Office 阅读渲染配置。
+func DefaultOfficeRenderingConfig() OfficeRenderingConfig {
+	return OfficeRenderingConfig{
+		IndependentRenderEnabled:            false,
+		RenderTimeoutSeconds:                120,
+		MaxRetryCount:                       2,
+		FallbackToOnlyOfficeOnRenderFailure: true,
+	}
+}
+
+// NormalizeOfficeRenderingConfig 将任意 Office 阅读渲染配置归一为可用结构。
+func NormalizeOfficeRenderingConfig(value map[string]any) OfficeRenderingConfig {
+	config := DefaultOfficeRenderingConfig()
+	if value == nil {
+		return config
+	}
+
+	config.IndependentRenderEnabled = readBool(value, "independentRenderEnabled", config.IndependentRenderEnabled)
+	config.RenderTimeoutSeconds = readInt(value, "renderTimeoutSeconds", config.RenderTimeoutSeconds)
+	if config.RenderTimeoutSeconds < 5 {
+		config.RenderTimeoutSeconds = 5
+	}
+	if config.RenderTimeoutSeconds > 600 {
+		config.RenderTimeoutSeconds = 600
+	}
+	config.MaxRetryCount = readInt(value, "maxRetryCount", config.MaxRetryCount)
+	if config.MaxRetryCount < 0 {
+		config.MaxRetryCount = 0
+	}
+	if config.MaxRetryCount > 10 {
+		config.MaxRetryCount = 10
+	}
+	config.FallbackToOnlyOfficeOnRenderFailure = readBool(
+		value,
+		"fallbackToOnlyOfficeOnRenderFailure",
+		config.FallbackToOnlyOfficeOnRenderFailure,
+	)
+	return config
+}
+
+// ToMap 将 Office 阅读渲染配置序列化为可持久化结构。
+func (c OfficeRenderingConfig) ToMap() map[string]any {
+	return map[string]any{
+		"independentRenderEnabled":            c.IndependentRenderEnabled,
+		"renderTimeoutSeconds":                c.RenderTimeoutSeconds,
+		"maxRetryCount":                       c.MaxRetryCount,
+		"fallbackToOnlyOfficeOnRenderFailure": c.FallbackToOnlyOfficeOnRenderFailure,
+	}
+}
+
+// GetConfig 返回当前生效 Office 阅读渲染配置；未配置时回退默认值。
+func (s *OfficeRenderingConfigService) GetConfig(ctx context.Context) (OfficeRenderingConfig, error) {
+	defaultConfig := DefaultOfficeRenderingConfig()
+	if s == nil || s.systemConfigRepo == nil {
+		return defaultConfig, nil
+	}
+
+	record, err := s.systemConfigRepo.GetByConfigKey(ctx, SystemConfigKeyOfficeRendering)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return defaultConfig, nil
@@ -95,7 +198,7 @@ func (s *OnlyOfficeConfigService) GetConfig(ctx context.Context) (OnlyOfficeConf
 	if err := json.Unmarshal([]byte(record.ConfigValueJSON), &payload); err != nil {
 		return defaultConfig, err
 	}
-	return NormalizeOnlyOfficeConfig(payload), nil
+	return NormalizeOfficeRenderingConfig(payload), nil
 }
 
 func validateOnlyOfficeConfig(payload map[string]any) error {
@@ -135,6 +238,39 @@ func validateOnlyOfficeConfig(payload map[string]any) error {
 		return err
 	}
 	if err := validateOnlyOfficeRequiredAbsoluteURL("callbackPublicBaseUrl", callbackPublicBaseURL); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateOfficeRenderingConfig(payload map[string]any) error {
+	requiredKeys := map[string]struct{}{
+		"independentRenderEnabled":            {},
+		"renderTimeoutSeconds":                {},
+		"maxRetryCount":                       {},
+		"fallbackToOnlyOfficeOnRenderFailure": {},
+	}
+	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
+		return err
+	}
+	if _, err := getRequiredBool(payload, "independentRenderEnabled"); err != nil {
+		return err
+	}
+	renderTimeoutSeconds, err := getRequiredInt(payload, "renderTimeoutSeconds")
+	if err != nil {
+		return err
+	}
+	if renderTimeoutSeconds < 5 || renderTimeoutSeconds > 600 {
+		return fmt.Errorf("renderTimeoutSeconds must be within 5-600")
+	}
+	maxRetryCount, err := getRequiredInt(payload, "maxRetryCount")
+	if err != nil {
+		return err
+	}
+	if maxRetryCount < 0 || maxRetryCount > 10 {
+		return fmt.Errorf("maxRetryCount must be within 0-10")
+	}
+	if _, err := getRequiredBool(payload, "fallbackToOnlyOfficeOnRenderFailure"); err != nil {
 		return err
 	}
 	return nil

@@ -1146,6 +1146,8 @@ export interface AdminGateway {
       | "auth"
       | "email"
       | "onlyoffice"
+      | "onlyoffice-integration"
+      | "office-rendering"
       | "image-hosting"
       | "sitemap"
       | "data-retention";

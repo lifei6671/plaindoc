@@ -22,17 +22,19 @@ import (
 )
 
 var systemConfigValidators = map[string]func(map[string]any) error{
-	"site":                          validateSiteConfig,
-	"editor":                        validateEditorConfig,
-	"security":                      validateSecurityConfig,
-	SystemConfigKeyAuth:             validateAuthConfig,
-	SystemConfigKeyEmail:            validateEmailConfig,
-	SystemConfigKeyOnlyOffice:       validateOnlyOfficeConfig,
-	SystemConfigKeyDataRetention:    validateDataRetentionConfig,
-	"image-hosting":                 validateImageHostingConfig,
-	searchconfig.SystemConfigKey:    validateSearchConfig,
-	SitemapConfigKey:                validateSitemapConfig,
-	HomepageAnonymousCacheConfigKey: validateHomepageAnonymousCacheConfig,
+	"site":                               validateSiteConfig,
+	"editor":                             validateEditorConfig,
+	"security":                           validateSecurityConfig,
+	SystemConfigKeyAuth:                  validateAuthConfig,
+	SystemConfigKeyEmail:                 validateEmailConfig,
+	SystemConfigKeyOnlyOfficeLegacy:      validateOnlyOfficeConfig,
+	SystemConfigKeyOnlyOfficeIntegration: validateOnlyOfficeConfig,
+	SystemConfigKeyOfficeRendering:       validateOfficeRenderingConfig,
+	SystemConfigKeyDataRetention:         validateDataRetentionConfig,
+	"image-hosting":                      validateImageHostingConfig,
+	searchconfig.SystemConfigKey:         validateSearchConfig,
+	SitemapConfigKey:                     validateSitemapConfig,
+	HomepageAnonymousCacheConfigKey:      validateHomepageAnonymousCacheConfig,
 }
 
 const (
@@ -219,7 +221,7 @@ func (s *AdminSystemConfigService) UpsertConfig(
 			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
 		}
 	}
-	if configKey == SystemConfigKeyOnlyOffice {
+	if configKey == SystemConfigKeyOnlyOfficeLegacy || configKey == SystemConfigKeyOnlyOfficeIntegration {
 		valueMap, err = normalizeOnlyOfficeConfigSecretsForPersist(valueMap, existing)
 		if err != nil {
 			return AdminSystemConfigRecord{}, fmt.Errorf("%w: %v", errcode.ErrAdminSystemConfigInvalidValue, err)
@@ -779,7 +781,8 @@ func mapSystemConfigToRecord(value models.SystemConfig) (AdminSystemConfigRecord
 	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyEmail) {
 		payload = maskEmailConfigSecrets(payload)
 	}
-	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyOnlyOffice) {
+	if strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyOnlyOfficeLegacy) ||
+		strings.EqualFold(strings.TrimSpace(value.ConfigKey), SystemConfigKeyOnlyOfficeIntegration) {
 		payload = maskOnlyOfficeConfigSecrets(payload)
 	}
 

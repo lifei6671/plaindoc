@@ -204,6 +204,7 @@ func newRouter(
 	// 图床配置与上传服务：既服务 API 上传入口，也服务公开图片回源路径。
 	imageHostingService := service.NewImageHostingService(systemConfigRepo)
 	onlyOfficeConfigService := service.NewOnlyOfficeConfigService(systemConfigRepo)
+	officeRenderingConfigService := service.NewOfficeRenderingConfigService(systemConfigRepo)
 	onlyOfficeDocumentTokenService := service.NewOnlyOfficeDocumentTokenService(cfg.JWT.Secret, 0)
 	// 阅读页 Handler：承接 /r/:spaceId/:docId 渲染链路（可降级）。
 	readerPageHandler := handler.NewReaderPageHandler(
@@ -214,6 +215,7 @@ func newRouter(
 		logger,
 		cfg.WebOrigin,
 		onlyOfficeConfigService,
+		officeRenderingConfigService,
 		onlyOfficeDocumentTokenService,
 	)
 	documentShareService := service.NewDocumentShareService(
@@ -235,6 +237,14 @@ func newRouter(
 		imageHostingService,
 	)
 	documentImageAssetService := service.NewDocumentImageAssetService(db, imageHostingService)
+	officeHTMLRenderService := service.NewOfficeHTMLRenderService(
+		db,
+		officeRenderingConfigService,
+		imageHostingService,
+		documentAttachmentRepo,
+		documentImageAssetService,
+		searchIndexService,
+	)
 	documentTemplateService := service.NewDocumentTemplateService(documentTemplateRepo)
 	imageHostingHandler := handler.NewImageHostingHandler(
 		authService,
@@ -256,6 +266,7 @@ func newRouter(
 		visibilityService,
 		imageHostingService,
 		onlyOfficeConfigService,
+		officeHTMLRenderService,
 		onlyOfficeDocumentTokenService,
 		documentAttachmentTokenService,
 		auditLogRepo,

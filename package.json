@@ -15,5 +15,8 @@
     "web:e2e:ui": "npm run e2e:ui -w @plaindoc/web",
     "web:e2e:list": "npm run e2e:list -w @plaindoc/web",
     "web:e2e:install": "npm run e2e:install -w @plaindoc/web"
+  },
+  "dependencies": {
+    "mammoth": "^1.11.0"
   }
 }

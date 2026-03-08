@@ -71,4 +71,27 @@ func TestRouter_OnlyOfficeConfig(t *testing.T) {
 	if _, exists := configAfterInsertPayload["jwtSecret"]; exists {
 		t.Fatalf("unexpected jwtSecret leak after insert: %+v", configAfterInsertPayload)
 	}
+
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "onlyoffice-integration",
+		"config_value_json":  `{"enabled":false,"documentServerUrl":"https://new-onlyoffice.example.com","callbackPublicBaseUrl":"https://new-api.example.com","jwtSecret":"new-secret"}`,
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("insert onlyoffice-integration system config failed: %v", err)
+	}
+
+	getConfigWithNewKeyReq := httptest.NewRequest(http.MethodGet, "/api/onlyoffice", nil)
+	getConfigWithNewKeyReq.Header.Set("Authorization", "Bearer "+accessToken)
+	getConfigWithNewKeyRec := serve(getConfigWithNewKeyReq)
+	if getConfigWithNewKeyRec.Code != http.StatusOK {
+		t.Fatalf("expected get onlyoffice config status 200 after new key insert, got %d body=%s", getConfigWithNewKeyRec.Code, getConfigWithNewKeyRec.Body.String())
+	}
+	configWithNewKeyPayload := decodeJSONResultData[map[string]any](t, getConfigWithNewKeyRec.Body.Bytes())
+	enabledWithNewKey, _ := configWithNewKeyPayload["enabled"].(bool)
+	if enabledWithNewKey {
+		t.Fatalf("expected onlyoffice new key to override legacy key and return enabled=false, got %+v", configWithNewKeyPayload)
+	}
 }

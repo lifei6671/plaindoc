@@ -199,6 +199,9 @@ func (s *ReaderPageService) BuildPage(
 			Visibility:     normalizeReaderVisibility(documentRow.Visibility),
 			Title:          documentTitle,
 			ContentMD:      documentRow.ContentMD,
+			RenderStatus:   models.NormalizeDocumentRenderStatus(documentRow.RenderStatus),
+			RenderError:    strings.TrimSpace(documentRow.RenderError),
+			RenderedAt:     formatReaderOptionalTime(documentRow.RenderedAt),
 			Version:        documentRow.Version,
 			SourceBlobID:   normalizeReaderOptionalString(documentRow.SourceBlobID),
 			SourceFileName: normalizeReaderOptionalString(documentRow.SourceFileName),
@@ -558,6 +561,13 @@ func normalizeReaderAuthorNickname(raw string) string {
 
 func formatReaderTime(raw time.Time) string {
 	if raw.IsZero() {
+		return ""
+	}
+	return raw.UTC().Format(time.RFC3339Nano)
+}
+
+func formatReaderOptionalTime(raw *time.Time) string {
+	if raw == nil || raw.IsZero() {
 		return ""
 	}
 	return raw.UTC().Format(time.RFC3339Nano)

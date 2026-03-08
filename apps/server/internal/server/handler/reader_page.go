@@ -25,14 +25,15 @@ import (
 )
 
 type readerPageHandler struct {
-	authService             *service.AuthService
-	readerPageService       *service.ReaderPageService
-	dispatcher              *pool.Dispatcher
-	renderCache             *rendercache.Cache
-	logger                  *slog.Logger
-	webOrigin               string
-	onlyOfficeConfigService *service.OnlyOfficeConfigService
-	onlyOfficeTokenService  *service.OnlyOfficeDocumentTokenService
+	authService                  *service.AuthService
+	readerPageService            *service.ReaderPageService
+	dispatcher                   *pool.Dispatcher
+	renderCache                  *rendercache.Cache
+	logger                       *slog.Logger
+	webOrigin                    string
+	onlyOfficeConfigService      *service.OnlyOfficeConfigService
+	officeRenderingConfigService *service.OfficeRenderingConfigService
+	onlyOfficeTokenService       *service.OnlyOfficeDocumentTokenService
 }
 
 type readerPageViewerIdentity struct {
@@ -42,15 +43,16 @@ type readerPageViewerIdentity struct {
 }
 
 type readerPagePayload struct {
-	Space         service.ReaderSpaceViewModel                `json:"space"`
-	Document      service.ReaderDocumentViewModel             `json:"document"`
-	Attachments   []service.ReaderDocumentAttachmentViewModel `json:"attachments"`
-	Tree          []service.ReaderTreeNodeViewModel           `json:"tree"`
-	ActiveDocID   string                                      `json:"activeDocId"`
-	RequestOrigin string                                      `json:"requestOrigin,omitempty"`
-	Viewer        readerPageViewerIdentity                    `json:"viewer"`
-	Access        *readerPageAccessState                      `json:"access,omitempty"`
-	Share         *readerPageShareState                       `json:"share,omitempty"`
+	Space           service.ReaderSpaceViewModel                `json:"space"`
+	Document        service.ReaderDocumentViewModel             `json:"document"`
+	Attachments     []service.ReaderDocumentAttachmentViewModel `json:"attachments"`
+	Tree            []service.ReaderTreeNodeViewModel           `json:"tree"`
+	ActiveDocID     string                                      `json:"activeDocId"`
+	RequestOrigin   string                                      `json:"requestOrigin,omitempty"`
+	Viewer          readerPageViewerIdentity                    `json:"viewer"`
+	OfficeRendering readerPageOfficeRenderingState              `json:"officeRendering"`
+	Access          *readerPageAccessState                      `json:"access,omitempty"`
+	Share           *readerPageShareState                       `json:"share,omitempty"`
 }
 
 type readerPageAccessState struct {
@@ -69,6 +71,11 @@ type readerPageShareState struct {
 	AttachmentBasePath string `json:"attachmentBasePath,omitempty"`
 }
 
+type readerPageOfficeRenderingState struct {
+	IndependentRenderEnabled            bool `json:"independentRenderEnabled"`
+	FallbackToOnlyOfficeOnRenderFailure bool `json:"fallbackToOnlyOfficeOnRenderFailure"`
+}
+
 const (
 	readerPublicBrowserMaxAgeSeconds = 60
 	readerPublicBrowserSWRSeconds    = 120
@@ -83,17 +90,19 @@ func NewReaderPageHandler(
 	logger *slog.Logger,
 	webOrigin string,
 	onlyOfficeConfigService *service.OnlyOfficeConfigService,
+	officeRenderingConfigService *service.OfficeRenderingConfigService,
 	onlyOfficeTokenService *service.OnlyOfficeDocumentTokenService,
 ) *readerPageHandler {
 	return &readerPageHandler{
-		authService:             authService,
-		readerPageService:       readerPageService,
-		dispatcher:              dispatcher,
-		renderCache:             renderCache,
-		logger:                  logger,
-		webOrigin:               normalizeWebOrigin(webOrigin),
-		onlyOfficeConfigService: onlyOfficeConfigService,
-		onlyOfficeTokenService:  onlyOfficeTokenService,
+		authService:                  authService,
+		readerPageService:            readerPageService,
+		dispatcher:                   dispatcher,
+		renderCache:                  renderCache,
+		logger:                       logger,
+		webOrigin:                    normalizeWebOrigin(webOrigin),
+		onlyOfficeConfigService:      onlyOfficeConfigService,
+		officeRenderingConfigService: officeRenderingConfigService,
+		onlyOfficeTokenService:       onlyOfficeTokenService,
 	}
 }
 
@@ -246,13 +255,14 @@ func (h *readerPageHandler) Page(c *gin.Context) {
 	}
 
 	payload := readerPagePayload{
-		Space:         viewModel.Space,
-		Document:      viewModel.Document,
-		Attachments:   viewModel.Attachments,
-		Tree:          viewModel.Tree,
-		ActiveDocID:   viewModel.ActiveDocID,
-		RequestOrigin: resolveRequestOrigin(c),
-		Viewer:        viewer,
+		Space:           viewModel.Space,
+		Document:        viewModel.Document,
+		Attachments:     viewModel.Attachments,
+		Tree:            viewModel.Tree,
+		ActiveDocID:     viewModel.ActiveDocID,
+		RequestOrigin:   resolveRequestOrigin(c),
+		Viewer:          viewer,
+		OfficeRendering: h.resolveOfficeRenderingState(c.Request.Context()),
 	}
 	h.renderReaderPayload(c, http.StatusOK, spaceID, documentID, payload, true)
 }
@@ -504,6 +514,26 @@ func buildReaderRenderCacheKey(
 		time.Time{},
 		hex.EncodeToString(payloadHash[:]),
 	)
+}
+
+func (h *readerPageHandler) resolveOfficeRenderingState(ctx context.Context) readerPageOfficeRenderingState {
+	if h == nil || h.officeRenderingConfigService == nil {
+		return readerPageOfficeRenderingState{
+			IndependentRenderEnabled:            false,
+			FallbackToOnlyOfficeOnRenderFailure: true,
+		}
+	}
+	config, err := h.officeRenderingConfigService.GetConfig(ctx)
+	if err != nil {
+		return readerPageOfficeRenderingState{
+			IndependentRenderEnabled:            false,
+			FallbackToOnlyOfficeOnRenderFailure: true,
+		}
+	}
+	return readerPageOfficeRenderingState{
+		IndependentRenderEnabled:            config.IndependentRenderEnabled,
+		FallbackToOnlyOfficeOnRenderFailure: config.FallbackToOnlyOfficeOnRenderFailure,
+	}
 }
 
 func (h *readerPageHandler) renderReaderAccessDeniedPage(

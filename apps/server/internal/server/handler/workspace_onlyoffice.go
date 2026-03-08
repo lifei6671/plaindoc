@@ -392,6 +392,16 @@ func (h *workspaceHandler) HandleOnlyOfficeCallback(c *gin.Context) {
 	}); auditErr != nil {
 		setRequestErrmsg(c, auditErr, "记录 ONLYOFFICE 编辑审计失败")
 	}
+	if h.officeHTMLRenderService != nil {
+		_ = h.officeHTMLRenderService.Enqueue(c.Request.Context(), service.OfficeHTMLRenderTask{
+			DocumentID:     current.DocumentID,
+			SpaceID:        current.SpaceID,
+			Format:         current.Format,
+			ContentVersion: nextContentVersion,
+			SourceBlobID:   sourceBlob.BlobID,
+			SourceContent:  fileContent,
+		})
+	}
 	writeOnlyOfficeCallbackResult(c, 0)
 }
 

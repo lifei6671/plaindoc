@@ -1,5 +1,6 @@
 import {
   Database,
+  FileText,
   Home,
   ImageIcon,
   Keyboard,
@@ -45,7 +46,8 @@ type SystemConfigKey =
   | "data-retention"
   | "auth"
   | "email"
-  | "onlyoffice"
+  | "onlyoffice-integration"
+  | "office-rendering"
   | "image-hosting"
   | "sitemap";
 type SpaceVisibility = "public" | "authenticated" | "member";
@@ -104,6 +106,13 @@ interface EmailSystemConfigValue {
     connectTimeoutMs: number;
     sendTimeoutMs: number;
   };
+}
+
+interface OfficeRenderingSystemConfigValue {
+  independentRenderEnabled: boolean;
+  renderTimeoutSeconds: number;
+  maxRetryCount: number;
+  fallbackToOnlyOfficeOnRenderFailure: boolean;
 }
 
 interface SearchSystemConfigValue {
@@ -193,6 +202,8 @@ interface SystemConfigTabItem {
   icon: LucideIcon;
 }
 
+type AdminSystemConfigsPageScope = "system" | "office";
+
 const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
   {
     key: "site",
@@ -237,10 +248,16 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     icon: Mail
   },
   {
-    key: "onlyoffice",
-    label: "ONLYOFFICE",
+    key: "onlyoffice-integration",
+    label: "ONLYOFFICE 接入",
     description: "Office 编辑服务接入",
     icon: Table2
+  },
+  {
+    key: "office-rendering",
+    label: "Office 阅读渲染",
+    description: "本地 HTML 阅读与失败回退",
+    icon: FileText
   },
   {
     key: "image-hosting",
@@ -255,6 +272,19 @@ const SYSTEM_CONFIG_TABS: SystemConfigTabItem[] = [
     icon: Map
   }
 ];
+
+const OFFICE_SYSTEM_CONFIG_KEYS: readonly SystemConfigKey[] = ["onlyoffice-integration", "office-rendering"];
+
+function listSystemConfigTabs(scope: AdminSystemConfigsPageScope): SystemConfigTabItem[] {
+  if (scope === "office") {
+    return SYSTEM_CONFIG_TABS.filter((item) => OFFICE_SYSTEM_CONFIG_KEYS.includes(item.key));
+  }
+  return SYSTEM_CONFIG_TABS.filter((item) => !OFFICE_SYSTEM_CONFIG_KEYS.includes(item.key));
+}
+
+function getDefaultSystemConfigKey(scope: AdminSystemConfigsPageScope): SystemConfigKey {
+  return listSystemConfigTabs(scope)[0]?.key ?? "site";
+}
 
 const SPACE_VISIBILITY_OPTIONS: Array<{ value: SpaceVisibility; label: string }> = [
   { value: "public", label: "完全公开（未登录可见）" },
@@ -440,6 +470,12 @@ const ONLY_OFFICE_TEMPLATE: OnlyOfficeSystemConfigValue = {
   callbackPublicBaseUrl: "",
   jwtSecret: ""
 };
+const OFFICE_RENDERING_TEMPLATE: OfficeRenderingSystemConfigValue = {
+  independentRenderEnabled: false,
+  renderTimeoutSeconds: 120,
+  maxRetryCount: 2,
+  fallbackToOnlyOfficeOnRenderFailure: true
+};
 
 const SEARCH_PROVIDER_OPTIONS: Array<{ value: SearchProvider; label: string }> = [
   { value: "database", label: "数据库（简单搜索）" },
@@ -597,6 +633,7 @@ const IMAGE_HOSTING_TEMPLATE = cloneImageHostingConfig(DEFAULT_IMAGE_HOSTING_CON
 
 interface AdminSystemConfigsPageProps {
   dataGateway: DataGateway;
+  scope?: AdminSystemConfigsPageScope;
 }
 
 function formatDateTime(value: string | null): string {
@@ -733,6 +770,12 @@ function cloneOnlyOfficeConfig(value: OnlyOfficeSystemConfigValue): OnlyOfficeSy
   };
 }
 
+function cloneOfficeRenderingConfig(value: OfficeRenderingSystemConfigValue): OfficeRenderingSystemConfigValue {
+  return {
+    ...value
+  };
+}
+
 function parseEmailConfig(value: unknown): EmailSystemConfigValue {
   const payload = asRecord(value);
   if (!payload) {
@@ -806,6 +849,29 @@ function parseOnlyOfficeConfig(value: unknown): OnlyOfficeSystemConfigValue {
     documentServerUrl: parseString(payload.documentServerUrl, ONLY_OFFICE_TEMPLATE.documentServerUrl),
     callbackPublicBaseUrl: parseString(payload.callbackPublicBaseUrl, ONLY_OFFICE_TEMPLATE.callbackPublicBaseUrl),
     jwtSecret: parseString(payload.jwtSecret, ONLY_OFFICE_TEMPLATE.jwtSecret)
+  };
+}
+
+function parseOfficeRenderingConfig(value: unknown): OfficeRenderingSystemConfigValue {
+  const payload = asRecord(value);
+  if (!payload) {
+    return cloneOfficeRenderingConfig(OFFICE_RENDERING_TEMPLATE);
+  }
+
+  return {
+    independentRenderEnabled:
+      typeof payload.independentRenderEnabled === "boolean"
+        ? payload.independentRenderEnabled
+        : OFFICE_RENDERING_TEMPLATE.independentRenderEnabled,
+    renderTimeoutSeconds: Math.min(
+      600,
+      Math.max(5, parseInteger(payload.renderTimeoutSeconds, OFFICE_RENDERING_TEMPLATE.renderTimeoutSeconds))
+    ),
+    maxRetryCount: Math.min(10, Math.max(0, parseInteger(payload.maxRetryCount, OFFICE_RENDERING_TEMPLATE.maxRetryCount))),
+    fallbackToOnlyOfficeOnRenderFailure:
+      typeof payload.fallbackToOnlyOfficeOnRenderFailure === "boolean"
+        ? payload.fallbackToOnlyOfficeOnRenderFailure
+        : OFFICE_RENDERING_TEMPLATE.fallbackToOnlyOfficeOnRenderFailure
   };
 }
 
@@ -1185,9 +1251,10 @@ function buildImageHostingTemplatePreview(template: string): string {
   return output;
 }
 
-export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPageProps) {
+export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminSystemConfigsPageProps) {
+  const visibleTabs = useMemo(() => listSystemConfigTabs(scope), [scope]);
   const [configs, setConfigs] = useState<AdminSystemConfig[]>([]);
-  const [selectedKey, setSelectedKey] = useState<SystemConfigKey>("site");
+  const [selectedKey, setSelectedKey] = useState<SystemConfigKey>(() => getDefaultSystemConfigKey(scope));
   const [imageHostingProviderTab, setImageHostingProviderTab] = useState<ImageHostingProvider>("local");
   const [selectedAuthProviderID, setSelectedAuthProviderID] = useState<string>(AUTH_TEMPLATE.defaultProviderId);
 
@@ -1197,6 +1264,9 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   const [emailDraft, setEmailDraft] = useState<EmailSystemConfigValue>(cloneEmailConfig(EMAIL_TEMPLATE));
   const [onlyOfficeDraft, setOnlyOfficeDraft] = useState<OnlyOfficeSystemConfigValue>(
     cloneOnlyOfficeConfig(ONLY_OFFICE_TEMPLATE)
+  );
+  const [officeRenderingDraft, setOfficeRenderingDraft] = useState<OfficeRenderingSystemConfigValue>(
+    cloneOfficeRenderingConfig(OFFICE_RENDERING_TEMPLATE)
   );
   const [searchDraft, setSearchDraft] = useState<SearchSystemConfigValue>(cloneSearchConfig(SEARCH_TEMPLATE));
   const [dataRetentionDraft, setDataRetentionDraft] = useState<DataRetentionSystemConfigValue>({
@@ -1216,7 +1286,8 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     "data-retention": false,
     auth: false,
     email: false,
-    onlyoffice: false,
+    "onlyoffice-integration": false,
+    "office-rendering": false,
     sitemap: false,
     "image-hosting": false
   });
@@ -1241,13 +1312,20 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
   const tabMap = useMemo(
     () =>
-      SYSTEM_CONFIG_TABS.reduce<Record<SystemConfigKey, SystemConfigTabItem>>((accumulator, item) => {
+      visibleTabs.reduce<Record<SystemConfigKey, SystemConfigTabItem>>((accumulator, item) => {
         accumulator[item.key] = item;
         return accumulator;
       }, {} as Record<SystemConfigKey, SystemConfigTabItem>),
-    []
+    [visibleTabs]
   );
-  const selectedTab = tabMap[selectedKey];
+  const selectedTab = tabMap[selectedKey] ?? visibleTabs[0] ?? SYSTEM_CONFIG_TABS[0]!;
+
+  useEffect(() => {
+    if (visibleTabs.some((tab) => tab.key === selectedKey)) {
+      return;
+    }
+    setSelectedKey(getDefaultSystemConfigKey(scope));
+  }, [scope, selectedKey, visibleTabs]);
 
   const selectedConfig = useMemo(
     () => configs.find((item) => item.configKey === selectedKey) ?? null,
@@ -1256,6 +1334,14 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
 
   const findConfigValue = useCallback(
     (key: SystemConfigKey): Record<string, unknown> | null => {
+      const item = configs.find((entry) => entry.configKey === key);
+      return item?.value ?? null;
+    },
+    [configs]
+  );
+
+  const findLegacyConfigValue = useCallback(
+    (key: string): Record<string, unknown> | null => {
       const item = configs.find((entry) => entry.configKey === key);
       return item?.value ?? null;
     },
@@ -1336,8 +1422,13 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
     if (!dirtyKeys.email) {
       setEmailDraft(parseEmailConfig(findConfigValue("email")));
     }
-    if (!dirtyKeys.onlyoffice) {
-      setOnlyOfficeDraft(parseOnlyOfficeConfig(findConfigValue("onlyoffice")));
+    if (!dirtyKeys["onlyoffice-integration"]) {
+      setOnlyOfficeDraft(
+        parseOnlyOfficeConfig(findConfigValue("onlyoffice-integration") ?? findLegacyConfigValue("onlyoffice"))
+      );
+    }
+    if (!dirtyKeys["office-rendering"]) {
+      setOfficeRenderingDraft(parseOfficeRenderingConfig(findConfigValue("office-rendering")));
     }
     if (!dirtyKeys.sitemap) {
       setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
@@ -1347,7 +1438,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       setImageHostingDraft(parsedConfig);
       setImageHostingProviderTab(parsedConfig.defaultProvider);
     }
-  }, [dirtyKeys, findConfigValue]);
+  }, [dirtyKeys, findConfigValue, findLegacyConfigValue]);
 
   const markDirty = useCallback((key: SystemConfigKey) => {
     setDirtyKeys((previous) => ({
@@ -1401,9 +1492,13 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setEmailDraft(cloneEmailConfig(EMAIL_TEMPLATE));
         markDirty("email");
         return;
-      case "onlyoffice":
+      case "onlyoffice-integration":
         setOnlyOfficeDraft(cloneOnlyOfficeConfig(ONLY_OFFICE_TEMPLATE));
-        markDirty("onlyoffice");
+        markDirty("onlyoffice-integration");
+        return;
+      case "office-rendering":
+        setOfficeRenderingDraft(cloneOfficeRenderingConfig(OFFICE_RENDERING_TEMPLATE));
+        markDirty("office-rendering");
         return;
       case "sitemap":
         setSitemapDraft({ ...SITEMAP_TEMPLATE });
@@ -1452,9 +1547,15 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         setEmailDraft(parseEmailConfig(findConfigValue("email")));
         clearDirty("email");
         return;
-      case "onlyoffice":
-        setOnlyOfficeDraft(parseOnlyOfficeConfig(findConfigValue("onlyoffice")));
-        clearDirty("onlyoffice");
+      case "onlyoffice-integration":
+        setOnlyOfficeDraft(
+          parseOnlyOfficeConfig(findConfigValue("onlyoffice-integration") ?? findLegacyConfigValue("onlyoffice"))
+        );
+        clearDirty("onlyoffice-integration");
+        return;
+      case "office-rendering":
+        setOfficeRenderingDraft(parseOfficeRenderingConfig(findConfigValue("office-rendering")));
+        clearDirty("office-rendering");
         return;
       case "sitemap":
         setSitemapDraft(parseSitemapConfig(findConfigValue("sitemap")));
@@ -1470,7 +1571,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return;
     }
-  }, [clearDirty, findConfigValue, selectedKey]);
+  }, [clearDirty, findConfigValue, findLegacyConfigValue, selectedKey]);
 
   const buildSelectedPayload = useCallback((): Record<string, unknown> => {
     switch (selectedKey) {
@@ -1509,8 +1610,10 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
         return cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
       case "email":
         return cloneEmailConfig(emailDraft) as unknown as Record<string, unknown>;
-      case "onlyoffice":
+      case "onlyoffice-integration":
         return cloneOnlyOfficeConfig(onlyOfficeDraft) as unknown as Record<string, unknown>;
+      case "office-rendering":
+        return cloneOfficeRenderingConfig(officeRenderingDraft) as unknown as Record<string, unknown>;
       case "sitemap":
         return {
           generationMode: sitemapDraft.generationMode,
@@ -1521,7 +1624,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
       default:
         return {};
     }
-  }, [authDraft, dataRetentionDraft, editorDraft, emailDraft, imageHostingDraft, onlyOfficeDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
+  }, [authDraft, dataRetentionDraft, editorDraft, emailDraft, imageHostingDraft, officeRenderingDraft, onlyOfficeDraft, searchDraft, securityDraft, selectedKey, sitemapDraft, siteDraft]);
 
   const handleSave = useCallback(async () => {
     const payload = buildSelectedPayload();
@@ -1805,13 +1908,13 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
   }, [dataGateway.admin, dirtyKeys.search, loadSearchIndexStatus, openToast]);
 
   return (
-    <section aria-label="系统配置管理">
+    <section aria-label={scope === "office" ? "Office 配置管理" : "系统配置管理"}>
       <AdminPageCard>
         <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
           <div className="grid min-h-[560px] gap-0 md:grid-cols-[240px_minmax(0,1fr)]">
             <aside className="hidden bg-transparent p-2 md:block">
               <nav className="space-y-1" aria-label="配置分组">
-                {SYSTEM_CONFIG_TABS.map((tab) => {
+                {visibleTabs.map((tab) => {
                   const isActive = tab.key === selectedKey;
                   const TabIcon = tab.icon;
                   return (
@@ -3482,7 +3585,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                   </div>
                 ) : null}
 
-                {selectedKey === "onlyoffice" ? (
+                {selectedKey === "onlyoffice-integration" ? (
                   <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
                     <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
                       <Checkbox
@@ -3492,7 +3595,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                             ...previous,
                             enabled: checked === true
                           }));
-                          markDirty("onlyoffice");
+                          markDirty("onlyoffice-integration");
                         }}
                         disabled={saving}
                       />
@@ -3512,7 +3615,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                               ...previous,
                               documentServerUrl: event.target.value
                             }));
-                            markDirty("onlyoffice");
+                            markDirty("onlyoffice-integration");
                           }}
                           placeholder="https://onlyoffice.example.com"
                           disabled={saving}
@@ -3528,7 +3631,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                               ...previous,
                               callbackPublicBaseUrl: event.target.value
                             }));
-                            markDirty("onlyoffice");
+                            markDirty("onlyoffice-integration");
                           }}
                           placeholder="https://api.example.com"
                           disabled={saving}
@@ -3545,7 +3648,7 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                               ...previous,
                               jwtSecret: event.target.value
                             }));
-                            markDirty("onlyoffice");
+                            markDirty("onlyoffice-integration");
                           }}
                           placeholder="留空表示不启用签名"
                           autoComplete="new-password"
@@ -3558,6 +3661,85 @@ export function AdminSystemConfigsPage({ dataGateway }: AdminSystemConfigsPagePr
                         )}
                       </label>
                     </div>
+                  </div>
+                ) : null}
+
+                {selectedKey === "office-rendering" ? (
+                  <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <Checkbox
+                        checked={officeRenderingDraft.independentRenderEnabled}
+                        onCheckedChange={(checked) => {
+                          setOfficeRenderingDraft((previous) => ({
+                            ...previous,
+                            independentRenderEnabled: checked === true
+                          }));
+                          markDirty("office-rendering");
+                        }}
+                        disabled={saving}
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium text-slate-700">启用独立阅读渲染</span>
+                        <p className="text-xs text-slate-500">开启后，Office 阅读页优先使用本地 HTML 渲染，而不是 ONLYOFFICE 只读 iframe。</p>
+                      </div>
+                    </label>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">渲染超时时间（秒）</span>
+                        <Input
+                          type="number"
+                          min={5}
+                          max={600}
+                          value={String(officeRenderingDraft.renderTimeoutSeconds)}
+                          onChange={(event) => {
+                            setOfficeRenderingDraft((previous) => ({
+                              ...previous,
+                              renderTimeoutSeconds: normalizeIntegerInput(event.target.value, previous.renderTimeoutSeconds)
+                            }));
+                            markDirty("office-rendering");
+                          }}
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">用于限制单次 Office 转 HTML 的最长执行时间。</p>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">最大重试次数</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={String(officeRenderingDraft.maxRetryCount)}
+                          onChange={(event) => {
+                            setOfficeRenderingDraft((previous) => ({
+                              ...previous,
+                              maxRetryCount: normalizeIntegerInput(event.target.value, previous.maxRetryCount)
+                            }));
+                            markDirty("office-rendering");
+                          }}
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">转换失败时最多自动重试的次数。</p>
+                      </label>
+                    </div>
+
+                    <label className="flex items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                      <Checkbox
+                        checked={officeRenderingDraft.fallbackToOnlyOfficeOnRenderFailure}
+                        onCheckedChange={(checked) => {
+                          setOfficeRenderingDraft((previous) => ({
+                            ...previous,
+                            fallbackToOnlyOfficeOnRenderFailure: checked === true
+                          }));
+                          markDirty("office-rendering");
+                        }}
+                        disabled={saving}
+                      />
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-medium text-slate-700">渲染失败时回退 ONLYOFFICE</span>
+                        <p className="text-xs text-slate-500">关闭后，阅读页会直接显示失败态，不再尝试回退到 ONLYOFFICE 只读模式。</p>
+                      </div>
+                    </label>
                   </div>
                 ) : null}
 

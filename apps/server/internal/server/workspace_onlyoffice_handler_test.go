@@ -1,7 +1,10 @@
 package server
 
 import (
+	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +12,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
 const onlyOfficeTestMIMEDOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -256,6 +262,113 @@ func TestRouter_WorkspaceOnlyOfficeCallbackPersistsFileRevision(t *testing.T) {
 	}
 }
 
+func TestRouter_WorkspaceOnlyOfficeCallbackRendersHTMLWhenIndependentRenderEnabled(t *testing.T) {
+	t.Cleanup(func() {
+		_ = os.RemoveAll("uploads")
+	})
+
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "owner-onlyoffice-render@example.com")
+	spaceID := "01h1onlyofficerenderhtmlspace01"
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+	seedOnlyOfficeEnabledConfig(t, database)
+	seedOfficeRenderingEnabledConfig(t, database)
+
+	documentID := createOfficeDocumentForOnlyOfficeTest(t, serve, spaceID, ownerToken, "docx", "本地阅读合同")
+	submitOnlyOfficeCallbackWithBinary(t, serve, ownerToken, documentID, buildOfficeTestDOCX(t, []string{"第一条", "本地渲染成功"}))
+	waitForOfficeRenderSuccess(t, database, documentID, func(content string) {
+		if !strings.Contains(content, "本地渲染成功") {
+			t.Fatalf("expected rendered html contain document text, got %s", content)
+		}
+	})
+}
+
+func TestRouter_WorkspaceOnlyOfficeCallbackSyncsEmbeddedImagesAndReusesFileBlob(t *testing.T) {
+	t.Cleanup(func() {
+		_ = os.RemoveAll("uploads")
+	})
+
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "owner-onlyoffice-image@example.com")
+	spaceID := "01h1onlyofficeimagehtmlspace001"
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+	seedOnlyOfficeEnabledConfig(t, database)
+	seedOfficeRenderingEnabledConfig(t, database)
+
+	documentID := createOfficeDocumentForOnlyOfficeTest(t, serve, spaceID, ownerToken, "docx", "带图合同")
+	imageBytes := []byte("png-image-office-render")
+	imageHash := sha256.Sum256(imageBytes)
+	expectedImageHash := hex.EncodeToString(imageHash[:])
+
+	submitOnlyOfficeCallbackWithBinary(
+		t,
+		serve,
+		ownerToken,
+		documentID,
+		buildOfficeTestDOCXWithImage(t, []string{"图片段落", "第二段"}, "image1.png", imageBytes),
+	)
+	waitForOfficeRenderSuccess(t, database, documentID, func(content string) {
+		if !strings.Contains(content, "<img src=") {
+			t.Fatalf("expected rendered html contain image tag, got %s", content)
+		}
+	})
+
+	var imageAsset struct {
+		Status string  `gorm:"column:status"`
+		BlobID *string `gorm:"column:blob_id"`
+	}
+	if err := database.ORM.Table("document_image_assets").
+		Select("status", "blob_id").
+		Where("document_id = ? AND status = ?", documentID, "active").
+		Take(&imageAsset).Error; err != nil {
+		t.Fatalf("query document image asset failed: %v", err)
+	}
+	if imageAsset.BlobID == nil || strings.TrimSpace(*imageAsset.BlobID) == "" {
+		t.Fatalf("expected active image asset blob id, got %+v", imageAsset.BlobID)
+	}
+
+	submitOnlyOfficeCallbackWithBinary(
+		t,
+		serve,
+		ownerToken,
+		documentID,
+		buildOfficeTestDOCXWithImage(t, []string{"再次保存", "图片未变"}, "image1.png", imageBytes),
+	)
+	waitForOfficeRenderSuccess(t, database, documentID, func(content string) {
+		if !strings.Contains(content, "<img src=") {
+			t.Fatalf("expected rendered html keep image tag, got %s", content)
+		}
+	})
+
+	var blobCount int64
+	if err := database.ORM.Table("file_blobs").
+		Where("content_hash = ? AND mime_type = ? AND deleted_at IS NULL", expectedImageHash, "image/png").
+		Count(&blobCount).Error; err != nil {
+		t.Fatalf("count image blobs failed: %v", err)
+	}
+	if blobCount != 1 {
+		t.Fatalf("expected reused image blob count 1, got %d", blobCount)
+	}
+
+	var activeImageAssetCount int64
+	if err := database.ORM.Table("document_image_assets").
+		Where("document_id = ? AND status = ?", documentID, "active").
+		Count(&activeImageAssetCount).Error; err != nil {
+		t.Fatalf("count active image assets failed: %v", err)
+	}
+	if activeImageAssetCount != 1 {
+		t.Fatalf("expected one active image asset, got %d", activeImageAssetCount)
+	}
+}
+
 func TestRouter_WorkspaceOnlyOfficeCallbackRejectsInvalidPayload(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.RemoveAll("uploads")
@@ -339,6 +452,87 @@ func createOfficeDocumentForOnlyOfficeTest(
 	return payload.DocID
 }
 
+func seedOfficeRenderingEnabledConfig(t *testing.T, database *storage.Database) {
+	t.Helper()
+	if err := database.ORM.Table("system_configs").Create(map[string]any{
+		"config_key":         "office-rendering",
+		"config_value_json":  `{"independentRenderEnabled":true,"renderTimeoutSeconds":30,"maxRetryCount":1,"fallbackToOnlyOfficeOnRenderFailure":true}`,
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         time.Now().UTC().Format(time.RFC3339Nano),
+		"updated_at":         time.Now().UTC().Format(time.RFC3339Nano),
+	}).Error; err != nil {
+		t.Fatalf("insert office-rendering config failed: %v", err)
+	}
+}
+
+func buildOfficeTestDOCX(t *testing.T, paragraphs []string) []byte {
+	t.Helper()
+
+	var documentBuilder strings.Builder
+	documentBuilder.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	documentBuilder.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`)
+	for _, paragraph := range paragraphs {
+		documentBuilder.WriteString(`<w:p><w:r><w:t>`)
+		documentBuilder.WriteString(paragraph)
+		documentBuilder.WriteString(`</w:t></w:r></w:p>`)
+	}
+	documentBuilder.WriteString(`</w:body></w:document>`)
+
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	writer, err := archive.Create("word/document.xml")
+	if err != nil {
+		t.Fatalf("create docx entry failed: %v", err)
+	}
+	if _, err := writer.Write([]byte(documentBuilder.String())); err != nil {
+		t.Fatalf("write docx xml failed: %v", err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close docx archive failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildOfficeTestDOCXWithImage(t *testing.T, paragraphs []string, imageName string, imageContent []byte) []byte {
+	t.Helper()
+
+	var documentBuilder strings.Builder
+	documentBuilder.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	documentBuilder.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><w:body>`)
+	for _, paragraph := range paragraphs {
+		documentBuilder.WriteString(`<w:p><w:r><w:t>`)
+		documentBuilder.WriteString(paragraph)
+		documentBuilder.WriteString(`</w:t></w:r></w:p>`)
+	}
+	documentBuilder.WriteString(`<w:p><w:r><w:drawing><a:graphic><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill><a:blip r:embed="rIdImage1"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></w:drawing></w:r></w:p>`)
+	documentBuilder.WriteString(`</w:body></w:document>`)
+
+	relsXML := `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImage1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/` + imageName + `"/>
+</Relationships>`
+
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	writeArchiveEntry := func(name string, content []byte) {
+		writer, err := archive.Create(name)
+		if err != nil {
+			t.Fatalf("create archive entry %s failed: %v", name, err)
+		}
+		if _, err := writer.Write(content); err != nil {
+			t.Fatalf("write archive entry %s failed: %v", name, err)
+		}
+	}
+	writeArchiveEntry("word/document.xml", []byte(documentBuilder.String()))
+	writeArchiveEntry("word/_rels/document.xml.rels", []byte(relsXML))
+	writeArchiveEntry("word/media/"+imageName, imageContent)
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close docx archive failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
 func fetchOnlyOfficeEditConfigForTest(
 	t *testing.T,
 	serve func(*http.Request) *httptest.ResponseRecorder,
@@ -360,6 +554,85 @@ func fetchOnlyOfficeEditConfigForTest(
 		DocumentServerURL string         `json:"documentServerUrl"`
 		Config            map[string]any `json:"config"`
 	}](t, rec.Body.Bytes())
+}
+
+func submitOnlyOfficeCallbackWithBinary(
+	t *testing.T,
+	serve func(*http.Request) *httptest.ResponseRecorder,
+	ownerToken string,
+	documentID string,
+	callbackBinary []byte,
+) {
+	t.Helper()
+
+	configPayload := fetchOnlyOfficeEditConfigForTest(t, serve, ownerToken, documentID)
+	documentConfig := requireJSONMap(t, configPayload.Config["document"], "document config")
+	editorConfig := requireJSONMap(t, configPayload.Config["editorConfig"], "editorConfig")
+
+	downloadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", onlyOfficeTestMIMEDOCX)
+		_, _ = w.Write(callbackBinary)
+	}))
+	defer downloadServer.Close()
+
+	callbackBody := []byte(`{"status":2,"url":"` + downloadServer.URL + `/callback.docx","key":"` + stringValue(documentConfig["key"]) + `"}`)
+	callbackReq := httptest.NewRequest(
+		http.MethodPost,
+		requestURIFromAbsoluteURL(t, stringValue(editorConfig["callbackUrl"])),
+		bytes.NewReader(callbackBody),
+	)
+	callbackReq.Header.Set("Content-Type", "application/json")
+	callbackRec := serve(callbackReq)
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("expected callback status 200, got %d body=%s", callbackRec.Code, callbackRec.Body.String())
+	}
+
+	var callbackResult struct {
+		Error int `json:"error"`
+	}
+	if err := json.Unmarshal(callbackRec.Body.Bytes(), &callbackResult); err != nil {
+		t.Fatalf("decode callback result failed: %v body=%s", err, callbackRec.Body.String())
+	}
+	if callbackResult.Error != 0 {
+		t.Fatalf("expected callback error=0, got %+v", callbackResult)
+	}
+}
+
+func waitForOfficeRenderSuccess(
+	t *testing.T,
+	database *storage.Database,
+	documentID string,
+	assertContent func(content string),
+) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var documentState struct {
+			RenderStatus string `gorm:"column:render_status"`
+			RenderError  string `gorm:"column:render_error"`
+			ContentMD    string `gorm:"column:content_md"`
+		}
+		if err := database.ORM.Table("documents").
+			Select("render_status", "render_error", "content_md").
+			Where("document_id = ?", documentID).
+			Take(&documentState).Error; err != nil {
+			t.Fatalf("query rendered document failed: %v", err)
+		}
+		if documentState.RenderStatus == "success" {
+			if assertContent != nil {
+				assertContent(documentState.ContentMD)
+			}
+			return
+		}
+		if documentState.RenderStatus == "failed" {
+			t.Fatalf("expected render success, got failed: %s", documentState.RenderError)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting office render success, last state=%+v", documentState)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func requireJSONMap(t *testing.T, value any, field string) map[string]any {

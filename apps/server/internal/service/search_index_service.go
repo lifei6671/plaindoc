@@ -816,7 +816,7 @@ func buildSearchIndexRecord(
 
 	spaceID := strings.TrimSpace(row.SpaceID)
 	title := strings.TrimSpace(row.Title)
-	bodyPlain := strings.TrimSpace(searchanalyzer.NormalizeMarkdownToPlainText(row.ContentMD))
+	bodyPlain := normalizeSearchIndexBody(row.Format, row.ContentMD)
 	titleCompoundTokens := searchprovider.ExtractCompoundLiteralTokens(title)
 	bodyCompoundTokens := searchprovider.ExtractCompoundLiteralTokens(bodyPlain)
 
@@ -870,6 +870,13 @@ func buildSearchIndexRecord(
 		AnalyzerName:    string(snapshot.Config.Analysis.ActiveAnalyzer),
 		AnalyzerVersion: dictVersion,
 	}, nil
+}
+
+func normalizeSearchIndexBody(format models.DocumentFormat, content string) string {
+	if models.IsOfficeDocumentFormat(format) {
+		return strings.TrimSpace(searchanalyzer.NormalizeHTMLToPlainText(content))
+	}
+	return strings.TrimSpace(searchanalyzer.NormalizeMarkdownToPlainText(content))
 }
 
 func mergeSearchTokens(items ...[]string) []string {

@@ -532,6 +532,22 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const renderedAt = new Date(startedAt);
   const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
   const isOfficeDocument = isOfficeDocumentFormat(payload.document.format);
+  const officeRendering = payload.officeRendering ?? {
+    independentRenderEnabled: false,
+    fallbackToOnlyOfficeOnRenderFailure: true
+  };
+  const officeRenderStatus = payload.document.renderStatus ?? "idle";
+  const officeContentHtml = typeof payload.document.contentMd === "string" ? payload.document.contentMd.trim() : "";
+  const useIndependentOfficeRender = isOfficeDocument && officeRendering.independentRenderEnabled === true;
+  const shouldFallbackToOnlyOffice =
+    useIndependentOfficeRender &&
+    officeRenderStatus === "failed" &&
+    officeRendering.fallbackToOnlyOfficeOnRenderFailure === true;
+  const shouldRenderOnlyOffice = isOfficeDocument && (!useIndependentOfficeRender || shouldFallbackToOnlyOffice);
+  const shouldRenderLocalOfficeHtml =
+    useIndependentOfficeRender && officeRenderStatus === "success" && officeContentHtml.length > 0;
+  const shouldRenderOfficeStatus =
+    isOfficeDocument && useIndependentOfficeRender && !shouldRenderLocalOfficeHtml && !shouldFallbackToOnlyOffice;
   const documentRouteKey = (payload.document.routeKey || payload.document.id || "").trim() || payload.document.id;
   const shareEnabled = payload.share?.enabled === true;
   const readerBasePath = shareEnabled
@@ -739,7 +755,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                 </section>
               ) : (
                 <>
-                  {isOfficeDocument ? (
+                  {shouldRenderOnlyOffice ? (
                     <section className="office-pane reader-office-pane" aria-label={resolveOfficeDocumentLabel(payload.document.format)}>
                       <div className="office-pane__surface">
                         <div
@@ -761,7 +777,38 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                             {resolveOfficeDocumentLabel(payload.document.format)}
                           </h2>
                           <p className="office-pane__placeholder-description" data-reader-office-message="1">
-                            正在加载 ONLYOFFICE 阅读器...
+                            {shouldFallbackToOnlyOffice ? "本地渲染失败，正在回退 ONLYOFFICE 阅读器..." : "正在加载 ONLYOFFICE 阅读器..."}
+                          </p>
+                        </div>
+                      </div>
+                    </section>
+                  ) : shouldRenderLocalOfficeHtml ? (
+                    <article
+                      id={PREVIEW_BODY_ID}
+                      className={`markdown-body ${PREVIEW_BODY_CLASS} ${previewThemeClassName}`}
+                      dangerouslySetInnerHTML={{ __html: payload.document.contentMd }}
+                    />
+                  ) : shouldRenderOfficeStatus ? (
+                    <section className="office-pane reader-office-pane" aria-label={resolveOfficeDocumentLabel(payload.document.format)}>
+                      <div className="office-pane__surface">
+                        <div
+                          className={`office-pane__placeholder${officeRenderStatus === "failed" ? " office-pane__placeholder--error" : ""}`}
+                          data-reader-office-placeholder="1"
+                          data-reader-office-status={officeRenderStatus}
+                        >
+                          <div className="office-pane__placeholder-icon" aria-hidden="true">
+                            {renderOfficeDocumentIcon(payload.document.format)}
+                            {officeRenderStatus === "pending" || officeRenderStatus === "idle" ? (
+                              <LoaderCircle size={14} className="office-pane__spinner" />
+                            ) : null}
+                          </div>
+                          <h2 className="office-pane__placeholder-title" data-reader-office-title="1">
+                            {resolveOfficeDocumentLabel(payload.document.format)}
+                          </h2>
+                          <p className="office-pane__placeholder-description" data-reader-office-message="1">
+                            {officeRenderStatus === "failed"
+                              ? (payload.document.renderError?.trim() || "本地 HTML 渲染失败")
+                              : "正在生成本地阅读内容..."}
                           </p>
                         </div>
                       </div>

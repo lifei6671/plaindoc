@@ -4,7 +4,13 @@ import type { ReaderPagePayload } from "./ssr-types";
 
 function createPayload(
   format: "markdown" | "docx" | "xlsx",
-  options?: { shareEnabled?: boolean }
+  options?: {
+    shareEnabled?: boolean;
+    officeRendering?: ReaderPagePayload["officeRendering"];
+    officeHtml?: string;
+    officeRenderStatus?: "idle" | "pending" | "success" | "failed";
+    officeRenderError?: string;
+  }
 ): ReaderPagePayload {
   const shareEnabled = options?.shareEnabled === true;
   return {
@@ -21,7 +27,9 @@ function createPayload(
       format,
       visibility: "public",
       title: format === "xlsx" ? "预算表" : "项目说明",
-      contentMd: format === "markdown" ? "# 标题\n\n正文" : "",
+      contentMd: format === "markdown" ? "# 标题\n\n正文" : options?.officeHtml ?? "",
+      renderStatus: format === "markdown" ? undefined : options?.officeRenderStatus ?? "idle",
+      renderError: format === "markdown" ? undefined : options?.officeRenderError ?? "",
       version: 1,
       sourceBlobId: format === "markdown" ? undefined : "blob-reader-test",
       sourceFileName: format === "xlsx" ? "预算表.xlsx" : format === "docx" ? "项目说明.docx" : undefined,
@@ -48,6 +56,7 @@ function createPayload(
     attachments: [],
     tree: [],
     activeDocId: "doc-reader-test",
+    officeRendering: options?.officeRendering,
     viewer: {
       authenticated: false
     }
@@ -81,5 +90,39 @@ describe("renderSpaceReader", () => {
     expect(result.html).toContain('data-reader-office-editor="1"');
     expect(result.html).not.toContain('data-reader-export-action="markdown"');
     expect(result.html).not.toContain('data-reader-export-action="pdf"');
+  });
+
+  it("renders local office html when independent rendering is enabled and succeeded", () => {
+    const result = renderSpaceReader(
+      createPayload("docx", {
+        officeRendering: {
+          independentRenderEnabled: true,
+          fallbackToOnlyOfficeOnRenderFailure: true
+        },
+        officeRenderStatus: "success",
+        officeHtml: "<h1>转换结果</h1><p>Office HTML</p>"
+      })
+    );
+
+    expect(result.html).toContain("转换结果");
+    expect(result.html).toContain("Office HTML");
+    expect(result.html).not.toContain('data-reader-office-editor="1"');
+  });
+
+  it("renders office failure state when independent rendering fails without fallback", () => {
+    const result = renderSpaceReader(
+      createPayload("docx", {
+        officeRendering: {
+          independentRenderEnabled: true,
+          fallbackToOnlyOfficeOnRenderFailure: false
+        },
+        officeRenderStatus: "failed",
+        officeRenderError: "render failed"
+      })
+    );
+
+    expect(result.html).toContain('data-reader-office-status="failed"');
+    expect(result.html).toContain("render failed");
+    expect(result.html).not.toContain('data-reader-office-editor="1"');
   });
 });

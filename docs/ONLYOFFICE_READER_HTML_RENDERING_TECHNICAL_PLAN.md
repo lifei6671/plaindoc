@@ -1,6 +1,6 @@
 # ONLYOFFICE 阅读页本地 HTML 渲染技术方案
 
-**文档状态**: Draft  
+**文档状态**: In Progress  
 **创建日期**: 2026-03-08  
 **适用范围**: `apps/server`、`apps/web`、`docs`  
 **目标**: 保持 ONLYOFFICE 工作区编辑继续使用 iframe 挂载，同时将前端阅读页与分享阅读页切换为本地 HTML 渲染；方案采用精简实现，复用 `documents`、`document_image_assets`、`file_blobs`，不引入独立快照表。
@@ -145,7 +145,7 @@
 
 当 Word 中存在图片时，转换流程如下：
 
-1. 从 `docx` 解包出图片二进制
+1. 通过 `Mammoth` 的 `convertImage` 回调拿到内嵌图片二进制
 2. 计算 hash
 3. 先查 `file_blobs` 是否已有相同文件
 4. 若已有：
@@ -166,6 +166,12 @@
 3. 现有后台图片管理和清理任务继续工作
 
 物理删除时，按 `blob_id` 判断该图片是否仍被其它文档引用。
+
+当前实现说明：
+
+1. 已接通“渲染结果 HTML -> `document_image_assets` 同步”链路
+2. `docx` 内嵌图片已支持通过 `Mammoth` 回调提取、上传图床与复用 `file_blobs`
+3. `xlsx` drawing 图片仍未纳入当前实现范围
 
 ---
 
@@ -215,17 +221,21 @@ Office 文档启用本地 HTML 渲染后，可以参与全文搜索。
 
 ### 7.3 后台页面要求
 
-系统配置页继续沿用：
+后台继续沿用：
 
 1. 左侧菜单
 2. 右侧配置项
 
-新增两个菜单项：
+新增后台一级菜单：
+
+1. `Office配置`
+
+页面内保留两个左侧配置项：
 
 1. `ONLYOFFICE 接入`
 2. `Office 阅读渲染`
 
-同时把后台导航里的“系统配置”提升到系统治理分组首位。
+“系统配置”和“Office配置”在后台导航中并列展示，同时把“系统配置”提升到系统治理分组首位。
 
 ### 7.4 旧配置迁移
 
@@ -241,27 +251,37 @@ Office 文档启用本地 HTML 渲染后，可以参与全文搜索。
 
 ### 8.1 Word
 
-建议使用 `Mammoth`：
+当前实现采用 `Mammoth`：
 
-1. 不自研 Word 解析器
-2. 目标是输出语义化 HTML
-3. 更适合阅读页场景
+1. Go 服务通过 `node apps/server/internal/service/scripts/render_docx_with_mammoth.mjs` 调起 `Mammoth`
+2. `Mammoth` 负责把 `docx` 转为语义化 HTML
+3. 图片通过 `convertImage` 回调转成临时占位符资产列表，再由 Go 落盘/上传并替换为受控 `img src`
+4. 这样 `docx -> HTML` 的主链路完全收敛到 `Mammoth`，不再维护自研 XML 解析器
 
 ### 8.2 Excel
 
-建议使用 `Excelize` + 薄渲染层：
+当前实现采用 `excelize`：
 
-1. 用 Excelize 读取 workbook / sheet / cell
-2. 后端输出 table HTML
-3. 前端按 sheet tabs + table 结构展示
+1. 直接读取 workbook、sheet 列表、行数据与 merge 信息
+2. 将每个 sheet 渲染成一个 `table`
+3. 阅读页输出多 tab 结构，首个 sheet 默认激活，其余 sheet 按面板切换显示
+4. 当前先覆盖“表格阅读”场景，暂不处理 drawing 图片与复杂样式还原
 
 ### 8.3 渲染运行时
 
-建议：
+当前实现：
 
-1. Go 负责任务调度和文档回写
-2. `docx` 转换走 Node adapter
-3. `xlsx` 转换走 Go adapter
+1. Go 负责任务调度、图片上传、正文回写与搜索同步
+2. `docx` 渲染依赖 Node 运行时和根目录 `package.json` 中的 `mammoth`
+3. `xlsx` 渲染依赖 `apps/server/go.mod` 中的 `github.com/xuri/excelize/v2`
+4. callback 成功后异步执行渲染，阅读页只消费最终 HTML
+
+### 8.4 当前能力边界
+
+1. `docx` 优先保证正文结构、段落和图片可读，不追求与 ONLYOFFICE 完全同像素还原
+2. `xlsx` 重点保证多 sheet tab + table 可读性，保留 merge 信息与横向滚动能力
+3. `xlsx` drawing 图片、批注、复杂样式和公式编辑态不在本期范围
+4. 若本地渲染失败，仍可按配置回退 ONLYOFFICE 只读模式
 
 ---
 
@@ -293,25 +313,28 @@ Office 文档阅读页按配置切换：
 
 ## 10. 实施顺序
 
-1. 新增 `onlyoffice-integration`、`office-rendering` 配置键，并迁移旧 `onlyoffice`
-2. 为 `documents` 增加最小渲染状态字段
-3. 为 `document_image_assets` 增加 `blob_id`，关联 `file_blobs`
-4. 实现 callback 后异步转换并回写 `documents.content_md`
-5. Office HTML 接入当前正文图片同步逻辑
-6. 阅读页按配置切换 ONLYOFFICE / 本地 HTML
-7. Office HTML 去标签后接入搜索索引
+- [x] 新增 `onlyoffice-integration`、`office-rendering` 配置键，并迁移旧 `onlyoffice`
+- [x] 为 `documents` 增加最小渲染状态字段
+- [x] 为 `document_image_assets` 增加 `blob_id`，关联 `file_blobs`
+- [x] 实现 callback 后异步转换并回写 `documents.content_md`
+- [x] Office HTML 接入当前正文图片同步逻辑
+- [x] 阅读页按配置切换 ONLYOFFICE / 本地 HTML
+- [x] Office HTML 去标签后接入搜索索引
+- [x] 后台拆分 `系统配置` 与 `Office配置` 两个一级菜单
 
 ---
 
 ## 11. 测试清单
 
-1. 旧 `onlyoffice` 配置迁移后，新旧键兼容读取正常
-2. 独立渲染关闭时，阅读页仍走 ONLYOFFICE
-3. 转换成功后，Office HTML 正确写入 `documents.content_md`
-4. 转换失败后，前端能正确显示失败态
-5. HTML 中的图片引用能正确同步到 `document_image_assets`
-6. 相同图片多次转换不会重复上传，能复用 `file_blobs`
-7. Office HTML 去标签后可参与全文搜索
+- [x] 旧 `onlyoffice` 配置迁移后，新旧键兼容读取正常
+- [x] 独立渲染关闭时，阅读页仍走 ONLYOFFICE
+- [x] 转换成功后，Office HTML 正确写入 `documents.content_md`
+- [x] 转换失败后，前端能正确显示失败态
+- [x] `docx` 通过 `Mammoth` 转换后能输出预期 HTML
+- [x] `xlsx` 通过 `excelize` 渲染为多 tab table
+- [x] HTML 中的图片引用能正确同步到 `document_image_assets`
+- [x] 相同图片多次转换不会重复上传，能复用 `file_blobs`
+- [x] Office HTML 去标签后可参与全文搜索
 
 ---
 
@@ -320,9 +343,10 @@ Office 文档阅读页按配置切换：
 最终采用：
 
 1. `documents.content_md` 直接承载 Office 当前 HTML
-2. `documents.format` 区分 Markdown 和 Office HTML
+2. `documents.format` 区分 Markdown、`docx`、`xlsx`
 3. `document_image_assets` 继续承载当前正文图片引用
 4. `file_blobs` 继续承载图片物理对象与 hash 去重
-5. 不引入独立快照表和历史渲染能力
+5. `docx` 转换统一使用 `Mammoth`，`xlsx` 渲染统一使用 `excelize` 多 tab table
+6. 不引入独立快照表和历史渲染能力
 
 这就是当前最适合落地和 review 的精简版方案。

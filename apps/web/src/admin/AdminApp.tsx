@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  Table2,
   type LucideIcon,
   Palette,
   Settings2,
@@ -62,6 +63,7 @@ type AdminMenuKey =
   | "document-templates"
   | "themes"
   | "system"
+  | "office-config"
   | "search-analyzers"
   | "audits";
 
@@ -190,6 +192,16 @@ function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
 
   if (hasPlatformAdminRole) {
     items.push({
+      key: "office-config",
+      label: "Office配置",
+      description: "维护 ONLYOFFICE 接入与阅读渲染",
+      path: "/admin/office-configs",
+      icon: Table2
+    });
+  }
+
+  if (hasPlatformAdminRole) {
+    items.push({
       key: "search-analyzers",
       label: "分词治理",
       description: "维护全文检索分词器与词典词条",
@@ -295,6 +307,12 @@ function renderPlaceholderContent(activeMenuKey: AdminMenuKey): { title: string;
         description: "系统级参数配置与校验。",
         todo: ["配置项列表", "JSON schema 校验", "配置变更审计"]
       };
+    case "office-config":
+      return {
+        title: "Office配置",
+        description: "ONLYOFFICE 接入与 Office 阅读渲染治理。",
+        todo: ["维护接入参数", "维护阅读渲染策略", "记录配置变更审计"]
+      };
     case "search-analyzers":
       return {
         title: "分词治理",
@@ -394,7 +412,7 @@ const ADMIN_MENU_GROUPS: readonly AdminMenuGroup[] = [
   { label: "总览", keys: ["dashboard"] },
   { label: "账号", keys: ["profile"] },
   { label: "内容管理", keys: ["users", "spaces", "documents", "shares", "attachments", "images"] },
-  { label: "系统治理", keys: ["document-templates", "themes", "system", "search-analyzers", "audits"] }
+  { label: "系统治理", keys: ["system", "office-config", "document-templates", "themes", "search-analyzers", "audits"] }
 ];
 const ADMIN_PAGE_BACKGROUND = "lab(98.26% 0 0)";
 const ADMIN_TITLE_EXTRA_METADATA = "PlainDoc - 一个适合中小团队文档在线管理系统";
@@ -905,7 +923,9 @@ export function AdminApp({
               ) : activeMenuItem?.key === "themes" ? (
                 <AdminThemesPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "system" ? (
-                <AdminSystemConfigsPage dataGateway={dataGateway} />
+                <AdminSystemConfigsPage key="system-configs" dataGateway={dataGateway} scope="system" />
+              ) : activeMenuItem?.key === "office-config" ? (
+                <AdminSystemConfigsPage key="office-configs" dataGateway={dataGateway} scope="office" />
               ) : activeMenuItem?.key === "search-analyzers" ? (
                 <AdminSearchAnalyzersPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "audits" ? (

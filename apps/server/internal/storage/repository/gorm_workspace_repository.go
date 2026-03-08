@@ -725,20 +725,23 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 	}
 
 	type documentRow struct {
-		DocumentID     string                `gorm:"column:document_id"`
-		NodeID         string                `gorm:"column:node_id"`
-		ReaderSlug     *string               `gorm:"column:reader_slug"`
-		ThemeID        string                `gorm:"column:theme_id"`
-		Format         models.DocumentFormat `gorm:"column:format"`
-		Title          string                `gorm:"column:title"`
-		ContentMD      string                `gorm:"column:content_md"`
-		Version        int                   `gorm:"column:version"`
-		SourceBlobID   *string               `gorm:"column:source_blob_id"`
-		SourceFileName *string               `gorm:"column:source_file_name"`
-		SourceMimeType *string               `gorm:"column:source_mime_type"`
-		ContentVersion int                   `gorm:"column:content_version"`
-		SpaceID        string                `gorm:"column:space_id"`
-		UpdatedAtRaw   string                `gorm:"column:updated_at"`
+		DocumentID     string                      `gorm:"column:document_id"`
+		NodeID         string                      `gorm:"column:node_id"`
+		ReaderSlug     *string                     `gorm:"column:reader_slug"`
+		ThemeID        string                      `gorm:"column:theme_id"`
+		Format         models.DocumentFormat       `gorm:"column:format"`
+		Title          string                      `gorm:"column:title"`
+		ContentMD      string                      `gorm:"column:content_md"`
+		RenderStatus   models.DocumentRenderStatus `gorm:"column:render_status"`
+		RenderError    string                      `gorm:"column:render_error"`
+		RenderedAtRaw  *string                     `gorm:"column:rendered_at"`
+		Version        int                         `gorm:"column:version"`
+		SourceBlobID   *string                     `gorm:"column:source_blob_id"`
+		SourceFileName *string                     `gorm:"column:source_file_name"`
+		SourceMimeType *string                     `gorm:"column:source_mime_type"`
+		ContentVersion int                         `gorm:"column:content_version"`
+		SpaceID        string                      `gorm:"column:space_id"`
+		UpdatedAtRaw   string                      `gorm:"column:updated_at"`
 	}
 
 	var row documentRow
@@ -752,6 +755,9 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 			"d.format",
 			"d.title",
 			"d.content_md",
+			"d.render_status",
+			"d.render_error",
+			"d.rendered_at",
 			"d.version",
 			"d.source_blob_id",
 			"d.source_file_name",
@@ -774,6 +780,9 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 		Format:         models.NormalizeDocumentFormat(row.Format),
 		Title:          strings.TrimSpace(row.Title),
 		ContentMD:      row.ContentMD,
+		RenderStatus:   models.NormalizeDocumentRenderStatus(row.RenderStatus),
+		RenderError:    strings.TrimSpace(row.RenderError),
+		RenderedAt:     parseNullableRecordTime(row.RenderedAtRaw),
 		Version:        row.Version,
 		SourceBlobID:   trimOptionalString(row.SourceBlobID),
 		SourceFileName: trimOptionalString(row.SourceFileName),
@@ -1004,6 +1013,9 @@ func (r *gormWorkspaceRepository) SaveOfficeDocument(
 				"source_blob_id":     sourceBlobID,
 				"source_file_name":   trimOptionalString(pointerString(params.SourceFileName)),
 				"source_mime_type":   trimOptionalString(pointerString(params.SourceMimeType)),
+				"render_status":      models.DocumentRenderStatusPending,
+				"render_error":       "",
+				"rendered_at":        nil,
 				"updated_by_user_id": trimOptionalString(pointerString(actorUserID)),
 				"updated_at":         touchedAt,
 			})
