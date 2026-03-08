@@ -199,6 +199,75 @@ func (h *documentSharePageHandler) GetOnlyOfficeViewConfig(c *gin.Context) {
 	response.JSON(c, http.StatusOK, configPayload)
 }
 
+// CreateOfficeSourceAccessLink 返回分享页 Office 原文件下载链接。
+func (h *documentSharePageHandler) CreateOfficeSourceAccessLink(c *gin.Context) {
+	if h == nil || h.documentShareService == nil || h.readerRenderer == nil || h.readerRenderer.onlyOfficeTokenService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	docKey := strings.TrimSpace(c.Param("docKey"))
+	if spaceID == "" {
+		response.DocumentShareErrSpaceIDRequired.Write(c)
+		return
+	}
+	if docKey == "" {
+		response.DocumentShareErrShareNotFound.Write(c)
+		return
+	}
+
+	appendVaryHeader(c, "Cookie")
+	appendVaryHeader(c, "Authorization")
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+
+	resolvedShare, err := h.ensureShareAttachmentAccess(c, spaceID, docKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "校验分享原文件下载权限失败")
+		if !writeMappedDocumentShareError(c, err) {
+			response.InternalError(c)
+		}
+		return
+	}
+
+	canonicalDocKey := resolveDocumentShareCanonicalDocKey(resolvedShare)
+	pageResult, err := h.documentShareService.BuildReaderPageByRouteKey(c.Request.Context(), spaceID, canonicalDocKey)
+	if err != nil {
+		setRequestErrmsg(c, err, "构建分享原文件下载数据失败")
+		if errors.Is(err, service.ErrDocumentShareNotFound) {
+			response.DocumentShareErrShareNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+
+	viewer := h.readerRenderer.resolveOptionalViewerIdentity(c)
+	downloadURL, fileName, expiresAt, err := buildOfficeSourceAccessLink(
+		h.readerRenderer.onlyOfficeTokenService,
+		pageResult.Page.Document,
+		viewer.UserID,
+	)
+	if err != nil {
+		setRequestErrmsg(c, err, "生成分享原文件下载链接失败")
+		switch {
+		case errors.Is(err, errOnlyOfficeViewConfigNotOfficeDocument):
+			response.Error(c, http.StatusBadRequest, response.CodeInvalidOperation, "当前分享文档不是 Office 文档")
+		case errors.Is(err, errOnlyOfficeViewConfigSourceBlobEmpty):
+			response.DocumentShareErrShareNotFound.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, officeSourceAccessLinkResponse{
+		URL:       downloadURL,
+		FileName:  fileName,
+		ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
 // Verify 校验密码分享访问密码并下发免密 Cookie。
 func (h *documentSharePageHandler) Verify(c *gin.Context) {
 	if h == nil || h.documentShareService == nil || h.accessTokenService == nil {

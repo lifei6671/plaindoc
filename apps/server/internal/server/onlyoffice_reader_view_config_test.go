@@ -69,6 +69,66 @@ func TestRouter_ReaderOnlyOfficeViewConfig_PublicOfficeDocument(t *testing.T) {
 	}
 }
 
+func TestRouter_ReaderOfficeSourceAccessLink_PublicOfficeDocument(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "reader-office-source-owner@example.com")
+	spaceID := "01h1readerofficesource000001"
+	seedOnlyOfficeEnabledConfig(t, database)
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+
+	documentID := createOfficeDocumentForOnlyOfficeTest(t, serve, spaceID, ownerToken, "docx", "原文件下载合同")
+	publishOnlyOfficeReaderDocument(t, database, spaceID, documentID)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/reader/spaces/"+spaceID+"/docs/"+documentID+"/office-source/access-link",
+		nil,
+	)
+	rec := serve(req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected reader office source access link status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	payload := decodeJSONResultData[struct {
+		URL      string `json:"url"`
+		FileName string `json:"fileName"`
+	}](t, rec.Body.Bytes())
+	if !strings.Contains(payload.URL, "/api/docs/"+documentID+"/onlyoffice/source?accessToken=") {
+		t.Fatalf("expected office source url with token, got %+v", payload)
+	}
+	if !strings.Contains(payload.FileName, ".docx") {
+		t.Fatalf("expected docx source file name, got %+v", payload)
+	}
+}
+
+func TestRouter_ReaderOfficeSourceAccessLink_RequiresPermission(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "reader-office-source-auth-owner@example.com")
+	spaceID := "01h1readerofficesourceauth01"
+	seedOnlyOfficeEnabledConfig(t, database)
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+
+	documentID := createOfficeDocumentForOnlyOfficeTest(t, serve, spaceID, ownerToken, "xlsx", "受限预算表")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/reader/spaces/"+spaceID+"/docs/"+documentID+"/office-source/access-link",
+		nil,
+	)
+	rec := serve(req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected reader office source access link status 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRouter_ReaderLandingRedirectsToOfficeDocument(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
@@ -145,6 +205,55 @@ func TestRouter_ShareOnlyOfficeViewConfig_PublicShare(t *testing.T) {
 	}
 	if !strings.Contains(stringValue(documentConfig["url"]), "/api/docs/"+documentID+"/onlyoffice/source") {
 		t.Fatalf("expected share source url point to onlyoffice source endpoint, got %+v", documentConfig)
+	}
+}
+
+func TestRouter_ShareOfficeSourceAccessLink_PublicShare(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "share-office-source-owner@example.com")
+	spaceID := "01h1shareofficesource000001"
+	shareID := "01h1shareofficesource000001"
+	seedOnlyOfficeEnabledConfig(t, database)
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+
+	documentID := createOfficeDocumentForOnlyOfficeTest(t, serve, spaceID, ownerToken, "xlsx", "预算源文件")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("document_shares").Create(map[string]any{
+		"share_id":       shareID,
+		"document_id":    documentID,
+		"space_id":       spaceID,
+		"mode":           "public",
+		"password_hint":  "",
+		"access_version": 1,
+		"created_at":     now,
+		"updated_at":     now,
+	}).Error; err != nil {
+		t.Fatalf("insert document share failed: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shares/"+spaceID+"/"+documentID+"/office-source/access-link",
+		nil,
+	)
+	rec := serve(req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected share office source access link status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	payload := decodeJSONResultData[struct {
+		URL      string `json:"url"`
+		FileName string `json:"fileName"`
+	}](t, rec.Body.Bytes())
+	if !strings.Contains(payload.URL, "/api/docs/"+documentID+"/onlyoffice/source?accessToken=") {
+		t.Fatalf("expected share office source url with token, got %+v", payload)
+	}
+	if !strings.Contains(payload.FileName, ".xlsx") {
+		t.Fatalf("expected xlsx source file name, got %+v", payload)
 	}
 }
 

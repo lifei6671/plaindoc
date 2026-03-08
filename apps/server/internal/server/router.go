@@ -458,6 +458,8 @@ func newRouter(
 		api.GET("/docs/:docId", accessHandler.GetDocument)
 		// 阅读页 Office 文档只读配置。
 		api.GET("/reader/spaces/:spaceId/docs/:docId/onlyoffice/view-config", readerPageHandler.GetOnlyOfficeViewConfig)
+		// 阅读页 Office 原文件下载 access-link。
+		api.POST("/reader/spaces/:spaceId/docs/:docId/office-source/access-link", readerPageHandler.CreateOfficeSourceAccessLink)
 		// 生成 ONLYOFFICE 编辑配置。
 		api.GET("/docs/:docId/onlyoffice/edit-config", workspaceHandler.GetOnlyOfficeEditConfig)
 		// ONLYOFFICE Document Server 拉取正文文件。
@@ -508,6 +510,11 @@ func newRouter(
 		api.GET(
 			"/shares/:spaceId/:docKey/onlyoffice/view-config",
 			documentSharePageHandler.GetOnlyOfficeViewConfig,
+		)
+		// 分享页 Office 原文件下载 access-link。
+		api.POST(
+			"/shares/:spaceId/:docKey/office-source/access-link",
+			documentSharePageHandler.CreateOfficeSourceAccessLink,
 		)
 		// 分享态附件下载入口（无脚本场景）。
 		api.GET(

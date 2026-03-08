@@ -5,6 +5,7 @@ import (
 	"errors"
 	neturl "net/url"
 	"strings"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
@@ -20,6 +21,12 @@ var (
 type onlyOfficeDocumentConfigResponse struct {
 	DocumentServerURL string         `json:"documentServerUrl"`
 	Config            map[string]any `json:"config"`
+}
+
+type officeSourceAccessLinkResponse struct {
+	URL       string `json:"url"`
+	FileName  string `json:"fileName,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
 }
 
 func buildOnlyOfficeViewConfig(
@@ -118,4 +125,47 @@ func buildOnlyOfficeViewConfig(
 		DocumentServerURL: onlyOfficeConfig.DocumentServerURL,
 		Config:            configPayload,
 	}, nil
+}
+
+func buildOfficeSourceAccessLink(
+	onlyOfficeTokenService *service.OnlyOfficeDocumentTokenService,
+	document service.ReaderDocumentViewModel,
+	actorUserID string,
+) (string, string, time.Time, error) {
+	if onlyOfficeTokenService == nil {
+		return "", "", time.Time{}, errors.New("onlyoffice token service is nil")
+	}
+
+	documentID := strings.TrimSpace(document.ID)
+	documentFormat := models.NormalizeDocumentFormat(document.Format)
+	if !models.IsOfficeDocumentFormat(documentFormat) {
+		return "", "", time.Time{}, errOnlyOfficeViewConfigNotOfficeDocument
+	}
+	if strings.TrimSpace(derefOptionalString(document.SourceBlobID)) == "" {
+		return "", "", time.Time{}, errOnlyOfficeViewConfigSourceBlobEmpty
+	}
+
+	contentVersion := normalizeWorkspaceContentVersion(document.ContentVersion, document.Version)
+	sourceToken, expiresAt, err := onlyOfficeTokenService.Issue(service.IssueOnlyOfficeDocumentTokenInput{
+		DocumentID:     documentID,
+		ContentVersion: contentVersion,
+		ActorUserID:    strings.TrimSpace(actorUserID),
+		Purpose:        service.OnlyOfficeDocumentTokenPurposeSource,
+	})
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+
+	fileName := strings.TrimSpace(derefOptionalString(document.SourceFileName))
+	if fileName == "" {
+		fileName = resolveOfficeSourceFileName(document.Title, documentFormat)
+	}
+
+	sourceURL := "/api/docs/" + neturl.PathEscape(documentID) + "/onlyoffice/source"
+	query := neturl.Values{onlyOfficeAccessTokenQueryKey: []string{sourceToken}}
+	if encodedQuery := query.Encode(); encodedQuery != "" {
+		sourceURL += "?" + encodedQuery
+	}
+
+	return sourceURL, fileName, expiresAt, nil
 }

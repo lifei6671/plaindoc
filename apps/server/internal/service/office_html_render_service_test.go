@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"os/exec"
 	"strings"
 	"testing"
@@ -142,6 +143,145 @@ func TestRenderXLSXHTMLRendersTabsAndMergedCells(t *testing.T) {
 	}
 }
 
+func TestRenderXLSXHTMLRendersPicturesAndChartWarning(t *testing.T) {
+	t.Parallel()
+
+	workbook := excelize.NewFile()
+	workbook.SetSheetName("Sheet1", "Overview")
+	if err := workbook.SetCellValue("Overview", "A1", "Name"); err != nil {
+		t.Fatalf("set overview A1 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Overview", "B1", "Value"); err != nil {
+		t.Fatalf("set overview B1 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Overview", "A2", "Alpha"); err != nil {
+		t.Fatalf("set overview A2 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Overview", "B2", 12); err != nil {
+		t.Fatalf("set overview B2 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Overview", "A3", "Beta"); err != nil {
+		t.Fatalf("set overview A3 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Overview", "B3", 18); err != nil {
+		t.Fatalf("set overview B3 failed: %v", err)
+	}
+
+	imageBytes, err := base64.StdEncoding.DecodeString(minimalPNGBase64)
+	if err != nil {
+		t.Fatalf("decode png failed: %v", err)
+	}
+	if err := workbook.AddPictureFromBytes("Overview", "D2", &excelize.Picture{
+		Extension: ".png",
+		File:      imageBytes,
+		Format:    &excelize.GraphicOptions{AltText: "预算截图", Name: "Budget Snapshot"},
+	}); err != nil {
+		t.Fatalf("add picture failed: %v", err)
+	}
+	if err := workbook.AddChart("Overview", "F2", &excelize.Chart{
+		Type: excelize.Col,
+		Series: []excelize.ChartSeries{
+			{
+				Name:       "Overview!$A$2",
+				Categories: "Overview!$A$2:$A$3",
+				Values:     "Overview!$B$2:$B$3",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("add chart failed: %v", err)
+	}
+
+	var buffer bytes.Buffer
+	if err := workbook.Write(&buffer); err != nil {
+		t.Fatalf("write workbook failed: %v", err)
+	}
+	if err := workbook.Close(); err != nil {
+		t.Fatalf("close workbook failed: %v", err)
+	}
+
+	renderedHTML, err := renderXLSXHTML(buffer.Bytes())
+	if err != nil {
+		t.Fatalf("renderXLSXHTML returned error: %v", err)
+	}
+
+	for _, expected := range []string{
+		`class="office-xlsx-alert"`,
+		`当前文档存在复杂图表`,
+		`office-xlsx-sheet__cell--with-media`,
+		`class="office-xlsx-sheet__cell-media-image"`,
+		`data:image/png;base64,`,
+		`预算截图`,
+		`D2`,
+	} {
+		if !strings.Contains(renderedHTML, expected) {
+			t.Fatalf("expected rendered html to contain %q, got %q", expected, renderedHTML)
+		}
+	}
+	if strings.Contains(renderedHTML, `class="office-xlsx-sheet__media"`) {
+		t.Fatalf("expected rendered html to stop rendering detached media gallery, got %q", renderedHTML)
+	}
+}
+
+func TestRenderXLSXHTMLKeepsChartSheetWithWarning(t *testing.T) {
+	t.Parallel()
+
+	workbook := excelize.NewFile()
+	workbook.SetSheetName("Sheet1", "Data")
+	if err := workbook.SetCellValue("Data", "A1", "Month"); err != nil {
+		t.Fatalf("set data A1 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Data", "B1", "Revenue"); err != nil {
+		t.Fatalf("set data B1 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Data", "A2", "Jan"); err != nil {
+		t.Fatalf("set data A2 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Data", "B2", 10); err != nil {
+		t.Fatalf("set data B2 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Data", "A3", "Feb"); err != nil {
+		t.Fatalf("set data A3 failed: %v", err)
+	}
+	if err := workbook.SetCellValue("Data", "B3", 18); err != nil {
+		t.Fatalf("set data B3 failed: %v", err)
+	}
+	if err := workbook.AddChartSheet("ChartView", &excelize.Chart{
+		Type: excelize.Line,
+		Series: []excelize.ChartSeries{
+			{
+				Name:       "Data!$B$1",
+				Categories: "Data!$A$2:$A$3",
+				Values:     "Data!$B$2:$B$3",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("add chart sheet failed: %v", err)
+	}
+
+	var buffer bytes.Buffer
+	if err := workbook.Write(&buffer); err != nil {
+		t.Fatalf("write workbook failed: %v", err)
+	}
+	if err := workbook.Close(); err != nil {
+		t.Fatalf("close workbook failed: %v", err)
+	}
+
+	renderedHTML, err := renderXLSXHTML(buffer.Bytes())
+	if err != nil {
+		t.Fatalf("renderXLSXHTML returned error: %v", err)
+	}
+
+	for _, expected := range []string{
+		`ChartView`,
+		`class="office-xlsx-sheet__chart-warning"`,
+		`当前工作表包含复杂图表`,
+	} {
+		if !strings.Contains(renderedHTML, expected) {
+			t.Fatalf("expected rendered html to contain %q, got %q", expected, renderedHTML)
+		}
+	}
+}
+
 func buildMinimalDOCX(t *testing.T, text string) []byte {
 	t.Helper()
 
@@ -181,3 +321,5 @@ func buildMinimalDOCX(t *testing.T, text string) []byte {
 	}
 	return buffer.Bytes()
 }
+
+const minimalPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5m7xkAAAAASUVORK5CYII="

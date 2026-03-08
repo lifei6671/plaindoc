@@ -47,6 +47,8 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const OFFICE_XLSX_READER_SELECTOR = "[data-office-xlsx-reader='1']";
   const OFFICE_XLSX_TAB_SELECTOR = "[data-office-sheet-tab]";
   const OFFICE_XLSX_PANEL_SELECTOR = "[data-office-sheet-panel]";
+  const OFFICE_XLSX_TABLE_WRAP_SELECTOR = ".office-xlsx-sheet__table-wrap";
+  const OFFICE_XLSX_TABLE_HEAD_SELECTOR = ".office-xlsx-sheet__table thead";
   const OFFICE_XLSX_TAB_ACTIVE_CLASS = "office-xlsx-tab--active";
   const OFFICE_XLSX_PANEL_ACTIVE_CLASS = "office-xlsx-sheet--active";
   const ONLYOFFICE_SCRIPT_LOADER_GLOBAL_KEY = "__plaindocOnlyOfficeScriptLoaders__";
@@ -315,6 +317,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
 
   let activeOnlyOfficeReader = null;
   let onlyOfficeReaderSeq = 0;
+  let officeDownloadSeq = 0;
   let officePaneHeightRafID = 0;
 
   const resolveOfficeEditorNode = () => document.querySelector(OFFICE_EDITOR_SELECTOR);
@@ -360,11 +363,13 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     if (!normalizedURL) {
       downloadNode.removeAttribute("href");
       downloadNode.removeAttribute("download");
+      downloadNode.removeAttribute("data-reader-office-download-ready");
       downloadNode.setAttribute("aria-disabled", "true");
       return;
     }
     downloadNode.href = normalizedURL;
     downloadNode.rel = "noopener noreferrer";
+    downloadNode.setAttribute("data-reader-office-download-ready", "1");
     downloadNode.setAttribute("aria-disabled", "false");
     const normalizedFileName = typeof fileName === "string" ? fileName.trim() : "";
     if (normalizedFileName) {
@@ -372,6 +377,16 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     } else {
       downloadNode.removeAttribute("download");
     }
+  };
+
+  const setOfficeDownloadBusy = (busy) => {
+    const downloadNode = document.querySelector(OFFICE_DOWNLOAD_SELECTOR);
+    if (!(downloadNode instanceof HTMLAnchorElement)) {
+      return;
+    }
+    const isBusy = busy === true;
+    downloadNode.classList.toggle(EXPORT_ACTION_BUSY_CLASS, isBusy);
+    downloadNode.setAttribute("aria-disabled", isBusy ? "true" : downloadNode.getAttribute("href") ? "false" : "true");
   };
 
   const setOfficePlaceholderState = (status, title, message) => {
@@ -451,6 +466,31 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       panelNode.classList.toggle(OFFICE_XLSX_PANEL_ACTIVE_CLASS, isActive);
       panelNode.hidden = !isActive;
     }
+    syncSpreadsheetStickyHeaders(readerNode);
+  };
+
+  const syncSpreadsheetStickyHeader = (tableWrapNode) => {
+    if (!(tableWrapNode instanceof HTMLElement)) {
+      return;
+    }
+    const headNode = tableWrapNode.querySelector(OFFICE_XLSX_TABLE_HEAD_SELECTOR);
+    if (!(headNode instanceof HTMLElement)) {
+      return;
+    }
+    headNode.style.setProperty("--office-xlsx-head-offset", String(Math.max(0, tableWrapNode.scrollTop)) + "px");
+  };
+
+  const syncSpreadsheetStickyHeaders = (rootNode) => {
+    const scopeNode =
+      rootNode && typeof rootNode.querySelectorAll === "function"
+        ? rootNode
+        : document;
+    const tableWrapNodes = Array.from(scopeNode.querySelectorAll(OFFICE_XLSX_TABLE_WRAP_SELECTOR)).filter(
+      (node) => node instanceof HTMLElement
+    );
+    for (const tableWrapNode of tableWrapNodes) {
+      syncSpreadsheetStickyHeader(tableWrapNode);
+    }
   };
 
   const syncSpreadsheetTabs = () => {
@@ -481,6 +521,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       }
       activateSpreadsheetTab(readerNode, activeSheetKey, false);
     }
+    syncSpreadsheetStickyHeaders(document);
   };
 
   const resolveOnlyOfficeViewConfigPath = (payload) => {
@@ -513,6 +554,66 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       "/docs/" +
       encodeURIComponent(docKey) +
       "/onlyoffice/view-config"
+    );
+  };
+
+  const resolveOfficeSourceAccessLinkPath = (payload) => {
+    if (!payload || typeof payload !== "object") {
+      return "";
+    }
+    const documentData = payload.document && typeof payload.document === "object" ? payload.document : null;
+    const shareData = payload.share && typeof payload.share === "object" ? payload.share : null;
+    const format = documentData && typeof documentData.format === "string" ? documentData.format.trim() : "";
+    if (!isOfficeDocumentFormat(format)) {
+      return "";
+    }
+
+    if (shareData && shareData.enabled === true) {
+      const shareSpaceID =
+        typeof shareData.spaceId === "string"
+          ? shareData.spaceId.trim()
+          : payload.space && typeof payload.space === "object" && typeof payload.space.id === "string"
+            ? payload.space.id.trim()
+            : "";
+      const shareDocKey =
+        typeof shareData.documentRouteKey === "string"
+          ? shareData.documentRouteKey.trim()
+          : documentData && typeof documentData.routeKey === "string"
+            ? documentData.routeKey.trim()
+            : documentData && typeof documentData.id === "string"
+              ? documentData.id.trim()
+              : "";
+      if (!shareSpaceID || !shareDocKey) {
+        return "";
+      }
+      return (
+        "/api/shares/" +
+        encodeURIComponent(shareSpaceID) +
+        "/" +
+        encodeURIComponent(shareDocKey) +
+        "/office-source/access-link"
+      );
+    }
+
+    const spaceID =
+      payload.space && typeof payload.space === "object" && typeof payload.space.id === "string"
+        ? payload.space.id.trim()
+        : "";
+    const documentID =
+      documentData && typeof documentData.id === "string"
+        ? documentData.id.trim()
+        : documentData && typeof documentData.routeKey === "string"
+          ? documentData.routeKey.trim()
+          : "";
+    if (!spaceID || !documentID) {
+      return "";
+    }
+    return (
+      "/api/reader/spaces/" +
+      encodeURIComponent(spaceID) +
+      "/docs/" +
+      encodeURIComponent(documentID) +
+      "/office-source/access-link"
     );
   };
 
@@ -553,6 +654,106 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       documentServerUrl,
       config
     };
+  };
+
+  const fetchOfficeSourceAccessLink = async () => {
+    const payload = resolveReaderStatePayload();
+    const requestPath = resolveOfficeSourceAccessLinkPath(payload);
+    if (!requestPath) {
+      throw new Error("当前页面不是 Office 文档");
+    }
+    const response = await fetch(requestPath, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "X-Requested-With": "plaindoc-reader-async"
+      }
+    });
+    const rawResponseText = await response.text();
+    const responsePayload = resolveJSONPayload(rawResponseText);
+    const responseData = resolveJsonResultData(responsePayload);
+    const responseCode =
+      responsePayload && typeof responsePayload === "object" && typeof responsePayload.code === "number"
+        ? responsePayload.code
+        : 0;
+    const responseMessage =
+      responsePayload && typeof responsePayload === "object" && typeof responsePayload.message === "string"
+        ? responsePayload.message.trim()
+        : "";
+    const downloadURL =
+      responseData && typeof responseData === "object" && typeof responseData.url === "string"
+        ? responseData.url.trim()
+        : "";
+    const fileName =
+      responseData && typeof responseData === "object" && typeof responseData.fileName === "string"
+        ? responseData.fileName.trim()
+        : "";
+    if (!response.ok || responseCode !== 0 || !downloadURL) {
+      throw new Error(responseMessage || "获取原文件下载链接失败");
+    }
+    return {
+      downloadURL,
+      fileName
+    };
+  };
+
+  const syncOfficeDownloadAction = async () => {
+    const downloadNode = document.querySelector(OFFICE_DOWNLOAD_SELECTOR);
+    if (!(downloadNode instanceof HTMLAnchorElement)) {
+      return;
+    }
+    const payload = resolveReaderStatePayload();
+    const documentData = payload && typeof payload === "object" && payload.document && typeof payload.document === "object"
+      ? payload.document
+      : null;
+    const format = documentData ? documentData.format : "";
+
+    officeDownloadSeq += 1;
+    const currentSeq = officeDownloadSeq;
+    setOfficeDownloadBusy(false);
+    setOfficeDownloadLink("", "");
+    if (!isOfficeDocumentFormat(format)) {
+      return;
+    }
+
+    try {
+      const accessLink = await fetchOfficeSourceAccessLink();
+      if (currentSeq !== officeDownloadSeq) {
+        return;
+      }
+      setOfficeDownloadLink(accessLink.downloadURL, accessLink.fileName);
+    } catch (error) {
+      if (currentSeq !== officeDownloadSeq) {
+        return;
+      }
+      setOfficeDownloadLink("", "");
+      console.error("[reader][office-download] fetch access link failed", error);
+    } finally {
+      if (currentSeq === officeDownloadSeq) {
+        setOfficeDownloadBusy(false);
+      }
+    }
+  };
+
+  const requestOfficeSourceDownload = async () => {
+    const downloadNode = document.querySelector(OFFICE_DOWNLOAD_SELECTOR);
+    if (!(downloadNode instanceof HTMLAnchorElement)) {
+      return;
+    }
+
+    setOfficeDownloadBusy(true);
+    try {
+      const accessLink = await fetchOfficeSourceAccessLink();
+      setOfficeDownloadLink(accessLink.downloadURL, accessLink.fileName);
+      if (!triggerAttachmentNavigation(accessLink.downloadURL, "download")) {
+        throw new Error("原文件下载链接无效");
+      }
+    } catch (error) {
+      console.error("[reader][office-download] request download failed", error);
+    } finally {
+      setOfficeDownloadBusy(false);
+    }
   };
 
   const syncOnlyOfficeReader = async () => {
@@ -1548,6 +1749,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       refreshOutlineRegistry();
       syncSpreadsheetTabs();
       scheduleOfficePaneViewportHeightSync();
+      void syncOfficeDownloadAction();
       await syncOnlyOfficeReader();
       if (pushHistory) {
         window.history.pushState({ reader: true }, "", targetURL.toString());
@@ -1575,6 +1777,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     refreshOutlineRegistry();
     setMobileSidebarOpen(false);
     syncSpreadsheetTabs();
+    void syncOfficeDownloadAction();
     void syncOnlyOfficeReader();
   } catch {
     // no-op: initialization enhancement should never block rendering.
@@ -1607,6 +1810,17 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
           event.preventDefault();
           event.stopPropagation();
           void requestAttachmentAccessLink(attachmentActionButton);
+          return;
+        }
+
+        const officeDownloadLink = event.target.closest(OFFICE_DOWNLOAD_SELECTOR);
+        if (officeDownloadLink instanceof HTMLAnchorElement) {
+          if (event.defaultPrevented) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          void requestOfficeSourceDownload();
           return;
         }
 
@@ -1747,6 +1961,17 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     if (readerMain instanceof HTMLElement) {
       readerMain.addEventListener("scroll", scheduleOutlineActiveSync, { passive: true });
     }
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        const scrollTarget = event.target;
+        if (!(scrollTarget instanceof HTMLElement) || !scrollTarget.matches(OFFICE_XLSX_TABLE_WRAP_SELECTOR)) {
+          return;
+        }
+        syncSpreadsheetStickyHeader(scrollTarget);
+      },
+      { passive: true, capture: true }
+    );
     window.addEventListener("resize", () => {
       if (!isMobileSidebarViewport()) {
         setMobileSidebarOpen(false);
@@ -1755,6 +1980,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       }
       refreshOutlineRegistry();
       scheduleOfficePaneViewportHeightSync();
+      syncSpreadsheetStickyHeaders(document);
     }, { passive: true });
   } catch {
     // no-op: outline enhancement should never block rendering.

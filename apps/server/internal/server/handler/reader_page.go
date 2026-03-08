@@ -335,6 +335,75 @@ func (h *readerPageHandler) GetOnlyOfficeViewConfig(c *gin.Context) {
 	response.JSON(c, http.StatusOK, configPayload)
 }
 
+// CreateOfficeSourceAccessLink 返回阅读页 Office 原文件下载链接。
+func (h *readerPageHandler) CreateOfficeSourceAccessLink(c *gin.Context) {
+	if h == nil || h.readerPageService == nil || h.onlyOfficeTokenService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	spaceID := strings.TrimSpace(c.Param("spaceId"))
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if spaceID == "" {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidSpaceID, "空间 ID 不能为空")
+		return
+	}
+	if documentID == "" {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidDocumentID, "文档 ID 不能为空")
+		return
+	}
+
+	appendVaryHeader(c, "Authorization")
+	appendVaryHeader(c, "Cookie")
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+
+	viewer := h.resolveOptionalViewerIdentity(c)
+	viewModel, err := h.readerPageService.BuildPage(
+		c.Request.Context(),
+		spaceID,
+		documentID,
+		viewer.UserID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound), errors.Is(err, service.ErrDocumentNotFound):
+			response.Error(c, http.StatusNotFound, response.CodeDocumentNotFound, "文档不存在，或已被删除")
+		case errors.Is(err, service.ErrViewerLoginRequired):
+			response.Error(c, http.StatusForbidden, response.CodeUnauthorized, "当前文档需要登录后访问")
+		case errors.Is(err, service.ErrSpaceAccessDenied), errors.Is(err, service.ErrDocumentAccessDenied):
+			response.Error(c, http.StatusForbidden, response.CodeForbidden, "你没有权限访问该文档")
+		default:
+			h.logError("reader office source access link build failed", err, "space_id", spaceID, "document_id", documentID)
+			response.InternalError(c)
+		}
+		return
+	}
+
+	downloadURL, fileName, expiresAt, err := buildOfficeSourceAccessLink(
+		h.onlyOfficeTokenService,
+		viewModel.Document,
+		viewer.UserID,
+	)
+	if err != nil {
+		h.logError("reader office source access link resolve failed", err, "space_id", spaceID, "document_id", documentID)
+		switch {
+		case errors.Is(err, errOnlyOfficeViewConfigNotOfficeDocument):
+			response.Error(c, http.StatusBadRequest, response.CodeInvalidOperation, "当前文档不是 Office 文档")
+		case errors.Is(err, errOnlyOfficeViewConfigSourceBlobEmpty):
+			response.Error(c, http.StatusNotFound, response.CodeDocumentNotFound, "原文件不存在，无法下载")
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	response.JSON(c, http.StatusOK, officeSourceAccessLinkResponse{
+		URL:       downloadURL,
+		FileName:  fileName,
+		ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
 func (h *readerPageHandler) renderReaderPayload(
 	c *gin.Context,
 	statusCode int,

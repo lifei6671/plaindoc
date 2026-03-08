@@ -1,22 +1,27 @@
 package service
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"mime"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,11 +61,19 @@ type mammothRenderImage struct {
 }
 
 type xlsxSheetRenderData struct {
-	Key       string
-	Name      string
-	Active    bool
-	HasTable  bool
-	TableHTML string
+	Key           string
+	Name          string
+	Active        bool
+	HasTable      bool
+	IsChartSheet  bool
+	TableHTML     string
+	ImageNoteHTML string
+}
+
+type xlsxInlinePictureRenderData struct {
+	URL     string
+	AltText string
+	Anchor  string
 }
 
 type xlsxMergeSpan struct {
@@ -72,6 +85,31 @@ type xlsxMergeSpan struct {
 type xlsxColumnRenderMeta struct {
 	Label   string
 	WidthPX int
+}
+
+type xlsxWorkbookAnalysis struct {
+	HasComplexCharts bool
+	ChartSheets      map[string]struct{}
+	ChartSheetNames  []string
+}
+
+type xlsxWorkbookXML struct {
+	Sheets []xlsxWorkbookSheetXML `xml:"sheets>sheet"`
+}
+
+type xlsxWorkbookSheetXML struct {
+	Name string `xml:"name,attr"`
+	RID  string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
+}
+
+type xlsxRelationshipsXML struct {
+	Relationships []xlsxRelationshipXML `xml:"Relationship"`
+}
+
+type xlsxRelationshipXML struct {
+	ID     string `xml:"Id,attr"`
+	Type   string `xml:"Type,attr"`
+	Target string `xml:"Target,attr"`
 }
 
 // OfficeHTMLRenderTask 表示一次 Office 正文渲染任务。
@@ -283,7 +321,7 @@ func (s *OfficeHTMLRenderService) renderOfficeHTML(
 	case models.DocumentFormatDOCX:
 		return s.renderDOCXHTML(ctx, task)
 	case models.DocumentFormatXLSX:
-		return renderXLSXHTML(task.SourceContent)
+		return s.renderXLSXHTML(ctx, task)
 	default:
 		return "", errors.New("unsupported office render format")
 	}
@@ -407,6 +445,18 @@ func resolveMammothRenderScriptPath() (string, error) {
 }
 
 func renderXLSXHTML(sourceContent []byte) (string, error) {
+	service := &OfficeHTMLRenderService{}
+	return service.renderXLSXHTML(context.Background(), OfficeHTMLRenderTask{
+		Format:        models.DocumentFormatXLSX,
+		SourceContent: sourceContent,
+	})
+}
+
+func (s *OfficeHTMLRenderService) renderXLSXHTML(
+	ctx context.Context,
+	task OfficeHTMLRenderTask,
+) (string, error) {
+	sourceContent := task.SourceContent
 	workbook, err := excelize.OpenReader(bytes.NewReader(sourceContent))
 	if err != nil {
 		return "", err
@@ -420,23 +470,57 @@ func renderXLSXHTML(sourceContent []byte) (string, error) {
 		return "", errors.New("xlsx workbook has no sheets")
 	}
 
+	analysis, err := analyzeXLSXWorkbook(sourceContent)
+	if err != nil {
+		return "", err
+	}
+
 	sheets := make([]xlsxSheetRenderData, 0, len(sheetNames))
 	for index, sheetName := range sheetNames {
-		tableHTML, hasTable, err := renderXLSXSheetTableHTML(workbook, sheetName)
+		isChartSheet := false
+		if analysis.ChartSheets != nil {
+			_, isChartSheet = analysis.ChartSheets[strings.TrimSpace(sheetName)]
+		}
+		picturesByCell, pictureCount, err := s.collectXLSXSheetPictures(ctx, task, workbook, sheetName, isChartSheet)
 		if err != nil {
 			return "", err
 		}
+		tableHTML, hasTable, renderedPictureCount, err := renderXLSXSheetTableHTML(workbook, sheetName, picturesByCell)
+		if err != nil {
+			if !isChartSheet {
+				return "", err
+			}
+			tableHTML = ""
+			hasTable = false
+			renderedPictureCount = 0
+		}
+		imageNoteHTML := ""
+		if pictureCount > renderedPictureCount {
+			imageNoteHTML = renderXLSXSheetImageNoteHTML()
+		}
 		sheets = append(sheets, xlsxSheetRenderData{
-			Key:       fmt.Sprintf("sheet-%d", index+1),
-			Name:      strings.TrimSpace(sheetName),
-			Active:    index == 0,
-			HasTable:  hasTable,
-			TableHTML: tableHTML,
+			Key:           fmt.Sprintf("sheet-%d", index+1),
+			Name:          strings.TrimSpace(sheetName),
+			Active:        index == 0,
+			HasTable:      hasTable,
+			IsChartSheet:  isChartSheet,
+			TableHTML:     tableHTML,
+			ImageNoteHTML: imageNoteHTML,
 		})
 	}
 
 	var builder strings.Builder
 	builder.WriteString(`<div class="office-xlsx-reader" data-office-xlsx-reader="1">`)
+	if analysis.HasComplexCharts {
+		builder.WriteString(`<div class="office-xlsx-alert" role="note" aria-label="复杂图表提示">`)
+		builder.WriteString(`<strong>当前文档存在复杂图表</strong><span>请下载后浏览原文件，以免图表信息缺失。</span>`)
+		if len(analysis.ChartSheetNames) > 0 {
+			builder.WriteString(`<span class="office-xlsx-alert__meta">复杂图表工作表：`)
+			builder.WriteString(html.EscapeString(strings.Join(analysis.ChartSheetNames, "、")))
+			builder.WriteString(`</span>`)
+		}
+		builder.WriteString(`</div>`)
+	}
 	builder.WriteString(`<div class="office-xlsx-tabs" role="tablist" aria-label="工作表">`)
 	for _, sheet := range sheets {
 		builder.WriteString(`<button type="button" class="office-xlsx-tab`)
@@ -470,8 +554,18 @@ func renderXLSXHTML(sourceContent []byte) (string, error) {
 		builder.WriteString(`>`)
 		if sheet.HasTable {
 			builder.WriteString(sheet.TableHTML)
-		} else {
-			builder.WriteString(`<p class="office-xlsx-sheet__empty">当前工作表没有可显示的数据。</p>`)
+		}
+		if sheet.ImageNoteHTML != "" {
+			builder.WriteString(sheet.ImageNoteHTML)
+		}
+		if !sheet.HasTable && sheet.ImageNoteHTML == "" {
+			if sheet.IsChartSheet {
+				builder.WriteString(`<div class="office-xlsx-sheet__chart-warning" role="note">`)
+				builder.WriteString(`<strong>当前工作表包含复杂图表</strong><span>HTML 阅读页暂不支持渲染该图表，请下载原文件后在 Excel 中浏览。</span>`)
+				builder.WriteString(`</div>`)
+			} else {
+				builder.WriteString(`<p class="office-xlsx-sheet__empty">当前工作表没有可显示的数据。</p>`)
+			}
 		}
 		builder.WriteString(`</section>`)
 	}
@@ -479,14 +573,33 @@ func renderXLSXHTML(sourceContent []byte) (string, error) {
 	return builder.String(), nil
 }
 
-func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string, bool, error) {
+func renderXLSXSheetTableHTML(
+	workbook *excelize.File,
+	sheetName string,
+	picturesByCell map[string][]xlsxInlinePictureRenderData,
+) (string, bool, int, error) {
 	rows, err := workbook.GetRows(sheetName)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	mergeStarts, coveredCells, maxRow, maxCol, err := buildXLSXMergeLayout(workbook, sheetName)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
+	}
+	normalizedPicturesByCell := normalizeXLSXPictureAnchors(picturesByCell, mergeStarts)
+	pictureColumns := make(map[int]struct{})
+	for cellRef := range normalizedPicturesByCell {
+		columnIndex, rowIndex, cellErr := excelize.CellNameToCoordinates(cellRef)
+		if cellErr != nil {
+			continue
+		}
+		if rowIndex > maxRow {
+			maxRow = rowIndex
+		}
+		if columnIndex > maxCol {
+			maxCol = columnIndex
+		}
+		pictureColumns[columnIndex] = struct{}{}
 	}
 	if len(rows) > maxRow {
 		maxRow = len(rows)
@@ -497,9 +610,9 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 		}
 	}
 	if maxRow == 0 || maxCol == 0 {
-		return "", false, nil
+		return "", false, 0, nil
 	}
-	columnMetas := buildXLSXColumnRenderMetas(rows, mergeStarts, coveredCells, maxRow, maxCol)
+	columnMetas := buildXLSXColumnRenderMetas(rows, mergeStarts, coveredCells, pictureColumns, maxRow, maxCol)
 	headerRowIndex := detectXLSXHeaderRowIndex(rows, mergeStarts, coveredCells, maxRow, maxCol)
 	summaryRows := detectXLSXSummaryRows(rows, mergeStarts, coveredCells, maxRow, maxCol, headerRowIndex)
 
@@ -520,6 +633,7 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 	}
 	builder.WriteString(`</tr></thead><tbody>`)
 	hasVisibleCell := false
+	renderedPictureCount := 0
 	for rowIndex := 1; rowIndex <= maxRow; rowIndex++ {
 		builder.WriteString(`<tr class="office-xlsx-sheet__row`)
 		if rowIndex == headerRowIndex {
@@ -539,6 +653,7 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 			}
 			value := resolveXLSXRowValue(rows, rowIndex, columnIndex)
 			cellRef := buildXLSXCellReference(rowIndex, columnIndex)
+			cellPictures := normalizedPicturesByCell[cellRef]
 			trimmedValue := strings.TrimSpace(value)
 			cellSemantics := classifyXLSXCellSemantics(trimmedValue)
 			if span, ok := mergeStarts[cellKey]; ok {
@@ -552,6 +667,9 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 				}
 				if _, ok := summaryRows[rowIndex]; ok {
 					builder.WriteString(` office-xlsx-sheet__cell--summary`)
+				}
+				if len(cellPictures) > 0 {
+					builder.WriteString(` office-xlsx-sheet__cell--with-media`)
 				}
 				for _, semanticClass := range cellSemantics {
 					builder.WriteByte(' ')
@@ -571,13 +689,16 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 					builder.WriteString(`"`)
 				}
 				builder.WriteString(`>`)
-				builder.WriteString(html.EscapeString(trimmedValue))
+				renderXLSXTableCellContent(&builder, trimmedValue, cellPictures)
 				builder.WriteString(`</td>`)
-				hasVisibleCell = true
+				if trimmedValue != "" || len(cellPictures) > 0 {
+					hasVisibleCell = true
+				}
+				renderedPictureCount += len(cellPictures)
 				continue
 			}
 			builder.WriteString(`<td class="office-xlsx-sheet__cell`)
-			if trimmedValue == "" {
+			if trimmedValue == "" && len(cellPictures) == 0 {
 				builder.WriteString(` office-xlsx-sheet__cell--empty`)
 			}
 			if rowIndex == headerRowIndex {
@@ -586,6 +707,9 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 			if _, ok := summaryRows[rowIndex]; ok {
 				builder.WriteString(` office-xlsx-sheet__cell--summary`)
 			}
+			if len(cellPictures) > 0 {
+				builder.WriteString(` office-xlsx-sheet__cell--with-media`)
+			}
 			for _, semanticClass := range cellSemantics {
 				builder.WriteByte(' ')
 				builder.WriteString(semanticClass)
@@ -593,16 +717,228 @@ func renderXLSXSheetTableHTML(workbook *excelize.File, sheetName string) (string
 			builder.WriteString(`" data-cell-ref="`)
 			builder.WriteString(html.EscapeString(cellRef))
 			builder.WriteString(`">`)
-			builder.WriteString(html.EscapeString(trimmedValue))
+			renderXLSXTableCellContent(&builder, trimmedValue, cellPictures)
 			builder.WriteString(`</td>`)
-			if trimmedValue != "" {
+			if trimmedValue != "" || len(cellPictures) > 0 {
 				hasVisibleCell = true
 			}
+			renderedPictureCount += len(cellPictures)
 		}
 		builder.WriteString(`</tr>`)
 	}
 	builder.WriteString(`</tbody></table></div>`)
-	return builder.String(), hasVisibleCell, nil
+	return builder.String(), hasVisibleCell, renderedPictureCount, nil
+}
+
+func renderXLSXTableCellContent(
+	builder *strings.Builder,
+	value string,
+	pictures []xlsxInlinePictureRenderData,
+) {
+	if builder == nil {
+		return
+	}
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue != "" {
+		builder.WriteString(`<div class="office-xlsx-sheet__cell-text">`)
+		builder.WriteString(html.EscapeString(trimmedValue))
+		builder.WriteString(`</div>`)
+	}
+	if len(pictures) == 0 {
+		return
+	}
+	builder.WriteString(`<div class="office-xlsx-sheet__cell-media-list">`)
+	for _, picture := range pictures {
+		builder.WriteString(`<figure class="office-xlsx-sheet__cell-media">`)
+		builder.WriteString(`<img class="office-xlsx-sheet__cell-media-image" loading="lazy" src="`)
+		builder.WriteString(html.EscapeString(picture.URL))
+		builder.WriteString(`" alt="`)
+		builder.WriteString(html.EscapeString(picture.AltText))
+		builder.WriteString(`" />`)
+		builder.WriteString(`<figcaption class="office-xlsx-sheet__cell-media-caption">`)
+		builder.WriteString(html.EscapeString(picture.AltText))
+		builder.WriteString(`</figcaption></figure>`)
+	}
+	builder.WriteString(`</div>`)
+}
+
+func normalizeXLSXPictureAnchors(
+	picturesByCell map[string][]xlsxInlinePictureRenderData,
+	mergeStarts map[string]xlsxMergeSpan,
+) map[string][]xlsxInlinePictureRenderData {
+	if len(picturesByCell) == 0 {
+		return nil
+	}
+	normalized := make(map[string][]xlsxInlinePictureRenderData, len(picturesByCell))
+	for cellRef, pictures := range picturesByCell {
+		anchor := strings.TrimSpace(cellRef)
+		if mergeStart := findXLSXMergeStartCell(anchor, mergeStarts); mergeStart != "" {
+			anchor = mergeStart
+		}
+		normalized[anchor] = append(normalized[anchor], pictures...)
+	}
+	return normalized
+}
+
+func findXLSXMergeStartCell(cellRef string, mergeStarts map[string]xlsxMergeSpan) string {
+	columnIndex, rowIndex, err := excelize.CellNameToCoordinates(strings.TrimSpace(cellRef))
+	if err != nil {
+		return ""
+	}
+	for cellKey, span := range mergeStarts {
+		parts := strings.SplitN(cellKey, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		startRow, rowErr := strconv.Atoi(parts[0])
+		startColumn, colErr := strconv.Atoi(parts[1])
+		if rowErr != nil || colErr != nil {
+			continue
+		}
+		if rowIndex < startRow || rowIndex >= startRow+span.Rowspan {
+			continue
+		}
+		if columnIndex < startColumn || columnIndex >= startColumn+span.Colspan {
+			continue
+		}
+		return buildXLSXCellReference(startRow, startColumn)
+	}
+	return ""
+}
+
+func (s *OfficeHTMLRenderService) collectXLSXSheetPictures(
+	ctx context.Context,
+	task OfficeHTMLRenderTask,
+	workbook *excelize.File,
+	sheetName string,
+	isChartSheet bool,
+) (map[string][]xlsxInlinePictureRenderData, int, error) {
+	if workbook == nil {
+		return nil, 0, errors.New("xlsx workbook is nil")
+	}
+	if isChartSheet {
+		return nil, 0, nil
+	}
+
+	pictureCells, err := workbook.GetPictureCells(sheetName)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(pictureCells) == 0 {
+		return nil, 0, nil
+	}
+
+	sortedCells := append([]string(nil), pictureCells...)
+	sort.SliceStable(sortedCells, func(i int, j int) bool {
+		leftCol, leftRow, leftErr := excelize.CellNameToCoordinates(sortedCells[i])
+		rightCol, rightRow, rightErr := excelize.CellNameToCoordinates(sortedCells[j])
+		switch {
+		case leftErr != nil && rightErr != nil:
+			return sortedCells[i] < sortedCells[j]
+		case leftErr != nil:
+			return false
+		case rightErr != nil:
+			return true
+		case leftRow != rightRow:
+			return leftRow < rightRow
+		default:
+			return leftCol < rightCol
+		}
+	})
+
+	pictureCount := 0
+	picturesByCell := make(map[string][]xlsxInlinePictureRenderData, len(sortedCells))
+	for _, cell := range sortedCells {
+		pictures, err := workbook.GetPictures(sheetName, cell)
+		if err != nil {
+			return nil, 0, err
+		}
+		for index, picture := range pictures {
+			pictureCount++
+			pictureURL, altText, err := s.materializeXLSXPictureURL(ctx, task, sheetName, cell, index, picture)
+			if err != nil {
+				return nil, 0, err
+			}
+			if strings.TrimSpace(pictureURL) == "" {
+				continue
+			}
+			picturesByCell[cell] = append(picturesByCell[cell], xlsxInlinePictureRenderData{
+				URL:     pictureURL,
+				AltText: altText,
+				Anchor:  cell,
+			})
+		}
+	}
+	if pictureCount == 0 {
+		return nil, 0, nil
+	}
+	return picturesByCell, pictureCount, nil
+}
+
+func renderXLSXSheetImageNoteHTML() string {
+	return `<div class="office-xlsx-sheet__image-warning" role="note"><strong>当前工作表包含图片</strong><span>部分图片暂时无法嵌入原表格，请下载原文件后在 Excel 中查看。</span></div>`
+}
+
+func (s *OfficeHTMLRenderService) materializeXLSXPictureURL(
+	ctx context.Context,
+	task OfficeHTMLRenderTask,
+	sheetName string,
+	cell string,
+	index int,
+	picture excelize.Picture,
+) (string, string, error) {
+	altText := strings.TrimSpace(defaultIfBlank(resolveXLSXPictureAltText(picture), sheetName+" "+cell+" 图片"))
+	if len(picture.File) == 0 {
+		return "", altText, nil
+	}
+
+	contentType := strings.TrimSpace(mime.TypeByExtension(strings.TrimSpace(picture.Extension)))
+	if contentType == "" {
+		contentType = strings.TrimSpace(http.DetectContentType(picture.File))
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	fileName := strings.TrimSpace(task.DocumentID)
+	if fileName == "" {
+		fileName = "office-render"
+	}
+	fileName += "-" + sanitizeOfficeRenderPathSegment(sheetName, "sheet") + "-" + sanitizeOfficeRenderPathSegment(cell, "cell")
+	if index > 0 {
+		fileName += "-" + strconv.Itoa(index+1)
+	}
+	fileName += defaultIfBlank(strings.TrimSpace(picture.Extension), ".bin")
+
+	if s != nil && s.documentAttachmentRepo != nil {
+		blob, err := s.ensureImageBlobForContent(
+			ctx,
+			picture.File,
+			contentType,
+			fileName,
+			strings.TrimSpace(task.SpaceID),
+			strings.TrimSpace(task.DocumentID),
+			time.Now().UTC(),
+		)
+		if err == nil && blob != nil && strings.TrimSpace(blob.ObjectURL) != "" {
+			return strings.TrimSpace(blob.ObjectURL), altText, nil
+		}
+	}
+
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(picture.File), altText, nil
+}
+
+func resolveXLSXPictureAltText(picture excelize.Picture) string {
+	if picture.Format == nil {
+		return "图片"
+	}
+	if altText := strings.TrimSpace(picture.Format.AltText); altText != "" {
+		return altText
+	}
+	if name := strings.TrimSpace(picture.Format.Name); name != "" {
+		return name
+	}
+	return "图片"
 }
 
 func buildXLSXMergeLayout(
@@ -688,6 +1024,7 @@ func buildXLSXColumnRenderMetas(
 	rows [][]string,
 	mergeStarts map[string]xlsxMergeSpan,
 	coveredCells map[string]struct{},
+	pictureColumns map[int]struct{},
 	maxRow int,
 	maxCol int,
 ) []xlsxColumnRenderMeta {
@@ -700,6 +1037,9 @@ func buildXLSXColumnRenderMetas(
 		}
 		if width := estimateXLSXDisplayWidth(columnLabel); width > maxDisplayWidth {
 			maxDisplayWidth = width
+		}
+		if _, ok := pictureColumns[columnIndex]; ok && maxDisplayWidth < 16 {
+			maxDisplayWidth = 16
 		}
 		for rowIndex := 1; rowIndex <= maxRow; rowIndex++ {
 			cellKey := buildXLSXCellKey(rowIndex, columnIndex)
@@ -995,6 +1335,95 @@ func defaultIfBlank(value string, fallback string) string {
 		return trimmed
 	}
 	return fallback
+}
+
+func analyzeXLSXWorkbook(sourceContent []byte) (xlsxWorkbookAnalysis, error) {
+	analysis := xlsxWorkbookAnalysis{
+		ChartSheets: make(map[string]struct{}),
+	}
+	if len(sourceContent) == 0 {
+		return analysis, errors.New("xlsx source content is empty")
+	}
+
+	readerAt := bytes.NewReader(sourceContent)
+	archiveReader, err := zip.NewReader(readerAt, int64(len(sourceContent)))
+	if err != nil {
+		return analysis, err
+	}
+
+	files := make(map[string]*zip.File, len(archiveReader.File))
+	for _, file := range archiveReader.File {
+		files[file.Name] = file
+		if strings.HasPrefix(file.Name, "xl/charts/") && strings.HasSuffix(file.Name, ".xml") {
+			analysis.HasComplexCharts = true
+		}
+		if strings.HasPrefix(file.Name, "xl/chartsheets/") && strings.HasSuffix(file.Name, ".xml") {
+			analysis.HasComplexCharts = true
+		}
+	}
+
+	workbookFile := files["xl/workbook.xml"]
+	workbookRelsFile := files["xl/_rels/workbook.xml.rels"]
+	if workbookFile == nil || workbookRelsFile == nil {
+		return analysis, nil
+	}
+
+	workbookXMLBytes, err := readZipFileContent(workbookFile)
+	if err != nil {
+		return analysis, err
+	}
+	workbookRelsBytes, err := readZipFileContent(workbookRelsFile)
+	if err != nil {
+		return analysis, err
+	}
+
+	var workbookXML xlsxWorkbookXML
+	if err := xml.Unmarshal(workbookXMLBytes, &workbookXML); err != nil {
+		return analysis, err
+	}
+	var workbookRels xlsxRelationshipsXML
+	if err := xml.Unmarshal(workbookRelsBytes, &workbookRels); err != nil {
+		return analysis, err
+	}
+
+	relsByID := make(map[string]xlsxRelationshipXML, len(workbookRels.Relationships))
+	for _, rel := range workbookRels.Relationships {
+		relsByID[strings.TrimSpace(rel.ID)] = rel
+	}
+
+	const chartsheetRelationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet"
+	for _, sheet := range workbookXML.Sheets {
+		rel, ok := relsByID[strings.TrimSpace(sheet.RID)]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(rel.Type) != chartsheetRelationshipType {
+			continue
+		}
+		sheetName := strings.TrimSpace(sheet.Name)
+		if sheetName == "" {
+			continue
+		}
+		analysis.ChartSheets[sheetName] = struct{}{}
+		analysis.ChartSheetNames = append(analysis.ChartSheetNames, sheetName)
+		analysis.HasComplexCharts = true
+	}
+	sort.Strings(analysis.ChartSheetNames)
+	return analysis, nil
+}
+
+func readZipFileContent(file *zip.File) ([]byte, error) {
+	if file == nil {
+		return nil, errors.New("zip file is nil")
+	}
+	reader, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = reader.Close()
+	}()
+	return io.ReadAll(reader)
 }
 
 func (s *OfficeHTMLRenderService) ensureImageBlobForContent(
