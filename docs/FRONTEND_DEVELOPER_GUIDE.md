@@ -165,6 +165,12 @@
 3. 后台协议：`AdminUser`、`AdminSpace`、`AdminDocument`、`AdminTheme`、`AdminSystemConfig`、`AdminAudit*`。
 4. 错误模型：`ConflictError`（文档/配置版本冲突）。
 
+ONLYOFFICE 相关字段约束：
+
+1. `Document.format`、`TreeNode.documentFormat`、`AdminDocument.format` 是前端判别 Markdown/Word/Excel 的真值字段。
+2. Office 文档需消费 `sourceBlobId/sourceFileName/sourceMimeType/contentVersion`，不能假设正文一定来自 `contentMd`。
+3. 管理后台文档页的格式徽标与格式筛选直接依赖 `AdminDocument.format`，不要在组件层用标题或后缀名猜测类型。
+
 ### 6.2 HTTP Adapter 行为模型
 
 实现文件：`apps/web/src/data-access/http/adapter.ts`。
@@ -316,6 +322,13 @@
 1. 后端发送 `handshake`，校验 `version`。
 2. 后端发送 `render`（含 `id`、`route`、`payload`）。
 3. Worker 返回 `{ ok: true, html, head, metrics }` 或错误对象。
+
+### 8.3.1 ONLYOFFICE 阅读模式
+
+1. `render-space-reader.tsx` 会按 `document.format` 分成 Markdown SSR 与 Office 容器模式。
+2. Office 阅读页/分享页只输出容器与状态数据，真正挂载逻辑在 `render-space-reader.async-script.ts`。
+3. Office 模式必须隐藏 Markdown 导出、PDF 打印、TOC 和滚动同步相关 UI。
+4. 只读配置由后端 `onlyoffice/view-config` 接口生成，前端不得自行拼接 token 或 Document Server URL。
 
 ### 8.4 阅读页 DOM Hook 契约（不能随意改）
 

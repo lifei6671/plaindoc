@@ -189,6 +189,7 @@
 | `site` | `AuthRegistrationPolicyService` | `validateSiteConfig` | 站点级开关（如注册策略叠加）。 |
 | `image-hosting` | `ImageHostingService.GetConfig` | `validateImageHostingConfig` | 图床 provider 与参数。 |
 | `sitemap` | `SitemapService.GetConfig` | `validateSitemapConfig` | sitemap 生成策略。 |
+| `onlyoffice` | `OnlyOfficeConfigService.GetConfig` | `validateOnlyOfficeConfig` | ONLYOFFICE Docs 开关、Document Server 地址、callback 外链地址、JWT 密钥。 |
 | `homepage.ssr.anonymous_cache` | `HomeService.resolveAnonymousCacheControl` | `validateHomepageAnonymousCacheConfig` | 首页匿名缓存头策略。 |
 | `editor`、`security` | 对应服务按需读取 | 对应 validator | 编辑器与安全策略配置项。 |
 
@@ -289,6 +290,17 @@
 11. `PUT /api/docs/:docId/visibility`
 12. `PUT /api/docs/:docId/theme`
 13. `POST /api/docs/:docId/remote-images/localize`
+14. `GET /api/docs/:docId/onlyoffice/edit-config`
+15. `GET /api/docs/:docId/onlyoffice/source`
+16. `POST /api/docs/:docId/onlyoffice/callback`
+
+ONLYOFFICE 一等文档规则：
+
+1. `documents.format` 区分 `markdown/docx/xlsx`，`nodes.type` 仍只表示 `folder/doc`。
+2. `SaveDocument` 仅适用于 Markdown；Office 文档必须走 ONLYOFFICE callback 写回。
+3. Office 正文落在 `file_blobs`，版本快照落在 `document_file_revisions`。
+4. `VisibilityService` 按“文档可读/可写”工作，Office 与 Markdown 共用同一套权限判断。
+5. callback 成功后会更新 `documents.version/content_version/source_blob_id`，并追加 `audit_logs` 记录。
 
 ### 6.3 管理后台（`/api/admin/*`）
 

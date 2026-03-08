@@ -765,6 +765,7 @@ type ListAdminDocumentsParams struct {
 	SpaceID          string
 	Statuses         []models.EntityStatus
 	Visibilities     []models.Visibility
+	Formats          []models.DocumentFormat
 	Limit            int
 	Offset           int
 }

@@ -1422,6 +1422,9 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       if (typeof input.visibility === "string" && input.visibility.trim()) {
         query.set("visibility", input.visibility);
       }
+      if (typeof input.format === "string" && input.format.trim()) {
+        query.set("format", input.format);
+      }
       if (typeof input.page === "number" && Number.isFinite(input.page) && input.page > 0) {
         query.set("page", String(Math.trunc(input.page)));
       }

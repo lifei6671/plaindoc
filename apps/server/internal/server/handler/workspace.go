@@ -51,6 +51,7 @@ type workspaceHandler struct {
 	onlyOfficeConfigService    *service.OnlyOfficeConfigService
 	onlyOfficeTokenService     *service.OnlyOfficeDocumentTokenService
 	attachmentTokenService     *service.DocumentAttachmentDownloadTokenService
+	auditLogRepo               repository.AuditLogRepository
 	localImageRootDir          string
 	onlyOfficeHTTPClient       *http.Client
 	remoteImageHTTPClient      *http.Client
@@ -207,6 +208,7 @@ func NewWorkspaceHandler(
 	onlyOfficeConfigService *service.OnlyOfficeConfigService,
 	onlyOfficeTokenService *service.OnlyOfficeDocumentTokenService,
 	attachmentTokenService *service.DocumentAttachmentDownloadTokenService,
+	auditLogRepo repository.AuditLogRepository,
 	renderCache *rendercache.Cache,
 	searchIndexServices ...*service.SearchIndexService,
 ) *workspaceHandler {
@@ -228,6 +230,7 @@ func NewWorkspaceHandler(
 		onlyOfficeConfigService:   onlyOfficeConfigService,
 		onlyOfficeTokenService:    onlyOfficeTokenService,
 		attachmentTokenService:    attachmentTokenService,
+		auditLogRepo:              auditLogRepo,
 		localImageRootDir:         defaultLocalImageStorageRoot,
 		onlyOfficeHTTPClient: &http.Client{
 			Timeout: 60 * time.Second,

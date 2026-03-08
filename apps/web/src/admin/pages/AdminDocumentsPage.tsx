@@ -102,6 +102,28 @@ function renderVisibilityBadgeClass(value: Visibility): string {
   }
 }
 
+function renderFormatLabel(value?: AdminDocument["format"]): string {
+  switch (value) {
+    case "docx":
+      return "Word";
+    case "xlsx":
+      return "Excel";
+    default:
+      return "Markdown";
+  }
+}
+
+function renderFormatBadgeClass(value?: AdminDocument["format"]): string {
+  switch (value) {
+    case "docx":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "xlsx":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    default:
+      return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+}
+
 function buildSpaceReaderPath(spaceId: string): string {
   return `/r/${encodeURIComponent(spaceId)}`;
 }
@@ -119,6 +141,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
   const [spaceId, setSpaceId] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "all" | "active" | "banned" | "deleted">("");
   const [visibilityFilter, setVisibilityFilter] = useState<"" | "all" | "public" | "authenticated" | "member">("");
+  const [formatFilter, setFormatFilter] = useState<"" | "all" | "markdown" | "docx" | "xlsx">("");
   const [page, setPage] = useState(1);
   const [selectedDocumentIDs, setSelectedDocumentIDs] = useState<string[]>([]);
 
@@ -140,6 +163,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
         spaceId,
         status: statusFilter || undefined,
         visibility: visibilityFilter || undefined,
+        format: formatFilter || undefined,
         page,
         pageSize: DEFAULT_PAGE_SIZE
       });
@@ -150,7 +174,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [dataGateway, keyword, openToast, page, spaceId, statusFilter, visibilityFilter]);
+  }, [dataGateway, formatFilter, keyword, openToast, page, spaceId, statusFilter, visibilityFilter]);
 
   useEffect(() => {
     void loadDocuments();
@@ -197,6 +221,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
     setSpaceId("");
     setStatusFilter("");
     setVisibilityFilter("");
+    setFormatFilter("");
     setPage(1);
   }, []);
 
@@ -426,7 +451,7 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
     <section aria-label="文档管理">
       {dialogs}
       <AdminPageCard>
-          <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_170px_190px_auto]" onSubmit={handleSearchSubmit}>
+          <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_160px_180px_170px_auto]" onSubmit={handleSearchSubmit}>
             <label className="space-y-1.5">
               <span className="text-xs font-semibold tracking-wide text-slate-600">关键词</span>
               <Input
@@ -484,6 +509,27 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                   <SelectItem value="public">完全公开</SelectItem>
                   <SelectItem value="authenticated">登录可见</SelectItem>
                   <SelectItem value="member">成员可见</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-semibold tracking-wide text-slate-600">格式</span>
+              <Select
+                value={formatFilter || "default"}
+                onValueChange={(value) => {
+                  setFormatFilter((value === "default" ? "" : value) as "" | "all" | "markdown" | "docx" | "xlsx");
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">全部格式（默认）</SelectItem>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="markdown">Markdown</SelectItem>
+                  <SelectItem value="docx">Word</SelectItem>
+                  <SelectItem value="xlsx">Excel</SelectItem>
                 </SelectContent>
               </Select>
             </label>
@@ -619,6 +665,11 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                               >
                                 {document.title || "未命名文档"}
                               </a>
+                              <div className="flex min-w-0 items-center gap-1.5 text-xs">
+                                <Badge variant="outline" className={renderFormatBadgeClass(document.format)}>
+                                  {renderFormatLabel(document.format)}
+                                </Badge>
+                              </div>
                               <div className="flex min-w-0 items-center gap-1.5 text-xs">
                                 <span className="shrink-0 text-slate-500">文档 ID</span>
                                 <code

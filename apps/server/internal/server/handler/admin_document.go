@@ -21,22 +21,23 @@ type adminDocumentHandler struct {
 }
 
 type adminDocumentResponse struct {
-	DocumentID       string              `json:"documentId"`
-	DocumentRouteKey string              `json:"documentRouteKey"`
-	NodeID           string              `json:"nodeId"`
-	Title            string              `json:"title"`
-	SpaceID          string              `json:"spaceId"`
-	SpaceName        string              `json:"spaceName"`
-	SpaceOwnerUserID string              `json:"spaceOwnerUserId"`
-	SpaceOwnerName   string              `json:"spaceOwnerName"`
-	SpaceOwnerEmail  string              `json:"spaceOwnerEmail"`
-	Visibility       models.Visibility   `json:"visibility"`
-	Status           models.EntityStatus `json:"status"`
-	BannedReason     string              `json:"bannedReason"`
-	BannedAt         *time.Time          `json:"bannedAt"`
-	DeletedAt        *time.Time          `json:"deletedAt"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	UpdatedAt        time.Time           `json:"updatedAt"`
+	DocumentID       string                `json:"documentId"`
+	DocumentRouteKey string                `json:"documentRouteKey"`
+	NodeID           string                `json:"nodeId"`
+	Format           models.DocumentFormat `json:"format"`
+	Title            string                `json:"title"`
+	SpaceID          string                `json:"spaceId"`
+	SpaceName        string                `json:"spaceName"`
+	SpaceOwnerUserID string                `json:"spaceOwnerUserId"`
+	SpaceOwnerName   string                `json:"spaceOwnerName"`
+	SpaceOwnerEmail  string                `json:"spaceOwnerEmail"`
+	Visibility       models.Visibility     `json:"visibility"`
+	Status           models.EntityStatus   `json:"status"`
+	BannedReason     string                `json:"bannedReason"`
+	BannedAt         *time.Time            `json:"bannedAt"`
+	DeletedAt        *time.Time            `json:"deletedAt"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
 }
 
 type adminDocumentListResponse struct {
@@ -71,7 +72,7 @@ func NewAdminDocumentHandler(
 	}
 }
 
-// ListDocuments 返回后台文档列表，支持关键词、空间、状态、可见性与分页查询。
+// ListDocuments 返回后台文档列表，支持关键词、空间、状态、可见性、格式与分页查询。
 func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 	if h == nil || h.adminDocumentService == nil {
 		response.InternalError(c)
@@ -100,6 +101,7 @@ func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 		logit.Any("spaceId", c.Query("spaceId")),
 		logit.Any("status", c.Query("status")),
 		logit.Any("visibility", c.Query("visibility")),
+		logit.Any("format", c.Query("format")),
 		logit.Any("page", page),
 		logit.Any("pageSize", pageSize),
 	)
@@ -110,6 +112,7 @@ func (h *adminDocumentHandler) ListDocuments(c *gin.Context) {
 		SpaceID:          strings.TrimSpace(c.Query("spaceId")),
 		StatusFilter:     service.AdminDocumentStatusFilter(c.Query("status")),
 		VisibilityFilter: service.AdminDocumentVisibilityFilter(c.Query("visibility")),
+		FormatFilter:     service.AdminDocumentFormatFilter(c.Query("format")),
 		Page:             page,
 		PageSize:         pageSize,
 	})
@@ -230,6 +233,7 @@ func mapAdminDocumentResponse(value service.AdminDocumentRecord) adminDocumentRe
 		DocumentID:       value.DocumentID,
 		DocumentRouteKey: value.DocumentRouteKey,
 		NodeID:           value.NodeID,
+		Format:           models.NormalizeDocumentFormat(value.Format),
 		Title:            value.Title,
 		SpaceID:          value.SpaceID,
 		SpaceName:        value.SpaceName,

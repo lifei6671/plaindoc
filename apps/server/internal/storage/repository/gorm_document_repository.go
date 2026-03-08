@@ -277,6 +277,10 @@ func (r *gormDocumentRepository) ListForAdmin(
 	if len(visibilities) > 0 {
 		baseQuery = baseQuery.Where("d.visibility IN ?", visibilities)
 	}
+	formats := normalizeDocumentFormats(params.Formats)
+	if len(formats) > 0 {
+		baseQuery = baseQuery.Where("d.format IN ?", formats)
+	}
 
 	var total int64
 	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
@@ -766,6 +770,26 @@ func normalizeDocumentVisibilities(input []models.Visibility) []models.Visibilit
 		visibilities = append(visibilities, visibility)
 	}
 	return visibilities
+}
+
+func normalizeDocumentFormats(input []models.DocumentFormat) []models.DocumentFormat {
+	if len(input) == 0 {
+		return nil
+	}
+	formats := make([]models.DocumentFormat, 0, len(input))
+	seen := make(map[models.DocumentFormat]struct{}, len(input))
+	for _, item := range input {
+		format := models.NormalizeDocumentFormat(item)
+		if !models.IsValidDocumentFormat(format) {
+			continue
+		}
+		if _, ok := seen[format]; ok {
+			continue
+		}
+		seen[format] = struct{}{}
+		formats = append(formats, format)
+	}
+	return formats
 }
 
 func resolveAdminDocumentRouteKey(documentID string, readerSlug *string) string {

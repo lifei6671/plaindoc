@@ -227,6 +227,33 @@ func TestRouter_WorkspaceOnlyOfficeCallbackPersistsFileRevision(t *testing.T) {
 	if savedBlob.SizeBytes != int64(len(callbackBinary)) {
 		t.Fatalf("expected saved blob size %d, got %d", len(callbackBinary), savedBlob.SizeBytes)
 	}
+
+	var auditLog struct {
+		ActorUserID *string `gorm:"column:actor_user_id"`
+		Module      string  `gorm:"column:module"`
+		Action      string  `gorm:"column:action"`
+		TargetType  string  `gorm:"column:target_type"`
+		TargetID    string  `gorm:"column:target_id"`
+		Summary     string  `gorm:"column:summary"`
+		DetailJSON  string  `gorm:"column:detail_json"`
+	}
+	if err := database.ORM.Table("audit_logs").
+		Select("actor_user_id", "module", "action", "target_type", "target_id", "summary", "detail_json").
+		Where("module = ? AND action = ? AND target_type = ? AND target_id = ?", "document", "update", "document", documentID).
+		Order("id DESC").
+		Take(&auditLog).Error; err != nil {
+		t.Fatalf("query onlyoffice callback audit log failed: %v", err)
+	}
+	if auditLog.ActorUserID == nil || strings.TrimSpace(*auditLog.ActorUserID) != ownerUserID {
+		t.Fatalf("expected audit actor %q, got %+v", ownerUserID, auditLog.ActorUserID)
+	}
+	if auditLog.Summary != "onlyoffice callback updated office document" {
+		t.Fatalf("unexpected onlyoffice audit summary: %+v", auditLog)
+	}
+	if !strings.Contains(auditLog.DetailJSON, `"source":"onlyoffice_callback"`) ||
+		!strings.Contains(auditLog.DetailJSON, `"contentVersion":2`) {
+		t.Fatalf("expected onlyoffice audit detail payload, got %s", auditLog.DetailJSON)
+	}
 }
 
 func TestRouter_WorkspaceOnlyOfficeCallbackRejectsInvalidPayload(t *testing.T) {

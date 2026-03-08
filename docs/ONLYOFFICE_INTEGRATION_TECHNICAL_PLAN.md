@@ -1,7 +1,8 @@
 # ONLYOFFICE 一等文档集成技术方案
 
-**文档状态**: Draft  
+**文档状态**: Completed  
 **创建日期**: 2026-03-06  
+**完成日期**: 2026-03-08  
 **适用范围**: `apps/server`、`apps/web`、`docs`  
 **目标**: 在不走“附件编辑”模型的前提下，引入 Word/Excel 一等文档能力，支持工作区编辑、前端阅读页、分享阅读页；同时明确其不参与全文搜索与 sitemap。
 
@@ -162,7 +163,7 @@ Office 文档统一按格式过滤：
   - 写入 file revision
   - 更新 `documents.current_blob_id + content_version + updated_at`
 - [x] 删除文档时补 Office 正文文件生命周期清理
-- [ ] 让权限服务按“文档是否可读/可写”工作，不与 Markdown 耦合
+- [x] 让权限服务按“文档是否可读/可写”工作，不与 Markdown 耦合
 
 ### 4.3 工作区后端 API
 
@@ -172,7 +173,7 @@ Office 文档统一按格式过滤：
 - [x] 新增工作区 ONLYOFFICE 编辑配置接口
 - [x] 新增工作区 ONLYOFFICE callback 接口
 - [x] 新增 Office 正文文件受控访问接口，供 Document Server 拉取
-- [ ] 文档重命名、标识、可见性接口保持复用，但要兼容 Office 文档
+- [x] 文档重命名、标识、可见性接口保持复用，但要兼容 Office 文档
 - [x] Markdown 专属接口加格式保护：
   - 远程图片本地化
   - Markdown 主题
@@ -196,8 +197,8 @@ Office 文档统一按格式过滤：
 
 ### 4.5 阅读页与分享阅读页
 
-- [ ] `ReaderPageService` 增加格式判别，按格式构建不同 view model
-- [ ] `DocumentShareService` 增加格式判别，按格式构建不同分享页 view model
+- [x] `ReaderPageService` 增加格式判别，按格式构建不同 view model
+- [x] `DocumentShareService` 增加格式判别，按格式构建不同分享页 view model
 - [x] `apps/web/src/ssr/render-space-reader.tsx` 改为双模式：
   - Markdown 输出 HTML 正文
   - Office 输出阅读容器与只读状态数据
@@ -221,18 +222,16 @@ Office 文档统一按格式过滤：
 
 ### 4.7 首页与阅读入口联动
 
-- [ ] 若 Office 文档具备阅读页，则首页空间可见性逻辑可继续把 Office 文档视作“可读文档”
-- [ ] `ReaderPageService.ResolveLandingDocumentID()` 需要按格式选择首篇可读文档
-- [ ] 若一个空间首篇是 Office 文档，`/r/:spaceId` 自动跳转也应正常进入 Office 阅读页
-- [ ] 首页卡片、后台文档列表可增加格式标识，避免管理员误判内容类型
+- [x] 若 Office 文档具备阅读页，则首页空间可见性逻辑可继续把 Office 文档视作“可读文档”
+- [x] `ReaderPageService.ResolveLandingDocumentID()` 需要按格式选择首篇可读文档
+- [x] 若一个空间首篇是 Office 文档，`/r/:spaceId` 自动跳转也应正常进入 Office 阅读页
+- [x] 本期收口：后台文档列表已增加格式标识；首页卡片格式标识不纳入本期实现范围
 
 ### 4.8 运营、审计与后台治理
 
-- [ ] 后台文档列表增加格式字段/筛选
-- [ ] 审计日志补充 Office 文档编辑回写记录
-- [ ] 管理端若支持批量操作，需按格式限制：
-  - Markdown 主题设置仅对 Markdown
-  - Markdown 模板能力仅对 Markdown
+- [x] 后台文档列表增加格式字段/筛选
+- [x] 审计日志补充 Office 文档编辑回写记录
+- [x] 本期收口：管理端不新增按格式区分的批量操作入口；Markdown 专属能力继续由接口侧格式保护
 - [x] 系统配置中预留 ONLYOFFICE 连接参数：
   - Document Server 地址
   - JWT 密钥
@@ -241,8 +240,8 @@ Office 文档统一按格式过滤：
 ### 4.9 测试与文档
 
 - [x] 迁移测试：三库结构与回填数据验证
-- [ ] 仓储测试：Office 正文回写事务、版本递增、清理补偿
-- [ ] Handler/Service 测试：
+- [x] 仓储测试：Office 正文回写事务、版本递增、清理补偿
+- [x] Handler/Service 测试：
   - [x] 创建 Office 文档
   - [x] 工作区编辑配置生成
   - [x] callback 成功/失败
@@ -254,8 +253,8 @@ Office 文档统一按格式过滤：
   - [x] 工作区格式切换
   - [x] 阅读/分享只读挂载
   - [x] Markdown 功能按格式禁用
-- [ ] 更新 `docs/README.md` 索引
-- [ ] 后续把最终结果并入 `BACKEND_DEVELOPER_GUIDE.md` 与 `FRONTEND_DEVELOPER_GUIDE.md`
+- [x] 更新 `docs/README.md` 索引
+- [x] 后续把最终结果并入 `BACKEND_DEVELOPER_GUIDE.md` 与 `FRONTEND_DEVELOPER_GUIDE.md`
 
 ---
 

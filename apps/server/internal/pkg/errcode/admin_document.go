@@ -11,6 +11,7 @@ type AdminDocumentErrorTargets struct {
 	Forbidden               error
 	InvalidStatusFilter     error
 	InvalidVisibilityFilter error
+	InvalidFormatFilter     error
 	InvalidDocumentID       error
 	InvalidStatus           error
 	BanReasonRequired       error
@@ -21,6 +22,7 @@ type AdminDocumentErrorTargets struct {
 var (
 	ErrAdminDocumentInvalidStatusFilter     = errors.New("invalid admin document status filter")
 	ErrAdminDocumentInvalidVisibilityFilter = errors.New("invalid admin document visibility filter")
+	ErrAdminDocumentInvalidFormatFilter     = errors.New("invalid admin document format filter")
 	ErrAdminDocumentInvalidDocumentID       = errors.New("admin document id is invalid")
 	ErrAdminDocumentInvalidStatus           = errors.New("admin document status is invalid")
 	ErrAdminDocumentBanReasonRequired       = errors.New("admin document ban reason is required")
@@ -32,6 +34,7 @@ var defaultAdminDocumentErrorTargets = AdminDocumentErrorTargets{
 	Forbidden:               ErrAdminForbidden,
 	InvalidStatusFilter:     ErrAdminDocumentInvalidStatusFilter,
 	InvalidVisibilityFilter: ErrAdminDocumentInvalidVisibilityFilter,
+	InvalidFormatFilter:     ErrAdminDocumentInvalidFormatFilter,
 	InvalidDocumentID:       ErrAdminDocumentInvalidDocumentID,
 	InvalidStatus:           ErrAdminDocumentInvalidStatus,
 	BanReasonRequired:       ErrAdminDocumentBanReasonRequired,
@@ -65,6 +68,12 @@ func MapAdminDocumentError(err error, targets ...AdminDocumentErrorTargets) erro
 			Status:  http.StatusBadRequest,
 			Code:    response.CodeInvalidVisibility,
 			Message: "visibility filter is invalid",
+		},
+		AppErrorMapping{
+			Target:  resolvedTargets.InvalidFormatFilter,
+			Status:  http.StatusBadRequest,
+			Code:    response.CodeInvalidRequest,
+			Message: "document format filter is invalid",
 		},
 		AppErrorMapping{
 			Target:  resolvedTargets.InvalidDocumentID,

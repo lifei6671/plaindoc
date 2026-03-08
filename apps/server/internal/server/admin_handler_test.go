@@ -1613,6 +1613,16 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	docIDB := "01h1admindocument000000000002"
 	insertAdminTestDocument(t, database, spaceIDA, nodeIDA, docIDA, "Scoped Doc A", "public")
 	insertAdminTestDocument(t, database, spaceIDB, nodeIDB, docIDB, "Unscoped Doc B", "authenticated")
+	if err := database.ORM.Table("documents").
+		Where("document_id = ?", docIDB).
+		Updates(map[string]any{
+			"format":           "docx",
+			"source_blob_id":   "01h1admindocblob000000000002",
+			"source_file_name": "unscoped-doc-b.docx",
+			"source_mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		}).Error; err != nil {
+		t.Fatalf("update admin test document format failed: %v", err)
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := database.ORM.Table("document_revisions").Create(map[string]any{
@@ -1662,6 +1672,29 @@ func TestRouter_AdminDocumentListUpdateDeleteAndScopeGuard(t *testing.T) {
 	}
 	if strings.Contains(spaceAdminListRec.Body.String(), docIDB) {
 		t.Fatalf("expected space_admin list to hide unscoped document %s, body=%s", docIDB, spaceAdminListRec.Body.String())
+	}
+
+	platformFormatListReq := httptest.NewRequest(http.MethodGet, "/api/admin/documents?format=docx&page=1&pageSize=50", nil)
+	platformFormatListReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	platformFormatListRec := serve(platformFormatListReq)
+	if platformFormatListRec.Code != http.StatusOK {
+		t.Fatalf("expected platform admin format list status 200, got %d body=%s", platformFormatListRec.Code, platformFormatListRec.Body.String())
+	}
+	if !strings.Contains(platformFormatListRec.Body.String(), docIDB) || !strings.Contains(platformFormatListRec.Body.String(), `"format":"docx"`) {
+		t.Fatalf("expected format-filtered list to contain docx document %s, body=%s", docIDB, platformFormatListRec.Body.String())
+	}
+	if strings.Contains(platformFormatListRec.Body.String(), docIDA) {
+		t.Fatalf("expected markdown document %s excluded from docx filter, body=%s", docIDA, platformFormatListRec.Body.String())
+	}
+
+	invalidFormatListReq := httptest.NewRequest(http.MethodGet, "/api/admin/documents?format=pdf&page=1&pageSize=50", nil)
+	invalidFormatListReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	invalidFormatListRec := serve(invalidFormatListReq)
+	if invalidFormatListRec.Code != http.StatusOK {
+		t.Fatalf("expected invalid format filter transport status 200, got %d body=%s", invalidFormatListRec.Code, invalidFormatListRec.Body.String())
+	}
+	if !strings.Contains(invalidFormatListRec.Body.String(), "document format filter is invalid") {
+		t.Fatalf("expected invalid format filter message, body=%s", invalidFormatListRec.Body.String())
 	}
 
 	banWithoutReasonReq := httptest.NewRequest(

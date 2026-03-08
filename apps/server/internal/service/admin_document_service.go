@@ -38,11 +38,22 @@ const (
 	AdminDocumentVisibilityFilterMember        AdminDocumentVisibilityFilter = "member"
 )
 
+// AdminDocumentFormatFilter 管理后台文档格式过滤条件。
+type AdminDocumentFormatFilter string
+
+const (
+	AdminDocumentFormatFilterAll      AdminDocumentFormatFilter = "all"
+	AdminDocumentFormatFilterMarkdown AdminDocumentFormatFilter = "markdown"
+	AdminDocumentFormatFilterDOCX     AdminDocumentFormatFilter = "docx"
+	AdminDocumentFormatFilterXLSX     AdminDocumentFormatFilter = "xlsx"
+)
+
 // AdminDocumentRecord 后台文档列表项。
 type AdminDocumentRecord struct {
 	DocumentID       string
 	DocumentRouteKey string
 	NodeID           string
+	Format           models.DocumentFormat
 	Title            string
 	SpaceID          string
 	SpaceName        string
@@ -65,6 +76,7 @@ type ListAdminDocumentsInput struct {
 	SpaceID          string
 	StatusFilter     AdminDocumentStatusFilter
 	VisibilityFilter AdminDocumentVisibilityFilter
+	FormatFilter     AdminDocumentFormatFilter
 	Page             int
 	PageSize         int
 }
@@ -146,6 +158,10 @@ func (s *AdminDocumentService) ListDocuments(
 	if err != nil {
 		return ListAdminDocumentsResult{}, err
 	}
+	formats, err := resolveAdminDocumentFormats(input.FormatFilter)
+	if err != nil {
+		return ListAdminDocumentsResult{}, err
+	}
 
 	page, pageSize := normalizeAdminDocumentPagination(input.Page, input.PageSize)
 	records, total, err := s.documentRepo.ListForAdmin(ctx, repository.ListAdminDocumentsParams{
@@ -155,6 +171,7 @@ func (s *AdminDocumentService) ListDocuments(
 		SpaceID:          strings.TrimSpace(input.SpaceID),
 		Statuses:         statuses,
 		Visibilities:     visibilities,
+		Formats:          formats,
 		Limit:            pageSize,
 		Offset:           (page - 1) * pageSize,
 	})
@@ -431,6 +448,7 @@ func (s *AdminDocumentService) buildRecordFromAccess(
 	return AdminDocumentRecord{
 		DocumentID:       accessInfo.Document.DocumentID,
 		NodeID:           accessInfo.Document.NodeID,
+		Format:           models.NormalizeDocumentFormat(accessInfo.Document.Format),
 		Title:            accessInfo.Document.Title,
 		SpaceID:          accessInfo.SpaceID,
 		SpaceName:        accessInfo.SpaceName,
@@ -487,6 +505,25 @@ func resolveAdminDocumentVisibilities(filter AdminDocumentVisibilityFilter) ([]m
 	}
 }
 
+func resolveAdminDocumentFormats(filter AdminDocumentFormatFilter) ([]models.DocumentFormat, error) {
+	switch normalizeAdminDocumentFormatFilter(filter) {
+	case "", AdminDocumentFormatFilterAll:
+		return []models.DocumentFormat{
+			models.DocumentFormatMarkdown,
+			models.DocumentFormatDOCX,
+			models.DocumentFormatXLSX,
+		}, nil
+	case AdminDocumentFormatFilterMarkdown:
+		return []models.DocumentFormat{models.DocumentFormatMarkdown}, nil
+	case AdminDocumentFormatFilterDOCX:
+		return []models.DocumentFormat{models.DocumentFormatDOCX}, nil
+	case AdminDocumentFormatFilterXLSX:
+		return []models.DocumentFormat{models.DocumentFormatXLSX}, nil
+	default:
+		return nil, errcode.ErrAdminDocumentInvalidFormatFilter
+	}
+}
+
 func normalizeAdminDocumentStatusFilter(filter AdminDocumentStatusFilter) AdminDocumentStatusFilter {
 	value := strings.ToLower(strings.TrimSpace(string(filter)))
 	if value == "" {
@@ -501,6 +538,14 @@ func normalizeAdminDocumentVisibilityFilter(filter AdminDocumentVisibilityFilter
 		return ""
 	}
 	return AdminDocumentVisibilityFilter(value)
+}
+
+func normalizeAdminDocumentFormatFilter(filter AdminDocumentFormatFilter) AdminDocumentFormatFilter {
+	value := strings.ToLower(strings.TrimSpace(string(filter)))
+	if value == "" {
+		return ""
+	}
+	return AdminDocumentFormatFilter(value)
 }
 
 func normalizeAdminDocumentPagination(page int, pageSize int) (int, int) {
@@ -539,6 +584,7 @@ func mapAdminDocumentRecord(record repository.AdminDocumentListRecord) AdminDocu
 		DocumentID:       documentID,
 		DocumentRouteKey: documentRouteKey,
 		NodeID:           record.Document.NodeID,
+		Format:           models.NormalizeDocumentFormat(record.Document.Format),
 		Title:            record.Document.Title,
 		SpaceID:          record.SpaceID,
 		SpaceName:        record.SpaceName,

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -375,7 +376,80 @@ func (h *workspaceHandler) HandleOnlyOfficeCallback(c *gin.Context) {
 	if h.renderCache != nil {
 		h.renderCache.PurgeDoc(current.DocumentID)
 	}
+	if auditErr := h.recordOnlyOfficeCallbackAudit(c.Request.Context(), onlyOfficeCallbackAuditRecord{
+		ActorUserID:    actorUserID,
+		RequestID:      response.RequestIDFromContext(c),
+		DocumentID:     current.DocumentID,
+		SpaceID:        current.SpaceID,
+		NodeID:         current.NodeID,
+		Format:         current.Format,
+		Version:        nextVersion,
+		ContentVersion: nextContentVersion,
+		SourceBlobID:   sourceBlob.BlobID,
+		SourceFileName: sourceFileName,
+		SourceMimeType: sourceMimeType,
+		OccurredAt:     now,
+	}); auditErr != nil {
+		setRequestErrmsg(c, auditErr, "记录 ONLYOFFICE 编辑审计失败")
+	}
 	writeOnlyOfficeCallbackResult(c, 0)
+}
+
+type onlyOfficeCallbackAuditRecord struct {
+	ActorUserID    string
+	RequestID      string
+	DocumentID     string
+	SpaceID        string
+	NodeID         string
+	Format         models.DocumentFormat
+	Version        int
+	ContentVersion int
+	SourceBlobID   string
+	SourceFileName string
+	SourceMimeType string
+	OccurredAt     time.Time
+}
+
+func (h *workspaceHandler) recordOnlyOfficeCallbackAudit(
+	ctx context.Context,
+	record onlyOfficeCallbackAuditRecord,
+) error {
+	if h == nil || h.auditLogRepo == nil {
+		return nil
+	}
+
+	detailJSON, err := json.Marshal(map[string]any{
+		"source":         "onlyoffice_callback",
+		"documentId":     strings.TrimSpace(record.DocumentID),
+		"spaceId":        strings.TrimSpace(record.SpaceID),
+		"nodeId":         strings.TrimSpace(record.NodeID),
+		"format":         models.NormalizeDocumentFormat(record.Format),
+		"version":        record.Version,
+		"contentVersion": record.ContentVersion,
+		"sourceBlobId":   strings.TrimSpace(record.SourceBlobID),
+		"sourceFileName": strings.TrimSpace(record.SourceFileName),
+		"sourceMimeType": strings.TrimSpace(record.SourceMimeType),
+	})
+	if err != nil {
+		return err
+	}
+
+	var actorUserID *string
+	if normalizedActorUserID := strings.TrimSpace(record.ActorUserID); normalizedActorUserID != "" {
+		actorUserID = &normalizedActorUserID
+	}
+
+	return h.auditLogRepo.Create(ctx, &models.AuditLog{
+		ActorUserID: actorUserID,
+		Module:      string(service.AdminAuditModuleDocument),
+		Action:      string(service.AdminAuditActionUpdate),
+		TargetType:  "document",
+		TargetID:    strings.TrimSpace(record.DocumentID),
+		Summary:     "onlyoffice callback updated office document",
+		DetailJSON:  string(detailJSON),
+		RequestID:   strings.TrimSpace(record.RequestID),
+		CreatedAt:   record.OccurredAt.UTC(),
+	})
 }
 
 func (h *workspaceHandler) parseOnlyOfficeDocumentToken(

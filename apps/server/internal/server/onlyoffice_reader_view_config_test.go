@@ -69,6 +69,30 @@ func TestRouter_ReaderOnlyOfficeViewConfig_PublicOfficeDocument(t *testing.T) {
 	}
 }
 
+func TestRouter_ReaderLandingRedirectsToOfficeDocument(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "reader-onlyoffice-landing-owner@example.com")
+	spaceID := "01h1readeronlyofficelanding0001"
+	seedOnlyOfficeEnabledConfig(t, database)
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+
+	documentID := createOfficeDocumentForOnlyOfficeTest(t, serve, spaceID, ownerToken, "docx", "空间入口合同")
+	publishOnlyOfficeReaderDocument(t, database, spaceID, documentID)
+
+	req := httptest.NewRequest(http.MethodGet, "/r/"+spaceID, nil)
+	rec := serve(req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected reader landing redirect status 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if location := rec.Header().Get("Location"); location != "/r/"+spaceID+"/"+documentID {
+		t.Fatalf("expected reader landing redirect to office document, got %q", location)
+	}
+}
+
 func TestRouter_ShareOnlyOfficeViewConfig_PublicShare(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

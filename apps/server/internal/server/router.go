@@ -253,6 +253,7 @@ func newRouter(
 		onlyOfficeConfigService,
 		onlyOfficeDocumentTokenService,
 		documentAttachmentTokenService,
+		auditLogRepo,
 		readerRenderCache,
 		searchIndexService,
 	)

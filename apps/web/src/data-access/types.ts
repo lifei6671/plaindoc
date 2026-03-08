@@ -506,6 +506,7 @@ export interface AdminSpaceCategory {
 
 export type AdminDocumentStatusFilter = "all" | "active" | "banned" | "deleted";
 export type AdminDocumentVisibilityFilter = "all" | "public" | "authenticated" | "member";
+export type AdminDocumentFormatFilter = "all" | DocumentFormat;
 
 export interface AdminDocument {
   documentId: string;
@@ -577,6 +578,7 @@ export interface AdminDocumentListInput {
   spaceId?: string;
   status?: AdminDocumentStatusFilter;
   visibility?: AdminDocumentVisibilityFilter;
+  format?: AdminDocumentFormatFilter;
   page?: number;
   pageSize?: number;
 }
