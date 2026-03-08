@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	workspaceDocumentIdentifierPattern   = regexp.MustCompile(`^[a-z0-9-]+$`)
+	workspaceDocumentIdentifierPattern   = regexp.MustCompile(`^[a-z0-9.-]+$`)
 	workspaceReservedDocumentIdentifiers = map[string]struct{}{
 		"admin":    {},
 		"api":      {},
@@ -1508,7 +1508,8 @@ func normalizeWorkspaceDocumentIdentifier(rawIdentifier *string) (*string, error
 	if !workspaceDocumentIdentifierPattern.MatchString(identifier) {
 		return nil, errWorkspaceDocumentIdentifierInvalid
 	}
-	if strings.HasPrefix(identifier, "-") || strings.HasSuffix(identifier, "-") {
+	if strings.HasPrefix(identifier, "-") || strings.HasSuffix(identifier, "-") ||
+		strings.HasPrefix(identifier, ".") || strings.HasSuffix(identifier, ".") {
 		return nil, errWorkspaceDocumentIdentifierInvalid
 	}
 	if _, reserved := workspaceReservedDocumentIdentifiers[identifier]; reserved {

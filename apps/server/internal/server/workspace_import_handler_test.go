@@ -289,8 +289,8 @@ func TestRouter_ImportDocuments_UsesReadmeAsParentAndSkipsEmptyAssetFolders(t *t
 		Take(&communityFolderNode).Error; err != nil {
 		t.Fatalf("query community folder node failed: %v", err)
 	}
-	if communityFolderNode.ParentNodeID == nil || strings.TrimSpace(*communityFolderNode.ParentNodeID) != readmeNode.NodeID {
-		t.Fatalf("expected community folder under guide readme, got parent=%+v want=%s", communityFolderNode.ParentNodeID, readmeNode.NodeID)
+	if communityFolderNode.ParentNodeID != nil {
+		t.Fatalf("expected community folder to be sibling of guide readme, got parent=%+v", communityFolderNode.ParentNodeID)
 	}
 	if communityPostNode.ParentNodeID == nil || strings.TrimSpace(*communityPostNode.ParentNodeID) != communityFolderNode.NodeID {
 		t.Fatalf("expected community post under community folder, got parent=%+v want=%s", communityPostNode.ParentNodeID, communityFolderNode.NodeID)
@@ -313,8 +313,8 @@ func TestRouter_ImportDocuments_UsesReadmeAsParentAndSkipsEmptyAssetFolders(t *t
 		Take(&gocnFolderNode).Error; err != nil {
 		t.Fatalf("query gocn folder node failed: %v", err)
 	}
-	if gocnFolderNode.ParentNodeID == nil || strings.TrimSpace(*gocnFolderNode.ParentNodeID) != readmeNode.NodeID {
-		t.Fatalf("expected gocn folder under guide readme, got parent=%+v want=%s", gocnFolderNode.ParentNodeID, readmeNode.NodeID)
+	if gocnFolderNode.ParentNodeID != nil {
+		t.Fatalf("expected gocn folder to be sibling of guide readme, got parent=%+v", gocnFolderNode.ParentNodeID)
 	}
 	if err := database.ORM.Table("nodes").
 		Select("nodes.node_id", "nodes.parent_node_id", "nodes.title", "nodes.type").
@@ -538,8 +538,8 @@ func TestRouter_ImportDocuments_RootReadmeOwnsDescendantsUntilNestedReadmeOverri
 		Take(&docsFolderNode).Error; err != nil {
 		t.Fatalf("query docs folder failed: %v", err)
 	}
-	if docsFolderNode.ParentNodeID == nil || strings.TrimSpace(*docsFolderNode.ParentNodeID) != rootReadmeNode.NodeID {
-		t.Fatalf("expected docs folder under root readme, got %+v", docsFolderNode.ParentNodeID)
+	if docsFolderNode.ParentNodeID != nil {
+		t.Fatalf("expected docs folder to be sibling of root readme, got %+v", docsFolderNode.ParentNodeID)
 	}
 	assertParentNode("intro", docsFolderNode.NodeID)
 
@@ -554,8 +554,8 @@ func TestRouter_ImportDocuments_RootReadmeOwnsDescendantsUntilNestedReadmeOverri
 		Take(&gocnFolderNode).Error; err != nil {
 		t.Fatalf("query gocn folder failed: %v", err)
 	}
-	if gocnFolderNode.ParentNodeID == nil || strings.TrimSpace(*gocnFolderNode.ParentNodeID) != rootReadmeNode.NodeID {
-		t.Fatalf("expected gocn folder under root readme, got %+v", gocnFolderNode.ParentNodeID)
+	if gocnFolderNode.ParentNodeID != nil {
+		t.Fatalf("expected gocn folder to be sibling of root readme, got %+v", gocnFolderNode.ParentNodeID)
 	}
 	if err := database.ORM.Table("nodes").
 		Select("nodes.node_id", "nodes.parent_node_id", "nodes.type").
@@ -873,8 +873,8 @@ func TestRouter_ImportDocuments_ReadmePreservesSiblingDirectoriesWhenMultipleBra
 		Take(&gocnFolderNode).Error; err != nil {
 		t.Fatalf("query gocn folder failed: %v", err)
 	}
-	if gocnFolderNode.ParentNodeID == nil || strings.TrimSpace(*gocnFolderNode.ParentNodeID) != rootReadmeNode.NodeID {
-		t.Fatalf("expected gocn folder parent=%s, got %+v", rootReadmeNode.NodeID, gocnFolderNode.ParentNodeID)
+	if gocnFolderNode.ParentNodeID != nil {
+		t.Fatalf("expected gocn folder to be sibling of root readme, got %+v", gocnFolderNode.ParentNodeID)
 	}
 
 	var gocn1FolderNode struct {
@@ -887,8 +887,8 @@ func TestRouter_ImportDocuments_ReadmePreservesSiblingDirectoriesWhenMultipleBra
 		Take(&gocn1FolderNode).Error; err != nil {
 		t.Fatalf("query gocn1 folder failed: %v", err)
 	}
-	if gocn1FolderNode.ParentNodeID == nil || strings.TrimSpace(*gocn1FolderNode.ParentNodeID) != rootReadmeNode.NodeID {
-		t.Fatalf("expected gocn1 folder parent=%s, got %+v", rootReadmeNode.NodeID, gocn1FolderNode.ParentNodeID)
+	if gocn1FolderNode.ParentNodeID != nil {
+		t.Fatalf("expected gocn1 folder to be sibling of root readme, got %+v", gocn1FolderNode.ParentNodeID)
 	}
 
 	var nestedReadmeNode struct {
@@ -927,6 +927,141 @@ func TestRouter_ImportDocuments_ReadmePreservesSiblingDirectoriesWhenMultipleBra
 			Take(&node).Error; err != nil {
 			t.Fatalf("query gocn1 child %s failed: %v", title, err)
 		}
+	}
+}
+
+func TestRouter_ImportDocuments_ReadmePeersWithMultipleChildDirsAndPreservesFileIdentifiers(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "import-readme-peer-ident-owner@example.com")
+	spaceID := "01h1importreadmepeerident001"
+	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
+
+	zipContent := buildWorkspaceImportZIP(t, map[string][]byte{
+		"README.md":                   []byte("# 根 README"),
+		"gocn/README.md":              []byte("# GoCN README"),
+		"gocn/2018-04/read-1.md":      []byte("# 2018-04 read-1"),
+		"gocn/2018-03/read-1.md":      []byte("# 2018-03 read-1"),
+		"gocn/2018-03/read-10.md":     []byte("# 2018-03 read-10"),
+	})
+
+	body, contentType := buildWorkspaceImportMultipartBody(t, "", map[string][]byte{
+		"readme-peer-ident.zip": zipContent,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/spaces/"+spaceID+"/imports", body)
+	req.Header.Set("Authorization", "Bearer "+ownerToken)
+	req.Header.Set("Content-Type", contentType)
+	rec := serve(req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected import status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var rootReadmeNode struct {
+		NodeID     string  `gorm:"column:node_id"`
+		ReaderSlug *string `gorm:"column:reader_slug"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.node_id", "nodes.reader_slug").
+		Where("space_id = ? AND title = ? AND parent_node_id IS NULL", spaceID, "README").
+		Take(&rootReadmeNode).Error; err != nil {
+		t.Fatalf("query root readme failed: %v", err)
+	}
+	if rootReadmeNode.ReaderSlug == nil || strings.TrimSpace(*rootReadmeNode.ReaderSlug) != "gocn" {
+		t.Fatalf("expected root readme identifier gocn, got %+v", rootReadmeNode.ReaderSlug)
+	}
+
+	var nestedReadmeNode struct {
+		NodeID       string  `gorm:"column:node_id"`
+		ParentNodeID *string `gorm:"column:parent_node_id"`
+		ReaderSlug   *string `gorm:"column:reader_slug"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.node_id", "nodes.parent_node_id", "nodes.reader_slug").
+		Where("space_id = ? AND title = ? AND parent_node_id = ?", spaceID, "README", rootReadmeNode.NodeID).
+		Take(&nestedReadmeNode).Error; err != nil {
+		t.Fatalf("query nested readme failed: %v", err)
+	}
+	if nestedReadmeNode.ParentNodeID == nil || strings.TrimSpace(*nestedReadmeNode.ParentNodeID) != rootReadmeNode.NodeID {
+		t.Fatalf("expected nested readme sibling under root readme, got %+v", nestedReadmeNode.ParentNodeID)
+	}
+	if nestedReadmeNode.ReaderSlug == nil || strings.TrimSpace(*nestedReadmeNode.ReaderSlug) == "" {
+		t.Fatalf("expected nested readme random identifier, got %+v", nestedReadmeNode.ReaderSlug)
+	}
+	if identifier := strings.TrimSpace(*nestedReadmeNode.ReaderSlug); identifier == "2018-03" || identifier == "2018-04" {
+		t.Fatalf("expected nested readme identifier to be randomized when multiple child dirs exist, got %q", identifier)
+	}
+
+	var folder201803 struct {
+		NodeID       string  `gorm:"column:node_id"`
+		ParentNodeID *string `gorm:"column:parent_node_id"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.node_id", "nodes.parent_node_id").
+		Where("space_id = ? AND title = ? AND type = ?", spaceID, "2018-03", "folder").
+		Take(&folder201803).Error; err != nil {
+		t.Fatalf("query 2018-03 folder failed: %v", err)
+	}
+	if folder201803.ParentNodeID == nil || strings.TrimSpace(*folder201803.ParentNodeID) != rootReadmeNode.NodeID {
+		t.Fatalf("expected 2018-03 folder sibling under root readme, got %+v", folder201803.ParentNodeID)
+	}
+
+	var folder201804 struct {
+		NodeID       string  `gorm:"column:node_id"`
+		ParentNodeID *string `gorm:"column:parent_node_id"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.node_id", "nodes.parent_node_id").
+		Where("space_id = ? AND title = ? AND type = ?", spaceID, "2018-04", "folder").
+		Take(&folder201804).Error; err != nil {
+		t.Fatalf("query 2018-04 folder failed: %v", err)
+	}
+	if folder201804.ParentNodeID == nil || strings.TrimSpace(*folder201804.ParentNodeID) != rootReadmeNode.NodeID {
+		t.Fatalf("expected 2018-04 folder sibling under root readme, got %+v", folder201804.ParentNodeID)
+	}
+
+	var read201803 struct {
+		ReaderSlug *string `gorm:"column:reader_slug"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.reader_slug").
+		Where("space_id = ? AND title = ? AND parent_node_id = ?", spaceID, "read-1", folder201803.NodeID).
+		Take(&read201803).Error; err != nil {
+		t.Fatalf("query 2018-03 read-1 failed: %v", err)
+	}
+	if read201803.ReaderSlug == nil || strings.TrimSpace(*read201803.ReaderSlug) != "read-1.md" {
+		t.Fatalf("expected 2018-03 read-1 identifier read-1.md, got %+v", read201803.ReaderSlug)
+	}
+
+	var read201804 struct {
+		ReaderSlug *string `gorm:"column:reader_slug"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.reader_slug").
+		Where("space_id = ? AND title = ? AND parent_node_id = ?", spaceID, "read-1", folder201804.NodeID).
+		Take(&read201804).Error; err != nil {
+		t.Fatalf("query 2018-04 read-1 failed: %v", err)
+	}
+	if read201804.ReaderSlug == nil || strings.TrimSpace(*read201804.ReaderSlug) == "" {
+		t.Fatalf("expected 2018-04 read-1 randomized identifier, got %+v", read201804.ReaderSlug)
+	}
+	if strings.TrimSpace(*read201804.ReaderSlug) == "read-1.md" {
+		t.Fatalf("expected duplicate read-1 identifier to be randomized, got %+v", read201804.ReaderSlug)
+	}
+
+	var read10 struct {
+		ReaderSlug *string `gorm:"column:reader_slug"`
+	}
+	if err := database.ORM.Table("nodes").
+		Select("nodes.reader_slug").
+		Where("space_id = ? AND title = ? AND parent_node_id = ?", spaceID, "read-10", folder201803.NodeID).
+		Take(&read10).Error; err != nil {
+		t.Fatalf("query 2018-03 read-10 failed: %v", err)
+	}
+	if read10.ReaderSlug == nil || strings.TrimSpace(*read10.ReaderSlug) != "read-10.md" {
+		t.Fatalf("expected read-10 identifier read-10.md, got %+v", read10.ReaderSlug)
 	}
 }
 

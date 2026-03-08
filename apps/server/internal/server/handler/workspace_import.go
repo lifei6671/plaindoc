@@ -791,6 +791,16 @@ func computeWorkspaceImportLogicalSubdirPath(
 	return strings.Join(preservedSegments, "/")
 }
 
+func workspaceImportReadmeOwnsChildDirectories(
+	runtimeState *workspaceImportRuntime,
+	readmeDirPath string,
+) bool {
+	if runtimeState == nil {
+		return true
+	}
+	return len(runtimeState.importableChildDirsByDir[normalizeWorkspaceImportDirPath(readmeDirPath)]) <= 1
+}
+
 func buildWorkspaceImportSiblingTitleIndex(nodes []repository.WorkspaceTreeNodeRecord) map[string]map[string]struct{} {
 	index := make(map[string]map[string]struct{})
 	for _, node := range nodes {
@@ -1006,12 +1016,36 @@ func (h *workspaceHandler) resolveWorkspaceImportDirectoryContainerNodeID(
 		if !exists || strings.TrimSpace(readmeNodeID) == "" {
 			return nil, fmt.Errorf("readme container is not ready for %s", readmePath)
 		}
+		if normalizedDirPath == readmeDirPath {
+			return normalizeOptionalString(&readmeNodeID), nil
+		}
+
+		baseNodeID := normalizeOptionalString(&readmeNodeID)
+		cacheBaseKey := "readme:" + readmeDirPath
+		if !workspaceImportReadmeOwnsChildDirectories(runtimeState, readmeDirPath) {
+			if readmeDirPath == "" {
+				baseNodeID = runtimeState.rootParentID
+			} else {
+				readmeParentNodeID, err := h.resolveWorkspaceImportDirectoryContainerNodeID(
+					ctx,
+					runtimeState,
+					readmeDirPath,
+					parentWorkspaceImportDirPath(readmeDirPath),
+					item,
+				)
+				if err != nil {
+					return nil, err
+				}
+				baseNodeID = readmeParentNodeID
+			}
+			cacheBaseKey = "readme-peer:" + readmeDirPath
+		}
 		logicalDirPath := computeWorkspaceImportLogicalSubdirPath(runtimeState, readmeDirPath, normalizedDirPath)
 		return h.ensureWorkspaceImportLogicalDirectoryChain(
 			ctx,
 			runtimeState,
-			normalizeOptionalString(&readmeNodeID),
-			"readme:"+readmeDirPath,
+			baseNodeID,
+			cacheBaseKey,
 			logicalDirPath,
 		)
 	}
@@ -1072,13 +1106,13 @@ func (h *workspaceHandler) processWorkspaceImportSource(
 	item.Stage = importItemStageCreatingDocument
 	switch conversion.Format {
 	case models.DocumentFormatMarkdown:
-		createdNodeID, createdDocID, createErr := h.createWorkspaceImportedMarkdownDocument(ctx, runtimeState, parentNodeID, conversion)
+		createdNodeID, createdDocID, createErr := h.createWorkspaceImportedMarkdownDocument(ctx, runtimeState, parentNodeID, conversion, source.SourcePath)
 		if createErr == nil && createdNodeID != nil && isWorkspaceImportReadmeSourcePath(source.SourcePath) {
 			runtimeState.createdReadmeNodeByDir[normalizeWorkspaceImportDirPath(path.Dir(source.SourcePath))] = strings.TrimSpace(*createdNodeID)
 		}
 		return createdNodeID, createdDocID, createErr
 	case models.DocumentFormatDOCX, models.DocumentFormatXLSX:
-		createdNodeID, createdDocID, createErr := h.createWorkspaceImportedOfficeDocument(ctx, runtimeState, parentNodeID, conversion)
+		createdNodeID, createdDocID, createErr := h.createWorkspaceImportedOfficeDocument(ctx, runtimeState, parentNodeID, conversion, source.SourcePath)
 		if createErr == nil && createdNodeID != nil && isWorkspaceImportReadmeSourcePath(source.SourcePath) {
 			runtimeState.createdReadmeNodeByDir[normalizeWorkspaceImportDirPath(path.Dir(source.SourcePath))] = strings.TrimSpace(*createdNodeID)
 		}
@@ -1224,6 +1258,89 @@ func (h *workspaceHandler) convertWorkspaceImportSource(
 	default:
 		return workspaceImportConversionResult{}, errWorkspaceImportUnsupportedType
 	}
+}
+
+func sanitizeWorkspaceImportIdentifierCandidate(rawValue string) string {
+	normalized := strings.ToLower(strings.TrimSpace(rawValue))
+	if normalized == "" {
+		return ""
+	}
+	var builder strings.Builder
+	previousDash := false
+	for _, runeValue := range normalized {
+		switch {
+		case runeValue >= 'a' && runeValue <= 'z', runeValue >= '0' && runeValue <= '9', runeValue == '.', runeValue == '-':
+			builder.WriteRune(runeValue)
+			previousDash = false
+		case runeValue == ' ' || runeValue == '_' || runeValue == '/':
+			if !previousDash && builder.Len() > 0 {
+				builder.WriteByte('-')
+				previousDash = true
+			}
+		default:
+			if !previousDash && builder.Len() > 0 {
+				builder.WriteByte('-')
+				previousDash = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "-.")
+}
+
+func buildWorkspaceImportRandomIdentifier(seed string) string {
+	normalizedSeed := sanitizeWorkspaceImportIdentifierCandidate(seed)
+	if normalizedSeed == "" {
+		normalizedSeed = "import"
+	}
+	suffix := strings.ToLower(ulid.Make().String()[:8])
+	extension := path.Ext(normalizedSeed)
+	stem := strings.TrimSuffix(normalizedSeed, extension)
+	if stem == "" {
+		stem = "import"
+	}
+	return sanitizeWorkspaceImportIdentifierCandidate(stem + "-" + suffix + extension)
+}
+
+func resolveWorkspaceImportReadmeIdentifierCandidate(
+	runtimeState *workspaceImportRuntime,
+	sourcePath string,
+) string {
+	dirPath := normalizeWorkspaceImportDirPath(path.Dir(strings.TrimSpace(sourcePath)))
+	childDirs := runtimeState.importableChildDirsByDir[dirPath]
+	if len(childDirs) == 1 {
+		return sanitizeWorkspaceImportIdentifierCandidate(childDirs[0])
+	}
+	if len(childDirs) > 1 {
+		return ""
+	}
+	if dirPath != "" {
+		return sanitizeWorkspaceImportIdentifierCandidate(path.Base(dirPath))
+	}
+	return ""
+}
+
+func resolveWorkspaceImportIdentifierCandidate(
+	runtimeState *workspaceImportRuntime,
+	sourcePath string,
+) *string {
+	var candidate string
+	if isWorkspaceImportReadmeSourcePath(sourcePath) {
+		candidate = resolveWorkspaceImportReadmeIdentifierCandidate(runtimeState, sourcePath)
+		if candidate == "" && !workspaceImportReadmeOwnsChildDirectories(runtimeState, path.Dir(sourcePath)) {
+			candidate = buildWorkspaceImportRandomIdentifier("readme")
+		}
+	} else {
+		candidate = sanitizeWorkspaceImportIdentifierCandidate(path.Base(strings.TrimSpace(sourcePath)))
+	}
+	if candidate == "" {
+		candidate = buildWorkspaceImportRandomIdentifier(path.Base(strings.TrimSpace(sourcePath)))
+	}
+	normalizedIdentifier, err := normalizeWorkspaceDocumentIdentifier(&candidate)
+	if err != nil || normalizedIdentifier == nil {
+		fallback := buildWorkspaceImportRandomIdentifier(path.Base(strings.TrimSpace(sourcePath)))
+		normalizedIdentifier, _ = normalizeWorkspaceDocumentIdentifier(&fallback)
+	}
+	return normalizedIdentifier
 }
 
 func extractWorkspaceImportMarkdownTitle(content string, fallbackTitle string) string {
@@ -1592,61 +1709,80 @@ func (h *workspaceHandler) createWorkspaceImportedMarkdownDocument(
 	runtimeState *workspaceImportRuntime,
 	parentNodeID *string,
 	conversion workspaceImportConversionResult,
+	sourcePath string,
 ) (*string, *string, error) {
 	now := time.Now().UTC()
 	title := ensureWorkspaceImportUniqueTitle(runtimeState.existingSiblingTitles, parentNodeID, conversion.Title)
+	readerSlug := resolveWorkspaceImportIdentifierCandidate(runtimeState, sourcePath)
 	maxSort, err := h.workspaceRepo.GetMaxNodeSort(ctx, runtimeState.spaceID, parentNodeID)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodeID := strings.ToLower(ulid.Make().String())
-	documentID := nodeID
-	node := &models.Node{
-		NodeID:          nodeID,
-		SpaceID:         runtimeState.spaceID,
-		ParentNodeID:    parentNodeID,
-		Type:            models.NodeTypeDoc,
-		Title:           title,
-		Sort:            maxSort + 1,
-		CreatedByUserID: &runtimeState.actorUserID,
-		UpdatedByUserID: &runtimeState.actorUserID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+
+	var nodeID string
+	var documentID string
+	created := false
+	for attempt := 0; attempt < 8; attempt++ {
+		nodeID = strings.ToLower(ulid.Make().String())
+		documentID = nodeID
+		node := &models.Node{
+			NodeID:          nodeID,
+			SpaceID:         runtimeState.spaceID,
+			ParentNodeID:    parentNodeID,
+			ReaderSlug:      readerSlug,
+			Type:            models.NodeTypeDoc,
+			Title:           title,
+			Sort:            maxSort + 1,
+			CreatedByUserID: &runtimeState.actorUserID,
+			UpdatedByUserID: &runtimeState.actorUserID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		document := &models.Document{
+			DocumentID:      documentID,
+			NodeID:          nodeID,
+			ThemeID:         "default",
+			Visibility:      runtimeState.defaultDocumentVisibility,
+			Status:          models.EntityStatusActive,
+			Title:           title,
+			Format:          models.DocumentFormatMarkdown,
+			ContentMD:       conversion.ContentMD,
+			Version:         1,
+			ContentVersion:  1,
+			CreatedByUserID: &runtimeState.actorUserID,
+			UpdatedByUserID: &runtimeState.actorUserID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		revision := &models.DocumentRevision{
+			DocumentRevisionID: strings.ToLower(ulid.Make().String()),
+			DocumentID:         documentID,
+			Version:            1,
+			ContentMD:          conversion.ContentMD,
+			BaseVersion:        0,
+			EditorUserID:       &runtimeState.actorUserID,
+			Source:             models.RevisionSourceRemote,
+			CreatedAt:          now,
+		}
+		if err := h.workspaceRepo.CreateNode(ctx, repository.WorkspaceCreateNodeParams{
+			Node:       node,
+			Document:   document,
+			Revision:   revision,
+			TouchSpace: runtimeState.spaceID,
+			TouchedAt:  now,
+		}); err != nil {
+			if readerSlug != nil && isWorkspaceUniqueConstraintError(err) {
+				randomized := buildWorkspaceImportRandomIdentifier(derefOptionalString(readerSlug))
+				readerSlug, _ = normalizeWorkspaceDocumentIdentifier(&randomized)
+				continue
+			}
+			return nil, nil, err
+		}
+		created = true
+		break
 	}
-	document := &models.Document{
-		DocumentID:      documentID,
-		NodeID:          nodeID,
-		ThemeID:         "default",
-		Visibility:      runtimeState.defaultDocumentVisibility,
-		Status:          models.EntityStatusActive,
-		Title:           title,
-		Format:          models.DocumentFormatMarkdown,
-		ContentMD:       conversion.ContentMD,
-		Version:         1,
-		ContentVersion:  1,
-		CreatedByUserID: &runtimeState.actorUserID,
-		UpdatedByUserID: &runtimeState.actorUserID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	revision := &models.DocumentRevision{
-		DocumentRevisionID: strings.ToLower(ulid.Make().String()),
-		DocumentID:         documentID,
-		Version:            1,
-		ContentMD:          conversion.ContentMD,
-		BaseVersion:        0,
-		EditorUserID:       &runtimeState.actorUserID,
-		Source:             models.RevisionSourceRemote,
-		CreatedAt:          now,
-	}
-	if err := h.workspaceRepo.CreateNode(ctx, repository.WorkspaceCreateNodeParams{
-		Node:       node,
-		Document:   document,
-		Revision:   revision,
-		TouchSpace: runtimeState.spaceID,
-		TouchedAt:  now,
-	}); err != nil {
-		return nil, nil, err
+	if !created {
+		return nil, nil, errors.New("create imported markdown document exhausted identifier retries")
 	}
 	if h.documentImageAssetService != nil {
 		_ = h.documentImageAssetService.SyncDocumentImageAssets(ctx, service.SyncDocumentImageAssetsInput{
@@ -1672,6 +1808,7 @@ func (h *workspaceHandler) createWorkspaceImportedOfficeDocument(
 	runtimeState *workspaceImportRuntime,
 	parentNodeID *string,
 	conversion workspaceImportConversionResult,
+	sourcePath string,
 ) (*string, *string, error) {
 	now := time.Now().UTC()
 	title := ensureWorkspaceImportUniqueTitle(runtimeState.existingSiblingTitles, parentNodeID, conversion.Title)
@@ -1679,72 +1816,90 @@ func (h *workspaceHandler) createWorkspaceImportedOfficeDocument(
 	if err != nil {
 		return nil, nil, err
 	}
-	nodeID := strings.ToLower(ulid.Make().String())
-	documentID := nodeID
-	sourceBlob, err := h.ensureBlobForContent(
-		ctx,
-		conversion.SourceContent,
-		conversion.SourceMimeType,
-		conversion.SourceFileName,
-		runtimeState.spaceID,
-		documentID,
-		runtimeState.actorUserID,
-		now,
-	)
-	if err != nil {
-		return nil, nil, err
+	readerSlug := resolveWorkspaceImportIdentifierCandidate(runtimeState, sourcePath)
+	var nodeID string
+	var documentID string
+	var sourceBlob *models.DocumentAttachmentBlob
+	created := false
+	for attempt := 0; attempt < 8; attempt++ {
+		nodeID = strings.ToLower(ulid.Make().String())
+		documentID = nodeID
+		sourceBlob, err = h.ensureBlobForContent(
+			ctx,
+			conversion.SourceContent,
+			conversion.SourceMimeType,
+			conversion.SourceFileName,
+			runtimeState.spaceID,
+			documentID,
+			runtimeState.actorUserID,
+			now,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		node := &models.Node{
+			NodeID:          nodeID,
+			SpaceID:         runtimeState.spaceID,
+			ParentNodeID:    parentNodeID,
+			ReaderSlug:      readerSlug,
+			Type:            models.NodeTypeDoc,
+			Title:           title,
+			Sort:            maxSort + 1,
+			CreatedByUserID: &runtimeState.actorUserID,
+			UpdatedByUserID: &runtimeState.actorUserID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		document := &models.Document{
+			DocumentID:      documentID,
+			NodeID:          nodeID,
+			ThemeID:         "default",
+			Visibility:      runtimeState.defaultDocumentVisibility,
+			Status:          models.EntityStatusActive,
+			Title:           title,
+			Format:          conversion.Format,
+			ContentMD:       "",
+			Version:         1,
+			ContentVersion:  1,
+			SourceBlobID:    &sourceBlob.BlobID,
+			SourceFileName:  &conversion.SourceFileName,
+			SourceMimeType:  &conversion.SourceMimeType,
+			CreatedByUserID: &runtimeState.actorUserID,
+			UpdatedByUserID: &runtimeState.actorUserID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		fileRevision := &models.DocumentFileRevision{
+			DocumentFileRevisionID: strings.ToLower(ulid.Make().String()),
+			DocumentID:             documentID,
+			BlobID:                 sourceBlob.BlobID,
+			FileName:               conversion.SourceFileName,
+			MimeType:               conversion.SourceMimeType,
+			Version:                1,
+			BaseVersion:            0,
+			EditorUserID:           &runtimeState.actorUserID,
+			Source:                 models.RevisionSourceRemote,
+			CreatedAt:              now,
+		}
+		if err := h.workspaceRepo.CreateNode(ctx, repository.WorkspaceCreateNodeParams{
+			Node:         node,
+			Document:     document,
+			FileRevision: fileRevision,
+			TouchSpace:   runtimeState.spaceID,
+			TouchedAt:    now,
+		}); err != nil {
+			if readerSlug != nil && isWorkspaceUniqueConstraintError(err) {
+				randomized := buildWorkspaceImportRandomIdentifier(derefOptionalString(readerSlug))
+				readerSlug, _ = normalizeWorkspaceDocumentIdentifier(&randomized)
+				continue
+			}
+			return nil, nil, err
+		}
+		created = true
+		break
 	}
-	node := &models.Node{
-		NodeID:          nodeID,
-		SpaceID:         runtimeState.spaceID,
-		ParentNodeID:    parentNodeID,
-		Type:            models.NodeTypeDoc,
-		Title:           title,
-		Sort:            maxSort + 1,
-		CreatedByUserID: &runtimeState.actorUserID,
-		UpdatedByUserID: &runtimeState.actorUserID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	document := &models.Document{
-		DocumentID:      documentID,
-		NodeID:          nodeID,
-		ThemeID:         "default",
-		Visibility:      runtimeState.defaultDocumentVisibility,
-		Status:          models.EntityStatusActive,
-		Title:           title,
-		Format:          conversion.Format,
-		ContentMD:       "",
-		Version:         1,
-		ContentVersion:  1,
-		SourceBlobID:    &sourceBlob.BlobID,
-		SourceFileName:  &conversion.SourceFileName,
-		SourceMimeType:  &conversion.SourceMimeType,
-		CreatedByUserID: &runtimeState.actorUserID,
-		UpdatedByUserID: &runtimeState.actorUserID,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	fileRevision := &models.DocumentFileRevision{
-		DocumentFileRevisionID: strings.ToLower(ulid.Make().String()),
-		DocumentID:             documentID,
-		BlobID:                 sourceBlob.BlobID,
-		FileName:               conversion.SourceFileName,
-		MimeType:               conversion.SourceMimeType,
-		Version:                1,
-		BaseVersion:            0,
-		EditorUserID:           &runtimeState.actorUserID,
-		Source:                 models.RevisionSourceRemote,
-		CreatedAt:              now,
-	}
-	if err := h.workspaceRepo.CreateNode(ctx, repository.WorkspaceCreateNodeParams{
-		Node:         node,
-		Document:     document,
-		FileRevision: fileRevision,
-		TouchSpace:   runtimeState.spaceID,
-		TouchedAt:    now,
-	}); err != nil {
-		return nil, nil, err
+	if !created {
+		return nil, nil, errors.New("create imported office document exhausted identifier retries")
 	}
 	if h.officeHTMLRenderService != nil {
 		_ = h.officeHTMLRenderService.Enqueue(ctx, service.OfficeHTMLRenderTask{

@@ -547,6 +547,24 @@ func TestRouter_UpdateDocumentIdentifier_AccessControlAndConflict(t *testing.T) 
 	if persistedNode.ReaderSlug != nil && strings.TrimSpace(*persistedNode.ReaderSlug) != "" {
 		t.Fatalf("expected reader_slug cleared, got %q", strings.TrimSpace(*persistedNode.ReaderSlug))
 	}
+
+	dottedReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/docs/"+firstDocID+"/identifier",
+		bytes.NewReader([]byte(`{"identifier":"read-1.md"}`)),
+	)
+	dottedReq.Header.Set("Authorization", "Bearer "+ownerToken)
+	dottedReq.Header.Set("Content-Type", "application/json")
+	dottedRec := serve(dottedReq)
+	if dottedRec.Code != http.StatusOK {
+		t.Fatalf("expected dotted identifier status 200, got %d body=%s", dottedRec.Code, dottedRec.Body.String())
+	}
+	dottedPayload := decodeJSONResultData[struct {
+		Identifier *string `json:"identifier"`
+	}](t, dottedRec.Body.Bytes())
+	if dottedPayload.Identifier == nil || *dottedPayload.Identifier != "read-1.md" {
+		t.Fatalf("expected dotted identifier read-1.md, got %#v", dottedPayload.Identifier)
+	}
 }
 
 func TestRouter_ReaderPage_DocumentIDRedirectsToSlugCanonical(t *testing.T) {
