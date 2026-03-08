@@ -1346,29 +1346,7 @@ func (r *gormSpaceRepository) HardDelete(ctx context.Context, spaceID string) (b
 			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
 			Where("n.space_id = ?", normalizedSpaceID)
 
-		if err := tx.Table("document_revisions").
-			Where("document_id IN (?)", documentIDsQuery).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("document_permissions").
-			Where("document_id IN (?)", documentIDsQuery).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("document_image_assets").
-			Where("space_id = ?", normalizedSpaceID).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("document_attachments").
-			Where("space_id = ?", normalizedSpaceID).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("documents").
-			Where("node_id IN (?)", nodeIDsQuery).
-			Delete(nil).Error; err != nil {
+		if _, err := DeleteDocumentsCascadeInTx(tx, documentIDsQuery); err != nil {
 			return err
 		}
 		if err := tx.Table("node_permissions").

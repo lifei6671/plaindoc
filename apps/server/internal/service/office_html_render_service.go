@@ -327,6 +327,26 @@ func (s *OfficeHTMLRenderService) renderOfficeHTML(
 	}
 }
 
+// RenderImportHTML 同步渲染导入场景的 Office HTML。
+// 该入口不会写数据库，仅返回转换后的 HTML，供导入链路继续转 Markdown。
+func (s *OfficeHTMLRenderService) RenderImportHTML(
+	ctx context.Context,
+	format models.DocumentFormat,
+	sourceContent []byte,
+	spaceID string,
+	documentID string,
+) (string, error) {
+	if s == nil {
+		return "", errors.New("office html render service is nil")
+	}
+	return s.renderOfficeHTML(ctx, OfficeHTMLRenderTask{
+		DocumentID:    strings.TrimSpace(documentID),
+		SpaceID:       strings.TrimSpace(spaceID),
+		Format:        format,
+		SourceContent: bytes.Clone(sourceContent),
+	})
+}
+
 func (s *OfficeHTMLRenderService) renderDOCXHTML(
 	ctx context.Context,
 	task OfficeHTMLRenderTask,

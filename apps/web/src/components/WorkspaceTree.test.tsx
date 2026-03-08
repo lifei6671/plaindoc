@@ -6,6 +6,7 @@ import type {
   DocumentShareConfig,
   DocumentTemplateDetail,
   DocumentTemplateSummary,
+  ImportWorkspaceDocumentsResult,
   NodeType,
   TreeNode,
   UpdateDocumentShareInput,
@@ -69,6 +70,11 @@ function createProps(overrides?: {
     templateId?: string;
     format?: "markdown" | "docx" | "xlsx";
   }) => Promise<CreateNodeResult>;
+  onImportDocuments?: (input: {
+    targetNodeId: string | null;
+    files: File[];
+    autoExtractTitle: boolean;
+  }) => Promise<ImportWorkspaceDocumentsResult>;
   onListDocumentTemplates?: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate?: (templateId: string) => Promise<DocumentTemplateDetail>;
 }) {
@@ -98,6 +104,24 @@ function createProps(overrides?: {
     vi
       .fn<(templateId: string) => Promise<DocumentTemplateDetail>>()
       .mockResolvedValue(buildTemplateDetail({ templateId: "tpl-default", contentMd: "# default" }));
+  const onImportDocuments =
+    overrides?.onImportDocuments ??
+    vi
+      .fn<
+        (input: {
+          targetNodeId: string | null;
+          files: File[];
+          autoExtractTitle: boolean;
+        }) => Promise<ImportWorkspaceDocumentsResult>
+      >()
+      .mockResolvedValue({
+        totalCount: 0,
+        successCount: 0,
+        failedCount: 0,
+        items: [],
+        failureItems: [],
+        createdNodes: []
+      });
   const onUpdateDocumentIdentifier = vi
     .fn<(docId: string, identifier: string | null) => Promise<void>>()
     .mockResolvedValue(undefined);
@@ -145,6 +169,7 @@ function createProps(overrides?: {
     officeCreationEnabled: overrides?.officeCreationEnabled ?? false,
     onOpenDocument,
     onCreateNode,
+    onImportDocuments,
     onListDocumentTemplates,
     onGetDocumentTemplate,
     onUpdateDocumentIdentifier,
@@ -423,6 +448,139 @@ describe("WorkspaceTree", () => {
       documentIdentifier: undefined,
       templateId: undefined,
       format: "xlsx"
+    });
+  });
+
+  it("opens import dialog and forwards selected files", async () => {
+    const onImportDocuments = vi
+      .fn<
+        (input: {
+          targetNodeId: string | null;
+          files: File[];
+          autoExtractTitle: boolean;
+        }) => Promise<ImportWorkspaceDocumentsResult>
+      >()
+      .mockResolvedValue({
+        totalCount: 1,
+        successCount: 1,
+        failedCount: 0,
+        items: [
+          {
+            sourceName: "demo.txt",
+            sourcePath: "demo.txt",
+            detectedType: "text",
+            status: "success",
+            stage: "done",
+            createdNodeId: "node-imported",
+            createdDocumentId: "doc-imported"
+          }
+        ],
+        failureItems: [],
+        createdNodes: [
+          {
+            nodeId: "node-imported",
+            documentId: "doc-imported",
+            parentId: "folder-1",
+            title: "demo",
+            type: "doc",
+            format: "markdown"
+          }
+        ]
+      });
+    const props = createProps({
+      nodes: [
+        {
+          id: "folder-1",
+          spaceId: "space-1",
+          parentId: null,
+          type: "folder",
+          title: "目录",
+          sort: 1,
+          children: []
+        }
+      ],
+      onImportDocuments
+    });
+    const user = userEvent.setup();
+    render(<WorkspaceTree {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "打开文档操作菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入" }));
+    await screen.findByRole("heading", { name: "导入" });
+
+    const fileInput = document.querySelector('input[type="file"][accept*=".docx"]') as HTMLInputElement | null;
+    if (!fileInput) {
+      throw new Error("import file input not found");
+    }
+    const file = new File(["hello"], "demo.txt", { type: "text/plain" });
+    await user.upload(fileInput, file);
+    await user.click(screen.getByRole("button", { name: "开始导入" }));
+
+    await waitFor(() => {
+      expect(onImportDocuments).toHaveBeenCalledTimes(1);
+    });
+    expect(onImportDocuments).toHaveBeenCalledWith({
+      targetNodeId: "folder-1",
+      files: [file],
+      autoExtractTitle: false
+    });
+    expect(await screen.findByText("导入结果")).toBeInTheDocument();
+  });
+
+  it("forwards auto extract title option when checked", async () => {
+    const onImportDocuments = vi
+      .fn<
+        (input: {
+          targetNodeId: string | null;
+          files: File[];
+          autoExtractTitle: boolean;
+        }) => Promise<ImportWorkspaceDocumentsResult>
+      >()
+      .mockResolvedValue({
+        totalCount: 1,
+        successCount: 1,
+        failedCount: 0,
+        items: [],
+        failureItems: [],
+        createdNodes: []
+      });
+    const props = createProps({
+      nodes: [
+        {
+          id: "folder-1",
+          spaceId: "space-1",
+          parentId: null,
+          type: "folder",
+          title: "目录",
+          sort: 1,
+          children: []
+        }
+      ],
+      onImportDocuments
+    });
+    const user = userEvent.setup();
+    render(<WorkspaceTree {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "打开文档操作菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "导入" }));
+    await screen.findByRole("heading", { name: "导入" });
+
+    const fileInput = document.querySelector('input[type="file"][accept*=".docx"]') as HTMLInputElement | null;
+    if (!fileInput) {
+      throw new Error("import file input not found");
+    }
+    const file = new File(["# Title"], "demo.md", { type: "text/markdown" });
+    await user.upload(fileInput, file);
+    await user.click(screen.getByRole("checkbox", { name: /自动提取文件名/i }));
+    await user.click(screen.getByRole("button", { name: "开始导入" }));
+
+    await waitFor(() => {
+      expect(onImportDocuments).toHaveBeenCalledTimes(1);
+    });
+    expect(onImportDocuments).toHaveBeenCalledWith({
+      targetNodeId: "folder-1",
+      files: [file],
+      autoExtractTitle: true
     });
   });
 

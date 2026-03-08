@@ -5,6 +5,7 @@ import type {
   DocumentShareConfig,
   DocumentTemplateDetail,
   DocumentTemplateSummary,
+  ImportWorkspaceDocumentsResult,
   NodeType,
   TreeNode,
   UpdateDocumentShareInput,
@@ -26,6 +27,11 @@ interface WorkspaceSidebarProps {
     templateId?: string;
     format?: DocumentFormat;
   }) => Promise<CreateNodeResult>;
+  onImportDocuments: (input: {
+    targetNodeId: string | null;
+    files: File[];
+    autoExtractTitle: boolean;
+  }) => Promise<ImportWorkspaceDocumentsResult>;
   onListDocumentTemplates: () => Promise<DocumentTemplateSummary[]>;
   onGetDocumentTemplate: (templateId: string) => Promise<DocumentTemplateDetail>;
   onUpdateDocumentIdentifier: (docId: string, identifier: string | null) => Promise<void>;
@@ -46,6 +52,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   onOpenDocument,
   officeCreationEnabled,
   onCreateNode,
+  onImportDocuments,
   onListDocumentTemplates,
   onGetDocumentTemplate,
   onUpdateDocumentIdentifier,
@@ -69,6 +76,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
         officeCreationEnabled={officeCreationEnabled}
         onOpenDocument={onOpenDocument}
         onCreateNode={onCreateNode}
+        onImportDocuments={onImportDocuments}
         onListDocumentTemplates={onListDocumentTemplates}
         onGetDocumentTemplate={onGetDocumentTemplate}
         onUpdateDocumentIdentifier={onUpdateDocumentIdentifier}

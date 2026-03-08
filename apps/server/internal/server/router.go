@@ -446,6 +446,8 @@ func newRouter(
 		api.GET("/spaces/:spaceId/tree", workspaceHandler.GetTree)
 		// 在空间下创建目录/文档节点。
 		api.POST("/spaces/:spaceId/nodes", workspaceHandler.CreateNode)
+		// 在空间中导入文档文件。
+		api.POST("/spaces/:spaceId/imports", workspaceHandler.ImportDocuments)
 		// 更新节点（重命名、移动、排序等）。
 		api.PATCH("/nodes/:nodeId", workspaceHandler.UpdateNode)
 		// 移动节点（拖拽排序专用：同级重排 + 跨父级移动）。

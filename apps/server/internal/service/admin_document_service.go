@@ -310,34 +310,12 @@ func (s *AdminDocumentService) DeleteDocument(
 		return err
 	}
 
-	now := time.Now().UTC()
-	nodeDeleted := false
-	if s.workspaceRepo != nil && strings.TrimSpace(accessInfo.Document.NodeID) != "" {
-		deleted, deleteErr := s.workspaceRepo.DeleteNode(
-			ctx,
-			strings.TrimSpace(accessInfo.Document.NodeID),
-			strings.TrimSpace(accessInfo.SpaceID),
-			now,
-		)
-		if deleteErr != nil {
-			return deleteErr
-		}
-		nodeDeleted = deleted
+	deleteMode, deleted, err := s.deleteManagedDocument(ctx, accessInfo)
+	if err != nil {
+		return err
 	}
-
-	documentDeleted, deleteErr := s.documentRepo.HardDelete(ctx, targetDocumentID)
-	if deleteErr != nil {
-		return deleteErr
-	}
-	if !nodeDeleted && !documentDeleted {
+	if !deleted {
 		return errcode.ErrAdminDocumentNotFound
-	}
-
-	deleteMode := "hard_document_only"
-	if nodeDeleted && !documentDeleted {
-		deleteMode = "hard_node_cascade"
-	} else if nodeDeleted && documentDeleted {
-		deleteMode = "hard_node_and_document"
 	}
 
 	var (
@@ -376,6 +354,42 @@ func (s *AdminDocumentService) DeleteDocument(
 	}
 
 	return nil
+}
+
+func (s *AdminDocumentService) deleteManagedDocument(
+	ctx context.Context,
+	accessInfo *repository.DocumentAccessInfo,
+) (string, bool, error) {
+	if s == nil || s.documentRepo == nil {
+		return "", false, errors.New("admin document service dependencies are nil")
+	}
+	if accessInfo == nil {
+		return "", false, nil
+	}
+
+	now := time.Now().UTC()
+	nodeID := strings.TrimSpace(accessInfo.Document.NodeID)
+	spaceID := strings.TrimSpace(accessInfo.SpaceID)
+	documentID := strings.TrimSpace(accessInfo.Document.DocumentID)
+
+	if s.workspaceRepo != nil && nodeID != "" {
+		deleted, err := s.workspaceRepo.DeleteNode(ctx, nodeID, spaceID, now)
+		if err != nil {
+			return "", false, err
+		}
+		if deleted {
+			return "hard_node_cascade", true, nil
+		}
+	}
+
+	deleted, err := s.documentRepo.HardDelete(ctx, documentID)
+	if err != nil {
+		return "", false, err
+	}
+	if deleted {
+		return "hard_document_only", true, nil
+	}
+	return "", false, nil
 }
 
 func (s *AdminDocumentService) ensureCanManageSpace(ctx context.Context, actorUserID string, spaceID string) error {

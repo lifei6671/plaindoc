@@ -69,6 +69,8 @@ import {
   type DocumentRevision,
   type IssueImageObjectKeyResult,
   type ImageHostingGateway,
+  type ImportWorkspaceDocumentsInput,
+  type ImportWorkspaceDocumentsResult,
   type LocalizeRemoteImagesInput,
   type LocalizeRemoteImagesResult,
   type MoveNodeInput,
@@ -813,6 +815,20 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
           templateId: templateID || undefined,
           format: documentFormat || undefined
         })
+      });
+    },
+    async importDocuments(input: ImportWorkspaceDocumentsInput) {
+      const formData = new FormData();
+      if (input.targetNodeId) {
+        formData.set("targetNodeId", input.targetNodeId);
+      }
+      formData.set("autoExtractTitle", String(input.autoExtractTitle));
+      for (const file of input.files) {
+        formData.append("files", file);
+      }
+      return request<ImportWorkspaceDocumentsResult>(`/spaces/${input.spaceId}/imports`, {
+        method: "POST",
+        body: formData
       });
     },
     async updateNode(input: UpdateNodeInput) {

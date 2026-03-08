@@ -84,6 +84,7 @@ import {
   type CreateNodeResult,
   type DocumentAttachment,
   type DocumentFormat,
+  type ImportWorkspaceDocumentsResult,
   type OnlyOfficeEditConfig,
   type DocumentShareConfig,
   type DocumentTemplateDetail,
@@ -1006,6 +1007,7 @@ export default function App() {
     renameNode,
     deleteNode,
     moveNode,
+    reloadTree,
     openDocument,
     setActiveDocumentFormat,
     setContent,
@@ -2612,6 +2614,42 @@ export default function App() {
     [createNode, handleOpenWorkspaceDocument]
   );
 
+  const handleImportWorkspaceDocuments = useCallback(
+    async (input: {
+      targetNodeId: string | null;
+      files: File[];
+      autoExtractTitle: boolean;
+    }): Promise<ImportWorkspaceDocumentsResult> => {
+      if (!activeSpaceId) {
+        throw new Error("当前未激活空间，无法导入文档。");
+      }
+      try {
+        const result = await dataGateway.workspace.importDocuments({
+          spaceId: activeSpaceId,
+          targetNodeId: input.targetNodeId,
+          files: input.files,
+          autoExtractTitle: input.autoExtractTitle
+        });
+        await reloadTree(activeSpaceId);
+        const firstImportedDocumentID =
+          result.createdNodes.find((item) => item.type === "doc" && item.documentId)?.documentId ?? null;
+        if (firstImportedDocumentID) {
+          void handleOpenWorkspaceDocument(firstImportedDocumentID);
+        }
+        setStatusMessage(
+          result.failedCount > 0
+            ? `导入完成：成功 ${result.successCount}，失败 ${result.failedCount}`
+            : `导入完成：成功 ${result.successCount}`
+        );
+        return result;
+      } catch (error) {
+        setStatusMessage(`导入失败：${formatError(error)}`);
+        throw error;
+      }
+    },
+    [activeSpaceId, dataGateway.workspace, handleOpenWorkspaceDocument, reloadTree]
+  );
+
   const loadWorkspaceDocumentTemplates = useCallback(async (): Promise<DocumentTemplateSummary[]> => {
     const payload = await dataGateway.documentTemplate.listTemplates({ page: 1, pageSize: 100 });
     return payload.items;
@@ -3608,6 +3646,7 @@ export default function App() {
             workspaceTree={workspaceTree}
             onOpenDocument={handleOpenWorkspaceDocument}
             onCreateNode={handleCreateWorkspaceNode}
+            onImportDocuments={handleImportWorkspaceDocuments}
             onListDocumentTemplates={loadWorkspaceDocumentTemplates}
             onGetDocumentTemplate={loadWorkspaceDocumentTemplateDetail}
             onUpdateDocumentIdentifier={handleUpdateWorkspaceDocumentIdentifier}

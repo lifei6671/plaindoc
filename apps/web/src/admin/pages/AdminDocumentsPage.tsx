@@ -330,6 +330,15 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
     [confirm, dataGateway.admin, openToast, prompt, runDocumentAction]
   );
 
+  const deleteDocuments = useCallback(
+    async (documentIDs: string[]) => {
+      for (const documentID of documentIDs) {
+        await dataGateway.admin.deleteDocument(documentID);
+      }
+    },
+    [dataGateway.admin]
+  );
+
   const handleDelete = useCallback(
     async (document: AdminDocument) => {
       const confirmed = await confirm({
@@ -342,10 +351,10 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
         return;
       }
       await runDocumentAction(document.documentId, async () => {
-        await dataGateway.admin.deleteDocument(document.documentId);
+        await deleteDocuments([document.documentId]);
       });
     },
-    [confirm, dataGateway.admin, runDocumentAction]
+    [confirm, deleteDocuments, runDocumentAction]
   );
 
   const handleToggleSelectAll = useCallback(
@@ -440,10 +449,10 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
       "删除",
       (document) => document.status !== "deleted",
       async (document) => {
-        await dataGateway.admin.deleteDocument(document.documentId);
+        await deleteDocuments([document.documentId]);
       }
     );
-  }, [confirm, dataGateway.admin, runBatchDocumentAction]);
+  }, [confirm, deleteDocuments, runBatchDocumentAction]);
 
   const selectionDisabled = loading || batchActioning || actioningDocumentID !== null;
 

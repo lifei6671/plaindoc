@@ -605,37 +605,11 @@ func (r *gormDocumentRepository) HardDelete(ctx context.Context, documentID stri
 
 	var documentDeleted bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Table("document_file_revisions").
-			Where("document_id = ?", normalizedDocumentID).
-			Delete(nil).Error; err != nil {
+		deletedDocumentCount, err := DeleteDocumentsCascadeInTx(tx, []string{normalizedDocumentID})
+		if err != nil {
 			return err
 		}
-		if err := tx.Table("document_revisions").
-			Where("document_id = ?", normalizedDocumentID).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("document_permissions").
-			Where("document_id = ?", normalizedDocumentID).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("document_image_assets").
-			Where("document_id = ?", normalizedDocumentID).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("document_attachments").
-			Where("document_id = ?", normalizedDocumentID).
-			Delete(nil).Error; err != nil {
-			return err
-		}
-
-		deleteDocumentTx := tx.Where("document_id = ?", normalizedDocumentID).Delete(&models.Document{})
-		if deleteDocumentTx.Error != nil {
-			return deleteDocumentTx.Error
-		}
-		documentDeleted = deleteDocumentTx.RowsAffected > 0
+		documentDeleted = deletedDocumentCount > 0
 		if !documentDeleted {
 			return nil
 		}

@@ -649,51 +649,35 @@ func (r *gormWorkspaceRepository) DeleteNode(
 	}
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		type deletedNodeSnapshot struct {
-			SpaceID string          `gorm:"column:space_id"`
-			Type    models.NodeType `gorm:"column:type"`
-		}
-		type documentIdentityRow struct {
-			DocumentID string `gorm:"column:document_id"`
-		}
-		var snapshot deletedNodeSnapshot
-		if err := tx.Table("nodes").
-			Select("space_id", "type").
-			Where("node_id = ?", normalizedNodeID).
-			Take(&snapshot).Error; err != nil {
+		scope, err := collectWorkspaceNodeDeleteScopeInTx(ctx, tx, normalizedNodeID)
+		if err != nil {
 			return err
 		}
-		documentID := normalizedNodeID
-		if snapshot.Type == models.NodeTypeDoc {
-			var identity documentIdentityRow
-			if err := tx.Table("documents").
-				Select("document_id").
-				Where("node_id = ?", normalizedNodeID).
-				Take(&identity).Error; err == nil {
-				if strings.TrimSpace(identity.DocumentID) != "" {
-					documentID = strings.TrimSpace(identity.DocumentID)
-				}
-			} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
+		if _, err := DeleteDocumentsCascadeInTx(tx, scope.DocumentIDs); err != nil {
+			return err
 		}
-
-		deleteResult := tx.Where("node_id = ?", normalizedNodeID).Delete(&models.Node{})
-		if deleteResult.Error != nil {
-			return deleteResult.Error
+		deletedNodeCount, err := deleteNodesCascadeInTx(tx, scope.NodeIDs)
+		if err != nil {
+			return err
 		}
-		if deleteResult.RowsAffected == 0 {
+		if deletedNodeCount == 0 {
 			return gorm.ErrRecordNotFound
 		}
 
-		if snapshot.Type == models.NodeTypeDoc {
-			if err := r.enqueueDocumentDeleteInTx(ctx, tx, documentID); err != nil {
-				return err
+		if scope.Root.Type == models.NodeTypeDoc {
+			documentIDs := scope.DocumentIDs
+			if len(documentIDs) == 0 {
+				documentIDs = []string{normalizedNodeID}
+			}
+			for _, documentID := range documentIDs {
+				if err := r.enqueueDocumentDeleteInTx(ctx, tx, documentID); err != nil {
+					return err
+				}
 			}
 		} else {
 			spaceForRebuild := normalizedSpaceID
 			if strings.TrimSpace(spaceForRebuild) == "" {
-				spaceForRebuild = strings.TrimSpace(snapshot.SpaceID)
+				spaceForRebuild = strings.TrimSpace(scope.Root.SpaceID)
 			}
 			if err := r.enqueueSpaceRebuildInTx(ctx, tx, spaceForRebuild); err != nil {
 				return err

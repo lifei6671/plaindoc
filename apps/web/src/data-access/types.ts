@@ -201,6 +201,42 @@ export interface CreateNodeResult {
   docId?: string;
 }
 
+export interface ImportWorkspaceDocumentsInput {
+  spaceId: string;
+  targetNodeId: string | null;
+  files: File[];
+  autoExtractTitle: boolean;
+}
+
+export interface ImportedWorkspaceNode {
+  nodeId: string;
+  documentId?: string;
+  parentId?: string | null;
+  title: string;
+  type: NodeType;
+  format?: DocumentFormat;
+}
+
+export interface ImportWorkspaceItemResult {
+  sourceName: string;
+  sourcePath: string;
+  detectedType: string;
+  status: "success" | "failed" | "skipped";
+  stage: string;
+  errorMessage?: string;
+  createdNodeId?: string;
+  createdDocumentId?: string;
+}
+
+export interface ImportWorkspaceDocumentsResult {
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  items: ImportWorkspaceItemResult[];
+  failureItems: ImportWorkspaceItemResult[];
+  createdNodes: ImportedWorkspaceNode[];
+}
+
 export interface UpdateNodeInput {
   nodeId: string;
   title?: string;
@@ -287,6 +323,7 @@ export interface WorkspaceGateway {
   createSpace(input: CreateSpaceInput): Promise<Space>;
   getTree(spaceId: string): Promise<TreeNode[]>;
   createNode(input: CreateNodeInput): Promise<CreateNodeResult>;
+  importDocuments(input: ImportWorkspaceDocumentsInput): Promise<ImportWorkspaceDocumentsResult>;
   updateNode(input: UpdateNodeInput): Promise<void>;
   deleteNode(nodeId: string): Promise<void>;
   // 目录移动：用于目录树拖拽排序（同级重排 + 跨父级移动）。
