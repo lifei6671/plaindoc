@@ -267,6 +267,9 @@ docker run --rm -p 8080:8080 plaindoc:latest
 
 ### 5.3 使用 Release 产物部署（Linux 裸机/云主机）
 
+**默认账号**： admin@iminho.me 
+**默认密码**：123456
+
 1. 下载对应 tag 的核心文件：
 `plaindoc-server-linux-amd64-<tag>.tar.gz`、`checksums-<tag>.txt`。  
 `plaindoc-web-<tag>.tar.gz` 为可选文件（仅前端产物包，适合只替换前端时使用）。  
