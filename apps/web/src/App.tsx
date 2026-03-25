@@ -2230,7 +2230,8 @@ export default function App() {
       createSharedMarkdownComponents({
         activePreviewTheme,
         tocItems,
-        onTocNavigate: handleTocNavigate
+        onTocNavigate: handleTocNavigate,
+        requestOrigin: typeof window === "undefined" ? undefined : window.location.origin
       }),
     [activePreviewTheme, handleTocNavigate, tocItems]
   );

@@ -59,7 +59,8 @@ function createPayload(
     officeRendering: options?.officeRendering,
     viewer: {
       authenticated: false
-    }
+    },
+    requestOrigin: "https://docs.plaindoc.example"
   };
 }
 
@@ -135,5 +136,30 @@ describe("renderSpaceReader", () => {
     expect(result.html).toContain('data-code-copy-button="1"');
     expect(result.html).toContain('data-code-copy-source="1"');
     expect(result.html).toContain("复制成功");
+  });
+
+  it("renders mermaid loading shell with source payload for async enhancement", () => {
+    const payload = createPayload("markdown");
+    payload.document.contentMd = "```mermaid\ngraph TD\nA-->B\n```";
+
+    const result = renderSpaceReader(payload);
+
+    expect(result.html).toContain('data-reader-hook="mermaid"');
+    expect(result.html).toContain('data-reader-mermaid-source="1"');
+    expect(result.html).toContain("Mermaid 图渲染中");
+  });
+
+  it("renders external markdown links with blank target and nofollow rel", () => {
+    const payload = createPayload("markdown");
+    payload.document.contentMd = [
+      "[外链](https://example.com/docs)",
+      "",
+      "[内链](/guide/getting-started)"
+    ].join("\n");
+
+    const result = renderSpaceReader(payload);
+
+    expect(result.html).toContain('<a href="https://example.com/docs" rel="noopener noreferrer nofollow" target="_blank">外链</a>');
+    expect(result.html).toContain('<a href="/guide/getting-started">内链</a>');
   });
 });

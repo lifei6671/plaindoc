@@ -90,7 +90,8 @@
 7. `apps/web/src/ssr/worker-entry.ts`（Worker 协议入口）
 8. `apps/web/src/ssr/render-space-reader.tsx`（阅读页 SSR HTML 生成）
 9. `apps/web/src/ssr/render-space-reader.async-script.ts`（阅读页异步增强脚本）
-10. `apps/web/scripts/check-dropdown-menu-modal.mjs`（DropdownMenu 规范门禁）
+10. `apps/web/src/ssr/reader-mermaid-runtime.js`（阅读页 Mermaid 浏览器端渲染）
+11. `apps/web/scripts/check-dropdown-menu-modal.mjs`（DropdownMenu 规范门禁）
 
 目录职责：
 
@@ -261,6 +262,7 @@ ONLYOFFICE 相关字段约束：
 2. `data*` 属性必须保留，否则滚动映射/锚点功能会失效。
 3. `code` 节点需保留 `math-inline` / `math-display`，否则公式渲染回归。
 4. 链接/资源协议白名单只放行安全协议（阻断 `javascript:` 等）。
+5. 编辑页预览与阅读页对外部 HTTP(S) 链接统一补 `target="_blank"` 与 `rel="noopener noreferrer nofollow"`；同源链接与页内锚点保持原行为。
 
 ### 7.2 滚动同步依赖项
 
@@ -336,6 +338,12 @@ ONLYOFFICE 相关字段约束：
 3. Office 模式必须隐藏 Markdown 导出、PDF 打印、TOC 和滚动同步相关 UI。
 4. 只读配置由后端 `onlyoffice/view-config` 接口生成，前端不得自行拼接 token 或 Document Server URL。
 
+### 8.3.2 Mermaid 阅读页增强
+
+1. Markdown 阅读页 SSR 对 `mermaid` fenced code block 只输出占位容器，不直接在 Worker 内执行 Mermaid 渲染。
+2. `render-space-reader.async-script.ts` 会动态加载 `reader-mermaid-runtime.js`，在浏览器端把 `Mermaid 图渲染中...` 替换成真实 SVG。
+3. Mermaid 容器必须保留 `data-reader-hook='mermaid'`、`data-reader-mermaid-status`、`data-reader-mermaid-source='1'`，否则异步增强会失效并一直停留在 loading。
+
 ### 8.4 阅读页 DOM Hook 契约（不能随意改）
 
 `render-space-reader.tsx` 与 `render-space-reader.async-script.ts` 共同依赖：
@@ -350,6 +358,9 @@ ONLYOFFICE 相关字段约束：
 8. `data-reader-active`
 9. `data-reader-label-active`
 10. `data-reader-hook='outline'` / `outline-link`
+11. `data-reader-hook='mermaid'`
+12. `data-reader-mermaid-status`
+13. `data-reader-mermaid-source='1'`
 
 规则：异步增强脚本应依赖 `data-reader-*`，而不是视觉 class。
 
@@ -404,6 +415,7 @@ ONLYOFFICE 相关字段约束：
    - 手工验证长文档双向滚动（含长图）
    - 主题切换后再次滚动无漂移
    - 含内嵌 HTML 的 Markdown 正常渲染且恶意协议被拦截
+   - 外链在编辑预览与阅读页均新窗口打开，且带 `nofollow`
 
 ---
 

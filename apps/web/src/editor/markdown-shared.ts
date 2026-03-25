@@ -4,6 +4,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import type { MermaidRenderResult } from "./mermaid-shared";
 import type { PreviewThemeTemplate } from "../preview-themes";
 import { buildMarkdownComponents } from "./markdown-components";
 import { PREVIEW_HTML_SANITIZE_SCHEMA } from "./markdown-sanitize";
@@ -16,6 +17,9 @@ interface CreateMarkdownComponentsInput {
   activePreviewTheme: PreviewThemeTemplate;
   tocItems: TocItem[];
   onTocNavigate: (item: TocItem) => void;
+  requestOrigin?: string;
+  preRenderedMermaidMap?: ReadonlyMap<string, MermaidRenderResult>;
+  includeMermaidSourcePayload?: boolean;
 }
 
 interface CreateSharedRemarkPluginsOptions {
@@ -59,6 +63,9 @@ export function createSharedMarkdownComponents(input: CreateMarkdownComponentsIn
   return buildMarkdownComponents({
     activePreviewTheme: input.activePreviewTheme,
     tocItems: input.tocItems,
-    onTocNavigate: input.onTocNavigate
+    onTocNavigate: input.onTocNavigate,
+    requestOrigin: input.requestOrigin,
+    preRenderedMermaidMap: input.preRenderedMermaidMap,
+    includeMermaidSourcePayload: input.includeMermaidSourcePayload
   });
 }

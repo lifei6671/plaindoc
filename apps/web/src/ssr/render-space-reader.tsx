@@ -562,14 +562,13 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
   const previewThemeClassName = getPreviewThemeClassName(resolvedTheme.id);
   const previewThemeStyleText = buildPreviewThemeStyleText(resolvedTheme);
   const previewThemeCustomStyleText = (resolvedTheme.customCss ?? "").trim();
-  const markdownRenderer = buildReaderMarkdownRenderer(payload.document.contentMd, resolvedTheme, {
-    requestOrigin: payload.requestOrigin
-  });
-
   const articleTitle = payload.document.title.trim() || "未命名文档";
   const spaceTitle = payload.space.name.trim() || "未命名空间";
   const seoTitle = composeSEOTitle(payload.space.title || articleTitle);
   const hasDeniedAccess = Boolean(payload.access?.code?.trim());
+  const markdownRenderer = buildReaderMarkdownRenderer(payload.document.contentMd, resolvedTheme, {
+    requestOrigin: payload.requestOrigin
+  });
   const updatedMeta = hasDeniedAccess ? "" : formatUpdatedMeta(payload.document.updatedAt, renderedAt);
   const authorNickname = payload.document.authorNickname.trim() || "未知作者";
   const documentMeta = `空间：${spaceTitle} · 作者：${authorNickname} · ${updatedMeta}`;
@@ -639,7 +638,15 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
                 />
               </div>
               <div className="reader-sidebar__footer" role="note" aria-label="发布信息">
-                本文档使用 <a href="https://github.com/lifei6671/plaindoc" title="PlainDoc" target="_blank">PlainDoc</a>{" "}
+                本文档使用{" "}
+                <a
+                  href="https://github.com/lifei6671/plaindoc"
+                  title="PlainDoc"
+                  target="_blank"
+                  rel="noopener noreferrer nofollow"
+                >
+                  PlainDoc
+                </a>{" "}
                 发布
               </div>
             </aside>

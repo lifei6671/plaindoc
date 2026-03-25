@@ -38,6 +38,17 @@ import {
   pickAnchorDataAttributes,
   resolveCodeLanguage
 } from "./markdown-utils";
+import {
+  isExternalHTTPLink,
+  mergeExternalLinkRel,
+  normalizeLinkRequestOrigin
+} from "./external-link";
+import {
+  buildMermaidCacheKey,
+  MERMAID_RENDER_CACHE_MAX_ENTRIES,
+  type MermaidRenderCacheEntry,
+  type MermaidRenderResult
+} from "./mermaid-shared";
 import type { TocItem } from "./types";
 import {
   PREVIEW_SYNTAX_THEMES,
@@ -99,29 +110,24 @@ interface BuildMarkdownComponentsOptions {
   activePreviewTheme: PreviewThemeTemplate;
   tocItems: TocItem[];
   onTocNavigate: (item: TocItem) => void;
+  requestOrigin?: string;
+  preRenderedMermaidMap?: ReadonlyMap<string, MermaidRenderResult>;
+  includeMermaidSourcePayload?: boolean;
 }
 
 interface MermaidBlockProps {
   code: string;
   anchorDataAttributes: Record<string, string>;
+  preRenderedResult?: MermaidRenderResult;
+  includeSourcePayload?: boolean;
 }
 
 type MermaidModule = typeof import("mermaid")["default"];
-
-interface MermaidRenderResult {
-  errorMessage: string | null;
-  svg: string;
-}
-
-interface MermaidRenderCacheEntry extends MermaidRenderResult {
-  pendingPromise?: Promise<MermaidRenderResult>;
-}
 
 interface CodeBlockCopyButtonProps {
   codeText: string;
 }
 
-const MERMAID_RENDER_CACHE_MAX_ENTRIES = 200;
 const CODE_COPY_SUCCESS_FEEDBACK_MS = 1800;
 
 let mermaidModulePromise: Promise<MermaidModule> | null = null;
@@ -261,14 +267,6 @@ async function loadMermaidModule(): Promise<MermaidModule> {
   return mermaidModulePromise;
 }
 
-function buildMermaidCacheKey(
-  anchorDataAttributes: Record<string, string>,
-  source: string
-): string {
-  const anchorIndex = anchorDataAttributes["data-anchor-index"]?.trim() || "mermaid";
-  return `${anchorIndex}:${source}`;
-}
-
 async function renderMermaidWithCache(
   cacheKey: string,
   source: string
@@ -319,18 +317,39 @@ async function renderMermaidWithCache(
 }
 
 // Mermaid 代码块渲染器：将 fenced mermaid 文本编译为 SVG，并保留锚点属性。
-function MermaidBlock({ code, anchorDataAttributes }: MermaidBlockProps) {
+function MermaidBlock({
+  code,
+  anchorDataAttributes,
+  preRenderedResult,
+  includeSourcePayload = false
+}: MermaidBlockProps) {
   const source = code.trim();
   const cacheKey = buildMermaidCacheKey(anchorDataAttributes, source);
-  const cachedEntry = source ? mermaidRenderCache.get(cacheKey) : undefined;
+  const cachedEntry = source ? (preRenderedResult ?? mermaidRenderCache.get(cacheKey)) : undefined;
   const [renderedSvg, setRenderedSvg] = useState(cachedEntry?.svg ?? "");
   const [renderError, setRenderError] = useState<string | null>(cachedEntry?.errorMessage ?? null);
   const renderTicketRef = useRef(0);
+  const mermaidDataAttributes = {
+    ...anchorDataAttributes,
+    "data-reader-hook": "mermaid",
+    "data-reader-mermaid-status": renderError ? "error" : renderedSvg ? "ready" : "loading"
+  };
+  const mermaidSourceNode = includeSourcePayload ? (
+    <pre hidden data-reader-mermaid-source="1">
+      <code>{code}</code>
+    </pre>
+  ) : null;
 
   useEffect(() => {
     if (!source) {
       setRenderedSvg("");
       setRenderError("Mermaid 代码块为空，无法渲染图表。");
+      return;
+    }
+
+    if (preRenderedResult) {
+      setRenderedSvg(preRenderedResult.svg);
+      setRenderError(preRenderedResult.errorMessage);
       return;
     }
 
@@ -358,13 +377,16 @@ function MermaidBlock({ code, anchorDataAttributes }: MermaidBlockProps) {
       setRenderedSvg(renderResult.svg);
       setRenderError(renderResult.errorMessage);
     });
-  }, [cacheKey, source]);
+  }, [cacheKey, preRenderedResult, source]);
 
   if (renderError) {
     return (
-      <div className="mermaid-block mermaid-block--error" {...anchorDataAttributes}>
-        <p className="mermaid-block__error-message">{renderError}</p>
-        <pre className="mermaid-block__fallback">
+      <div className="mermaid-block mermaid-block--error" {...mermaidDataAttributes}>
+        {mermaidSourceNode}
+        <p className="mermaid-block__error-message" data-reader-mermaid-message="1">
+          {renderError}
+        </p>
+        <pre className="mermaid-block__fallback" data-reader-mermaid-fallback="1">
           <code>{code}</code>
         </pre>
       </div>
@@ -373,16 +395,19 @@ function MermaidBlock({ code, anchorDataAttributes }: MermaidBlockProps) {
 
   if (!renderedSvg) {
     return (
-      <div className="mermaid-block mermaid-block--loading" {...anchorDataAttributes}>
-        Mermaid 图渲染中...
+      <div className="mermaid-block mermaid-block--loading" {...mermaidDataAttributes}>
+        {mermaidSourceNode}
+        <p data-reader-mermaid-message="1">Mermaid 图渲染中...</p>
       </div>
     );
   }
 
   return (
-    <div className="mermaid-block" {...anchorDataAttributes}>
+    <div className="mermaid-block" {...mermaidDataAttributes}>
+      {mermaidSourceNode}
       <div
         className="mermaid-block__diagram"
+        data-reader-mermaid-diagram="1"
         // Mermaid 官方渲染结果为可信 SVG 字符串；此处按需注入到预览 DOM。
         dangerouslySetInnerHTML={{ __html: renderedSvg }}
       />
@@ -409,10 +434,14 @@ function renderDecoratedHeading(
 export function buildMarkdownComponents({
   activePreviewTheme,
   tocItems,
-  onTocNavigate
+  onTocNavigate,
+  requestOrigin,
+  preRenderedMermaidMap,
+  includeMermaidSourcePayload = false
 }: BuildMarkdownComponentsOptions): Components {
   const syntaxTheme =
     PREVIEW_SYNTAX_THEMES[activePreviewTheme.syntaxTheme] ?? PREVIEW_SYNTAX_THEMES["one-light"];
+  const normalizedRequestOrigin = normalizeLinkRequestOrigin(requestOrigin);
 
   return {
     // 标题统一渲染为 prefix/content/suffix 结构，便于主题扩展。
@@ -422,6 +451,23 @@ export function buildMarkdownComponents({
     h4: ({ node: _node, children, ...props }) => renderDecoratedHeading("h4", children, props),
     h5: ({ node: _node, children, ...props }) => renderDecoratedHeading("h5", children, props),
     h6: ({ node: _node, children, ...props }) => renderDecoratedHeading("h6", children, props),
+    a: ({ node: _node, href, rel, target, children, ...props }) => {
+      const normalizedHref = typeof href === "string" ? href : "";
+      const shouldOpenInNewWindow = isExternalHTTPLink(normalizedHref, normalizedRequestOrigin);
+      const resolvedRel = shouldOpenInNewWindow
+        ? mergeExternalLinkRel(typeof rel === "string" ? rel : "")
+        : rel;
+      return (
+        <a
+          href={href}
+          rel={resolvedRel}
+          target={shouldOpenInNewWindow ? "_blank" : target}
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
     // 识别独占段落 [TOC] 标记，并在文档内渲染可点击目录菜单。
     p: ({ node: _node, className, children, ...props }) => {
       const paragraphText = extractCodeText(children).trim();
@@ -485,7 +531,15 @@ export function buildMarkdownComponents({
       const codeText = extractCodeText(codeElementProps.children as ReactNode).replace(/\n$/, "");
 
       if (language.toLowerCase() === "mermaid") {
-        return <MermaidBlock code={codeText} anchorDataAttributes={anchorDataAttributes} />;
+        const mermaidCacheKey = buildMermaidCacheKey(anchorDataAttributes, codeText.trim());
+        return (
+          <MermaidBlock
+            code={codeText}
+            anchorDataAttributes={anchorDataAttributes}
+            preRenderedResult={preRenderedMermaidMap?.get(mermaidCacheKey)}
+            includeSourcePayload={includeMermaidSourcePayload}
+          />
+        );
       }
 
       // 自定义 PreTag：统一挂样式类，并把源码文本标记给阅读页脚本做复制。

@@ -1,8 +1,14 @@
+import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
+  const appEntryPath = resolve(__dirname, "index.html");
+  const readerMermaidRuntimeEntryPath = resolve(
+    __dirname,
+    "src/ssr/reader-mermaid-runtime.js"
+  );
   const env = loadEnv(mode, ".", "");
   const backendOrigin = (env.VITE_DEV_PROXY_TARGET || "http://localhost:8080").trim();
   // 仅 Web 路由由 Vite + React Router 处理，其余路径统一转发给后端 SSR。
@@ -16,7 +22,22 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       // 与首页 SSR 模板静态资源路由 /assets 隔离，避免构建产物冲突。
-      assetsDir: "web-assets"
+      assetsDir: "web-assets",
+      rollupOptions: {
+        input: {
+          app: appEntryPath,
+          readerMermaidRuntime: readerMermaidRuntimeEntryPath
+        },
+        output: {
+          entryFileNames: (chunkInfo) => {
+            const facadeModuleID = chunkInfo.facadeModuleId ?? "";
+            if (facadeModuleID === readerMermaidRuntimeEntryPath) {
+              return "web-assets/reader-mermaid-runtime.js";
+            }
+            return "web-assets/[name]-[hash].js";
+          }
+        }
+      }
     },
     server: {
       port: 3001,

@@ -18,6 +18,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const READER_TOOLTIP_SELECTOR = ".reader-tooltip[data-tooltip]";
   const CODE_COPY_BUTTON_SELECTOR = "button[data-code-copy-button='1']";
   const CODE_COPY_SOURCE_SELECTOR = "[data-code-copy-source='1']";
+  const MERMAID_BLOCK_SELECTOR = "[data-reader-hook='mermaid']";
   const TREE_ROW_ACTIVE_CLASS = "reader-tree__row--active";
   const TREE_LABEL_ACTIVE_CLASS = "reader-tree__label--active";
   const STATE_SCRIPT_SELECTOR = "#plaindoc-reader-state";
@@ -65,6 +66,8 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const OUTLINE_ACTIVE_OFFSET = 108;
   const MOBILE_SIDEBAR_BREAKPOINT = 1024;
   const CODE_COPY_SUCCESS_FEEDBACK_MS = 1800;
+  const READER_MERMAID_RUNTIME_PATH = "/web-assets/reader-mermaid-runtime.js";
+  const READER_MERMAID_RUNTIME_GLOBAL_KEY = "__plaindocReaderMermaidRuntime__";
   const queryActiveRow = () => document.querySelector(TREE_ROW_ACTIVE_SELECTOR);
 
   const normalizePathname = (pathname) => pathname.replace(/\\/+$/, "") || "/";
@@ -111,6 +114,30 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   };
 
   const codeCopyResetTimers = new WeakMap();
+  let mermaidRuntimeLoader = null;
+
+  const loadReaderMermaidRuntime = () => {
+    if (mermaidRuntimeLoader) {
+      return mermaidRuntimeLoader;
+    }
+    mermaidRuntimeLoader = import(READER_MERMAID_RUNTIME_PATH).catch((error) => {
+      mermaidRuntimeLoader = null;
+      throw error;
+    });
+    return mermaidRuntimeLoader;
+  };
+
+  const renderReaderMermaidBlocks = async () => {
+    if (!document.querySelector(MERMAID_BLOCK_SELECTOR)) {
+      return;
+    }
+    await loadReaderMermaidRuntime();
+    const runtimeModule = window[READER_MERMAID_RUNTIME_GLOBAL_KEY];
+    if (!runtimeModule || typeof runtimeModule.renderReaderMermaidBlocks !== "function") {
+      return;
+    }
+    await runtimeModule.renderReaderMermaidBlocks(document);
+  };
 
   const setCodeCopyButtonState = (buttonNode, nextState) => {
     if (!(buttonNode instanceof HTMLButtonElement)) {
@@ -157,6 +184,28 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     document.body.removeChild(textarea);
     if (!copied) {
       throw new Error("copy failed");
+    }
+  };
+
+  const handleCodeCopyAction = async (buttonNode) => {
+    if (!(buttonNode instanceof HTMLButtonElement)) {
+      return;
+    }
+    const shellNode = buttonNode.closest(".code-block-copy-shell");
+    if (!(shellNode instanceof HTMLElement)) {
+      return;
+    }
+    const sourceNode = shellNode.querySelector(CODE_COPY_SOURCE_SELECTOR);
+    const codeText = sourceNode instanceof HTMLElement ? sourceNode.textContent || "" : "";
+    if (!codeText) {
+      return;
+    }
+    try {
+      await copyTextToClipboard(codeText);
+      setCodeCopyButtonState(buttonNode, "success");
+      scheduleCodeCopyReset(buttonNode);
+    } catch {
+      setCodeCopyButtonState(buttonNode, "idle");
     }
   };
 
@@ -1874,6 +1923,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       refreshOutlineRegistry();
       syncSpreadsheetTabs();
       scheduleOfficePaneViewportHeightSync();
+      await renderReaderMermaidBlocks();
       void syncOfficeDownloadAction();
       await syncOnlyOfficeReader();
       if (pushHistory) {
@@ -1902,6 +1952,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     refreshOutlineRegistry();
     setMobileSidebarOpen(false);
     syncSpreadsheetTabs();
+    void renderReaderMermaidBlocks();
     void syncOfficeDownloadAction();
     void syncOnlyOfficeReader();
   } catch {
@@ -2125,33 +2176,17 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   }
 
   try {
-    const copyButtons = Array.from(document.querySelectorAll(CODE_COPY_BUTTON_SELECTOR)).filter(
-      (node) => node instanceof HTMLButtonElement
-    );
-    for (const buttonNode of copyButtons) {
-      if (!(buttonNode instanceof HTMLButtonElement)) {
-        continue;
+    document.addEventListener("click", (event) => {
+      if (!(event.target instanceof Element)) {
+        return;
       }
-      buttonNode.addEventListener("click", async (event) => {
-        event.preventDefault();
-        const shellNode = buttonNode.closest(".code-block-copy-shell");
-        if (!(shellNode instanceof HTMLElement)) {
-          return;
-        }
-        const sourceNode = shellNode.querySelector(CODE_COPY_SOURCE_SELECTOR);
-        const codeText = sourceNode instanceof HTMLElement ? sourceNode.textContent || "" : "";
-        if (!codeText) {
-          return;
-        }
-        try {
-          await copyTextToClipboard(codeText);
-          setCodeCopyButtonState(buttonNode, "success");
-          scheduleCodeCopyReset(buttonNode);
-        } catch {
-          setCodeCopyButtonState(buttonNode, "idle");
-        }
-      });
-    }
+      const buttonNode = event.target.closest(CODE_COPY_BUTTON_SELECTOR);
+      if (!(buttonNode instanceof HTMLButtonElement)) {
+        return;
+      }
+      event.preventDefault();
+      void handleCodeCopyAction(buttonNode);
+    });
   } catch {
     // no-op: code copy enhancement should never block rendering.
   }
