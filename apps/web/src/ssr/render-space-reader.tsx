@@ -24,6 +24,7 @@ import {
 } from "../preview-themes";
 import appStyleText from "../styles.css?inline";
 import readerBaseStyleText from "./render-space-reader.base.css?inline";
+import { ReaderImageViewerShell } from "./ReaderImageViewerShell";
 import { READER_ASYNC_ENHANCEMENT_SCRIPT } from "./render-space-reader.async-script";
 import readerGoogleSansCodeStyleText from "./render-space-reader.font.css?inline";
 import { buildReaderMarkdownRenderer } from "./markdown-shared";
@@ -948,6 +949,7 @@ export function renderSpaceReader(payload: ReaderPagePayload): SpaceReaderRender
             hidden
           />
         ) : null}
+        <ReaderImageViewerShell />
         <script
           id="plaindoc-reader-state"
           type="application/json"

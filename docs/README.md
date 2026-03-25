@@ -31,6 +31,8 @@
    ONLYOFFICE 一等文档方案：Word/Excel 作为文档节点接入，支持工作区编辑、前端阅读、分享阅读，并明确不参与搜索与 sitemap。
 3. `ONLYOFFICE_READER_HTML_RENDERING_TECHNICAL_PLAN.md`  
    ONLYOFFICE 阅读页本地 HTML 渲染方案：编辑继续走 iframe，阅读/分享按配置切换 ONLYOFFICE 或本地 HTML，并复用 `documents`、`document_image_assets`、`file_blobs` 实现轻量落地。
+4. `READER_IMAGE_VIEWER_TECHNICAL_PLAN.md`
+   阅读页图片浏览器方案：支持 `img`、正文 inline SVG 与 Mermaid SVG 的黑色遮罩浮层浏览、切图、缩放、原始尺寸与旋转工具条。
 
 ---
 

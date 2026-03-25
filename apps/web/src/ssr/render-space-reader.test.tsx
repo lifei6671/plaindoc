@@ -162,4 +162,13 @@ describe("renderSpaceReader", () => {
     expect(result.html).toContain('<a href="https://example.com/docs" rel="noopener noreferrer nofollow" target="_blank">外链</a>');
     expect(result.html).toContain('<a href="/guide/getting-started">内链</a>');
   });
+
+  it("renders reader image viewer shell hooks for async enhancement", () => {
+    const result = renderSpaceReader(createPayload("markdown"));
+
+    expect(result.html).toContain('data-reader-hook="image-viewer"');
+    expect(result.html).toContain('data-reader-hook="image-viewer-stage"');
+    expect(result.html).toContain('data-reader-hook="image-viewer-close"');
+    expect(result.html).toContain('data-reader-hook="image-viewer-scale"');
+  });
 });

@@ -18,7 +18,10 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const READER_TOOLTIP_SELECTOR = ".reader-tooltip[data-tooltip]";
   const CODE_COPY_BUTTON_SELECTOR = "button[data-code-copy-button='1']";
   const CODE_COPY_SOURCE_SELECTOR = "[data-code-copy-source='1']";
+  const PREVIEW_BODY_SELECTOR = "#plaindoc-preview-body";
   const MERMAID_BLOCK_SELECTOR = "[data-reader-hook='mermaid']";
+  const IMAGE_VIEWER_CANDIDATE_SELECTOR =
+    "#plaindoc-preview-body img, #plaindoc-preview-body svg, [data-reader-hook='mermaid']";
   const TREE_ROW_ACTIVE_CLASS = "reader-tree__row--active";
   const TREE_LABEL_ACTIVE_CLASS = "reader-tree__label--active";
   const STATE_SCRIPT_SELECTOR = "#plaindoc-reader-state";
@@ -68,6 +71,8 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const CODE_COPY_SUCCESS_FEEDBACK_MS = 1800;
   const READER_MERMAID_RUNTIME_PATH = "/web-assets/reader-mermaid-runtime.js";
   const READER_MERMAID_RUNTIME_GLOBAL_KEY = "__plaindocReaderMermaidRuntime__";
+  const READER_IMAGE_VIEWER_RUNTIME_PATH = "/web-assets/reader-image-viewer-runtime.js";
+  const READER_IMAGE_VIEWER_RUNTIME_GLOBAL_KEY = "__plaindocReaderImageViewerRuntime__";
   const queryActiveRow = () => document.querySelector(TREE_ROW_ACTIVE_SELECTOR);
 
   const normalizePathname = (pathname) => pathname.replace(/\\/+$/, "") || "/";
@@ -115,6 +120,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
 
   const codeCopyResetTimers = new WeakMap();
   let mermaidRuntimeLoader = null;
+  let imageViewerRuntimeLoader = null;
 
   const loadReaderMermaidRuntime = () => {
     if (mermaidRuntimeLoader) {
@@ -127,6 +133,37 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     return mermaidRuntimeLoader;
   };
 
+  const getReaderImageViewerRuntime = () => {
+    const runtimeModule = window[READER_IMAGE_VIEWER_RUNTIME_GLOBAL_KEY];
+    if (!runtimeModule || typeof runtimeModule.ensureReaderImageViewer !== "function") {
+      return null;
+    }
+    return runtimeModule;
+  };
+
+  const loadReaderImageViewerRuntime = () => {
+    const existingRuntime = getReaderImageViewerRuntime();
+    if (existingRuntime) {
+      return Promise.resolve(existingRuntime);
+    }
+    if (imageViewerRuntimeLoader) {
+      return imageViewerRuntimeLoader;
+    }
+    imageViewerRuntimeLoader = import(READER_IMAGE_VIEWER_RUNTIME_PATH)
+      .then(() => {
+        const runtimeModule = getReaderImageViewerRuntime();
+        if (!runtimeModule) {
+          throw new Error("reader image viewer runtime unavailable");
+        }
+        return runtimeModule;
+      })
+      .catch((error) => {
+        imageViewerRuntimeLoader = null;
+        throw error;
+      });
+    return imageViewerRuntimeLoader;
+  };
+
   const renderReaderMermaidBlocks = async () => {
     if (!document.querySelector(MERMAID_BLOCK_SELECTOR)) {
       return;
@@ -137,6 +174,31 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       return;
     }
     await runtimeModule.renderReaderMermaidBlocks(document);
+  };
+
+  const syncReaderImageViewerRegistry = async () => {
+    if (!document.querySelector(PREVIEW_BODY_SELECTOR)) {
+      return;
+    }
+    const hasGalleryCandidate = Boolean(document.querySelector(IMAGE_VIEWER_CANDIDATE_SELECTOR));
+    const existingRuntime = getReaderImageViewerRuntime();
+    if (!hasGalleryCandidate) {
+      if (existingRuntime && typeof existingRuntime.refreshReaderImageViewer === "function") {
+        existingRuntime.refreshReaderImageViewer(document);
+      }
+      return;
+    }
+    const runtimeModule = existingRuntime ?? (await loadReaderImageViewerRuntime());
+    if (!runtimeModule) {
+      return;
+    }
+    if (typeof runtimeModule.ensureReaderImageViewer === "function") {
+      runtimeModule.ensureReaderImageViewer(document);
+      return;
+    }
+    if (typeof runtimeModule.refreshReaderImageViewer === "function") {
+      runtimeModule.refreshReaderImageViewer(document);
+    }
   };
 
   const setCodeCopyButtonState = (buttonNode, nextState) => {
@@ -1923,7 +1985,9 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       refreshOutlineRegistry();
       syncSpreadsheetTabs();
       scheduleOfficePaneViewportHeightSync();
+      await syncReaderImageViewerRegistry();
       await renderReaderMermaidBlocks();
+      await syncReaderImageViewerRegistry();
       void syncOfficeDownloadAction();
       await syncOnlyOfficeReader();
       if (pushHistory) {
@@ -1952,7 +2016,10 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     refreshOutlineRegistry();
     setMobileSidebarOpen(false);
     syncSpreadsheetTabs();
-    void renderReaderMermaidBlocks();
+    void syncReaderImageViewerRegistry();
+    void renderReaderMermaidBlocks()
+      .then(() => syncReaderImageViewerRegistry())
+      .catch(() => syncReaderImageViewerRegistry());
     void syncOfficeDownloadAction();
     void syncOnlyOfficeReader();
   } catch {

@@ -59,4 +59,45 @@ describe("READER_ASYNC_ENHANCEMENT_SCRIPT", () => {
     expect(copyButton).toHaveAttribute("data-copy-state", "success");
     expect(copyButton).toHaveAttribute("aria-label", "复制成功");
   });
+
+  it("initializes reader image viewer runtime for existing reader images", async () => {
+    document.body.innerHTML = `
+      <main data-reader-hook="main">
+        <article class="reader-article-shell" data-reader-hook="article-shell">
+          <article id="plaindoc-preview-body">
+            <p><img src="https://example.com/demo.png" alt="示例图片" width="400" height="240" /></p>
+          </article>
+        </article>
+      </main>
+      <div data-reader-hook="image-viewer" aria-hidden="true" hidden>
+        <button data-reader-hook="image-viewer-backdrop" aria-label="关闭图片浏览器"></button>
+        <div data-reader-hook="image-viewer-stage">
+          <div data-reader-hook="image-viewer-content"></div>
+        </div>
+        <button data-reader-hook="image-viewer-close" aria-label="关闭图片浏览器"></button>
+        <button data-reader-hook="image-viewer-prev" aria-label="上一张"></button>
+        <button data-reader-hook="image-viewer-next" aria-label="下一张"></button>
+        <button data-reader-hook="image-viewer-zoom-out" aria-label="缩小"></button>
+        <button data-reader-hook="image-viewer-zoom-in" aria-label="放大"></button>
+        <button data-reader-hook="image-viewer-original" aria-label="原始尺寸"></button>
+        <button data-reader-hook="image-viewer-rotate" aria-label="旋转"></button>
+        <span data-reader-hook="image-viewer-index">0/0</span>
+        <span data-reader-hook="image-viewer-scale">100%</span>
+      </div>
+      <script id="plaindoc-reader-state" type="application/json">{}</script>
+    `;
+
+    const ensureReaderImageViewer = vi.fn();
+    (window as Window & { __plaindocReaderImageViewerRuntime__?: unknown }).__plaindocReaderImageViewerRuntime__ =
+      {
+        ensureReaderImageViewer,
+        refreshReaderImageViewer: vi.fn()
+      };
+
+    window.eval(READER_ASYNC_ENHANCEMENT_SCRIPT);
+
+    await waitFor(() => {
+      expect(ensureReaderImageViewer).toHaveBeenCalledWith(document);
+    });
+  });
 });

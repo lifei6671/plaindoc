@@ -91,7 +91,9 @@
 8. `apps/web/src/ssr/render-space-reader.tsx`（阅读页 SSR HTML 生成）
 9. `apps/web/src/ssr/render-space-reader.async-script.ts`（阅读页异步增强脚本）
 10. `apps/web/src/ssr/reader-mermaid-runtime.js`（阅读页 Mermaid 浏览器端渲染）
-11. `apps/web/scripts/check-dropdown-menu-modal.mjs`（DropdownMenu 规范门禁）
+11. `apps/web/src/ssr/ReaderImageViewerShell.tsx`（阅读页图片浏览器壳层组件）
+12. `apps/web/src/ssr/reader-image-viewer-runtime.js`（阅读页图片浏览器独立运行时）
+13. `apps/web/scripts/check-dropdown-menu-modal.mjs`（DropdownMenu 规范门禁）
 
 目录职责：
 
@@ -344,6 +346,13 @@ ONLYOFFICE 相关字段约束：
 2. `render-space-reader.async-script.ts` 会动态加载 `reader-mermaid-runtime.js`，在浏览器端把 `Mermaid 图渲染中...` 替换成真实 SVG。
 3. Mermaid 容器必须保留 `data-reader-hook='mermaid'`、`data-reader-mermaid-status`、`data-reader-mermaid-source='1'`，否则异步增强会失效并一直停留在 loading。
 
+### 8.3.3 图片浏览器阅读页增强
+
+1. 阅读页图片浏览器采用“SSR 壳层组件 + 独立浏览器运行时”模式实现，壳层位于 `ReaderImageViewerShell.tsx`，运行时位于 `reader-image-viewer-runtime.js`。
+2. `render-space-reader.async-script.ts` 只负责在页面初始化、文档内部切换完成、Mermaid 渲染完成后加载并调用图片浏览器运行时，避免把状态机和 DOM 操作耦合进主异步脚本。
+3. 图片浏览器运行时只扫描 `#plaindoc-preview-body` 下的 `img`、正文 inline `svg` 和 Mermaid 渲染后的 SVG，并通过 `data-reader-image-viewer-target='1'` 标记可点击媒体。
+4. 如果后续要替换这套图片浏览器，优先替换 `ReaderImageViewerShell.tsx` 与 `reader-image-viewer-runtime.js`，不要把行为散落回 `render-space-reader.tsx` 或 Markdown 渲染组件。
+
 ### 8.4 阅读页 DOM Hook 契约（不能随意改）
 
 `render-space-reader.tsx` 与 `render-space-reader.async-script.ts` 共同依赖：
@@ -361,6 +370,20 @@ ONLYOFFICE 相关字段约束：
 11. `data-reader-hook='mermaid'`
 12. `data-reader-mermaid-status`
 13. `data-reader-mermaid-source='1'`
+14. `data-reader-hook='image-viewer'`
+15. `data-reader-hook='image-viewer-backdrop'`
+16. `data-reader-hook='image-viewer-stage'`
+17. `data-reader-hook='image-viewer-content'`
+18. `data-reader-hook='image-viewer-close'`
+19. `data-reader-hook='image-viewer-prev'`
+20. `data-reader-hook='image-viewer-next'`
+21. `data-reader-hook='image-viewer-zoom-out'`
+22. `data-reader-hook='image-viewer-zoom-in'`
+23. `data-reader-hook='image-viewer-original'`
+24. `data-reader-hook='image-viewer-rotate'`
+25. `data-reader-hook='image-viewer-index'`
+26. `data-reader-hook='image-viewer-scale'`
+27. `data-reader-image-viewer-target='1'`
 
 规则：异步增强脚本应依赖 `data-reader-*`，而不是视觉 class。
 

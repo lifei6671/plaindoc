@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
     __dirname,
     "src/ssr/reader-mermaid-runtime.js"
   );
+  const readerImageViewerRuntimeEntryPath = resolve(
+    __dirname,
+    "src/ssr/reader-image-viewer-runtime.js"
+  );
   const env = loadEnv(mode, ".", "");
   const backendOrigin = (env.VITE_DEV_PROXY_TARGET || "http://localhost:8080").trim();
   // 仅 Web 路由由 Vite + React Router 处理，其余路径统一转发给后端 SSR。
@@ -26,13 +30,17 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           app: appEntryPath,
-          readerMermaidRuntime: readerMermaidRuntimeEntryPath
+          readerMermaidRuntime: readerMermaidRuntimeEntryPath,
+          readerImageViewerRuntime: readerImageViewerRuntimeEntryPath
         },
         output: {
           entryFileNames: (chunkInfo) => {
             const facadeModuleID = chunkInfo.facadeModuleId ?? "";
             if (facadeModuleID === readerMermaidRuntimeEntryPath) {
               return "web-assets/reader-mermaid-runtime.js";
+            }
+            if (facadeModuleID === readerImageViewerRuntimeEntryPath) {
+              return "web-assets/reader-image-viewer-runtime.js";
             }
             return "web-assets/[name]-[hash].js";
           }
