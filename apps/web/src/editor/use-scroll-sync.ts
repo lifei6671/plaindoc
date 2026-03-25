@@ -30,6 +30,8 @@ interface UseScrollSyncResult {
   handleTocNavigate: (item: TocItem) => void;
 }
 
+const EDITOR_DRIVEN_SYNC_LOCK_MS = 1200;
+
 // 将滚动同步相关状态与副作用封装成 Hook，降低 App 复杂度。
 export function useScrollSync({
   content,
@@ -57,8 +59,14 @@ export function useScrollSync({
   const previewToEditorAnchorsRef = useRef<DirectionAnchor[]>([]);
   // 映射重建调度句柄（rAF）。
   const rebuildMapRafRef = useRef<number | null>(null);
+  // 本轮重建完成后是否需要主动回对齐滚动位置。
+  const pendingResyncAfterRebuildRef = useRef(false);
   // 同步滚动补帧句柄：用于分帧追平大跨度映射。
   const syncFollowRafRef = useRef<number | null>(null);
+  // 编辑过程中进入“编辑区优先”模式：禁止预览区事件反向推回编辑区。
+  const editorDrivenOnlyRef = useRef(false);
+  // 编辑区优先模式的释放定时器。
+  const editorDrivenOnlyTimerRef = useRef<number | null>(null);
   // 延迟重建定时器集合：用于处理粘贴/批量改动后的异步布局收敛。
   const delayedRebuildTimersRef = useRef<number[]>([]);
   // 上一次内容快照：用于判断本次改动是否属于“大幅变更”（如整段粘贴）。
@@ -227,6 +235,26 @@ export function useScrollSync({
     }
   }, []);
 
+  // 清理“编辑区优先”释放定时器。
+  const clearEditorDrivenOnlyTimer = useCallback(() => {
+    if (editorDrivenOnlyTimerRef.current !== null) {
+      window.clearTimeout(editorDrivenOnlyTimerRef.current);
+      editorDrivenOnlyTimerRef.current = null;
+    }
+  }, []);
+
+  // 输入期间强制锁定为“只允许编辑区驱动预览区”，保护编辑区滚动稳定。
+  const activateEditorDrivenOnlyMode = useCallback(() => {
+    editorDrivenOnlyRef.current = true;
+    lastScrollSourceRef.current = "editor";
+    clearSyncFollowRaf();
+    clearEditorDrivenOnlyTimer();
+    editorDrivenOnlyTimerRef.current = window.setTimeout(() => {
+      editorDrivenOnlyRef.current = false;
+      editorDrivenOnlyTimerRef.current = null;
+    }, EDITOR_DRIVEN_SYNC_LOCK_MS);
+  }, [clearEditorDrivenOnlyTimer, clearSyncFollowRaf]);
+
   // 单帧同步：限制最大步进，避免高斜率区间（如展开 TOC）瞬间跨越。
   const applySyncStep = useCallback(
     (sourceName: ScrollSource): boolean => {
@@ -295,6 +323,10 @@ export function useScrollSync({
   // 执行一次单向同步，并用锁避免对端 scroll 反向触发。
   const syncFromSource = useCallback(
     (sourceName: ScrollSource) => {
+      // 编辑阶段禁止预览区滚动事件反向推回编辑区，优先保证输入稳定。
+      if (sourceName === "preview" && editorDrivenOnlyRef.current) {
+        return;
+      }
       if (syncingRef.current) {
         return;
       }
@@ -337,7 +369,7 @@ export function useScrollSync({
       return;
     }
     syncingRef.current = true;
-    const sourceName = lastScrollSourceRef.current;
+    const sourceName = editorDrivenOnlyRef.current ? "editor" : lastScrollSourceRef.current;
     let shouldFollow = false;
     try {
       shouldFollow = applySyncStep(sourceName);
@@ -490,15 +522,21 @@ export function useScrollSync({
   }, [resolveLiveEditorScroller, resolveLiveEditorView]);
 
   // 用 requestAnimationFrame 合并多次重建请求，降低重排频率。
-  const scheduleRebuildScrollAnchors = useCallback(() => {
+  const scheduleRebuildScrollAnchors = useCallback((shouldResync = true) => {
+    pendingResyncAfterRebuildRef.current =
+      pendingResyncAfterRebuildRef.current || shouldResync;
     if (rebuildMapRafRef.current !== null) {
       return;
     }
 
     rebuildMapRafRef.current = window.requestAnimationFrame(() => {
       rebuildMapRafRef.current = null;
+      const shouldApplyResync = pendingResyncAfterRebuildRef.current;
+      pendingResyncAfterRebuildRef.current = false;
       rebuildScrollAnchors();
-      resyncFromLastSource();
+      if (shouldApplyResync) {
+        resyncFromLastSource();
+      }
     });
   }, [rebuildScrollAnchors, resyncFromLastSource]);
 
@@ -602,12 +640,14 @@ export function useScrollSync({
     const isBulkContentChange = characterDelta >= 120;
     previousContentSnapshotRef.current = currentContent;
 
+    // 输入发生后进入“编辑区优先”窗口，期间所有回对齐都只能从编辑区驱动。
+    activateEditorDrivenOnlyMode();
     scheduleRebuildScrollAnchors();
     if (isBulkContentChange) {
       // 多轮重建用于覆盖 CodeMirror 重排、图片加载与高亮渲染的延迟窗口。
       scheduleDelayedRebuilds([80, 240, 520]);
     }
-  }, [content, scheduleDelayedRebuilds, scheduleRebuildScrollAnchors]);
+  }, [activateEditorDrivenOnlyMode, content, scheduleDelayedRebuilds, scheduleRebuildScrollAnchors]);
 
   // 处理“大段粘贴”场景：粘贴后追加延迟重建，覆盖图片与布局异步更新窗口。
   useEffect(() => {
@@ -620,6 +660,8 @@ export function useScrollSync({
     const pendingTimers = new Set<number>();
 
     const onPaste = () => {
+      // 粘贴本质也是输入，进入“编辑区优先”窗口。
+      activateEditorDrivenOnlyMode();
       // 第一次重建：尽快刷新映射，保证初次滚动就可同步。
       scheduleRebuildScrollAnchors();
       // 第二次重建：等待 CodeMirror 完成一轮布局更新。
@@ -645,7 +687,7 @@ export function useScrollSync({
       }
       pendingTimers.clear();
     };
-  }, [editorScrollerElement, scheduleRebuildScrollAnchors]);
+  }, [activateEditorDrivenOnlyMode, editorScrollerElement, scheduleRebuildScrollAnchors]);
 
   // 主题样式或外部覆盖样式变化后，主动重建锚点映射，避免滚动同步漂移。
   useEffect(() => {
@@ -667,7 +709,7 @@ export function useScrollSync({
 
     // 单图事件处理器：任意图片完成/失败都触发锚点重建。
     const onImageEvent = () => {
-      scheduleRebuildScrollAnchors();
+      scheduleRebuildScrollAnchors(false);
     };
 
     // 维护已绑定的图片集合，避免重复绑定监听器。
@@ -687,7 +729,7 @@ export function useScrollSync({
         boundImages.add(image);
         // 处理缓存命中场景：已完成图片不会再次触发 load，需要主动重建映射。
         if (image.complete) {
-          scheduleRebuildScrollAnchors();
+          scheduleRebuildScrollAnchors(false);
         }
       }
 
@@ -707,7 +749,7 @@ export function useScrollSync({
     if (typeof ResizeObserver !== "undefined") {
       resizeObserver = new ResizeObserver(() => {
         // 任意尺寸变化都触发一次合并后的重建。
-        scheduleRebuildScrollAnchors();
+        scheduleRebuildScrollAnchors(false);
       });
       resizeObserver.observe(editorElement);
       // 直接观察预览滚动容器尺寸变化。
@@ -723,7 +765,7 @@ export function useScrollSync({
       mutationObserver = new MutationObserver(() => {
         // 预览 DOM 变更（例如图片节点替换）后刷新监听并重建映射。
         refreshImageBindings();
-        scheduleRebuildScrollAnchors();
+        scheduleRebuildScrollAnchors(false);
       });
       mutationObserver.observe(previewElement, {
         childList: true,
@@ -748,9 +790,10 @@ export function useScrollSync({
         window.cancelAnimationFrame(rebuildMapRafRef.current);
       }
       clearSyncFollowRaf();
+      clearEditorDrivenOnlyTimer();
       clearDelayedRebuildTimers();
     };
-  }, [clearDelayedRebuildTimers, clearSyncFollowRaf]);
+  }, [clearDelayedRebuildTimers, clearEditorDrivenOnlyTimer, clearSyncFollowRaf]);
 
   // 接收 CodeMirror 初始化回调，记录滚动容器并触发首次重建。
   const handleEditorCreate = useCallback(
