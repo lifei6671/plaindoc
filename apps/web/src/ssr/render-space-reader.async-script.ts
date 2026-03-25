@@ -16,6 +16,8 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const MOBILE_BAR_TITLE_SELECTOR = "[data-reader-hook='mobile-bar-title']";
   const MOBILE_SIDEBAR_OPEN_CLASS = "reader-mobile-sidebar-open";
   const READER_TOOLTIP_SELECTOR = ".reader-tooltip[data-tooltip]";
+  const CODE_COPY_BUTTON_SELECTOR = "button[data-code-copy-button='1']";
+  const CODE_COPY_SOURCE_SELECTOR = "[data-code-copy-source='1']";
   const TREE_ROW_ACTIVE_CLASS = "reader-tree__row--active";
   const TREE_LABEL_ACTIVE_CLASS = "reader-tree__label--active";
   const STATE_SCRIPT_SELECTOR = "#plaindoc-reader-state";
@@ -62,6 +64,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const OUTLINE_SCROLL_OFFSET = 16;
   const OUTLINE_ACTIVE_OFFSET = 108;
   const MOBILE_SIDEBAR_BREAKPOINT = 1024;
+  const CODE_COPY_SUCCESS_FEEDBACK_MS = 1800;
   const queryActiveRow = () => document.querySelector(TREE_ROW_ACTIVE_SELECTOR);
 
   const normalizePathname = (pathname) => pathname.replace(/\\/+$/, "") || "/";
@@ -105,6 +108,56 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const setMobileSidebarOpen = (nextOpen) => {
     mobileSidebarOpen = nextOpen === true;
     syncMobileSidebarDOMState();
+  };
+
+  const codeCopyResetTimers = new WeakMap();
+
+  const setCodeCopyButtonState = (buttonNode, nextState) => {
+    if (!(buttonNode instanceof HTMLButtonElement)) {
+      return;
+    }
+    const normalizedState = nextState === "success" ? "success" : "idle";
+    buttonNode.setAttribute("data-copy-state", normalizedState);
+    buttonNode.setAttribute("aria-label", normalizedState === "success" ? "复制成功" : "复制代码");
+  };
+
+  const scheduleCodeCopyReset = (buttonNode) => {
+    if (!(buttonNode instanceof HTMLButtonElement)) {
+      return;
+    }
+    const previousTimerId = codeCopyResetTimers.get(buttonNode);
+    if (typeof previousTimerId === "number") {
+      window.clearTimeout(previousTimerId);
+    }
+    const timerId = window.setTimeout(() => {
+      setCodeCopyButtonState(buttonNode, "idle");
+      codeCopyResetTimers.delete(buttonNode);
+    }, CODE_COPY_SUCCESS_FEEDBACK_MS);
+    codeCopyResetTimers.set(buttonNode, timerId);
+  };
+
+  const copyTextToClipboard = async (text) => {
+    if (typeof text !== "string" || !text) {
+      throw new Error("copy text is empty");
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.top = "-9999px";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (!copied) {
+      throw new Error("copy failed");
+    }
   };
 
   const syncSpreadsheetFullscreenButtons = () => {
@@ -2069,6 +2122,38 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
     }, { passive: true });
   } catch {
     // no-op: outline enhancement should never block rendering.
+  }
+
+  try {
+    const copyButtons = Array.from(document.querySelectorAll(CODE_COPY_BUTTON_SELECTOR)).filter(
+      (node) => node instanceof HTMLButtonElement
+    );
+    for (const buttonNode of copyButtons) {
+      if (!(buttonNode instanceof HTMLButtonElement)) {
+        continue;
+      }
+      buttonNode.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const shellNode = buttonNode.closest(".code-block-copy-shell");
+        if (!(shellNode instanceof HTMLElement)) {
+          return;
+        }
+        const sourceNode = shellNode.querySelector(CODE_COPY_SOURCE_SELECTOR);
+        const codeText = sourceNode instanceof HTMLElement ? sourceNode.textContent || "" : "";
+        if (!codeText) {
+          return;
+        }
+        try {
+          await copyTextToClipboard(codeText);
+          setCodeCopyButtonState(buttonNode, "success");
+          scheduleCodeCopyReset(buttonNode);
+        } catch {
+          setCodeCopyButtonState(buttonNode, "idle");
+        }
+      });
+    }
+  } catch {
+    // no-op: code copy enhancement should never block rendering.
   }
 
   try {

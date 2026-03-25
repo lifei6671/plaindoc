@@ -125,4 +125,15 @@ describe("renderSpaceReader", () => {
     expect(result.html).toContain("render failed");
     expect(result.html).not.toContain('data-reader-office-editor="1"');
   });
+
+  it("renders copy button for fenced code blocks", () => {
+    const payload = createPayload("markdown");
+    payload.document.contentMd = "```ts\nconst answer = 42;\n```";
+
+    const result = renderSpaceReader(payload);
+
+    expect(result.html).toContain('data-code-copy-button="1"');
+    expect(result.html).toContain('data-code-copy-source="1"');
+    expect(result.html).toContain("复制成功");
+  });
 });

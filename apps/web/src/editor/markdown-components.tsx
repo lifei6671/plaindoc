@@ -117,7 +117,12 @@ interface MermaidRenderCacheEntry extends MermaidRenderResult {
   pendingPromise?: Promise<MermaidRenderResult>;
 }
 
+interface CodeBlockCopyButtonProps {
+  codeText: string;
+}
+
 const MERMAID_RENDER_CACHE_MAX_ENTRIES = 200;
+const CODE_COPY_SUCCESS_FEEDBACK_MS = 1800;
 
 let mermaidModulePromise: Promise<MermaidModule> | null = null;
 let mermaidRenderSequence = 0;
@@ -136,6 +141,104 @@ function setMermaidRenderCacheEntry(cacheKey: string, entry: MermaidRenderCacheE
     }
     mermaidRenderCache.delete(oldestKey);
   }
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  if (typeof document === "undefined") {
+    throw new Error("clipboard unavailable");
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="5" y="3.5" width="7" height="9" rx="1.5" />
+      <path d="M3.5 10.5V5A1.5 1.5 0 0 1 5 3.5" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="m3.5 8.5 2.6 2.6 6.4-6.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CodeBlockCopyButton({ codeText }: CodeBlockCopyButtonProps) {
+  const [copyState, setCopyState] = useState<"idle" | "success">("idle");
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleClick = async () => {
+    if (!codeText) {
+      return;
+    }
+    try {
+      await copyTextToClipboard(codeText);
+      setCopyState("success");
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = window.setTimeout(() => {
+        setCopyState("idle");
+        resetTimerRef.current = null;
+      }, CODE_COPY_SUCCESS_FEEDBACK_MS);
+    } catch {
+      setCopyState("idle");
+    }
+  };
+
+  const isSuccess = copyState === "success";
+
+  return (
+    <button
+      type="button"
+      className="code-block-copy-button"
+      data-code-copy-button="1"
+      data-copy-state={copyState}
+      aria-label={isSuccess ? "复制成功" : "复制代码"}
+      onClick={handleClick}
+    >
+      <span className="code-block-copy-button__icon code-block-copy-button__icon--copy">
+        <CopyIcon />
+      </span>
+      <span className="code-block-copy-button__icon code-block-copy-button__icon--success">
+        <CheckIcon />
+      </span>
+      <span className="code-block-copy-button__label code-block-copy-button__label--idle">复制</span>
+      <span className="code-block-copy-button__label code-block-copy-button__label--success">
+        复制成功
+      </span>
+    </button>
+  );
 }
 
 async function loadMermaidModule(): Promise<MermaidModule> {
@@ -385,7 +488,7 @@ export function buildMarkdownComponents({
         return <MermaidBlock code={codeText} anchorDataAttributes={anchorDataAttributes} />;
       }
 
-      // 自定义 PreTag：把 source 锚点挂回代码块根节点，保证滚动映射不丢失。
+      // 自定义 PreTag：统一挂样式类，并把源码文本标记给阅读页脚本做复制。
       const PreTag = ({
         children: preChildren,
         style: preStyle,
@@ -393,7 +496,12 @@ export function buildMarkdownComponents({
       }: ComponentPropsWithoutRef<"pre">) => (
         <pre
           {...preTagProps}
-          {...anchorDataAttributes}
+          className={[
+            "code-block-copy-shell__surface",
+            typeof preTagProps.className === "string" ? preTagProps.className : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
           style={{
             ...(preStyle ?? {}),
             ...activePreviewTheme.codeBlockStyle
@@ -402,21 +510,26 @@ export function buildMarkdownComponents({
           {preChildren}
         </pre>
       );
+      const codeTagProps = {
+        className: codeClassName,
+        style: activePreviewTheme.codeBlockCodeStyle,
+        "data-code-copy-source": "1"
+      };
 
       return (
-        <SyntaxHighlighter
-          language={language}
-          style={syntaxTheme}
-          PreTag={PreTag}
-          useInlineStyles
-          wrapLongLines
-          codeTagProps={{
-            className: codeClassName,
-            style: activePreviewTheme.codeBlockCodeStyle
-          }}
-        >
-          {codeText}
-        </SyntaxHighlighter>
+        <div className="code-block-copy-shell" {...anchorDataAttributes}>
+          <CodeBlockCopyButton codeText={codeText} />
+          <SyntaxHighlighter
+            language={language}
+            style={syntaxTheme}
+            PreTag={PreTag}
+            useInlineStyles
+            wrapLongLines
+            codeTagProps={codeTagProps as unknown as ComponentPropsWithoutRef<"code">}
+          >
+            {codeText}
+          </SyntaxHighlighter>
+        </div>
       );
     },
     code: ({ node: _node, className, style, children, ...props }) => {
