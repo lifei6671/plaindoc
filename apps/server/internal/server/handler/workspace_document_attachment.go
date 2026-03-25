@@ -257,7 +257,7 @@ func (h *workspaceHandler) UploadDocumentAttachment(c *gin.Context) {
 			documentID,
 			actorUserID,
 			time.Now().UTC(),
-			config.UploadPathTemplate(targetProvider),
+			config.AttachmentUploadPathTemplate(targetProvider),
 		)
 		if objectKeyErr != nil {
 			setRequestErrmsg(c, objectKeyErr, "生成对象存储键失败")
@@ -1201,8 +1201,8 @@ func buildDocumentAttachmentObjectKey(
 	if cleanObjectKey == "." || cleanObjectKey == "/" || strings.HasPrefix(cleanObjectKey, "../") {
 		return "", errors.New("attachment object key is invalid")
 	}
-	if !strings.HasPrefix(cleanObjectKey, "images/") {
-		return "", errors.New("attachment object key must start with images/")
+	if !strings.HasPrefix(cleanObjectKey, "attachments/") {
+		return "", errors.New("attachment object key must start with attachments/")
 	}
 	if len(cleanObjectKey) > 512 {
 		return "", errors.New("attachment object key is too long")

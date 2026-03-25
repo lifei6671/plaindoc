@@ -292,6 +292,11 @@ a {
   z-index: 5000;
   transition: opacity 0.12s ease, transform 0.12s ease;
 }
+.reader-tooltip[data-reader-tooltip-enhanced="1"]::before,
+.reader-tooltip[data-reader-tooltip-enhanced="1"]::after {
+  content: none;
+  display: none;
+}
 .reader-tooltip:not(.reader-tree__title-tooltip):hover::before,
 .reader-tooltip:not(.reader-tree__title-tooltip):hover::after,
 .reader-tooltip:not(.reader-tree__title-tooltip):focus-within::before,

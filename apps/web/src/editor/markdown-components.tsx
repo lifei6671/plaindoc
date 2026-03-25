@@ -2,7 +2,6 @@ import {
   Children,
   isValidElement,
   useEffect,
-  useId,
   useRef,
   useState,
   type ComponentPropsWithoutRef,
@@ -107,54 +106,156 @@ interface MermaidBlockProps {
   anchorDataAttributes: Record<string, string>;
 }
 
+type MermaidModule = typeof import("mermaid")["default"];
+
+interface MermaidRenderResult {
+  errorMessage: string | null;
+  svg: string;
+}
+
+interface MermaidRenderCacheEntry extends MermaidRenderResult {
+  pendingPromise?: Promise<MermaidRenderResult>;
+}
+
+const MERMAID_RENDER_CACHE_MAX_ENTRIES = 200;
+
+let mermaidModulePromise: Promise<MermaidModule> | null = null;
+let mermaidRenderSequence = 0;
+
+const mermaidRenderCache = new Map<string, MermaidRenderCacheEntry>();
+
+function setMermaidRenderCacheEntry(cacheKey: string, entry: MermaidRenderCacheEntry) {
+  if (mermaidRenderCache.has(cacheKey)) {
+    mermaidRenderCache.delete(cacheKey);
+  }
+  mermaidRenderCache.set(cacheKey, entry);
+  while (mermaidRenderCache.size > MERMAID_RENDER_CACHE_MAX_ENTRIES) {
+    const oldestKey = mermaidRenderCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    mermaidRenderCache.delete(oldestKey);
+  }
+}
+
+async function loadMermaidModule(): Promise<MermaidModule> {
+  if (!mermaidModulePromise) {
+    mermaidModulePromise = import("mermaid")
+      .then((module) => {
+        module.default.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          suppressErrorRendering: true
+        });
+        return module.default;
+      })
+      .catch((error) => {
+        // 动态导入失败时清空模块级 promise，允许后续重新尝试加载。
+        mermaidModulePromise = null;
+        throw error;
+      });
+  }
+  return mermaidModulePromise;
+}
+
+function buildMermaidCacheKey(
+  anchorDataAttributes: Record<string, string>,
+  source: string
+): string {
+  const anchorIndex = anchorDataAttributes["data-anchor-index"]?.trim() || "mermaid";
+  return `${anchorIndex}:${source}`;
+}
+
+async function renderMermaidWithCache(
+  cacheKey: string,
+  source: string
+): Promise<MermaidRenderResult> {
+  const cachedEntry = mermaidRenderCache.get(cacheKey);
+  if (cachedEntry?.pendingPromise) {
+    return cachedEntry.pendingPromise;
+  }
+  if (cachedEntry && (cachedEntry.svg || cachedEntry.errorMessage)) {
+    return {
+      errorMessage: cachedEntry.errorMessage,
+      svg: cachedEntry.svg
+    };
+  }
+
+  const pendingPromise = (async () => {
+    try {
+      const mermaid = await loadMermaidModule();
+      mermaidRenderSequence += 1;
+      const renderResult = await mermaid.render(
+        `plaindoc-mermaid-${mermaidRenderSequence}`,
+        source
+      );
+      const successResult: MermaidRenderResult = {
+        errorMessage: null,
+        svg: renderResult.svg
+      };
+      setMermaidRenderCacheEntry(cacheKey, successResult);
+      return successResult;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // 渲染失败不写入长期缓存，避免一次瞬时错误把同源图表永久锁死。
+      mermaidRenderCache.delete(cacheKey);
+      const failureResult: MermaidRenderResult = {
+        errorMessage: `Mermaid 渲染失败：${message}`,
+        svg: ""
+      };
+      return failureResult;
+    }
+  })();
+
+  setMermaidRenderCacheEntry(cacheKey, {
+    errorMessage: null,
+    svg: "",
+    pendingPromise
+  });
+  return pendingPromise;
+}
+
 // Mermaid 代码块渲染器：将 fenced mermaid 文本编译为 SVG，并保留锚点属性。
 function MermaidBlock({ code, anchorDataAttributes }: MermaidBlockProps) {
-  const [renderedSvg, setRenderedSvg] = useState("");
-  const [renderError, setRenderError] = useState<string | null>(null);
-  const blockId = useId();
+  const source = code.trim();
+  const cacheKey = buildMermaidCacheKey(anchorDataAttributes, source);
+  const cachedEntry = source ? mermaidRenderCache.get(cacheKey) : undefined;
+  const [renderedSvg, setRenderedSvg] = useState(cachedEntry?.svg ?? "");
+  const [renderError, setRenderError] = useState<string | null>(cachedEntry?.errorMessage ?? null);
   const renderTicketRef = useRef(0);
 
   useEffect(() => {
-    const source = code.trim();
     if (!source) {
       setRenderedSvg("");
       setRenderError("Mermaid 代码块为空，无法渲染图表。");
       return;
     }
 
+    const currentCachedEntry = mermaidRenderCache.get(cacheKey);
+    if (currentCachedEntry?.svg) {
+      setRenderedSvg(currentCachedEntry.svg);
+      setRenderError(currentCachedEntry.errorMessage);
+      return;
+    }
+    if (currentCachedEntry?.errorMessage) {
+      setRenderedSvg("");
+      setRenderError(currentCachedEntry.errorMessage);
+      return;
+    }
+
     renderTicketRef.current += 1;
     const renderTicket = renderTicketRef.current;
-    const normalizedBlockId = blockId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    // 重新渲染期间保留旧 SVG，避免预览高度先塌缩再撑开导致抖动。
+    setRenderError(null);
 
-    const renderMermaid = async () => {
-      try {
-        const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          suppressErrorRendering: true
-        });
-        const renderResult = await mermaid.render(
-          `plaindoc-mermaid-${normalizedBlockId}-${renderTicket}`,
-          source
-        );
-        if (renderTicketRef.current !== renderTicket) {
-          return;
-        }
-        setRenderedSvg(renderResult.svg);
-        setRenderError(null);
-      } catch (error) {
-        if (renderTicketRef.current !== renderTicket) {
-          return;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        setRenderedSvg("");
-        setRenderError(`Mermaid 渲染失败：${message}`);
+    void renderMermaidWithCache(cacheKey, source).then((renderResult) => {
+      if (renderTicketRef.current !== renderTicket) {
+        return;
       }
-    };
-
-    void renderMermaid();
-  }, [blockId, code]);
+      setRenderedSvg(renderResult.svg);
+      setRenderError(renderResult.errorMessage);
+    });
+  }, [cacheKey, source]);
 
   if (renderError) {
     return (

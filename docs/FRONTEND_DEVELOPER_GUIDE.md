@@ -171,6 +171,12 @@ ONLYOFFICE 相关字段约束：
 2. Office 文档需消费 `sourceBlobId/sourceFileName/sourceMimeType/contentVersion`，不能假设正文一定来自 `contentMd`。
 3. 管理后台文档页的格式徽标与格式筛选直接依赖 `AdminDocument.format`，不要在组件层用标题或后缀名猜测类型。
 
+图床配置相关约束：
+
+1. `apps/web/src/settings/image-hosting.ts` 负责把后台 `image-hosting` 配置归一化为前端真值结构。
+2. 管理台必须分别编辑 `imageUploadPathTemplate` 与 `attachmentUploadPathTemplate`；不要再把附件路径写回旧的 `uploadPathTemplate` 语义。
+3. 编辑器预览若启用 Mermaid 延迟渲染，滚动同步与 TOC 必须跟随“当前已渲染的预览内容”，不能只订阅编辑区实时文本。
+
 ### 6.2 HTTP Adapter 行为模型
 
 实现文件：`apps/web/src/data-access/http/adapter.ts`。

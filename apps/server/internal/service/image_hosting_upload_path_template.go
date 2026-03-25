@@ -10,8 +10,12 @@ import (
 )
 
 const (
-	// DefaultImageHostingUploadPathTemplate 统一默认图片对象路径模板。
-	DefaultImageHostingUploadPathTemplate = "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+	// DefaultImageHostingImageUploadPathTemplate 默认图片对象路径模板。
+	DefaultImageHostingImageUploadPathTemplate = "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+	// DefaultImageHostingAttachmentUploadPathTemplate 默认附件对象路径模板。
+	DefaultImageHostingAttachmentUploadPathTemplate = "attachments/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+	// DefaultImageHostingUploadPathTemplate 保留旧常量名，兼容历史调用。
+	DefaultImageHostingUploadPathTemplate = DefaultImageHostingImageUploadPathTemplate
 	maxImageHostingUploadPathTemplateLen  = 256
 )
 
@@ -39,16 +43,49 @@ const imageHostingUploadPathRandomCharset = "0123456789abcdefghijklmnopqrstuvwxy
 func NormalizeImageHostingUploadPathTemplate(rawValue string) string {
 	normalized := strings.TrimSpace(rawValue)
 	if normalized == "" {
-		return DefaultImageHostingUploadPathTemplate
+		return DefaultImageHostingImageUploadPathTemplate
+	}
+	return normalized
+}
+
+// NormalizeAttachmentHostingUploadPathTemplate 将附件模板归一化为非空可用值。
+func NormalizeAttachmentHostingUploadPathTemplate(rawValue string) string {
+	normalized := migrateLegacyAttachmentUploadPathTemplate(rawValue)
+	if normalized == "" {
+		return DefaultImageHostingAttachmentUploadPathTemplate
 	}
 	return normalized
 }
 
 // ValidateImageHostingUploadPathTemplate 校验上传路径模板约束。
 func ValidateImageHostingUploadPathTemplate(rawValue string) error {
+	return validateImageHostingUploadPathTemplate(rawValue, "images/", DefaultImageHostingImageUploadPathTemplate)
+}
+
+// ValidateAttachmentHostingUploadPathTemplate 校验附件上传路径模板约束。
+func ValidateAttachmentHostingUploadPathTemplate(rawValue string) error {
+	return validateImageHostingUploadPathTemplate(
+		NormalizeAttachmentHostingUploadPathTemplate(rawValue),
+		"attachments/",
+		DefaultImageHostingAttachmentUploadPathTemplate,
+	)
+}
+
+func migrateLegacyAttachmentUploadPathTemplate(rawValue string) string {
+	normalized := strings.TrimSpace(rawValue)
+	if normalized == "" {
+		return ""
+	}
+	if strings.HasPrefix(normalized, "images/") {
+		return "attachments/" + strings.TrimPrefix(normalized, "images/")
+	}
+	return normalized
+}
+
+func validateImageHostingUploadPathTemplate(rawValue string, requiredPrefix string, fallbackValue string) error {
 	template := strings.TrimSpace(rawValue)
 	if template == "" {
-		return fmt.Errorf("uploadPathTemplate must not be empty")
+		template = fallbackValue
 	}
 	if len(template) > maxImageHostingUploadPathTemplateLen {
 		return fmt.Errorf("uploadPathTemplate must be at most %d chars", maxImageHostingUploadPathTemplateLen)
@@ -65,8 +102,8 @@ func ValidateImageHostingUploadPathTemplate(rawValue string) error {
 	if strings.Contains(template, "//") {
 		return fmt.Errorf("uploadPathTemplate must not contain empty path segment")
 	}
-	if !strings.HasPrefix(template, "images/") {
-		return fmt.Errorf("uploadPathTemplate must start with images/")
+	if !strings.HasPrefix(template, requiredPrefix) {
+		return fmt.Errorf("uploadPathTemplate must start with %s", requiredPrefix)
 	}
 	if !strings.Contains(template, "{assetId}") {
 		return fmt.Errorf("uploadPathTemplate must contain {assetId}")

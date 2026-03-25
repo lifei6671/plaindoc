@@ -8,10 +8,30 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/xuri/excelize/v2"
 )
+
+func TestBuildOfficeRenderObjectKey_UsesAttachmentsPrefix(t *testing.T) {
+	t.Parallel()
+
+	objectKey, err := buildOfficeRenderObjectKey(
+		"report.docx",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"space-a",
+		"doc-a",
+		time.Date(2026, time.March, 25, 10, 0, 0, 0, time.UTC),
+		DefaultImageHostingConfig().AttachmentUploadPathTemplate(ImageHostingProviderLocal),
+	)
+	if err != nil {
+		t.Fatalf("buildOfficeRenderObjectKey returned error: %v", err)
+	}
+	if !strings.HasPrefix(objectKey, "attachments/") {
+		t.Fatalf("expected office attachment object key start with attachments/, got %q", objectKey)
+	}
+}
 
 func TestOfficeHTMLRenderServiceRenderDOCXHTMLUsesMammoth(t *testing.T) {
 	t.Parallel()

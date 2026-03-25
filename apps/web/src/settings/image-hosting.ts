@@ -16,7 +16,8 @@ export interface CloudflareR2Config {
   secretAccessKey: string;
   bucket: string;
   publicBaseUrl: string;
-  uploadPathTemplate: string;
+  imageUploadPathTemplate: string;
+  attachmentUploadPathTemplate: string;
 }
 
 export interface AliyunOssConfig {
@@ -26,13 +27,15 @@ export interface AliyunOssConfig {
   bucket: string;
   endpoint: string;
   publicBaseUrl: string;
-  uploadPathTemplate: string;
+  imageUploadPathTemplate: string;
+  attachmentUploadPathTemplate: string;
 }
 
 export interface LocalImageHostingConfig {
   uploadEndpoint: string;
   publicBaseUrl: string;
-  uploadPathTemplate: string;
+  imageUploadPathTemplate: string;
+  attachmentUploadPathTemplate: string;
 }
 
 export interface ImageHostingConfig {
@@ -52,7 +55,8 @@ export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
     secretAccessKey: "",
     bucket: "",
     publicBaseUrl: "",
-    uploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+    imageUploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}",
+    attachmentUploadPathTemplate: "attachments/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
   },
   aliyunOss: {
     region: "",
@@ -61,12 +65,14 @@ export const DEFAULT_IMAGE_HOSTING_CONFIG: ImageHostingConfig = {
     bucket: "",
     endpoint: "",
     publicBaseUrl: "",
-    uploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+    imageUploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}",
+    attachmentUploadPathTemplate: "attachments/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
   },
   local: {
     uploadEndpoint: "/api/uploads/images",
     publicBaseUrl: "/uploads",
-    uploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+    imageUploadPathTemplate: "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}",
+    attachmentUploadPathTemplate: "attachments/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
   },
   imageProcessing: {
     mode: "same_format",
@@ -115,6 +121,17 @@ function readBoolean(record: Record<string, unknown> | null, key: string, fallba
   }
   const value = record[key];
   return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeAttachmentUploadPathTemplate(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.startsWith("images/")) {
+    return `attachments/${normalized.slice("images/".length)}`;
+  }
+  return normalized;
 }
 
 function normalizeImageProcessingMode(input: unknown): ImageHostingImageProcessingMode {
@@ -202,6 +219,9 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
   const legacyMaxPixels = readInteger(imageProcessing, "maxPixels", 0);
   const derivedLegacyDimension =
     legacyMaxPixels > 0 ? Math.max(256, Math.min(20000, Math.floor(Math.sqrt(legacyMaxPixels)))) : 0;
+  const cloudflareLegacyUploadPathTemplate = readString(cloudflareR2, "uploadPathTemplate");
+  const aliyunLegacyUploadPathTemplate = readString(aliyunOss, "uploadPathTemplate");
+  const localLegacyUploadPathTemplate = readString(local, "uploadPathTemplate");
 
   return {
     defaultProvider,
@@ -211,9 +231,15 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
       secretAccessKey: readString(cloudflareR2, "secretAccessKey"),
       bucket: readString(cloudflareR2, "bucket"),
       publicBaseUrl: readString(cloudflareR2, "publicBaseUrl"),
-      uploadPathTemplate:
-        readString(cloudflareR2, "uploadPathTemplate") ||
-        DEFAULT_IMAGE_HOSTING_CONFIG.cloudflareR2.uploadPathTemplate
+      imageUploadPathTemplate:
+        readString(cloudflareR2, "imageUploadPathTemplate") ||
+        cloudflareLegacyUploadPathTemplate ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.cloudflareR2.imageUploadPathTemplate,
+      attachmentUploadPathTemplate:
+        normalizeAttachmentUploadPathTemplate(
+          readString(cloudflareR2, "attachmentUploadPathTemplate") || cloudflareLegacyUploadPathTemplate
+        ) ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.cloudflareR2.attachmentUploadPathTemplate
     },
     aliyunOss: {
       region: readString(aliyunOss, "region"),
@@ -222,16 +248,30 @@ export function normalizeImageHostingConfig(input: unknown): ImageHostingConfig 
       bucket: readString(aliyunOss, "bucket"),
       endpoint: readString(aliyunOss, "endpoint"),
       publicBaseUrl: readString(aliyunOss, "publicBaseUrl"),
-      uploadPathTemplate:
-        readString(aliyunOss, "uploadPathTemplate") || DEFAULT_IMAGE_HOSTING_CONFIG.aliyunOss.uploadPathTemplate
+      imageUploadPathTemplate:
+        readString(aliyunOss, "imageUploadPathTemplate") ||
+        aliyunLegacyUploadPathTemplate ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.aliyunOss.imageUploadPathTemplate,
+      attachmentUploadPathTemplate:
+        normalizeAttachmentUploadPathTemplate(
+          readString(aliyunOss, "attachmentUploadPathTemplate") || aliyunLegacyUploadPathTemplate
+        ) ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.aliyunOss.attachmentUploadPathTemplate
     },
     local: {
       uploadEndpoint:
         readString(local, "uploadEndpoint") || DEFAULT_IMAGE_HOSTING_CONFIG.local.uploadEndpoint,
       publicBaseUrl:
         readString(local, "publicBaseUrl") || DEFAULT_IMAGE_HOSTING_CONFIG.local.publicBaseUrl,
-      uploadPathTemplate:
-        readString(local, "uploadPathTemplate") || DEFAULT_IMAGE_HOSTING_CONFIG.local.uploadPathTemplate
+      imageUploadPathTemplate:
+        readString(local, "imageUploadPathTemplate") ||
+        localLegacyUploadPathTemplate ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.local.imageUploadPathTemplate,
+      attachmentUploadPathTemplate:
+        normalizeAttachmentUploadPathTemplate(
+          readString(local, "attachmentUploadPathTemplate") || localLegacyUploadPathTemplate
+        ) ||
+        DEFAULT_IMAGE_HOSTING_CONFIG.local.attachmentUploadPathTemplate
     },
     imageProcessing: {
       mode: normalizeImageProcessingMode(readString(imageProcessing, "mode")),

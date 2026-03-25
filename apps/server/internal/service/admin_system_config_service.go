@@ -1696,14 +1696,16 @@ func validateImageHostingConfig(payload map[string]any) error {
 		return err
 	}
 	if err := validateNoUnknownKeys(cloudflareR2, map[string]struct{}{
-		"accountId":           {},
-		"bucket":              {},
-		"accessKeyId":         {},
-		"secretAccessKey":     {},
-		"publicBaseUrl":       {},
-		"uploadPathTemplate":  {},
-		"downloadStrategy":    {},
-		"signedUrlTtlSeconds": {},
+		"accountId":                    {},
+		"bucket":                       {},
+		"accessKeyId":                  {},
+		"secretAccessKey":              {},
+		"publicBaseUrl":                {},
+		"imageUploadPathTemplate":      {},
+		"attachmentUploadPathTemplate": {},
+		"uploadPathTemplate":           {},
+		"downloadStrategy":             {},
+		"signedUrlTtlSeconds":          {},
 	}); err != nil {
 		return fmt.Errorf("cloudflareR2 %w", err)
 	}
@@ -1727,16 +1729,33 @@ func validateImageHostingConfig(payload map[string]any) error {
 	if err != nil {
 		return err
 	}
-	cloudflareUploadPathTemplate := DefaultImageHostingUploadPathTemplate
+	cloudflareLegacyUploadPathTemplate := ""
 	if value, hasValue, optionalErr := getOptionalString(cloudflareR2, "uploadPathTemplate"); optionalErr != nil {
 		return optionalErr
 	} else if hasValue {
-		cloudflareUploadPathTemplate = value
+		cloudflareLegacyUploadPathTemplate = value
+	}
+	cloudflareImageUploadPathTemplate := cloudflareLegacyUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(cloudflareR2, "imageUploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		cloudflareImageUploadPathTemplate = value
 	}
 	if validateErr := ValidateImageHostingUploadPathTemplate(
-		NormalizeImageHostingUploadPathTemplate(cloudflareUploadPathTemplate),
+		NormalizeImageHostingUploadPathTemplate(cloudflareImageUploadPathTemplate),
 	); validateErr != nil {
-		return fmt.Errorf("cloudflareR2.uploadPathTemplate %w", validateErr)
+		return fmt.Errorf("cloudflareR2.imageUploadPathTemplate %w", validateErr)
+	}
+	cloudflareAttachmentUploadPathTemplate := cloudflareLegacyUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(cloudflareR2, "attachmentUploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		cloudflareAttachmentUploadPathTemplate = value
+	}
+	if validateErr := ValidateAttachmentHostingUploadPathTemplate(
+		NormalizeAttachmentHostingUploadPathTemplate(cloudflareAttachmentUploadPathTemplate),
+	); validateErr != nil {
+		return fmt.Errorf("cloudflareR2.attachmentUploadPathTemplate %w", validateErr)
 	}
 	cloudflareDownloadStrategy := ImageHostingDownloadStrategyPublic
 	if strategy, hasStrategy, strategyErr := getOptionalString(cloudflareR2, "downloadStrategy"); strategyErr != nil {
@@ -1770,15 +1789,17 @@ func validateImageHostingConfig(payload map[string]any) error {
 		return err
 	}
 	if err := validateNoUnknownKeys(aliyunOSS, map[string]struct{}{
-		"region":              {},
-		"bucket":              {},
-		"endpoint":            {},
-		"accessKeyId":         {},
-		"accessKeySecret":     {},
-		"publicBaseUrl":       {},
-		"uploadPathTemplate":  {},
-		"downloadStrategy":    {},
-		"signedUrlTtlSeconds": {},
+		"region":                       {},
+		"bucket":                       {},
+		"endpoint":                     {},
+		"accessKeyId":                  {},
+		"accessKeySecret":              {},
+		"publicBaseUrl":                {},
+		"imageUploadPathTemplate":      {},
+		"attachmentUploadPathTemplate": {},
+		"uploadPathTemplate":           {},
+		"downloadStrategy":             {},
+		"signedUrlTtlSeconds":          {},
 	}); err != nil {
 		return fmt.Errorf("aliyunOss %w", err)
 	}
@@ -1806,16 +1827,33 @@ func validateImageHostingConfig(payload map[string]any) error {
 	if err != nil {
 		return err
 	}
-	aliyunUploadPathTemplate := DefaultImageHostingUploadPathTemplate
+	aliyunLegacyUploadPathTemplate := ""
 	if value, hasValue, optionalErr := getOptionalString(aliyunOSS, "uploadPathTemplate"); optionalErr != nil {
 		return optionalErr
 	} else if hasValue {
-		aliyunUploadPathTemplate = value
+		aliyunLegacyUploadPathTemplate = value
+	}
+	aliyunImageUploadPathTemplate := aliyunLegacyUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(aliyunOSS, "imageUploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		aliyunImageUploadPathTemplate = value
 	}
 	if validateErr := ValidateImageHostingUploadPathTemplate(
-		NormalizeImageHostingUploadPathTemplate(aliyunUploadPathTemplate),
+		NormalizeImageHostingUploadPathTemplate(aliyunImageUploadPathTemplate),
 	); validateErr != nil {
-		return fmt.Errorf("aliyunOss.uploadPathTemplate %w", validateErr)
+		return fmt.Errorf("aliyunOss.imageUploadPathTemplate %w", validateErr)
+	}
+	aliyunAttachmentUploadPathTemplate := aliyunLegacyUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(aliyunOSS, "attachmentUploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		aliyunAttachmentUploadPathTemplate = value
+	}
+	if validateErr := ValidateAttachmentHostingUploadPathTemplate(
+		NormalizeAttachmentHostingUploadPathTemplate(aliyunAttachmentUploadPathTemplate),
+	); validateErr != nil {
+		return fmt.Errorf("aliyunOss.attachmentUploadPathTemplate %w", validateErr)
 	}
 	aliyunDownloadStrategy := ImageHostingDownloadStrategyPublic
 	if strategy, hasStrategy, strategyErr := getOptionalString(aliyunOSS, "downloadStrategy"); strategyErr != nil {
@@ -1849,9 +1887,11 @@ func validateImageHostingConfig(payload map[string]any) error {
 		return err
 	}
 	if err := validateNoUnknownKeys(local, map[string]struct{}{
-		"uploadEndpoint":     {},
-		"publicBaseUrl":      {},
-		"uploadPathTemplate": {},
+		"uploadEndpoint":               {},
+		"publicBaseUrl":                {},
+		"imageUploadPathTemplate":      {},
+		"attachmentUploadPathTemplate": {},
+		"uploadPathTemplate":           {},
 	}); err != nil {
 		return fmt.Errorf("local %w", err)
 	}
@@ -1863,16 +1903,33 @@ func validateImageHostingConfig(payload map[string]any) error {
 	if err != nil {
 		return err
 	}
-	localUploadPathTemplate := DefaultImageHostingUploadPathTemplate
+	localLegacyUploadPathTemplate := ""
 	if value, hasValue, optionalErr := getOptionalString(local, "uploadPathTemplate"); optionalErr != nil {
 		return optionalErr
 	} else if hasValue {
-		localUploadPathTemplate = value
+		localLegacyUploadPathTemplate = value
+	}
+	localImageUploadPathTemplate := localLegacyUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(local, "imageUploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		localImageUploadPathTemplate = value
 	}
 	if validateErr := ValidateImageHostingUploadPathTemplate(
-		NormalizeImageHostingUploadPathTemplate(localUploadPathTemplate),
+		NormalizeImageHostingUploadPathTemplate(localImageUploadPathTemplate),
 	); validateErr != nil {
-		return fmt.Errorf("local.uploadPathTemplate %w", validateErr)
+		return fmt.Errorf("local.imageUploadPathTemplate %w", validateErr)
+	}
+	localAttachmentUploadPathTemplate := localLegacyUploadPathTemplate
+	if value, hasValue, optionalErr := getOptionalString(local, "attachmentUploadPathTemplate"); optionalErr != nil {
+		return optionalErr
+	} else if hasValue {
+		localAttachmentUploadPathTemplate = value
+	}
+	if validateErr := ValidateAttachmentHostingUploadPathTemplate(
+		NormalizeAttachmentHostingUploadPathTemplate(localAttachmentUploadPathTemplate),
+	); validateErr != nil {
+		return fmt.Errorf("local.attachmentUploadPathTemplate %w", validateErr)
 	}
 
 	switch defaultProvider {

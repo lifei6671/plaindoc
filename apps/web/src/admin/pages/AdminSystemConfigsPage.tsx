@@ -347,11 +347,15 @@ const IMAGE_HOSTING_IMAGE_MAX_WIDTH_MAX = 20000;
 const IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MIN = 256;
 const IMAGE_HOSTING_IMAGE_MAX_HEIGHT_MAX = 20000;
 
-const IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER =
+type ImageHostingUploadTemplateField = "imageUploadPathTemplate" | "attachmentUploadPathTemplate";
+
+const IMAGE_HOSTING_IMAGE_TEMPLATE_PLACEHOLDER =
   "images/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}";
+const IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PLACEHOLDER =
+  "attachments/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}";
 const IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT =
   "可用变量：{spaceId} {docId} {yyyy} {mm} {dd} {hh} {assetId} {origName} {ext} {uploaderId} {Rand:N}；其中 N 取值 4-10，且必须包含 {assetId}。";
-const IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS: Array<{
+const IMAGE_HOSTING_IMAGE_TEMPLATE_PRESETS: Array<{
   key: string;
   label: string;
   template: string;
@@ -370,6 +374,27 @@ const IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS: Array<{
       key: "by-month",
       label: "按年月归档",
       template: "images/{spaceId}/{yyyy}/{mm}/{assetId}.{ext}"
+    }
+  ];
+const IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PRESETS: Array<{
+  key: string;
+  label: string;
+  template: string;
+}> = [
+    {
+      key: "by-document",
+      label: "按文档归档",
+      template: "attachments/{spaceId}/{docId}/{yyyy}/{mm}/{dd}/{assetId}_{origName}.{ext}"
+    },
+    {
+      key: "by-day",
+      label: "按年月日归档",
+      template: "attachments/{spaceId}/{yyyy}/{mm}/{dd}/{assetId}.{ext}"
+    },
+    {
+      key: "by-month",
+      label: "按年月归档",
+      template: "attachments/{spaceId}/{yyyy}/{mm}/{assetId}.{ext}"
     }
   ];
 const IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES: Array<{
@@ -1300,11 +1325,7 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
   const [runningSearchRebuild, setRunningSearchRebuild] = useState(false);
   const [searchIndexStatus, setSearchIndexStatus] = useState<AdminSearchIndexStatusResult | null>(null);
   const [searchStatusLoading, setSearchStatusLoading] = useState(false);
-  const imageHostingTemplateInputRefs = useRef<Record<ImageHostingProvider, HTMLInputElement | null>>({
-    local: null,
-    "cloudflare-r2": null,
-    "aliyun-oss": null
-  });
+  const imageHostingTemplateInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const openToast = useCallback((message: string, variant: "success" | "info" | "error" = "error") => {
     showToast(message, variant);
@@ -1691,6 +1712,11 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
     markDirty("image-hosting");
   }, [markDirty]);
 
+  const resolveImageHostingTemplateInputRefKey = useCallback(
+    (provider: ImageHostingProvider, field: ImageHostingUploadTemplateField) => `${provider}:${field}`,
+    []
+  );
+
   const setImageProcessingMode = useCallback((mode: ImageHostingImageProcessingMode) => {
     setImageHostingDraft((previousConfig) => ({
       ...previousConfig,
@@ -1753,20 +1779,23 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
   }, [markDirty]);
 
   const bindImageHostingTemplateInputRef = useCallback(
-    (provider: ImageHostingProvider) => (node: HTMLInputElement | null) => {
-      imageHostingTemplateInputRefs.current[provider] = node;
-    },
-    []
+    (provider: ImageHostingProvider, field: ImageHostingUploadTemplateField) =>
+      (node: HTMLInputElement | null) => {
+        imageHostingTemplateInputRefs.current[resolveImageHostingTemplateInputRefKey(provider, field)] = node;
+      },
+    [resolveImageHostingTemplateInputRefKey]
   );
 
   const insertImageHostingTemplateVariable = useCallback(
     (
       provider: ImageHostingProvider,
+      field: ImageHostingUploadTemplateField,
       currentValue: string,
       token: string,
       onChange: (nextValue: string) => void
     ) => {
-      const inputNode = imageHostingTemplateInputRefs.current[provider];
+      const inputRefKey = resolveImageHostingTemplateInputRefKey(provider, field);
+      const inputNode = imageHostingTemplateInputRefs.current[inputRefKey];
       const normalizedCurrentValue = currentValue ?? "";
       const insertFrom =
         inputNode && document.activeElement === inputNode
@@ -1781,7 +1810,7 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
       onChange(nextValue);
       window.requestAnimationFrame(() => {
         const nextCursor = insertFrom + token.length;
-        const latestInputNode = imageHostingTemplateInputRefs.current[provider];
+        const latestInputNode = imageHostingTemplateInputRefs.current[inputRefKey];
         if (!latestInputNode) {
           return;
         }
@@ -1789,7 +1818,7 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
         latestInputNode.setSelectionRange(nextCursor, nextCursor);
       });
     },
-    []
+    [resolveImageHostingTemplateInputRefKey]
   );
 
   const selectedAuthProvider = useMemo(() => {
@@ -3979,31 +4008,31 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                         </label>
                         <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold tracking-wide text-slate-700">上传路径模板</span>
-                            <span className="text-[11px] text-slate-500">内置场景</span>
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">图片上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">仅影响后续图片上传</span>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS.map((preset) => (
+                            {IMAGE_HOSTING_IMAGE_TEMPLATE_PRESETS.map((preset) => (
                               <button
                                 key={`local-${preset.key}`}
                                 type="button"
                                 className={`rounded-md border px-2 py-1 text-xs transition ${
-                                  imageHostingDraft.local.uploadPathTemplate.trim() === preset.template
+                                  imageHostingDraft.local.imageUploadPathTemplate.trim() === preset.template
                                     ? "border-sky-300 bg-sky-50 text-sky-700"
                                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                                 }`}
                                 disabled={saving}
-                                onClick={() => setLocalField("uploadPathTemplate", preset.template)}
+                                onClick={() => setLocalField("imageUploadPathTemplate", preset.template)}
                               >
                                 {preset.label}
                               </button>
                             ))}
                           </div>
                           <Input
-                            ref={bindImageHostingTemplateInputRef("local")}
-                            placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
-                            value={imageHostingDraft.local.uploadPathTemplate}
-                            onChange={(event) => setLocalField("uploadPathTemplate", event.target.value)}
+                            ref={bindImageHostingTemplateInputRef("local", "imageUploadPathTemplate")}
+                            placeholder={IMAGE_HOSTING_IMAGE_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.local.imageUploadPathTemplate}
+                            onChange={(event) => setLocalField("imageUploadPathTemplate", event.target.value)}
                             disabled={saving}
                           />
                           <div className="flex flex-wrap gap-1.5">
@@ -4018,9 +4047,10 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                                       onClick={() =>
                                         insertImageHostingTemplateVariable(
                                           "local",
-                                          imageHostingDraft.local.uploadPathTemplate,
+                                          "imageUploadPathTemplate",
+                                          imageHostingDraft.local.imageUploadPathTemplate,
                                           variable.token,
-                                          (nextValue) => setLocalField("uploadPathTemplate", nextValue)
+                                          (nextValue) => setLocalField("imageUploadPathTemplate", nextValue)
                                         )
                                       }
                                     >
@@ -4038,7 +4068,73 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                           <p className="text-xs text-slate-500">
                             预览：{" "}
                             <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
-                              {buildImageHostingTemplatePreview(imageHostingDraft.local.uploadPathTemplate)}
+                              {buildImageHostingTemplatePreview(imageHostingDraft.local.imageUploadPathTemplate)}
+                            </code>
+                          </p>
+                        </div>
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">附件上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">仅影响后续附件上传</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PRESETS.map((preset) => (
+                              <button
+                                key={`local-attachment-${preset.key}`}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs transition ${
+                                  imageHostingDraft.local.attachmentUploadPathTemplate.trim() === preset.template
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                                disabled={saving}
+                                onClick={() => setLocalField("attachmentUploadPathTemplate", preset.template)}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                          <Input
+                            ref={bindImageHostingTemplateInputRef("local", "attachmentUploadPathTemplate")}
+                            placeholder={IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.local.attachmentUploadPathTemplate}
+                            onChange={(event) => setLocalField("attachmentUploadPathTemplate", event.target.value)}
+                            disabled={saving}
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            <TooltipProvider delayDuration={120}>
+                              {IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES.map((variable) => (
+                                <Tooltip key={`local-attachment-${variable.token}`}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                      disabled={saving}
+                                      onClick={() =>
+                                        insertImageHostingTemplateVariable(
+                                          "local",
+                                          "attachmentUploadPathTemplate",
+                                          imageHostingDraft.local.attachmentUploadPathTemplate,
+                                          variable.token,
+                                          (nextValue) => setLocalField("attachmentUploadPathTemplate", nextValue)
+                                        )
+                                      }
+                                    >
+                                      {variable.label}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-[280px] whitespace-pre-wrap break-words">
+                                    {variable.description}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                            </TooltipProvider>
+                          </div>
+                          <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
+                          <p className="text-xs text-slate-500">
+                            预览：{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
+                              {buildImageHostingTemplatePreview(imageHostingDraft.local.attachmentUploadPathTemplate)}
                             </code>
                           </p>
                         </div>
@@ -4093,31 +4189,31 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                         </label>
                         <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold tracking-wide text-slate-700">上传路径模板</span>
-                            <span className="text-[11px] text-slate-500">内置场景</span>
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">图片上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">仅影响后续图片上传</span>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS.map((preset) => (
+                            {IMAGE_HOSTING_IMAGE_TEMPLATE_PRESETS.map((preset) => (
                               <button
                                 key={`cloudflare-r2-${preset.key}`}
                                 type="button"
                                 className={`rounded-md border px-2 py-1 text-xs transition ${
-                                  imageHostingDraft.cloudflareR2.uploadPathTemplate.trim() === preset.template
+                                  imageHostingDraft.cloudflareR2.imageUploadPathTemplate.trim() === preset.template
                                     ? "border-sky-300 bg-sky-50 text-sky-700"
                                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                                 }`}
                                 disabled={saving}
-                                onClick={() => setCloudflareField("uploadPathTemplate", preset.template)}
+                                onClick={() => setCloudflareField("imageUploadPathTemplate", preset.template)}
                               >
                                 {preset.label}
                               </button>
                             ))}
                           </div>
                           <Input
-                            ref={bindImageHostingTemplateInputRef("cloudflare-r2")}
-                            placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
-                            value={imageHostingDraft.cloudflareR2.uploadPathTemplate}
-                            onChange={(event) => setCloudflareField("uploadPathTemplate", event.target.value)}
+                            ref={bindImageHostingTemplateInputRef("cloudflare-r2", "imageUploadPathTemplate")}
+                            placeholder={IMAGE_HOSTING_IMAGE_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.cloudflareR2.imageUploadPathTemplate}
+                            onChange={(event) => setCloudflareField("imageUploadPathTemplate", event.target.value)}
                             disabled={saving}
                           />
                           <div className="flex flex-wrap gap-1.5">
@@ -4132,9 +4228,10 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                                       onClick={() =>
                                         insertImageHostingTemplateVariable(
                                           "cloudflare-r2",
-                                          imageHostingDraft.cloudflareR2.uploadPathTemplate,
+                                          "imageUploadPathTemplate",
+                                          imageHostingDraft.cloudflareR2.imageUploadPathTemplate,
                                           variable.token,
-                                          (nextValue) => setCloudflareField("uploadPathTemplate", nextValue)
+                                          (nextValue) => setCloudflareField("imageUploadPathTemplate", nextValue)
                                         )
                                       }
                                     >
@@ -4152,7 +4249,73 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                           <p className="text-xs text-slate-500">
                             预览：{" "}
                             <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
-                              {buildImageHostingTemplatePreview(imageHostingDraft.cloudflareR2.uploadPathTemplate)}
+                              {buildImageHostingTemplatePreview(imageHostingDraft.cloudflareR2.imageUploadPathTemplate)}
+                            </code>
+                          </p>
+                        </div>
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">附件上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">仅影响后续附件上传</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PRESETS.map((preset) => (
+                              <button
+                                key={`cloudflare-r2-attachment-${preset.key}`}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs transition ${
+                                  imageHostingDraft.cloudflareR2.attachmentUploadPathTemplate.trim() === preset.template
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                                disabled={saving}
+                                onClick={() => setCloudflareField("attachmentUploadPathTemplate", preset.template)}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                          <Input
+                            ref={bindImageHostingTemplateInputRef("cloudflare-r2", "attachmentUploadPathTemplate")}
+                            placeholder={IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.cloudflareR2.attachmentUploadPathTemplate}
+                            onChange={(event) => setCloudflareField("attachmentUploadPathTemplate", event.target.value)}
+                            disabled={saving}
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            <TooltipProvider delayDuration={120}>
+                              {IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES.map((variable) => (
+                                <Tooltip key={`cloudflare-r2-attachment-${variable.token}`}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                      disabled={saving}
+                                      onClick={() =>
+                                        insertImageHostingTemplateVariable(
+                                          "cloudflare-r2",
+                                          "attachmentUploadPathTemplate",
+                                          imageHostingDraft.cloudflareR2.attachmentUploadPathTemplate,
+                                          variable.token,
+                                          (nextValue) => setCloudflareField("attachmentUploadPathTemplate", nextValue)
+                                        )
+                                      }
+                                    >
+                                      {variable.label}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-[280px] whitespace-pre-wrap break-words">
+                                    {variable.description}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                            </TooltipProvider>
+                          </div>
+                          <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
+                          <p className="text-xs text-slate-500">
+                            预览：{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
+                              {buildImageHostingTemplatePreview(imageHostingDraft.cloudflareR2.attachmentUploadPathTemplate)}
                             </code>
                           </p>
                         </div>
@@ -4216,31 +4379,31 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                         </label>
                         <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold tracking-wide text-slate-700">上传路径模板</span>
-                            <span className="text-[11px] text-slate-500">内置场景</span>
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">图片上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">仅影响后续图片上传</span>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {IMAGE_HOSTING_UPLOAD_TEMPLATE_PRESETS.map((preset) => (
+                            {IMAGE_HOSTING_IMAGE_TEMPLATE_PRESETS.map((preset) => (
                               <button
                                 key={`aliyun-oss-${preset.key}`}
                                 type="button"
                                 className={`rounded-md border px-2 py-1 text-xs transition ${
-                                  imageHostingDraft.aliyunOss.uploadPathTemplate.trim() === preset.template
+                                  imageHostingDraft.aliyunOss.imageUploadPathTemplate.trim() === preset.template
                                     ? "border-sky-300 bg-sky-50 text-sky-700"
                                     : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                                 }`}
                                 disabled={saving}
-                                onClick={() => setAliyunField("uploadPathTemplate", preset.template)}
+                                onClick={() => setAliyunField("imageUploadPathTemplate", preset.template)}
                               >
                                 {preset.label}
                               </button>
                             ))}
                           </div>
                           <Input
-                            ref={bindImageHostingTemplateInputRef("aliyun-oss")}
-                            placeholder={IMAGE_HOSTING_UPLOAD_TEMPLATE_PLACEHOLDER}
-                            value={imageHostingDraft.aliyunOss.uploadPathTemplate}
-                            onChange={(event) => setAliyunField("uploadPathTemplate", event.target.value)}
+                            ref={bindImageHostingTemplateInputRef("aliyun-oss", "imageUploadPathTemplate")}
+                            placeholder={IMAGE_HOSTING_IMAGE_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.aliyunOss.imageUploadPathTemplate}
+                            onChange={(event) => setAliyunField("imageUploadPathTemplate", event.target.value)}
                             disabled={saving}
                           />
                           <div className="flex flex-wrap gap-1.5">
@@ -4255,9 +4418,10 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                                       onClick={() =>
                                         insertImageHostingTemplateVariable(
                                           "aliyun-oss",
-                                          imageHostingDraft.aliyunOss.uploadPathTemplate,
+                                          "imageUploadPathTemplate",
+                                          imageHostingDraft.aliyunOss.imageUploadPathTemplate,
                                           variable.token,
-                                          (nextValue) => setAliyunField("uploadPathTemplate", nextValue)
+                                          (nextValue) => setAliyunField("imageUploadPathTemplate", nextValue)
                                         )
                                       }
                                     >
@@ -4275,7 +4439,73 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                           <p className="text-xs text-slate-500">
                             预览：{" "}
                             <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
-                              {buildImageHostingTemplatePreview(imageHostingDraft.aliyunOss.uploadPathTemplate)}
+                              {buildImageHostingTemplatePreview(imageHostingDraft.aliyunOss.imageUploadPathTemplate)}
+                            </code>
+                          </p>
+                        </div>
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/50 p-3 sm:col-span-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold tracking-wide text-slate-700">附件上传路径模板</span>
+                            <span className="text-[11px] text-slate-500">仅影响后续附件上传</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PRESETS.map((preset) => (
+                              <button
+                                key={`aliyun-oss-attachment-${preset.key}`}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs transition ${
+                                  imageHostingDraft.aliyunOss.attachmentUploadPathTemplate.trim() === preset.template
+                                    ? "border-sky-300 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                }`}
+                                disabled={saving}
+                                onClick={() => setAliyunField("attachmentUploadPathTemplate", preset.template)}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                          <Input
+                            ref={bindImageHostingTemplateInputRef("aliyun-oss", "attachmentUploadPathTemplate")}
+                            placeholder={IMAGE_HOSTING_ATTACHMENT_TEMPLATE_PLACEHOLDER}
+                            value={imageHostingDraft.aliyunOss.attachmentUploadPathTemplate}
+                            onChange={(event) => setAliyunField("attachmentUploadPathTemplate", event.target.value)}
+                            disabled={saving}
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            <TooltipProvider delayDuration={120}>
+                              {IMAGE_HOSTING_UPLOAD_TEMPLATE_VARIABLES.map((variable) => (
+                                <Tooltip key={`aliyun-oss-attachment-${variable.token}`}>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                      disabled={saving}
+                                      onClick={() =>
+                                        insertImageHostingTemplateVariable(
+                                          "aliyun-oss",
+                                          "attachmentUploadPathTemplate",
+                                          imageHostingDraft.aliyunOss.attachmentUploadPathTemplate,
+                                          variable.token,
+                                          (nextValue) => setAliyunField("attachmentUploadPathTemplate", nextValue)
+                                        )
+                                      }
+                                    >
+                                      {variable.label}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-[280px] whitespace-pre-wrap break-words">
+                                    {variable.description}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ))}
+                            </TooltipProvider>
+                          </div>
+                          <p className="text-xs text-slate-500">{IMAGE_HOSTING_UPLOAD_TEMPLATE_HINT}</p>
+                          <p className="text-xs text-slate-500">
+                            预览：{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px] text-slate-700">
+                              {buildImageHostingTemplatePreview(imageHostingDraft.aliyunOss.attachmentUploadPathTemplate)}
                             </code>
                           </p>
                         </div>

@@ -195,6 +195,12 @@
 
 校验实现文件：`apps/server/internal/service/admin_system_config_service.go`。
 
+`image-hosting` 额外约束：
+
+1. 图片链路读取 `imageUploadPathTemplate`，附件链路读取 `attachmentUploadPathTemplate`。
+2. 历史字段 `uploadPathTemplate` 仅作为兼容输入；归一化时会继续喂给图片模板，并把附件模板自动迁移到 `attachments/` 前缀。
+3. Office 初始化、文档附件上传、Office HTML 渲染落盘都属于附件链路，不能再复用图片模板。
+
 ---
 
 ## 6. API 功能域总览

@@ -15,7 +15,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   const MOBILE_SIDEBAR_OVERLAY_SELECTOR = "[data-reader-hook='mobile-overlay']";
   const MOBILE_BAR_TITLE_SELECTOR = "[data-reader-hook='mobile-bar-title']";
   const MOBILE_SIDEBAR_OPEN_CLASS = "reader-mobile-sidebar-open";
-  const TREE_TITLE_TOOLTIP_SELECTOR = "[data-reader-hook='tree-title-tooltip'][data-tooltip]";
+  const READER_TOOLTIP_SELECTOR = ".reader-tooltip[data-tooltip]";
   const TREE_ROW_ACTIVE_CLASS = "reader-tree__row--active";
   const TREE_LABEL_ACTIVE_CLASS = "reader-tree__label--active";
   const STATE_SCRIPT_SELECTOR = "#plaindoc-reader-state";
@@ -2072,7 +2072,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
   }
 
   try {
-    const tooltipTargetSelector = TREE_TITLE_TOOLTIP_SELECTOR;
+    const tooltipTargetSelector = READER_TOOLTIP_SELECTOR;
     const tooltipClassName = "reader-floating-tooltip";
     const tooltipVisibleClassName = "reader-floating-tooltip--visible";
     const viewportPadding = 10;
@@ -2104,8 +2104,9 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       tooltipNode.style.top = "-9999px";
 
       const tooltipRect = tooltipNode.getBoundingClientRect();
-      let left = anchorRect.left;
+      const preferredLeft = anchorRect.left + anchorRect.width / 2 - tooltipRect.width / 2;
       const maxLeft = window.innerWidth - viewportPadding - tooltipRect.width;
+      let left = preferredLeft;
       if (left > maxLeft) {
         left = maxLeft;
       }
@@ -2113,10 +2114,14 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
         left = viewportPadding;
       }
 
-      let top = anchorRect.top - tooltipRect.height - tooltipOffset;
-      if (top < viewportPadding) {
-        top = anchorRect.bottom + tooltipOffset;
-      }
+      const topCandidate = anchorRect.top - tooltipRect.height - tooltipOffset;
+      const bottomCandidate = anchorRect.bottom + tooltipOffset;
+      const availableTop = anchorRect.top - viewportPadding;
+      const availableBottom = window.innerHeight - anchorRect.bottom - viewportPadding;
+      const shouldPlaceAbove =
+        topCandidate >= viewportPadding ||
+        (availableTop >= tooltipRect.height && availableTop >= availableBottom);
+      let top = shouldPlaceAbove ? topCandidate : bottomCandidate;
       const maxTop = window.innerHeight - viewportPadding - tooltipRect.height;
       if (top > maxTop) {
         top = maxTop;
@@ -2169,6 +2174,7 @@ export const READER_ASYNC_ENHANCEMENT_SCRIPT = `(() => {
       if (!(targetNode instanceof HTMLElement)) {
         continue;
       }
+      targetNode.setAttribute("data-reader-tooltip-enhanced", "1");
       targetNode.addEventListener("mouseenter", () => showTooltip(targetNode));
       targetNode.addEventListener("mouseleave", hideTooltip);
       targetNode.addEventListener("focusin", () => showTooltip(targetNode));

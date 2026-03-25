@@ -38,6 +38,7 @@ import { gfm as turndownGfmPlugin } from "turndown-plugin-gfm";
 import "katex/contrib/mhchem";
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -177,6 +178,7 @@ const DEFAULT_AUTH_LOGIN_OPTIONS: AuthLoginOptions = {
 const DEFAULT_ONLY_OFFICE_CLIENT_CONFIG: OnlyOfficeClientConfig = {
   enabled: false
 };
+const MERMAID_PREVIEW_DEFER_THRESHOLD = 1;
 
 function isOfficeDocumentFormat(format: DocumentFormat): boolean {
   return format === "docx" || format === "xlsx";
@@ -1133,6 +1135,14 @@ export default function App() {
     [activePreviewTheme.id]
   );
 
+  const deferredPreviewContent = useDeferredValue(content);
+  const mermaidBlockCount = useMemo(() => {
+    const mermaidMatches = content.match(/^```mermaid\b/gim);
+    return mermaidMatches?.length ?? 0;
+  }, [content]);
+  const shouldDeferPreview = mermaidBlockCount >= MERMAID_PREVIEW_DEFER_THRESHOLD;
+  const previewContent = shouldDeferPreview ? deferredPreviewContent : content;
+
   // 滚动同步 Hook：封装编辑区/预览区双向同步与锚点重建逻辑。
   const {
     handleEditorPaneRef,
@@ -1142,6 +1152,7 @@ export default function App() {
   } =
     useScrollSync({
       content,
+      renderedContent: previewContent,
       previewThemeClassName: activePreviewThemeClassName,
       customPreviewStyleText,
       previewViewportMode
@@ -2205,8 +2216,8 @@ export default function App() {
   );
   // 解析文档标题与 [TOC] 标记，供目录菜单与语法渲染共用。
   const tocParseResult = useMemo(
-    () => parseTocFromMarkdown(content, markdownTextParser),
-    [content, markdownTextParser]
+    () => parseTocFromMarkdown(previewContent, markdownTextParser),
+    [markdownTextParser, previewContent]
   );
   // TOC 标题列表。
   const tocItems = tocParseResult.items;
@@ -3734,7 +3745,7 @@ export default function App() {
                     rehypePlugins={rehypePlugins}
                     components={markdownComponents}
                   >
-                    {content}
+                    {previewContent}
                   </ReactMarkdown>
                 </article>
               </div>

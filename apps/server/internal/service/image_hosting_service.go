@@ -71,34 +71,37 @@ type ImageHostingImageProcessingConfig struct {
 
 // CloudflareR2ImageHostingConfig Cloudflare R2 图床配置。
 type CloudflareR2ImageHostingConfig struct {
-	AccountID           string                       `json:"accountId"`
-	Bucket              string                       `json:"bucket"`
-	AccessKeyID         string                       `json:"accessKeyId"`
-	SecretAccessKey     string                       `json:"secretAccessKey"`
-	PublicBaseURL       string                       `json:"publicBaseUrl"`
-	UploadPathTemplate  string                       `json:"uploadPathTemplate"`
-	DownloadStrategy    ImageHostingDownloadStrategy `json:"downloadStrategy"`
-	SignedURLTTLSeconds int                          `json:"signedUrlTtlSeconds"`
+	AccountID                    string                       `json:"accountId"`
+	Bucket                       string                       `json:"bucket"`
+	AccessKeyID                  string                       `json:"accessKeyId"`
+	SecretAccessKey              string                       `json:"secretAccessKey"`
+	PublicBaseURL                string                       `json:"publicBaseUrl"`
+	ImageUploadPathTemplate      string                       `json:"imageUploadPathTemplate"`
+	AttachmentUploadPathTemplate string                       `json:"attachmentUploadPathTemplate"`
+	DownloadStrategy             ImageHostingDownloadStrategy `json:"downloadStrategy"`
+	SignedURLTTLSeconds          int                          `json:"signedUrlTtlSeconds"`
 }
 
 // AliyunOSSImageHostingConfig 阿里云 OSS 图床配置。
 type AliyunOSSImageHostingConfig struct {
-	Region              string                       `json:"region"`
-	Bucket              string                       `json:"bucket"`
-	Endpoint            string                       `json:"endpoint"`
-	AccessKeyID         string                       `json:"accessKeyId"`
-	AccessKeySecret     string                       `json:"accessKeySecret"`
-	PublicBaseURL       string                       `json:"publicBaseUrl"`
-	UploadPathTemplate  string                       `json:"uploadPathTemplate"`
-	DownloadStrategy    ImageHostingDownloadStrategy `json:"downloadStrategy"`
-	SignedURLTTLSeconds int                          `json:"signedUrlTtlSeconds"`
+	Region                       string                       `json:"region"`
+	Bucket                       string                       `json:"bucket"`
+	Endpoint                     string                       `json:"endpoint"`
+	AccessKeyID                  string                       `json:"accessKeyId"`
+	AccessKeySecret              string                       `json:"accessKeySecret"`
+	PublicBaseURL                string                       `json:"publicBaseUrl"`
+	ImageUploadPathTemplate      string                       `json:"imageUploadPathTemplate"`
+	AttachmentUploadPathTemplate string                       `json:"attachmentUploadPathTemplate"`
+	DownloadStrategy             ImageHostingDownloadStrategy `json:"downloadStrategy"`
+	SignedURLTTLSeconds          int                          `json:"signedUrlTtlSeconds"`
 }
 
 // LocalImageHostingConfig 本地图片存储配置。
 type LocalImageHostingConfig struct {
-	UploadEndpoint     string `json:"uploadEndpoint"`
-	PublicBaseURL      string `json:"publicBaseUrl"`
-	UploadPathTemplate string `json:"uploadPathTemplate"`
+	UploadEndpoint               string `json:"uploadEndpoint"`
+	PublicBaseURL                string `json:"publicBaseUrl"`
+	ImageUploadPathTemplate      string `json:"imageUploadPathTemplate"`
+	AttachmentUploadPathTemplate string `json:"attachmentUploadPathTemplate"`
 }
 
 // ImageHostingConfig 图床系统配置。
@@ -127,30 +130,33 @@ func DefaultImageHostingConfig() ImageHostingConfig {
 	return ImageHostingConfig{
 		DefaultProvider: ImageHostingProviderLocal,
 		CloudflareR2: CloudflareR2ImageHostingConfig{
-			AccountID:           "",
-			Bucket:              "",
-			AccessKeyID:         "",
-			SecretAccessKey:     "",
-			PublicBaseURL:       "",
-			UploadPathTemplate:  DefaultImageHostingUploadPathTemplate,
-			DownloadStrategy:    ImageHostingDownloadStrategyPublic,
-			SignedURLTTLSeconds: defaultImageHostingSignedURLTTLSeconds,
+			AccountID:                    "",
+			Bucket:                       "",
+			AccessKeyID:                  "",
+			SecretAccessKey:              "",
+			PublicBaseURL:                "",
+			ImageUploadPathTemplate:      DefaultImageHostingImageUploadPathTemplate,
+			AttachmentUploadPathTemplate: DefaultImageHostingAttachmentUploadPathTemplate,
+			DownloadStrategy:             ImageHostingDownloadStrategyPublic,
+			SignedURLTTLSeconds:          defaultImageHostingSignedURLTTLSeconds,
 		},
 		AliyunOSS: AliyunOSSImageHostingConfig{
-			Region:              "",
-			Bucket:              "",
-			Endpoint:            "",
-			AccessKeyID:         "",
-			AccessKeySecret:     "",
-			PublicBaseURL:       "",
-			UploadPathTemplate:  DefaultImageHostingUploadPathTemplate,
-			DownloadStrategy:    ImageHostingDownloadStrategyPublic,
-			SignedURLTTLSeconds: defaultImageHostingSignedURLTTLSeconds,
+			Region:                       "",
+			Bucket:                       "",
+			Endpoint:                     "",
+			AccessKeyID:                  "",
+			AccessKeySecret:              "",
+			PublicBaseURL:                "",
+			ImageUploadPathTemplate:      DefaultImageHostingImageUploadPathTemplate,
+			AttachmentUploadPathTemplate: DefaultImageHostingAttachmentUploadPathTemplate,
+			DownloadStrategy:             ImageHostingDownloadStrategyPublic,
+			SignedURLTTLSeconds:          defaultImageHostingSignedURLTTLSeconds,
 		},
 		Local: LocalImageHostingConfig{
-			UploadEndpoint:     "/api/uploads/images",
-			PublicBaseURL:      "/uploads",
-			UploadPathTemplate: DefaultImageHostingUploadPathTemplate,
+			UploadEndpoint:               "/api/uploads/images",
+			PublicBaseURL:                "/uploads",
+			ImageUploadPathTemplate:      DefaultImageHostingImageUploadPathTemplate,
+			AttachmentUploadPathTemplate: DefaultImageHostingAttachmentUploadPathTemplate,
 		},
 		ImageProcessing: ImageHostingImageProcessingConfig{
 			Mode:          ImageHostingImageProcessingModeSameFormat,
@@ -183,8 +189,18 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 		config.CloudflareR2.AccessKeyID = readString(cloudflareR2, "accessKeyId")
 		config.CloudflareR2.SecretAccessKey = readString(cloudflareR2, "secretAccessKey")
 		config.CloudflareR2.PublicBaseURL = readString(cloudflareR2, "publicBaseUrl")
-		config.CloudflareR2.UploadPathTemplate = NormalizeImageHostingUploadPathTemplate(
-			readString(cloudflareR2, "uploadPathTemplate"),
+		legacyUploadPathTemplate := readString(cloudflareR2, "uploadPathTemplate")
+		config.CloudflareR2.ImageUploadPathTemplate = NormalizeImageHostingUploadPathTemplate(
+			firstNonEmptyString(
+				readString(cloudflareR2, "imageUploadPathTemplate"),
+				legacyUploadPathTemplate,
+			),
+		)
+		config.CloudflareR2.AttachmentUploadPathTemplate = NormalizeAttachmentHostingUploadPathTemplate(
+			firstNonEmptyString(
+				readString(cloudflareR2, "attachmentUploadPathTemplate"),
+				legacyUploadPathTemplate,
+			),
 		)
 		if strategy := normalizeImageHostingDownloadStrategy(readString(cloudflareR2, "downloadStrategy")); strategy != "" {
 			config.CloudflareR2.DownloadStrategy = strategy
@@ -201,8 +217,18 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 		config.AliyunOSS.AccessKeyID = readString(aliyunOSS, "accessKeyId")
 		config.AliyunOSS.AccessKeySecret = readString(aliyunOSS, "accessKeySecret")
 		config.AliyunOSS.PublicBaseURL = readString(aliyunOSS, "publicBaseUrl")
-		config.AliyunOSS.UploadPathTemplate = NormalizeImageHostingUploadPathTemplate(
-			readString(aliyunOSS, "uploadPathTemplate"),
+		legacyUploadPathTemplate := readString(aliyunOSS, "uploadPathTemplate")
+		config.AliyunOSS.ImageUploadPathTemplate = NormalizeImageHostingUploadPathTemplate(
+			firstNonEmptyString(
+				readString(aliyunOSS, "imageUploadPathTemplate"),
+				legacyUploadPathTemplate,
+			),
+		)
+		config.AliyunOSS.AttachmentUploadPathTemplate = NormalizeAttachmentHostingUploadPathTemplate(
+			firstNonEmptyString(
+				readString(aliyunOSS, "attachmentUploadPathTemplate"),
+				legacyUploadPathTemplate,
+			),
 		)
 		if strategy := normalizeImageHostingDownloadStrategy(readString(aliyunOSS, "downloadStrategy")); strategy != "" {
 			config.AliyunOSS.DownloadStrategy = strategy
@@ -219,8 +245,18 @@ func NormalizeImageHostingConfig(value map[string]any) ImageHostingConfig {
 		if publicBaseURL := readString(local, "publicBaseUrl"); publicBaseURL != "" {
 			config.Local.PublicBaseURL = normalizeLocalPublicBaseURL(publicBaseURL)
 		}
-		config.Local.UploadPathTemplate = NormalizeImageHostingUploadPathTemplate(
-			readString(local, "uploadPathTemplate"),
+		legacyUploadPathTemplate := readString(local, "uploadPathTemplate")
+		config.Local.ImageUploadPathTemplate = NormalizeImageHostingUploadPathTemplate(
+			firstNonEmptyString(
+				readString(local, "imageUploadPathTemplate"),
+				legacyUploadPathTemplate,
+			),
+		)
+		config.Local.AttachmentUploadPathTemplate = NormalizeAttachmentHostingUploadPathTemplate(
+			firstNonEmptyString(
+				readString(local, "attachmentUploadPathTemplate"),
+				legacyUploadPathTemplate,
+			),
 		)
 	}
 
@@ -418,14 +454,30 @@ func (c ImageHostingConfig) SignedURLTTL(provider ImageHostingProvider) time.Dur
 	return time.Duration(ttlSeconds) * time.Second
 }
 
+// UploadPathTemplate 保留历史图片调用入口；附件链路必须改用 AttachmentUploadPathTemplate。
 func (c ImageHostingConfig) UploadPathTemplate(provider ImageHostingProvider) string {
+	return c.ImageUploadPathTemplate(provider)
+}
+
+func (c ImageHostingConfig) ImageUploadPathTemplate(provider ImageHostingProvider) string {
 	switch provider {
 	case ImageHostingProviderCloudflareR2:
-		return NormalizeImageHostingUploadPathTemplate(c.CloudflareR2.UploadPathTemplate)
+		return NormalizeImageHostingUploadPathTemplate(c.CloudflareR2.ImageUploadPathTemplate)
 	case ImageHostingProviderAliyunOSS:
-		return NormalizeImageHostingUploadPathTemplate(c.AliyunOSS.UploadPathTemplate)
+		return NormalizeImageHostingUploadPathTemplate(c.AliyunOSS.ImageUploadPathTemplate)
 	default:
-		return NormalizeImageHostingUploadPathTemplate(c.Local.UploadPathTemplate)
+		return NormalizeImageHostingUploadPathTemplate(c.Local.ImageUploadPathTemplate)
+	}
+}
+
+func (c ImageHostingConfig) AttachmentUploadPathTemplate(provider ImageHostingProvider) string {
+	switch provider {
+	case ImageHostingProviderCloudflareR2:
+		return NormalizeAttachmentHostingUploadPathTemplate(c.CloudflareR2.AttachmentUploadPathTemplate)
+	case ImageHostingProviderAliyunOSS:
+		return NormalizeAttachmentHostingUploadPathTemplate(c.AliyunOSS.AttachmentUploadPathTemplate)
+	default:
+		return NormalizeAttachmentHostingUploadPathTemplate(c.Local.AttachmentUploadPathTemplate)
 	}
 }
 
@@ -451,6 +503,16 @@ func readString(payload map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(value)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func readObject(payload map[string]any, key string) (map[string]any, bool) {

@@ -1507,7 +1507,7 @@ func (s *OfficeHTMLRenderService) ensureImageBlobForContent(
 		spaceID,
 		documentID,
 		now,
-		config.UploadPathTemplate(targetProvider),
+		config.AttachmentUploadPathTemplate(targetProvider),
 	)
 	if err != nil {
 		return nil, err
@@ -1664,8 +1664,8 @@ func buildOfficeRenderObjectKey(
 	if cleanObjectKey == "." || cleanObjectKey == "/" || strings.HasPrefix(cleanObjectKey, "../") {
 		return "", errors.New("attachment object key is invalid")
 	}
-	if !strings.HasPrefix(cleanObjectKey, "images/") {
-		return "", errors.New("attachment object key must start with images/")
+	if !strings.HasPrefix(cleanObjectKey, "attachments/") {
+		return "", errors.New("attachment object key must start with attachments/")
 	}
 	if len(cleanObjectKey) > 512 {
 		return "", errors.New("attachment object key is too long")

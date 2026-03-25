@@ -187,7 +187,7 @@ func (h *workspaceHandler) ensureBlobForContent(
 		documentID,
 		actorUserID,
 		now,
-		config.UploadPathTemplate(targetProvider),
+		config.AttachmentUploadPathTemplate(targetProvider),
 	)
 	if err != nil {
 		return nil, err

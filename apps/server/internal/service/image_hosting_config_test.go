@@ -124,3 +124,18 @@ func TestValidateImageHostingConfig_ImageProcessing(t *testing.T) {
 		t.Fatalf("expected unknown key validation error")
 	}
 }
+
+func TestValidateImageHostingConfig_LegacyUploadPathTemplateAttachmentFallback(t *testing.T) {
+	t.Parallel()
+
+	validPayload := DefaultImageHostingConfig().ToMap()
+	validPayload["local"] = map[string]any{
+		"uploadEndpoint":     "/api/uploads/images",
+		"publicBaseUrl":      "/uploads",
+		"uploadPathTemplate": "images/custom/{spaceId}/{assetId}.{ext}",
+	}
+
+	if err := validateImageHostingConfig(validPayload); err != nil {
+		t.Fatalf("expected legacy uploadPathTemplate remain valid for attachment fallback, got %v", err)
+	}
+}

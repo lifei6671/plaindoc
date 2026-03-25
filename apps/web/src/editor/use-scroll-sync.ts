@@ -18,6 +18,7 @@ import type {
 
 interface UseScrollSyncOptions {
   content: string;
+  renderedContent: string;
   previewThemeClassName: string;
   customPreviewStyleText: string;
   previewViewportMode: PreviewViewportMode;
@@ -31,10 +32,16 @@ interface UseScrollSyncResult {
 }
 
 const EDITOR_DRIVEN_SYNC_LOCK_MS = 1200;
+const EDITOR_SCROLL_JUMP_MIN_PIXELS = 320;
+const EDITOR_SCROLL_JUMP_VIEWPORT_RATIO = 0.8;
+const EDITOR_SCROLL_JUMP_DOCUMENT_RATIO = 0.025;
+
+type SyncMode = "smooth" | "snap";
 
 // 将滚动同步相关状态与副作用封装成 Hook，降低 App 复杂度。
 export function useScrollSync({
   content,
+  renderedContent,
   previewThemeClassName,
   customPreviewStyleText,
   previewViewportMode
@@ -69,8 +76,10 @@ export function useScrollSync({
   const editorDrivenOnlyTimerRef = useRef<number | null>(null);
   // 延迟重建定时器集合：用于处理粘贴/批量改动后的异步布局收敛。
   const delayedRebuildTimersRef = useRef<number[]>([]);
+  // 记录上一次编辑区滚动位置，用于识别滚动条拖拽等大跨度跳转。
+  const lastObservedEditorScrollTopRef = useRef<number | null>(null);
   // 上一次内容快照：用于判断本次改动是否属于“大幅变更”（如整段粘贴）。
-  const previousContentSnapshotRef = useRef(content);
+  const previousRenderedContentSnapshotRef = useRef(renderedContent);
   // 防止双向同步引发循环滚动。
   const syncingRef = useRef(false);
   // 记录最近一次主动滚动来源，用于重算后回对齐。
@@ -255,9 +264,46 @@ export function useScrollSync({
     }, EDITOR_DRIVEN_SYNC_LOCK_MS);
   }, [clearEditorDrivenOnlyTimer, clearSyncFollowRaf]);
 
+  // 编辑区出现大跨度 scrollTop 变化时，视为滚动条拖拽/快速跳转，目标区域直接吸附。
+  const resolveEditorSyncMode = useCallback((editorElement: HTMLElement): SyncMode => {
+    const previousTop = lastObservedEditorScrollTopRef.current;
+    const currentTop = editorElement.scrollTop;
+    lastObservedEditorScrollTopRef.current = currentTop;
+    if (previousTop === null) {
+      return "smooth";
+    }
+
+    const deltaAbs = Math.abs(currentTop - previousTop);
+    const viewportThreshold = editorElement.clientHeight * EDITOR_SCROLL_JUMP_VIEWPORT_RATIO;
+    const maxScrollable = getMaxScrollable(editorElement);
+    const documentThreshold = maxScrollable * EDITOR_SCROLL_JUMP_DOCUMENT_RATIO;
+    const jumpThreshold = Math.max(
+      EDITOR_SCROLL_JUMP_MIN_PIXELS,
+      viewportThreshold,
+      documentThreshold
+    );
+
+    return deltaAbs >= jumpThreshold ? "snap" : "smooth";
+  }, []);
+
+  // 预览区追随编辑区时允许更激进的动态步进，避免拖动滚动条时目标区域落后过多。
+  const resolveMaxSyncStep = useCallback((sourceName: ScrollSource, delta: number): number => {
+    const deltaAbs = Math.abs(delta);
+    if (sourceName !== "editor") {
+      return MAX_SYNC_STEP_PER_FRAME;
+    }
+    if (deltaAbs <= MAX_SYNC_STEP_PER_FRAME) {
+      return MAX_SYNC_STEP_PER_FRAME;
+    }
+    if (deltaAbs >= 2400) {
+      return deltaAbs;
+    }
+    return clamp(deltaAbs * 0.45, MAX_SYNC_STEP_PER_FRAME, 1200);
+  }, []);
+
   // 单帧同步：限制最大步进，避免高斜率区间（如展开 TOC）瞬间跨越。
   const applySyncStep = useCallback(
-    (sourceName: ScrollSource): boolean => {
+    (sourceName: ScrollSource, syncMode: SyncMode = "smooth"): boolean => {
       const editorElement = resolveLiveEditorScroller();
       const previewElement = previewScrollerRef.current;
       if (!editorElement || !previewElement) {
@@ -272,13 +318,18 @@ export function useScrollSync({
         targetElement.scrollTop = mappedTarget;
         return false;
       }
+      if (syncMode === "snap") {
+        targetElement.scrollTop = clamp(mappedTarget, 0, getMaxScrollable(targetElement));
+        return false;
+      }
 
-      const limitedStep = clamp(delta, -MAX_SYNC_STEP_PER_FRAME, MAX_SYNC_STEP_PER_FRAME);
+      const maxSyncStep = resolveMaxSyncStep(sourceName, delta);
+      const limitedStep = clamp(delta, -maxSyncStep, maxSyncStep);
       const nextTop = clamp(targetElement.scrollTop + limitedStep, 0, getMaxScrollable(targetElement));
       targetElement.scrollTop = nextTop;
-      return Math.abs(delta) > MAX_SYNC_STEP_PER_FRAME;
+      return Math.abs(delta) > maxSyncStep;
     },
-    [getMappedTargetScrollTop, resolveLiveEditorScroller]
+    [getMappedTargetScrollTop, resolveLiveEditorScroller, resolveMaxSyncStep]
   );
 
   // 若目标位移过大，继续按帧追平，保证视觉连续而不是一次跳跃。
@@ -322,7 +373,7 @@ export function useScrollSync({
 
   // 执行一次单向同步，并用锁避免对端 scroll 反向触发。
   const syncFromSource = useCallback(
-    (sourceName: ScrollSource) => {
+    (sourceName: ScrollSource, syncMode: SyncMode = "smooth") => {
       // 编辑阶段禁止预览区滚动事件反向推回编辑区，优先保证输入稳定。
       if (sourceName === "preview" && editorDrivenOnlyRef.current) {
         return;
@@ -343,14 +394,14 @@ export function useScrollSync({
       lastScrollSourceRef.current = sourceName;
       let shouldFollow = false;
       try {
-        shouldFollow = applySyncStep(sourceName);
+        shouldFollow = applySyncStep(sourceName, syncMode);
       } catch {
         // 防止异常导致锁永远不释放。
         shouldFollow = false;
       }
       window.requestAnimationFrame(() => {
         syncingRef.current = false;
-        if (shouldFollow) {
+        if (shouldFollow && syncMode !== "snap") {
           scheduleFollowSync(sourceName);
         }
       });
@@ -613,9 +664,12 @@ export function useScrollSync({
     if (!editorScrollerElement || !previewScrollerElement) {
       return;
     }
+    lastObservedEditorScrollTopRef.current = editorScrollerElement.scrollTop;
 
     const onEditorScroll = () => {
-      syncFromSource("editor");
+      const liveEditorScroller = resolveLiveEditorScroller();
+      const syncMode = liveEditorScroller ? resolveEditorSyncMode(liveEditorScroller) : "smooth";
+      syncFromSource("editor", syncMode);
     };
 
     const onPreviewScroll = () => {
@@ -629,25 +683,34 @@ export function useScrollSync({
       editorScrollerElement.removeEventListener("scroll", onEditorScroll);
       previewScrollerElement.removeEventListener("scroll", onPreviewScroll);
     };
-  }, [editorScrollerElement, previewScrollerElement, syncFromSource]);
+  }, [
+    editorScrollerElement,
+    previewScrollerElement,
+    resolveEditorSyncMode,
+    resolveLiveEditorScroller,
+    syncFromSource
+  ]);
 
-  // 内容变更后需要重建锚点映射。
+  // 编辑发生后立即进入“编辑区优先”窗口，避免预览区事件在输入期间反向抢焦点。
+  useEffect(() => {
+    activateEditorDrivenOnlyMode();
+  }, [activateEditorDrivenOnlyMode, content]);
+
+  // 当前已渲染的预览内容变更后，再重建锚点映射，避免对着旧 DOM 提前计算位置。
   useEffect(() => {
     // 判断是否为批量变更（例如一次性粘贴长文）；批量变更时增加延迟重建兜底。
-    const previousContent = previousContentSnapshotRef.current;
-    const currentContent = content;
+    const previousContent = previousRenderedContentSnapshotRef.current;
+    const currentContent = renderedContent;
     const characterDelta = Math.abs(currentContent.length - previousContent.length);
     const isBulkContentChange = characterDelta >= 120;
-    previousContentSnapshotRef.current = currentContent;
+    previousRenderedContentSnapshotRef.current = currentContent;
 
-    // 输入发生后进入“编辑区优先”窗口，期间所有回对齐都只能从编辑区驱动。
-    activateEditorDrivenOnlyMode();
     scheduleRebuildScrollAnchors();
     if (isBulkContentChange) {
       // 多轮重建用于覆盖 CodeMirror 重排、图片加载与高亮渲染的延迟窗口。
       scheduleDelayedRebuilds([80, 240, 520]);
     }
-  }, [activateEditorDrivenOnlyMode, content, scheduleDelayedRebuilds, scheduleRebuildScrollAnchors]);
+  }, [renderedContent, scheduleDelayedRebuilds, scheduleRebuildScrollAnchors]);
 
   // 处理“大段粘贴”场景：粘贴后追加延迟重建，覆盖图片与布局异步更新窗口。
   useEffect(() => {
