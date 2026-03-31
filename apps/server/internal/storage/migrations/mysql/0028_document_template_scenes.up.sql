@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS document_template_scenes (
 	KEY idx_document_template_scenes_sort_updated_at (sort, updated_at),
 	CONSTRAINT fk_document_template_scenes_created_by_user_id FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
 	CONSTRAINT fk_document_template_scenes_updated_by_user_id FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档模板场景表：归档模板所属场景';
 
 INSERT INTO document_template_scenes (
 	scene_key,
@@ -28,20 +28,32 @@ INSERT INTO document_template_scenes (
 	updated_at
 )
 SELECT
-	t.scene_key,
-	MAX(t.scene_name) AS scene_name,
-	'' AS description,
-	0 AS sort,
-	0 AS is_builtin,
-	MAX(t.created_by_user_id) AS created_by_user_id,
-	MAX(t.updated_by_user_id) AS updated_by_user_id,
-	MIN(t.created_at) AS created_at,
-	MAX(t.updated_at) AS updated_at
-FROM document_templates AS t
-WHERE TRIM(t.scene_key) <> ''
-GROUP BY t.scene_key
+	new_scene_rows.scene_key,
+	new_scene_rows.scene_name,
+	new_scene_rows.description,
+	new_scene_rows.sort,
+	new_scene_rows.is_builtin,
+	new_scene_rows.created_by_user_id,
+	new_scene_rows.updated_by_user_id,
+	new_scene_rows.created_at,
+	new_scene_rows.updated_at
+FROM (
+	SELECT
+		t.scene_key AS scene_key,
+		MAX(t.scene_name) AS scene_name,
+		'' AS description,
+		0 AS sort,
+		0 AS is_builtin,
+		MAX(t.created_by_user_id) AS created_by_user_id,
+		MAX(t.updated_by_user_id) AS updated_by_user_id,
+		MIN(t.created_at) AS created_at,
+		MAX(t.updated_at) AS updated_at
+	FROM document_templates AS t
+	WHERE TRIM(t.scene_key) <> ''
+	GROUP BY t.scene_key
+) AS new_scene_rows
 ON DUPLICATE KEY UPDATE
-	scene_name = VALUES(scene_name),
-	updated_at = GREATEST(document_template_scenes.updated_at, VALUES(updated_at));
+	scene_name = new_scene_rows.scene_name,
+	updated_at = GREATEST(document_template_scenes.updated_at, new_scene_rows.updated_at);
 
 ALTER TABLE document_templates DROP COLUMN scene_name;

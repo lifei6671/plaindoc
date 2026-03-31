@@ -25,4 +25,4 @@ CREATE TABLE IF NOT EXISTS document_shares (
 	CONSTRAINT fk_document_shares_space_id FOREIGN KEY (space_id) REFERENCES spaces(space_id) ON DELETE CASCADE,
 	CONSTRAINT fk_document_shares_created_by_user_id FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
 	CONSTRAINT fk_document_shares_updated_by_user_id FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档分享表：记录分享方式、有效期与访问版本';

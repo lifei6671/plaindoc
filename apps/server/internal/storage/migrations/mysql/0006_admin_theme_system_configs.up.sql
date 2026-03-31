@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
 	updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '更新时间',
 	CONSTRAINT ck_system_configs_version CHECK (version > 0),
 	CONSTRAINT fk_system_configs_updated_by_user_id FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
-) COMMENT='系统配置中心表：按 config_key 存储 JSON 配置与版本';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统配置中心表：按 config_key 存储 JSON 配置与版本';
 
 CREATE INDEX idx_system_configs_updated_by_user_id ON system_configs(updated_by_user_id);
 CREATE INDEX idx_system_configs_updated_at ON system_configs(updated_at);

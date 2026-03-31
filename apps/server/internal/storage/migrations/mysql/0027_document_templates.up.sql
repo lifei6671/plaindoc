@@ -20,4 +20,4 @@ CREATE TABLE IF NOT EXISTS document_templates (
 	KEY idx_document_templates_enabled_updated_at (is_enabled, updated_at),
 	CONSTRAINT fk_document_templates_created_by_user_id FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
 	CONSTRAINT fk_document_templates_updated_by_user_id FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档模板表：存储模板内容与启用状态';

@@ -19,9 +19,10 @@ INSERT INTO space_categories (
 	1,
 	CURRENT_TIMESTAMP,
 	CURRENT_TIMESTAMP
-) ON DUPLICATE KEY UPDATE
-	name = VALUES(name),
-	is_default = VALUES(is_default),
+) AS new_space_category
+ON DUPLICATE KEY UPDATE
+	name = new_space_category.name,
+	is_default = new_space_category.is_default,
 	updated_at = CURRENT_TIMESTAMP;
 
 ALTER TABLE spaces

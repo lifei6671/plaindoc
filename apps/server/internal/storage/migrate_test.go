@@ -1,14 +1,76 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+func TestDriverSupportsMigrationTransactions(t *testing.T) {
+	tests := []struct {
+		name     string
+		driver   string
+		expected bool
+	}{
+		{name: "sqlite uses transaction", driver: DriverSQLite, expected: true},
+		{name: "postgres uses transaction", driver: DriverPostgres, expected: true},
+		{name: "mysql skips transaction", driver: DriverMySQL, expected: false},
+	}
+
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := driverSupportsMigrationTransactions(testCase.driver); got != testCase.expected {
+				t.Fatalf("expected %v, got %v", testCase.expected, got)
+			}
+		})
+	}
+}
+
+func TestMigrateUpWithOptions_LogsEachMigrationFile(t *testing.T) {
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-migrate-logging?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	migrations, err := LoadMigrations(DriverSQLite)
+	if err != nil {
+		t.Fatalf("LoadMigrations failed: %v", err)
+	}
+
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{}))
+
+	if err := MigrateUpWithOptions(context.Background(), database.ORM, DriverSQLite, MigrateOptions{
+		Logger: logger,
+	}); err != nil {
+		t.Fatalf("MigrateUpWithOptions failed: %v", err)
+	}
+
+	logOutput := logBuffer.String()
+	applyingCount := strings.Count(logOutput, "\"msg\":\"database migration applying\"")
+	appliedCount := strings.Count(logOutput, "\"msg\":\"database migration applied\"")
+
+	if applyingCount != len(migrations) {
+		t.Fatalf("expected %d applying logs, got %d", len(migrations), applyingCount)
+	}
+	if appliedCount != len(migrations) {
+		t.Fatalf("expected %d applied logs, got %d", len(migrations), appliedCount)
+	}
+}
 
 func TestMigrateUpAndDown_SQLite(t *testing.T) {
 	database, err := OpenDatabase(OpenConfig{

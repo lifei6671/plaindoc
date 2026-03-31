@@ -21,6 +21,8 @@ const (
 	DriverSQLite   = "sqlite"
 	DriverPostgres = "postgres"
 	DriverMySQL    = "mysql"
+
+	defaultDatabasePingTimeout = 15 * time.Second
 )
 
 // OpenConfig 定义数据库连接入参，独立于配置模块便于测试复用。
@@ -75,7 +77,7 @@ func OpenDatabase(cfg OpenConfig) (*Database, error) {
 	applyDefaultPoolConfig(sqlDB, normalizedDriver)
 
 	// 中文注释：启动阶段先做一次 ping，尽早发现连接或认证错误。
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDatabasePingTimeout)
 	defer cancel()
 	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()

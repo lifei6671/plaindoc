@@ -27,6 +27,8 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 )
 
+const startupDatabaseMigrationTimeout = 5 * time.Minute
+
 func main() {
 	if handleMetaCommand(os.Args[1:], os.Stdout) {
 		return
@@ -108,9 +110,12 @@ func main() {
 	logger.Info("database connected", "db_driver", database.Driver)
 
 	if cfg.Database.AutoMigrate {
-		migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), 45*time.Second)
+		logger.Info("database migrations starting", "timeout", startupDatabaseMigrationTimeout.String())
+		migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), startupDatabaseMigrationTimeout)
 		defer cancelMigrate()
-		if err := storage.MigrateUp(migrateCtx, database.ORM, database.Driver); err != nil {
+		if err := storage.MigrateUpWithOptions(migrateCtx, database.ORM, database.Driver, storage.MigrateOptions{
+			Logger: logger,
+		}); err != nil {
 			logger.Error("database migrate up failed", logit.Error("error", err))
 			log.Fatalf("database migrate up failed: %v", err)
 		}

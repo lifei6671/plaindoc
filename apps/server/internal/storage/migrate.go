@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"path"
 	"sort"
 	"strconv"
@@ -25,8 +26,18 @@ type Migration struct {
 	DownSQL string
 }
 
+// MigrateOptions 描述迁移执行时的可选行为。
+type MigrateOptions struct {
+	Logger *slog.Logger
+}
+
 // MigrateUp 执行所有未应用的迁移。
 func MigrateUp(ctx context.Context, db *gorm.DB, driver string) error {
+	return MigrateUpWithOptions(ctx, db, driver, MigrateOptions{})
+}
+
+// MigrateUpWithOptions 执行所有未应用的迁移，并允许注入日志等可选能力。
+func MigrateUpWithOptions(ctx context.Context, db *gorm.DB, driver string, options MigrateOptions) error {
 	sqlDB, err := unwrapSQLDB(db)
 	if err != nil {
 		return err
@@ -54,9 +65,12 @@ func MigrateUp(ctx context.Context, db *gorm.DB, driver string) error {
 		if appliedVersions[migration.Version] {
 			continue
 		}
+		logMigrationEvent(ctx, options.Logger, "database migration applying", normalizedDriver, migration)
 		if err := applyMigrationUp(ctx, sqlDB, normalizedDriver, migration); err != nil {
+			logMigrationFailure(ctx, options.Logger, normalizedDriver, migration, err)
 			return err
 		}
+		logMigrationEvent(ctx, options.Logger, "database migration applied", normalizedDriver, migration)
 	}
 
 	return nil
@@ -272,6 +286,16 @@ func listAppliedMigrationVersionsDesc(ctx context.Context, db *sql.DB) ([]int, e
 }
 
 func applyMigrationUp(ctx context.Context, db *sql.DB, driver string, migration Migration) error {
+	if !driverSupportsMigrationTransactions(driver) {
+		if err := executeSQLStatements(ctx, db, migration.UpSQL); err != nil {
+			return fmt.Errorf("execute up migration %d(%s) failed: %w", migration.Version, migration.Name, err)
+		}
+		if err := insertAppliedMigration(ctx, db, driver, migration); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration transaction failed: %w", err)
@@ -284,13 +308,8 @@ func applyMigrationUp(ctx context.Context, db *sql.DB, driver string, migration 
 		return fmt.Errorf("execute up migration %d(%s) failed: %w", migration.Version, migration.Name, err)
 	}
 
-	insertQuery := fmt.Sprintf(
-		"INSERT INTO schema_migrations(version, name, applied_at) VALUES(%s, %s, CURRENT_TIMESTAMP)",
-		bindVar(driver, 1),
-		bindVar(driver, 2),
-	)
-	if _, err := tx.ExecContext(ctx, insertQuery, migration.Version, migration.Name); err != nil {
-		return fmt.Errorf("insert schema_migrations row failed: %w", err)
+	if err := insertAppliedMigration(ctx, tx, driver, migration); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -300,6 +319,16 @@ func applyMigrationUp(ctx context.Context, db *sql.DB, driver string, migration 
 }
 
 func applyMigrationDown(ctx context.Context, db *sql.DB, driver string, migration Migration) error {
+	if !driverSupportsMigrationTransactions(driver) {
+		if err := executeSQLStatements(ctx, db, migration.DownSQL); err != nil {
+			return fmt.Errorf("execute down migration %d(%s) failed: %w", migration.Version, migration.Name, err)
+		}
+		if err := deleteAppliedMigration(ctx, db, driver, migration.Version); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin rollback transaction failed: %w", err)
@@ -312,9 +341,8 @@ func applyMigrationDown(ctx context.Context, db *sql.DB, driver string, migratio
 		return fmt.Errorf("execute down migration %d(%s) failed: %w", migration.Version, migration.Name, err)
 	}
 
-	deleteQuery := fmt.Sprintf("DELETE FROM schema_migrations WHERE version=%s", bindVar(driver, 1))
-	if _, err := tx.ExecContext(ctx, deleteQuery, migration.Version); err != nil {
-		return fmt.Errorf("delete schema_migrations row failed: %w", err)
+	if err := deleteAppliedMigration(ctx, tx, driver, migration.Version); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -325,6 +353,57 @@ func applyMigrationDown(ctx context.Context, db *sql.DB, driver string, migratio
 
 type sqlStatementExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func insertAppliedMigration(ctx context.Context, executor sqlStatementExecutor, driver string, migration Migration) error {
+	insertQuery := fmt.Sprintf(
+		"INSERT INTO schema_migrations(version, name, applied_at) VALUES(%s, %s, CURRENT_TIMESTAMP)",
+		bindVar(driver, 1),
+		bindVar(driver, 2),
+	)
+	if _, err := executor.ExecContext(ctx, insertQuery, migration.Version, migration.Name); err != nil {
+		return fmt.Errorf("insert schema_migrations row failed: %w", err)
+	}
+	return nil
+}
+
+func deleteAppliedMigration(ctx context.Context, executor sqlStatementExecutor, driver string, version int) error {
+	deleteQuery := fmt.Sprintf("DELETE FROM schema_migrations WHERE version=%s", bindVar(driver, 1))
+	if _, err := executor.ExecContext(ctx, deleteQuery, version); err != nil {
+		return fmt.Errorf("delete schema_migrations row failed: %w", err)
+	}
+	return nil
+}
+
+func driverSupportsMigrationTransactions(driver string) bool {
+	return driver != DriverMySQL
+}
+
+func logMigrationEvent(ctx context.Context, logger *slog.Logger, message string, driver string, migration Migration) {
+	if logger == nil {
+		return
+	}
+	logger.InfoContext(
+		ctx,
+		message,
+		slog.String("db_driver", driver),
+		slog.Int("migration_version", migration.Version),
+		slog.String("migration_name", migration.Name),
+	)
+}
+
+func logMigrationFailure(ctx context.Context, logger *slog.Logger, driver string, migration Migration, err error) {
+	if logger == nil {
+		return
+	}
+	logger.ErrorContext(
+		ctx,
+		"database migration failed",
+		slog.String("db_driver", driver),
+		slog.Int("migration_version", migration.Version),
+		slog.String("migration_name", migration.Name),
+		slog.Any("error", err),
+	)
 }
 
 func executeSQLStatements(ctx context.Context, executor sqlStatementExecutor, sqlText string) error {
