@@ -27,18 +27,18 @@ type upsertWorkspaceDocumentShareRequest struct {
 }
 
 type workspaceDocumentShareResponse struct {
-	Enabled      bool                     `json:"enabled"`
-	ShareID      string                   `json:"shareId"`
-	DocumentID   string                   `json:"documentId"`
-	SpaceID      string                   `json:"spaceId"`
-	Mode         models.DocumentShareMode `json:"mode"`
-	PasswordHint string                   `json:"passwordHint"`
-	HasPassword  bool                     `json:"hasPassword"`
-	ExpiresAt    *string                  `json:"expiresAt,omitempty"`
-	DisabledAt   *string                  `json:"disabledAt,omitempty"`
-	AccessVersion int                     `json:"accessVersion"`
-	CreatedAt    string                   `json:"createdAt"`
-	UpdatedAt    string                   `json:"updatedAt"`
+	Enabled       bool                     `json:"enabled"`
+	ShareID       string                   `json:"shareId"`
+	DocumentID    string                   `json:"documentId"`
+	SpaceID       string                   `json:"spaceId"`
+	Mode          models.DocumentShareMode `json:"mode"`
+	PasswordHint  string                   `json:"passwordHint"`
+	HasPassword   bool                     `json:"hasPassword"`
+	ExpiresAt     *string                  `json:"expiresAt,omitempty"`
+	DisabledAt    *string                  `json:"disabledAt,omitempty"`
+	AccessVersion int                      `json:"accessVersion"`
+	CreatedAt     string                   `json:"createdAt"`
+	UpdatedAt     string                   `json:"updatedAt"`
 }
 
 // NewWorkspaceDocumentShareHandler 创建编辑器文档分享配置处理器。

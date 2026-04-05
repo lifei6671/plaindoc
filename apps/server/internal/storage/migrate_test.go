@@ -34,6 +34,41 @@ func TestDriverSupportsMigrationTransactions(t *testing.T) {
 	}
 }
 
+func TestSplitSQLStatements_HandlesDollarQuotedBlocks(t *testing.T) {
+	sqlText := `ALTER TABLE documents
+	ADD COLUMN IF NOT EXISTS format VARCHAR(16) NOT NULL DEFAULT 'markdown';
+
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'chk_documents_format'
+	) THEN
+		ALTER TABLE documents
+			ADD CONSTRAINT chk_documents_format
+			CHECK (format IN ('markdown', 'docx', 'xlsx'));
+	END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_documents_format
+	ON documents(format);`
+
+	statements := splitSQLStatements(sqlText)
+	if len(statements) != 3 {
+		t.Fatalf("expected 3 statements, got %d: %#v", len(statements), statements)
+	}
+	if !strings.HasPrefix(statements[1], "DO $$") || !strings.HasSuffix(statements[1], "END $$") {
+		t.Fatalf("expected second statement to keep dollar-quoted block intact, got %#v", statements[1])
+	}
+	if !strings.Contains(statements[1], "CHECK (format IN ('markdown', 'docx', 'xlsx'))") {
+		t.Fatalf("expected block content to be preserved, got %#v", statements[1])
+	}
+	if !strings.HasPrefix(statements[2], "CREATE INDEX IF NOT EXISTS idx_documents_format") {
+		t.Fatalf("expected third statement to remain separate, got %#v", statements[2])
+	}
+}
+
 func TestMigrateUpWithOptions_LogsEachMigrationFile(t *testing.T) {
 	database, err := OpenDatabase(OpenConfig{
 		Driver: DriverSQLite,

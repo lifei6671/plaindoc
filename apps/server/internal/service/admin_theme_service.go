@@ -532,15 +532,5 @@ func mapThemeToAdminRecord(value models.Theme) (AdminThemeRecord, error) {
 }
 
 func decodeThemeStyleJSON(rawValue string) (map[string]any, error) {
-	if strings.TrimSpace(rawValue) == "" {
-		return map[string]any{}, nil
-	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(rawValue), &payload); err != nil {
-		return nil, err
-	}
-	if payload == nil {
-		return map[string]any{}, nil
-	}
-	return payload, nil
+	return DecodeThemeStyleJSON(rawValue)
 }

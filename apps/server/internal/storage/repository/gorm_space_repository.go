@@ -625,7 +625,7 @@ func (r *gormSpaceRepository) ListForAdmin(
 			"s.category_id",
 			"s.category",
 			"COALESCE(sc.name, s.category) AS category_name",
-			"COALESCE(sc.is_default, 0) AS category_is_default",
+			"COALESCE(sc.is_default, FALSE) AS category_is_default",
 			"s.owner_user_id",
 			"s.visibility",
 			"s.cover_asset_id",
@@ -1341,12 +1341,28 @@ func (r *gormSpaceRepository) HardDelete(ctx context.Context, spaceID string) (b
 		nodeIDsQuery := tx.Table("nodes").
 			Select("node_id").
 			Where("space_id = ?", normalizedSpaceID)
-		documentIDsQuery := tx.Table("documents AS d").
-			Select("d.document_id").
+		type documentIDRow struct {
+			DocumentID string `gorm:"column:document_id"`
+		}
+		documentIDRows := make([]documentIDRow, 0, 8)
+		if err := tx.Table("documents AS d").
+			Select("d.document_id AS document_id").
 			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-			Where("n.space_id = ?", normalizedSpaceID)
+			Where("n.space_id = ?", normalizedSpaceID).
+			Scan(&documentIDRows).Error; err != nil {
+			return err
+		}
 
-		if _, err := DeleteDocumentsCascadeInTx(tx, documentIDsQuery); err != nil {
+		documentIDs := make([]string, 0, len(documentIDRows))
+		for _, row := range documentIDRows {
+			documentID := strings.TrimSpace(row.DocumentID)
+			if documentID == "" {
+				continue
+			}
+			documentIDs = append(documentIDs, documentID)
+		}
+
+		if _, err := DeleteDocumentsCascadeInTx(tx, uniqueNonEmptyStrings(documentIDs)); err != nil {
 			return err
 		}
 		if err := tx.Table("node_permissions").

@@ -108,11 +108,11 @@ type SendAdminUserPasswordResetEmailInput struct {
 
 // AdminUserService 封装后台用户管理业务。
 type AdminUserService struct {
-	userRepo           repository.UserRepository
-	userSessionRepo    repository.UserSessionRepository
-	adminRoleRepo      repository.AdminRoleRepository
-	adminAccessService *AdminAccessService
-	adminAuditService  *AdminAuditService
+	userRepo             repository.UserRepository
+	userSessionRepo      repository.UserSessionRepository
+	adminRoleRepo        repository.AdminRoleRepository
+	adminAccessService   *AdminAccessService
+	adminAuditService    *AdminAuditService
 	passwordResetService *PasswordResetService
 }
 
@@ -130,11 +130,11 @@ func NewAdminUserService(
 		passwordResetService = passwordResetServices[0]
 	}
 	return &AdminUserService{
-		userRepo:           userRepo,
-		userSessionRepo:    userSessionRepo,
-		adminRoleRepo:      adminRoleRepo,
-		adminAccessService: adminAccessService,
-		adminAuditService:  adminAuditService,
+		userRepo:             userRepo,
+		userSessionRepo:      userSessionRepo,
+		adminRoleRepo:        adminRoleRepo,
+		adminAccessService:   adminAccessService,
+		adminAuditService:    adminAuditService,
 		passwordResetService: passwordResetService,
 	}
 }

@@ -1,6 +1,6 @@
 # 后端统一开发文档（`apps/server`）
 
-**Last Updated**: 2026-03-02  
+**Last Updated**: 2026-04-05  
 **适用对象**: 后端工程师、全栈工程师、AI Agent  
 **目标**: 用一份文档覆盖后端架构、配置、接口、SSR、数据模型、发布与排障，作为唯一后端事实口径。
 
@@ -388,6 +388,7 @@ ONLYOFFICE 一等文档规则：
    - `apps/server/internal/storage/migrations/mysql/*.sql`
    - `apps/server/internal/storage/migrations/postgres/*.sql`
 2. GORM 模型用于代码映射：`apps/server/internal/storage/models/*.go`。
+3. PostgreSQL 迁移执行器已支持 `DO $$...$$` 这类 dollar-quoted block，可用于幂等约束检查与复杂 DDL 编排；编写这类脚本时仍需保证三套迁移一致，并补回归测试。
 
 当前迁移版本到 `0014_user_identities`。
 

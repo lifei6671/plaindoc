@@ -8,64 +8,64 @@ import (
 
 // AdminUserErrorTargets 描述管理员用户管理场景的错误目标。
 type AdminUserErrorTargets struct {
-	Forbidden            error
-	InvalidStatusFilter  error
-	InvalidStatus        error
-	BanReasonRequired    error
-	NotFound             error
-	InvalidUserID        error
-	SelfOperationBlocked error
-	AlreadyDeleted       error
-	InvalidEmail         error
-	InvalidName          error
-	InvalidPassword      error
-	EmailAlreadyExists   error
-	InvalidRole          error
-	RoleForbidden        error
-	PasswordResetUnavailable   error
-	PasswordResetUnsupported   error
-	PasswordResetRateLimited   error
+	Forbidden                    error
+	InvalidStatusFilter          error
+	InvalidStatus                error
+	BanReasonRequired            error
+	NotFound                     error
+	InvalidUserID                error
+	SelfOperationBlocked         error
+	AlreadyDeleted               error
+	InvalidEmail                 error
+	InvalidName                  error
+	InvalidPassword              error
+	EmailAlreadyExists           error
+	InvalidRole                  error
+	RoleForbidden                error
+	PasswordResetUnavailable     error
+	PasswordResetUnsupported     error
+	PasswordResetRateLimited     error
 	PasswordResetEmailSendFailed error
 }
 
 var (
-	ErrAdminUserInvalidStatusFilter  = errors.New("invalid admin user status filter")
-	ErrAdminUserInvalidStatus        = errors.New("invalid admin user status")
-	ErrAdminUserBanReasonRequired    = errors.New("admin user ban reason is required")
-	ErrAdminUserNotFound             = errors.New("admin user target not found")
-	ErrAdminUserInvalidUserID        = errors.New("admin user id is invalid")
-	ErrAdminUserSelfOperationBlocked = errors.New("admin user self operation is blocked")
-	ErrAdminUserAlreadyDeleted       = errors.New("admin user target already deleted")
-	ErrAdminUserInvalidEmail         = errors.New("admin user email is invalid")
-	ErrAdminUserInvalidName          = errors.New("admin user name is invalid")
-	ErrAdminUserInvalidPassword      = errors.New("admin user password is invalid")
-	ErrAdminUserEmailAlreadyExists   = errors.New("admin user email already exists")
-	ErrAdminUserInvalidRole          = errors.New("admin user role is invalid")
-	ErrAdminUserRoleForbidden        = errors.New("admin user role operation forbidden")
-	ErrAdminUserPasswordResetUnavailable = errors.New("admin user password reset is unavailable")
-	ErrAdminUserPasswordResetUnsupported = errors.New("admin user password reset is unsupported")
-	ErrAdminUserPasswordResetRateLimited = errors.New("admin user password reset is rate limited")
+	ErrAdminUserInvalidStatusFilter          = errors.New("invalid admin user status filter")
+	ErrAdminUserInvalidStatus                = errors.New("invalid admin user status")
+	ErrAdminUserBanReasonRequired            = errors.New("admin user ban reason is required")
+	ErrAdminUserNotFound                     = errors.New("admin user target not found")
+	ErrAdminUserInvalidUserID                = errors.New("admin user id is invalid")
+	ErrAdminUserSelfOperationBlocked         = errors.New("admin user self operation is blocked")
+	ErrAdminUserAlreadyDeleted               = errors.New("admin user target already deleted")
+	ErrAdminUserInvalidEmail                 = errors.New("admin user email is invalid")
+	ErrAdminUserInvalidName                  = errors.New("admin user name is invalid")
+	ErrAdminUserInvalidPassword              = errors.New("admin user password is invalid")
+	ErrAdminUserEmailAlreadyExists           = errors.New("admin user email already exists")
+	ErrAdminUserInvalidRole                  = errors.New("admin user role is invalid")
+	ErrAdminUserRoleForbidden                = errors.New("admin user role operation forbidden")
+	ErrAdminUserPasswordResetUnavailable     = errors.New("admin user password reset is unavailable")
+	ErrAdminUserPasswordResetUnsupported     = errors.New("admin user password reset is unsupported")
+	ErrAdminUserPasswordResetRateLimited     = errors.New("admin user password reset is rate limited")
 	ErrAdminUserPasswordResetEmailSendFailed = errors.New("admin user password reset email send failed")
 )
 
 var defaultAdminUserErrorTargets = AdminUserErrorTargets{
-	Forbidden:            ErrAdminForbidden,
-	InvalidStatusFilter:  ErrAdminUserInvalidStatusFilter,
-	InvalidStatus:        ErrAdminUserInvalidStatus,
-	BanReasonRequired:    ErrAdminUserBanReasonRequired,
-	NotFound:             ErrAdminUserNotFound,
-	InvalidUserID:        ErrAdminUserInvalidUserID,
-	SelfOperationBlocked: ErrAdminUserSelfOperationBlocked,
-	AlreadyDeleted:       ErrAdminUserAlreadyDeleted,
-	InvalidEmail:         ErrAdminUserInvalidEmail,
-	InvalidName:          ErrAdminUserInvalidName,
-	InvalidPassword:      ErrAdminUserInvalidPassword,
-	EmailAlreadyExists:   ErrAdminUserEmailAlreadyExists,
-	InvalidRole:          ErrAdminUserInvalidRole,
-	RoleForbidden:        ErrAdminUserRoleForbidden,
-	PasswordResetUnavailable:   ErrAdminUserPasswordResetUnavailable,
-	PasswordResetUnsupported:   ErrAdminUserPasswordResetUnsupported,
-	PasswordResetRateLimited:   ErrAdminUserPasswordResetRateLimited,
+	Forbidden:                    ErrAdminForbidden,
+	InvalidStatusFilter:          ErrAdminUserInvalidStatusFilter,
+	InvalidStatus:                ErrAdminUserInvalidStatus,
+	BanReasonRequired:            ErrAdminUserBanReasonRequired,
+	NotFound:                     ErrAdminUserNotFound,
+	InvalidUserID:                ErrAdminUserInvalidUserID,
+	SelfOperationBlocked:         ErrAdminUserSelfOperationBlocked,
+	AlreadyDeleted:               ErrAdminUserAlreadyDeleted,
+	InvalidEmail:                 ErrAdminUserInvalidEmail,
+	InvalidName:                  ErrAdminUserInvalidName,
+	InvalidPassword:              ErrAdminUserInvalidPassword,
+	EmailAlreadyExists:           ErrAdminUserEmailAlreadyExists,
+	InvalidRole:                  ErrAdminUserInvalidRole,
+	RoleForbidden:                ErrAdminUserRoleForbidden,
+	PasswordResetUnavailable:     ErrAdminUserPasswordResetUnavailable,
+	PasswordResetUnsupported:     ErrAdminUserPasswordResetUnsupported,
+	PasswordResetRateLimited:     ErrAdminUserPasswordResetRateLimited,
 	PasswordResetEmailSendFailed: ErrAdminUserPasswordResetEmailSendFailed,
 }
 

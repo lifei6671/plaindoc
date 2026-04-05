@@ -16,18 +16,18 @@ type gormPasswordResetTokenRepository struct {
 }
 
 type passwordResetTokenRow struct {
-	ID                   int64   `gorm:"column:id"`
-	TokenID              string  `gorm:"column:token_id"`
-	TokenSecretHash      string  `gorm:"column:token_secret_hash"`
-	UserID               string  `gorm:"column:user_id"`
-	Source               string  `gorm:"column:source"`
-	RequestedByUserID    *string `gorm:"column:requested_by_user_id"`
-	RequestIPHash        string  `gorm:"column:request_ip_hash"`
-	ExpiresAtRaw         string  `gorm:"column:expires_at"`
-	ConsumedAtRaw        *string `gorm:"column:consumed_at"`
-	InvalidatedAtRaw     *string `gorm:"column:invalidated_at"`
-	CreatedAtRaw         string  `gorm:"column:created_at"`
-	UpdatedAtRaw         string  `gorm:"column:updated_at"`
+	ID                int64   `gorm:"column:id"`
+	TokenID           string  `gorm:"column:token_id"`
+	TokenSecretHash   string  `gorm:"column:token_secret_hash"`
+	UserID            string  `gorm:"column:user_id"`
+	Source            string  `gorm:"column:source"`
+	RequestedByUserID *string `gorm:"column:requested_by_user_id"`
+	RequestIPHash     string  `gorm:"column:request_ip_hash"`
+	ExpiresAtRaw      string  `gorm:"column:expires_at"`
+	ConsumedAtRaw     *string `gorm:"column:consumed_at"`
+	InvalidatedAtRaw  *string `gorm:"column:invalidated_at"`
+	CreatedAtRaw      string  `gorm:"column:created_at"`
+	UpdatedAtRaw      string  `gorm:"column:updated_at"`
 }
 
 // NewGormPasswordResetTokenRepository 创建基于 GORM 的密码重置令牌仓储实现。

@@ -141,6 +141,7 @@ PlainDoc 是一个面向中小团队的文档平台：Go 单体后端 + React �
    - `apps/server/internal/storage/migrations/sqlite`
    - `apps/server/internal/storage/migrations/mysql`
    - `apps/server/internal/storage/migrations/postgres`
+   - PostgreSQL 迁移脚本可以使用 `DO $$...$$` 这类 dollar-quoted block；当前迁移执行器已支持该语法，不要为了拆句器兼容性刻意回避。
 6. 后端分层不能混用：
    - `handler` 做参数校验与响应映射
    - `service` 做业务与权限
@@ -167,4 +168,3 @@ PlainDoc 是一个面向中小团队的文档平台：Go 单体后端 + React �
 2. 再定位“契约真值文件”（types/config/router），最后落到实现细节。
 3. 每次改动后至少执行最小回归：`go test ./... -count=1`（server）+ `npm run web:build`（web）。
 4. 涉及契约、配置、SSR、路由变更时，同步更新 `BACKEND_DEVELOPER_GUIDE.md` 或 `FRONTEND_DEVELOPER_GUIDE.md`，避免文档漂移。
-

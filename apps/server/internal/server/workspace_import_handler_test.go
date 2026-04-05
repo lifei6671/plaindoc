@@ -667,10 +667,10 @@ func TestRouter_ImportDocuments_NestedReadmeCollapsesSingleGrandchildDirectory(t
 	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
 
 	zipContent := buildWorkspaceImportZIP(t, map[string][]byte{
-		"README.md":             []byte("# 根 README"),
-		"gocn/README.md":        []byte("# GoCN README"),
-		"gocn/2018/read-1.md":   []byte("# read-1"),
-		"gocn/2018/read-2.md":   []byte("# read-2"),
+		"README.md":           []byte("# 根 README"),
+		"gocn/README.md":      []byte("# GoCN README"),
+		"gocn/2018/read-1.md": []byte("# read-1"),
+		"gocn/2018/read-2.md": []byte("# read-2"),
 	})
 
 	body, contentType := buildWorkspaceImportMultipartBody(t, "", map[string][]byte{
@@ -745,12 +745,12 @@ func TestRouter_ImportDocuments_ReadmdAliasBehavesLikeNestedReadme(t *testing.T)
 	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
 
 	zipContent := buildWorkspaceImportZIP(t, map[string][]byte{
-		"README.md":                  []byte("# 根 README"),
-		"gocn/READMD.md":             []byte("# GoCN README Alias"),
-		"gocn/2018-03/read-1.md":     []byte("# read-1"),
-		"gocn/2018-03/read-10.md":    []byte("# read-10"),
-		"gocn/2018-03/read-11.md":    []byte("# read-11"),
-		"gocn/2018-03/images/a.png":  decodeBase64WorkspaceImportAsset(t, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XlN8AAAAASUVORK5CYII="),
+		"README.md":                 []byte("# 根 README"),
+		"gocn/READMD.md":            []byte("# GoCN README Alias"),
+		"gocn/2018-03/read-1.md":    []byte("# read-1"),
+		"gocn/2018-03/read-10.md":   []byte("# read-10"),
+		"gocn/2018-03/read-11.md":   []byte("# read-11"),
+		"gocn/2018-03/images/a.png": decodeBase64WorkspaceImportAsset(t, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XlN8AAAAASUVORK5CYII="),
 	})
 
 	body, contentType := buildWorkspaceImportMultipartBody(t, "", map[string][]byte{
@@ -941,11 +941,11 @@ func TestRouter_ImportDocuments_ReadmePeersWithMultipleChildDirsAndPreservesFile
 	seedSpaceForWorkspaceCreateNode(t, database, ownerUserID, spaceID, "member")
 
 	zipContent := buildWorkspaceImportZIP(t, map[string][]byte{
-		"README.md":                   []byte("# 根 README"),
-		"gocn/README.md":              []byte("# GoCN README"),
-		"gocn/2018-04/read-1.md":      []byte("# 2018-04 read-1"),
-		"gocn/2018-03/read-1.md":      []byte("# 2018-03 read-1"),
-		"gocn/2018-03/read-10.md":     []byte("# 2018-03 read-10"),
+		"README.md":               []byte("# 根 README"),
+		"gocn/README.md":          []byte("# GoCN README"),
+		"gocn/2018-04/read-1.md":  []byte("# 2018-04 read-1"),
+		"gocn/2018-03/read-1.md":  []byte("# 2018-03 read-1"),
+		"gocn/2018-03/read-10.md": []byte("# 2018-03 read-10"),
 	})
 
 	body, contentType := buildWorkspaceImportMultipartBody(t, "", map[string][]byte{

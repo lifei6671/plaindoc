@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/rendercache"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"github.com/lifei6671/plaindoc/apps/server/internal/service"
 	"gorm.io/gorm"
 )
 
@@ -94,8 +95,7 @@ func (h *themeHandler) List(c *gin.Context) {
 		Table("themes").
 		Select("theme_id", "name", "description", "variables_json", "syntax_theme", "code_block_style_json", "code_block_code_style_json", "inline_code_style_json", "custom_css", "is_builtin", "is_enabled").
 		Where("is_enabled = ?", true).
-		Order("is_builtin DESC").
-		Order("updated_at DESC").
+		Order("id DESC").
 		Find(&themes).Error; err != nil {
 		response.InternalError(c)
 		return
@@ -224,14 +224,7 @@ func toThemeResponse(theme themeRow) (themeResponse, error) {
 }
 
 func decodeStyleJSON(raw string) (map[string]any, error) {
-	if raw == "" {
-		return map[string]any{}, nil
-	}
-	var value map[string]any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return nil, err
-	}
-	return value, nil
+	return service.DecodeThemeStyleJSON(raw)
 }
 
 func toDocumentResponse(document documentRow, updatedAt string) documentResponse {

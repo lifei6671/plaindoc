@@ -424,8 +424,9 @@ func splitSQLStatements(sqlText string) []string {
 	inDoubleQuotes := false
 	inLineComment := false
 	inBlockComment := false
+	dollarQuoteDelimiter := ""
 
-	for i := 0; i < len(sqlText); i++ {
+	for i := 0; i < len(sqlText); {
 		current := sqlText[i]
 		next := byte(0)
 		if i+1 < len(sqlText) {
@@ -433,28 +434,48 @@ func splitSQLStatements(sqlText string) []string {
 		}
 
 		if inLineComment {
+			i++
 			if current == '\n' {
 				inLineComment = false
+				builder.WriteByte(current)
 			}
 			continue
 		}
 		if inBlockComment {
+			i++
 			if current == '*' && next == '/' {
 				inBlockComment = false
 				i++
 			}
 			continue
 		}
+		if dollarQuoteDelimiter != "" {
+			if strings.HasPrefix(sqlText[i:], dollarQuoteDelimiter) {
+				builder.WriteString(dollarQuoteDelimiter)
+				i += len(dollarQuoteDelimiter)
+				dollarQuoteDelimiter = ""
+				continue
+			}
+			builder.WriteByte(current)
+			i++
+			continue
+		}
 
 		if !inSingleQuotes && !inDoubleQuotes {
 			if current == '-' && next == '-' {
 				inLineComment = true
-				i++
+				i += 2
 				continue
 			}
 			if current == '/' && next == '*' {
 				inBlockComment = true
-				i++
+				i += 2
+				continue
+			}
+			if delimiter, consumed, ok := readDollarQuoteDelimiter(sqlText[i:]); ok {
+				dollarQuoteDelimiter = delimiter
+				builder.WriteString(delimiter)
+				i += consumed
 				continue
 			}
 		}
@@ -463,7 +484,7 @@ func splitSQLStatements(sqlText string) []string {
 			if inSingleQuotes && next == '\'' {
 				builder.WriteByte(current)
 				builder.WriteByte(next)
-				i++
+				i += 2
 				continue
 			}
 			inSingleQuotes = !inSingleQuotes
@@ -477,10 +498,12 @@ func splitSQLStatements(sqlText string) []string {
 				statements = append(statements, statement)
 			}
 			builder.Reset()
+			i++
 			continue
 		}
 
 		builder.WriteByte(current)
+		i++
 	}
 
 	last := strings.TrimSpace(builder.String())
@@ -489,6 +512,32 @@ func splitSQLStatements(sqlText string) []string {
 	}
 
 	return statements
+}
+
+func readDollarQuoteDelimiter(sqlText string) (delimiter string, consumed int, ok bool) {
+	if len(sqlText) < 2 || sqlText[0] != '$' {
+		return "", 0, false
+	}
+
+	end := strings.IndexByte(sqlText[1:], '$')
+	if end < 0 {
+		return "", 0, false
+	}
+
+	tag := sqlText[1 : 1+end]
+	if tag != "" {
+		for i := 0; i < len(tag); i++ {
+			ch := tag[i]
+			if !(ch == '_' || ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') {
+				return "", 0, false
+			}
+		}
+		if tag[0] >= '0' && tag[0] <= '9' {
+			return "", 0, false
+		}
+	}
+
+	return "$" + tag + "$", len(tag) + 2, true
 }
 
 func parseMigrationFilename(filename string) (version int, name string, direction string, err error) {

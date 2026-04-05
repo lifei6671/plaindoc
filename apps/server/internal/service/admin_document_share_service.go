@@ -11,8 +11,8 @@ import (
 
 // AdminDocumentShareService 封装后台分享中心业务。
 type AdminDocumentShareService struct {
-	shareRepo         repository.DocumentShareRepository
-	documentShareSvc  *DocumentShareService
+	shareRepo          repository.DocumentShareRepository
+	documentShareSvc   *DocumentShareService
 	adminAccessService *AdminAccessService
 }
 

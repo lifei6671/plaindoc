@@ -22,21 +22,21 @@ const (
 
 // EmailSMTPConfig 邮件 SMTP 配置。
 type EmailSMTPConfig struct {
-	Host             string `json:"host"`
-	Port             int    `json:"port"`
-	Username         string `json:"username"`
+	Host               string `json:"host"`
+	Port               int    `json:"port"`
+	Username           string `json:"username"`
 	PasswordCiphertext string `json:"passwordCiphertext"`
-	Security         string `json:"security"`
-	ConnectTimeoutMS int    `json:"connectTimeoutMs"`
-	SendTimeoutMS    int    `json:"sendTimeoutMs"`
+	Security           string `json:"security"`
+	ConnectTimeoutMS   int    `json:"connectTimeoutMs"`
+	SendTimeoutMS      int    `json:"sendTimeoutMs"`
 }
 
 // EmailPasswordResetConfig 密码重置邮件策略配置。
 type EmailPasswordResetConfig struct {
-	TokenTTLMinutes           int `json:"tokenTTLMinutes"`
-	MinRequestIntervalSeconds int `json:"minRequestIntervalSeconds"`
+	TokenTTLMinutes            int `json:"tokenTTLMinutes"`
+	MinRequestIntervalSeconds  int `json:"minRequestIntervalSeconds"`
 	MaxRequestsPerHourPerEmail int `json:"maxRequestsPerHourPerEmail"`
-	MaxRequestsPerHourPerIP   int `json:"maxRequestsPerHourPerIP"`
+	MaxRequestsPerHourPerIP    int `json:"maxRequestsPerHourPerIP"`
 }
 
 // EmailConfig 邮件系统配置。

@@ -21,10 +21,10 @@ var (
 
 // DocumentShareAccessTokenClaims 定义分享免密令牌载荷。
 type DocumentShareAccessTokenClaims struct {
-	ShareID        string `json:"shareId"`
-	AccessVersion  int    `json:"accessVersion"`
-	IssuedAtUnix   int64  `json:"iat"`
-	ExpiresAtUnix  int64  `json:"exp"`
+	ShareID       string `json:"shareId"`
+	AccessVersion int    `json:"accessVersion"`
+	IssuedAtUnix  int64  `json:"iat"`
+	ExpiresAtUnix int64  `json:"exp"`
 }
 
 // IssueDocumentShareAccessTokenInput 定义签发参数。

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
+	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
@@ -46,6 +47,42 @@ func TestRouter_ListThemes(t *testing.T) {
 		_ = database.Close()
 	}()
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("themes").Create(map[string]any{
+		"theme_id":                   "theme-a",
+		"name":                       "Theme A",
+		"description":                "older theme",
+		"variables_json":             `{}`,
+		"syntax_theme":               "one-light",
+		"code_block_style_json":      `{}`,
+		"code_block_code_style_json": `{}`,
+		"inline_code_style_json":     `{}`,
+		"custom_css":                 "",
+		"is_builtin":                 0,
+		"is_enabled":                 1,
+		"created_at":                 now,
+		"updated_at":                 now,
+	}).Error; err != nil {
+		t.Fatalf("insert first theme failed: %v", err)
+	}
+	if err := database.ORM.Table("themes").Create(map[string]any{
+		"theme_id":                   "theme-b",
+		"name":                       "Theme B",
+		"description":                "newer theme",
+		"variables_json":             `{}`,
+		"syntax_theme":               "one-light",
+		"code_block_style_json":      `{}`,
+		"code_block_code_style_json": `{}`,
+		"inline_code_style_json":     `{}`,
+		"custom_css":                 "",
+		"is_builtin":                 0,
+		"is_enabled":                 1,
+		"created_at":                 now,
+		"updated_at":                 now,
+	}).Error; err != nil {
+		t.Fatalf("insert second theme failed: %v", err)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/api/themes", nil)
 	rec := serve(req)
 
@@ -56,11 +93,50 @@ func TestRouter_ListThemes(t *testing.T) {
 	payload := decodeJSONResultData[[]struct {
 		ID string `json:"id"`
 	}](t, rec.Body.Bytes())
-	if len(payload) == 0 {
-		t.Fatal("expected at least one theme")
+	if len(payload) < 2 {
+		t.Fatalf("expected at least two themes, got %d", len(payload))
 	}
-	if payload[0].ID != "default" {
-		t.Fatalf("expected first theme id default, got %s", payload[0].ID)
+	if payload[0].ID != "theme-b" || payload[1].ID != "theme-a" {
+		t.Fatalf("expected primary key descending order theme-b -> theme-a, got %#v", payload[:2])
+	}
+}
+
+func TestRouter_ListThemes_ToleratesLegacyMySQLSeedJSON(t *testing.T) {
+	database, serve := setupThemeTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("themes").Create(map[string]any{
+		"theme_id":                   "legacy_public_theme",
+		"name":                       "Legacy Public Theme",
+		"description":                "broken json from mysql seed",
+		"variables_json":             `{"--pd-preview-text-color":"#111111"}`,
+		"syntax_theme":               "one-light",
+		"code_block_style_json":      `{"background":"#ffffff"}`,
+		"code_block_code_style_json": `{"fontFamily":""Google Sans Code","Operator Mono","SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace","color":"#dbeafe"}`,
+		"inline_code_style_json":     `{"padding":"1px 6px"}`,
+		"custom_css":                 "",
+		"is_builtin":                 0,
+		"is_enabled":                 1,
+		"created_at":                 now,
+		"updated_at":                 now,
+	}).Error; err != nil {
+		t.Fatalf("insert legacy public theme failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/themes", nil)
+	rec := serve(req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, rec.Body.Bytes()); code != response.SuccessCode {
+		t.Fatalf("expected public theme list business code 0, got %d body=%s", code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"id":"legacy_public_theme"`)) {
+		t.Fatalf("expected public theme list contain repaired legacy theme, body=%s", rec.Body.String())
 	}
 }
 

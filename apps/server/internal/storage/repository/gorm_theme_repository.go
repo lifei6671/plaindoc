@@ -62,7 +62,7 @@ func (r *gormThemeRepository) List(ctx context.Context, includeDisabled bool) ([
 	if !includeDisabled {
 		query = query.Where("is_enabled = ?", true)
 	}
-	query = query.Order("is_builtin DESC").Order("updated_at DESC")
+	query = query.Order("id DESC")
 
 	var rows []themeRow
 	if err := query.Find(&rows).Error; err != nil {

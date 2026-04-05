@@ -63,29 +63,29 @@ type AdminDocumentTemplateSceneRecord struct {
 
 // CreateAdminDocumentTemplateSceneInput 创建文档模板场景输入参数。
 type CreateAdminDocumentTemplateSceneInput struct {
-	ActorUserID  string
-	RequestID    string
-	SceneKey     string
-	SceneName    string
-	Description  string
-	Sort         int
+	ActorUserID string
+	RequestID   string
+	SceneKey    string
+	SceneName   string
+	Description string
+	Sort        int
 }
 
 // UpdateAdminDocumentTemplateSceneInput 更新文档模板场景输入参数。
 type UpdateAdminDocumentTemplateSceneInput struct {
-	ActorUserID  string
-	RequestID    string
-	SceneKey     string
-	SceneName    *string
-	Description  *string
-	Sort         *int
+	ActorUserID string
+	RequestID   string
+	SceneKey    string
+	SceneName   *string
+	Description *string
+	Sort        *int
 }
 
 // AdminDocumentTemplateSceneService 封装管理员文档模板场景治理能力。
 type AdminDocumentTemplateSceneService struct {
-	sceneRepo       repository.DocumentTemplateSceneRepository
-	adminAccess     *AdminAccessService
-	adminAudit      *AdminAuditService
+	sceneRepo   repository.DocumentTemplateSceneRepository
+	adminAccess *AdminAccessService
+	adminAudit  *AdminAuditService
 }
 
 // NewAdminDocumentTemplateSceneService 创建管理员文档模板场景治理服务。

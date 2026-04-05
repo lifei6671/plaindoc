@@ -2106,6 +2106,49 @@ func TestRouter_AdminThemeCRUDAndPublicThemeVisibility(t *testing.T) {
 	}
 }
 
+func TestRouter_AdminThemeList_ToleratesLegacyMySQLSeedJSON(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "theme-legacy-platform-admin@example.com")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("themes").Create(map[string]any{
+		"theme_id":                   "legacy_mysql_theme",
+		"name":                       "Legacy MySQL Theme",
+		"description":                "broken json from mysql seed",
+		"variables_json":             `{"--pd-preview-text-color":"#111111"}`,
+		"syntax_theme":               "one-light",
+		"code_block_style_json":      `{"background":"#ffffff"}`,
+		"code_block_code_style_json": `{"fontFamily":""Google Sans Code","Operator Mono","SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace","color":"#dbeafe"}`,
+		"inline_code_style_json":     `{"padding":"1px 6px"}`,
+		"custom_css":                 "",
+		"is_builtin":                 1,
+		"is_enabled":                 1,
+		"created_at":                 now,
+		"updated_at":                 now,
+	}).Error; err != nil {
+		t.Fatalf("insert legacy mysql theme failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/themes", nil)
+	req.Header.Set("Authorization", "Bearer "+platformAdminToken)
+	rec := serve(req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected admin theme list status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if code := decodeJSONResultCode(t, rec.Body.Bytes()); code != response.SuccessCode {
+		t.Fatalf("expected admin theme list business code 0, got %d body=%s", code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "legacy_mysql_theme") {
+		t.Fatalf("expected admin theme list contain repaired legacy theme, body=%s", rec.Body.String())
+	}
+}
+
 func TestRouter_AdminSystemConfigPlatformOnlyAndVersionControl(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {

@@ -415,29 +415,35 @@ export function AdminThemesPage({ dataGateway }: AdminThemesPageProps) {
                           <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(theme.updatedAt)}</td>
                           <td className="px-3 py-3">
                             <div className="flex flex-wrap items-center gap-2">
-                              <Button type="button" size="sm" variant="outline" disabled={isActioning} onClick={() => void handleEditTheme(theme)}>
-                                <PencilLine size={13} />
-                                <span>编辑</span>
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className={
-                                  theme.enabled
-                                    ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                                }
-                                disabled={isActioning}
-                                onClick={() => void handleToggleTheme(theme)}
-                              >
-                                {theme.enabled ? <PowerOff size={13} /> : <Power size={13} />}
-                                <span>{theme.enabled ? "停用" : "启用"}</span>
-                              </Button>
-                              <Button type="button" size="sm" variant="destructive" disabled={isActioning} onClick={() => void handleDeleteTheme(theme)}>
-                                <Trash2 size={13} />
-                                <span>删除</span>
-                              </Button>
+                              {theme.builtin ? null : (
+                                <Button type="button" size="sm" variant="outline" disabled={isActioning} onClick={() => void handleEditTheme(theme)}>
+                                  <PencilLine size={13} />
+                                  <span>编辑</span>
+                                </Button>
+                              )}
+                              {theme.builtin ? null : (
+                                <>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className={
+                                      theme.enabled
+                                        ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                        : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                    }
+                                    disabled={isActioning}
+                                    onClick={() => void handleToggleTheme(theme)}
+                                  >
+                                    {theme.enabled ? <PowerOff size={13} /> : <Power size={13} />}
+                                    <span>{theme.enabled ? "停用" : "启用"}</span>
+                                  </Button>
+                                  <Button type="button" size="sm" variant="destructive" disabled={isActioning} onClick={() => void handleDeleteTheme(theme)}>
+                                    <Trash2 size={13} />
+                                    <span>删除</span>
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
