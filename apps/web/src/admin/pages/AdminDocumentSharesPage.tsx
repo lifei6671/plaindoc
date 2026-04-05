@@ -16,6 +16,7 @@ const DEFAULT_PAGE_SIZE = 20;
 interface AdminDocumentSharesPageProps {
   dataGateway: DataGateway;
   currentUserRoles: AdminRole[];
+  currentUserID: string;
 }
 
 interface AdminDocumentSharesState {
@@ -94,11 +95,12 @@ function resolveAbsoluteUrl(raw: string): string {
 }
 
 function buildShareCenterMenus(canManageAllShares: boolean): ShareCenterMenuItem[] {
+  // 普通用户也可以进入分享中心，但只允许停留在“我的分享”视图。
   const menus: ShareCenterMenuItem[] = [
     {
       key: "mine",
       label: "我的分享",
-      description: "查看并管理当前登录人创建的分享记录",
+      description: "查看当前登录人创建的分享记录",
       view: "mine",
       icon: User
     }
@@ -115,7 +117,7 @@ function buildShareCenterMenus(canManageAllShares: boolean): ShareCenterMenuItem
   return menus;
 }
 
-export function AdminDocumentSharesPage({ dataGateway, currentUserRoles }: AdminDocumentSharesPageProps) {
+export function AdminDocumentSharesPage({ dataGateway, currentUserRoles, currentUserID }: AdminDocumentSharesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
 
   const canManageAllShares = useMemo(() => {
@@ -577,6 +579,10 @@ export function AdminDocumentSharesPage({ dataGateway, currentUserRoles }: Admin
                       sharesState.items.map((item) => {
                         const shareReaderPath = buildShareReaderPath(item);
                         const rowActioning = actioningShareID === item.shareId;
+                        const canManageRow = canManageAllShares || (item.createdByUserId ?? "").trim() === currentUserID.trim();
+                        const copyButtonClassName = canManageRow
+                          ? "h-8 rounded-r-none border-r-0 px-2 text-xs"
+                          : "h-8 rounded-md px-2 text-xs";
                         return (
                           <tr key={item.shareId} className="border-t border-slate-200/70 align-top text-sm text-slate-700">
                             <td className="px-3 py-3">
@@ -628,88 +634,91 @@ export function AdminDocumentSharesPage({ dataGateway, currentUserRoles }: Admin
                             <td className="px-3 py-3 text-xs text-slate-500">{formatDateTime(item.updatedAt)}</td>
                             <td className="px-3 py-3">
                               <div className="flex justify-end">
-                                <div className="inline-flex rounded-md">
+                                <div className={`inline-flex ${canManageRow ? "overflow-hidden rounded-md" : "rounded-md"}`}>
                                   <Button
                                     type="button"
                                     size="sm"
                                     variant="outline"
-                                    className="h-8 rounded-r-none border-r-0 px-2 text-xs"
+                                    className={copyButtonClassName}
                                     disabled={rowActioning || !shareReaderPath}
                                     onClick={() => {
                                       void handleCopyShareLink(shareReaderPath);
                                     }}
                                   >
-                                    {rowActioning ? (
-                                      <LoaderCircle size={12} className="mr-1.5 animate-spin" />
-                                    ) : (
-                                      <Copy size={12} className="mr-1.5" />
-                                    )}
-                                    复制链接
+                                      {rowActioning ? (
+                                        <LoaderCircle size={12} className="mr-1.5 animate-spin" />
+                                      ) : (
+                                        <Copy size={12} className="mr-1.5" />
+                                      )}
+                                      复制链接
                                   </Button>
-                                  <DropdownMenu modal={false}>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-8 w-8 rounded-l-none px-0"
-                                        disabled={rowActioning}
-                                        aria-label="展开分享操作"
-                                      >
-                                        <ChevronDown size={12} />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-44">
-                                      <DropdownMenuItem
-                                        disabled={rowActioning}
-                                        onSelect={() => {
-                                          void (item.mode === "public" ? handleSwitchToPassword(item) : handleSwitchToPublic(item));
-                                        }}
-                                      >
-                                        {item.mode === "public" ? <Lock size={14} className="mr-2" /> : <LockOpen size={14} className="mr-2" />}
-                                        <span>{item.mode === "public" ? "设密码分享" : "设公开分享"}</span>
-                                      </DropdownMenuItem>
-                                      {item.hasPassword ? (
+                                  {/* 普通用户只保留自己创建的分享行内操作，管理员仍可管理全部记录。 */}
+                                  {canManageRow ? (
+                                    <DropdownMenu modal={false}>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-8 w-8 rounded-l-none px-0"
+                                          disabled={rowActioning}
+                                          aria-label="展开分享操作"
+                                        >
+                                          <ChevronDown size={12} />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end" className="w-44">
                                         <DropdownMenuItem
                                           disabled={rowActioning}
                                           onSelect={() => {
-                                            void handleChangePassword(item);
+                                            void (item.mode === "public" ? handleSwitchToPassword(item) : handleSwitchToPublic(item));
                                           }}
                                         >
-                                          <Lock size={14} className="mr-2" />
-                                          <span>修改密码</span>
+                                          {item.mode === "public" ? <Lock size={14} className="mr-2" /> : <LockOpen size={14} className="mr-2" />}
+                                          <span>{item.mode === "public" ? "设密码分享" : "设公开分享"}</span>
                                         </DropdownMenuItem>
-                                      ) : null}
-                                      <DropdownMenuItem
-                                        disabled={rowActioning}
-                                        onSelect={() => {
-                                          void handleExtend7Days(item);
-                                        }}
-                                      >
-                                        <Clock3 size={14} className="mr-2" />
-                                        <span>延期 7 天</span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        disabled={rowActioning}
-                                        onSelect={() => {
-                                          void handleSetPermanent(item);
-                                        }}
-                                      >
-                                        <RefreshCw size={14} className="mr-2" />
-                                        <span>设为永久</span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        disabled={rowActioning}
-                                        onSelect={() => {
-                                          void handleDisableShare(item);
-                                        }}
-                                        className="text-rose-600 focus:text-rose-600"
-                                      >
-                                        <Trash2 size={14} className="mr-2" />
-                                        <span>取消分享</span>
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
+                                        {item.hasPassword ? (
+                                          <DropdownMenuItem
+                                            disabled={rowActioning}
+                                            onSelect={() => {
+                                              void handleChangePassword(item);
+                                            }}
+                                          >
+                                            <Lock size={14} className="mr-2" />
+                                            <span>修改密码</span>
+                                          </DropdownMenuItem>
+                                        ) : null}
+                                        <DropdownMenuItem
+                                          disabled={rowActioning}
+                                          onSelect={() => {
+                                            void handleExtend7Days(item);
+                                          }}
+                                        >
+                                          <Clock3 size={14} className="mr-2" />
+                                          <span>延期 7 天</span>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          disabled={rowActioning}
+                                          onSelect={() => {
+                                            void handleSetPermanent(item);
+                                          }}
+                                        >
+                                          <RefreshCw size={14} className="mr-2" />
+                                          <span>设为永久</span>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          disabled={rowActioning}
+                                          onSelect={() => {
+                                            void handleDisableShare(item);
+                                          }}
+                                          className="text-rose-600 focus:text-rose-600"
+                                        >
+                                          <Trash2 size={14} className="mr-2" />
+                                          <span>取消分享</span>
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  ) : null}
                                 </div>
                               </div>
                             </td>

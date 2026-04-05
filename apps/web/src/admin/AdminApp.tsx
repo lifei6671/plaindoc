@@ -23,7 +23,6 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  type AdminRole,
   type AdminIdentity,
   type AuthCaptchaChallenge,
   type AuthCaptchaRefreshInput,
@@ -87,140 +86,168 @@ interface AdminAppProps {
   onLogout: () => Promise<void>;
 }
 
-function buildAdminMenu(roles: AdminRole[]): AdminMenuItem[] {
+function buildAdminMenu(identity: AdminIdentity | null): AdminMenuItem[] {
+  const roles = identity?.roles ?? [];
   const hasPlatformAdminRole = roles.includes("platform_admin");
   const hasSpaceAdminRole = roles.includes("space_admin");
   const hasAnyAdminRole = hasPlatformAdminRole || hasSpaceAdminRole;
-  if (!hasAnyAdminRole) {
-    return [];
-  }
+  const canViewSpaceManagement = hasAnyAdminRole || identity?.capabilities?.canViewSpaceManagement === true;
 
+  // 菜单结构按“个人信息 -> 分享中心 -> 成员态空间管理 -> 管理员全量后台”逐级展开。
+  // 分享中心对所有登录用户开放，但普通用户只会停留在“我的分享”视图。
   const items: AdminMenuItem[] = [
-    {
-      key: "dashboard",
-      label: "概览",
-      description: "查看后台整体运行与风险概况",
-      path: ADMIN_ROUTE_BASE_PATH,
-      icon: LayoutDashboard
-    },
     {
       key: "profile",
       label: "个人信息",
       description: "维护昵称、头像与密码",
       path: "/admin/profile",
       icon: User
-    }
-  ];
-
-  if (hasPlatformAdminRole) {
-    items.push({
-      key: "users",
-      label: "用户管理",
-      description: "管理用户状态、封禁与删除",
-      path: "/admin/users",
-      icon: Users
-    });
-  }
-
-  items.push(
-    {
-      key: "spaces",
-      label: "空间管理",
-      description: "查看空间状态并执行封禁/删除",
-      path: "/admin/spaces",
-      icon: FolderKanban
-    },
-    {
-      key: "documents",
-      label: "文档管理",
-      description: "筛选文档并处理违规内容",
-      path: "/admin/documents",
-      icon: FileText
     },
     {
       key: "shares",
       label: "分享中心",
-      description: "管理分享文档与我的分享",
+      description: "查看我的分享记录",
       path: "/admin/document-shares",
       icon: Link2
-    },
-    {
-      key: "attachments",
-      label: "附件管理",
-      description: "检索与删除文档附件",
-      path: "/admin/attachments",
-      icon: Paperclip
-    },
-    {
-      key: "images",
-      label: "图片管理",
-      description: "检索与删除文档图片资源",
-      path: "/admin/images",
-      icon: Image
     }
-  );
+  ];
 
-  if (hasPlatformAdminRole) {
-    items.push({
-      key: "document-templates",
-      label: "模板管理",
-      description: "治理全站文档场景模板",
-      path: "/admin/document-templates",
-      icon: FileText
+  if (hasAnyAdminRole) {
+    items.unshift({
+      key: "dashboard",
+      label: "概览",
+      description: "查看后台整体运行与风险概况",
+      path: ADMIN_ROUTE_BASE_PATH,
+      icon: LayoutDashboard
     });
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "users",
+        label: "用户管理",
+        description: "管理用户状态、封禁与删除",
+        path: "/admin/users",
+        icon: Users
+      });
+    }
+
+    items.push(
+      {
+        key: "spaces",
+        label: "空间管理",
+        description: "查看空间状态并执行封禁/删除",
+        path: "/admin/spaces",
+        icon: FolderKanban
+      },
+      {
+        key: "documents",
+        label: "文档管理",
+        description: "筛选文档并处理违规内容",
+        path: "/admin/documents",
+        icon: FileText
+      },
+      {
+        key: "attachments",
+        label: "附件管理",
+        description: "检索与删除文档附件",
+        path: "/admin/attachments",
+        icon: Paperclip
+      },
+      {
+        key: "images",
+        label: "图片管理",
+        description: "检索与删除文档图片资源",
+        path: "/admin/images",
+        icon: Image
+      }
+    );
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "document-templates",
+        label: "模板管理",
+        description: "治理全站文档场景模板",
+        path: "/admin/document-templates",
+        icon: FileText
+      });
+    }
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "themes",
+        label: "主题管理",
+        description: "维护全站主题模板与 CSS 变量",
+        path: "/admin/themes",
+        icon: Palette
+      });
+    }
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "system",
+        label: "系统配置",
+        description: "维护系统级配置参数",
+        path: "/admin/system-configs",
+        icon: Settings2
+      });
+    }
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "office-config",
+        label: "Office配置",
+        description: "维护 ONLYOFFICE 接入与阅读渲染",
+        path: "/admin/office-configs",
+        icon: Table2
+      });
+    }
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "search-analyzers",
+        label: "分词治理",
+        description: "维护全文检索分词器与词典词条",
+        path: "/admin/search-analyzers",
+        icon: Search
+      });
+    }
+
+    if (hasPlatformAdminRole) {
+      items.push({
+        key: "audits",
+        label: "审计日志",
+        description: "检索关键管理操作轨迹",
+        path: "/admin/audits",
+        icon: History
+      });
+    }
+
+    return items;
   }
 
-  if (hasPlatformAdminRole) {
+  if (canViewSpaceManagement) {
     items.push({
-      key: "themes",
-      label: "主题管理",
-      description: "维护全站主题模板与 CSS 变量",
-      path: "/admin/themes",
-      icon: Palette
-    });
-  }
-
-  if (hasPlatformAdminRole) {
-    items.push({
-      key: "system",
-      label: "系统配置",
-      description: "维护系统级配置参数",
-      path: "/admin/system-configs",
-      icon: Settings2
-    });
-  }
-
-  if (hasPlatformAdminRole) {
-    items.push({
-      key: "office-config",
-      label: "Office配置",
-      description: "维护 ONLYOFFICE 接入与阅读渲染",
-      path: "/admin/office-configs",
-      icon: Table2
-    });
-  }
-
-  if (hasPlatformAdminRole) {
-    items.push({
-      key: "search-analyzers",
-      label: "分词治理",
-      description: "维护全文检索分词器与词典词条",
-      path: "/admin/search-analyzers",
-      icon: Search
-    });
-  }
-
-  if (hasPlatformAdminRole) {
-    items.push({
-      key: "audits",
-      label: "审计日志",
-      description: "检索关键管理操作轨迹",
-      path: "/admin/audits",
-      icon: History
+      key: "spaces",
+      label: "空间管理",
+      description: "查看你参与的空间并打开编辑文档",
+      path: "/admin/spaces",
+      icon: FolderKanban
     });
   }
 
   return items;
+}
+
+// 左下角用户徽章按当前登录用户角色动态展示，避免把不同身份都写死成同一个 Admin。
+function resolveAdminIdentityBadgeLabel(identity: AdminIdentity | null): string {
+  const roles = identity?.roles ?? [];
+  if (roles.includes("platform_admin")) {
+    return "平台管理员";
+  }
+  if (roles.includes("space_admin")) {
+    return "空间管理员";
+  }
+  return "普通用户";
 }
 
 function resolveActiveMenu(menuItems: AdminMenuItem[], pathname: string): AdminMenuItem | null {
@@ -640,8 +667,8 @@ export function AdminApp({
   }, [activeUser, checking, dataGateway]);
 
   const adminMenuItems = useMemo(
-    () => buildAdminMenu(adminIdentity?.roles ?? []),
-    [adminIdentity?.roles]
+    () => buildAdminMenu(adminIdentity),
+    [adminIdentity]
   );
   const activeMenuItem = useMemo(
     () => resolveActiveMenu(adminMenuItems, location.pathname),
@@ -654,7 +681,7 @@ export function AdminApp({
     if (checking || isAdminIdentityLoading) {
       return ADMIN_DEFAULT_PAGE_TITLE;
     }
-    if (adminIdentityError || !adminIdentity || adminMenuItems.length === 0) {
+    if (adminIdentityError || !adminIdentity) {
       return "无管理后台权限";
     }
     const activeMenuKey = activeMenuItem?.key ?? adminMenuItems[0]?.key ?? "dashboard";
@@ -744,7 +771,7 @@ export function AdminApp({
     );
   }
 
-  if (adminIdentityError || !adminIdentity || adminMenuItems.length === 0) {
+  if (adminIdentityError || !adminIdentity) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6" style={{ backgroundColor: ADMIN_PAGE_BACKGROUND }}>
         <Card className="w-full max-w-lg border-rose-200 shadow-sm">
@@ -775,6 +802,8 @@ export function AdminApp({
   const activeContent = renderPlaceholderContent(activeMenuItem?.key ?? adminMenuItems[0].key);
   const currentMenuPath = activeMenuItem?.path ?? adminMenuItems[0].path;
   const groupedMenuItems = buildMenuGroups(adminMenuItems);
+  const hasPrivilegedAdminRole = adminIdentity.roles.includes("platform_admin") || adminIdentity.roles.includes("space_admin");
+  const spaceManagementMode: "admin" | "member" = hasPrivilegedAdminRole ? "admin" : "member";
 
   return (
     <div className="h-dvh overflow-hidden text-slate-900" style={{ backgroundColor: ADMIN_PAGE_BACKGROUND }}>
@@ -837,7 +866,7 @@ export function AdminApp({
                 <p className="truncate text-xs text-slate-500">{adminIdentity.email || activeUser.email}</p>
               </div>
               <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-600">
-                Admin
+                {resolveAdminIdentityBadgeLabel(adminIdentity)}
               </Badge>
             </div>
             <div className="mt-3 flex items-center gap-2">
@@ -909,11 +938,15 @@ export function AdminApp({
               ) : activeMenuItem?.key === "profile" ? (
                 <AdminProfilePage dataGateway={dataGateway} onProfileUpdated={handleProfileUpdated} />
               ) : activeMenuItem?.key === "spaces" ? (
-                <AdminSpacesPage dataGateway={dataGateway} />
+                <AdminSpacesPage dataGateway={dataGateway} mode={spaceManagementMode} />
               ) : activeMenuItem?.key === "documents" ? (
                 <AdminDocumentsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "shares" ? (
-                <AdminDocumentSharesPage dataGateway={dataGateway} currentUserRoles={adminIdentity.roles} />
+                <AdminDocumentSharesPage
+                  dataGateway={dataGateway}
+                  currentUserRoles={adminIdentity.roles}
+                  currentUserID={adminIdentity.userId}
+                />
               ) : activeMenuItem?.key === "attachments" ? (
                 <AdminDocumentAttachmentsPage dataGateway={dataGateway} />
               ) : activeMenuItem?.key === "images" ? (

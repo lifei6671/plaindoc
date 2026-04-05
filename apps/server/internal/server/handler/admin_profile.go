@@ -66,7 +66,7 @@ func NewAdminProfileHandler(
 	}
 }
 
-// GetProfile 返回当前管理员个人信息。
+// GetProfile 返回当前后台用户个人信息。
 func (h *adminProfileHandler) GetProfile(c *gin.Context) {
 	if h == nil || h.adminProfileService == nil {
 		response.InternalError(c)
@@ -88,7 +88,7 @@ func (h *adminProfileHandler) GetProfile(c *gin.Context) {
 	response.JSON(c, http.StatusOK, mapAdminProfileResponse(payload))
 }
 
-// UpdateProfile 更新当前管理员昵称或头像地址。
+// UpdateProfile 更新当前后台用户昵称或头像地址。
 func (h *adminProfileHandler) UpdateProfile(c *gin.Context) {
 	if h == nil || h.adminProfileService == nil {
 		response.InternalError(c)
@@ -126,7 +126,7 @@ func (h *adminProfileHandler) UpdateProfile(c *gin.Context) {
 	response.JSON(c, http.StatusOK, mapAdminProfileResponse(payload))
 }
 
-// UpdatePassword 更新当前管理员密码。
+// UpdatePassword 更新当前后台用户密码。
 func (h *adminProfileHandler) UpdatePassword(c *gin.Context) {
 	if h == nil || h.adminProfileService == nil {
 		response.InternalError(c)
@@ -164,7 +164,7 @@ func (h *adminProfileHandler) UpdatePassword(c *gin.Context) {
 	response.JSON(c, http.StatusOK, struct{}{})
 }
 
-// UploadAvatar 上传头像并更新当前管理员头像地址。
+// UploadAvatar 上传头像并更新当前后台用户头像地址。
 func (h *adminProfileHandler) UploadAvatar(c *gin.Context) {
 	if h == nil || h.adminProfileService == nil {
 		response.InternalError(c)

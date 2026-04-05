@@ -13,7 +13,7 @@ import (
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
-func TestRouter_AdminMeRequiresAdminRole(t *testing.T) {
+func TestRouter_AdminMeReturnsCapabilitiesAndProfileAccess(t *testing.T) {
 	database, serve := setupAuthTestRouter(t)
 	defer func() {
 		_ = database.Close()
@@ -25,12 +25,201 @@ func TestRouter_AdminMeRequiresAdminRole(t *testing.T) {
 		t.Fatalf("expected status 401 without token, got %d body=%s", noTokenRec.Code, noTokenRec.Body.String())
 	}
 
-	_, _, userToken := registerAccessUser(t, serve, "admin-non-role@example.com")
+	normalUserID, _, userToken := registerAccessUser(t, serve, "admin-non-role@example.com")
+
 	userReq := httptest.NewRequest(http.MethodGet, "/api/admin/me", nil)
 	userReq.Header.Set("Authorization", "Bearer "+userToken)
 	userRec := serve(userReq)
-	if userRec.Code != http.StatusForbidden {
-		t.Fatalf("expected status 403 for non-admin, got %d body=%s", userRec.Code, userRec.Body.String())
+	if userRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for logged-in user, got %d body=%s", userRec.Code, userRec.Body.String())
+	}
+
+	userPayload := decodeJSONResultData[struct {
+		UserID       string   `json:"userId"`
+		Email        string   `json:"email"`
+		Name         string   `json:"name"`
+		AvatarURL    string   `json:"avatarUrl"`
+		Roles        []string `json:"roles"`
+		Capabilities struct {
+			CanViewSpaceManagement bool `json:"canViewSpaceManagement"`
+			CanManageSpace         bool `json:"canManageSpace"`
+		} `json:"capabilities"`
+	}](t, userRec.Body.Bytes())
+	if userPayload.UserID != normalUserID {
+		t.Fatalf("expected user id %s, got %s", normalUserID, userPayload.UserID)
+	}
+	if len(userPayload.Roles) != 0 {
+		t.Fatalf("expected no admin roles for normal user, got %+v", userPayload.Roles)
+	}
+	if userPayload.Capabilities.CanViewSpaceManagement || userPayload.Capabilities.CanManageSpace {
+		t.Fatalf("expected profile-only capabilities, got %+v", userPayload.Capabilities)
+	}
+
+	profileReq := httptest.NewRequest(http.MethodGet, "/api/admin/profile", nil)
+	profileReq.Header.Set("Authorization", "Bearer "+userToken)
+	profileRec := serve(profileReq)
+	if profileRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for /api/admin/profile, got %d body=%s", profileRec.Code, profileRec.Body.String())
+	}
+
+	usersReq := httptest.NewRequest(http.MethodGet, "/api/admin/users?page=1&pageSize=20", nil)
+	usersReq.Header.Set("Authorization", "Bearer "+userToken)
+	usersRec := serve(usersReq)
+	if usersRec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403 for non-admin /api/admin/users, got %d body=%s", usersRec.Code, usersRec.Body.String())
+	}
+}
+
+func TestRouter_AdminProfileEditableByLoggedInNormalUser(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	userID, _, userToken := registerAccessUser(t, serve, "admin-profile-normal@example.com")
+
+	// 普通登录用户没有后台管理角色，但个人信息页仍然要允许修改自己的资料。
+	updateProfileReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/profile",
+		bytes.NewReader([]byte(`{"name":"普通用户已更新"}`)),
+	)
+	updateProfileReq.Header.Set("Authorization", "Bearer "+userToken)
+	updateProfileReq.Header.Set("Content-Type", "application/json")
+	updateProfileRec := serve(updateProfileReq)
+	if updateProfileRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200 for normal user updating profile, got %d body=%s",
+			updateProfileRec.Code,
+			updateProfileRec.Body.String(),
+		)
+	}
+
+	updateProfilePayload := decodeJSONResultData[struct {
+		UserID string `json:"userId"`
+		Name   string `json:"name"`
+	}](t, updateProfileRec.Body.Bytes())
+	if updateProfilePayload.UserID != userID {
+		t.Fatalf("expected updated profile user id %s, got %s", userID, updateProfilePayload.UserID)
+	}
+	if updateProfilePayload.Name != "普通用户已更新" {
+		t.Fatalf("expected updated profile name 普通用户已更新, got %s", updateProfilePayload.Name)
+	}
+
+	getProfileReq := httptest.NewRequest(http.MethodGet, "/api/admin/profile", nil)
+	getProfileReq.Header.Set("Authorization", "Bearer "+userToken)
+	getProfileRec := serve(getProfileReq)
+	if getProfileRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for normal user reading profile, got %d body=%s", getProfileRec.Code, getProfileRec.Body.String())
+	}
+
+	getProfilePayload := decodeJSONResultData[struct {
+		Name string `json:"name"`
+	}](t, getProfileRec.Body.Bytes())
+	if getProfilePayload.Name != "普通用户已更新" {
+		t.Fatalf("expected persisted profile name 普通用户已更新, got %s", getProfilePayload.Name)
+	}
+
+	updatePasswordReq := httptest.NewRequest(
+		http.MethodPut,
+		"/api/admin/profile/password",
+		bytes.NewReader([]byte(`{"currentPassword":"123456","newPassword":"newpass123","confirmPassword":"newpass123"}`)),
+	)
+	updatePasswordReq.Header.Set("Authorization", "Bearer "+userToken)
+	updatePasswordReq.Header.Set("Content-Type", "application/json")
+	updatePasswordRec := serve(updatePasswordReq)
+	if updatePasswordRec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200 for normal user updating password, got %d body=%s",
+			updatePasswordRec.Code,
+			updatePasswordRec.Body.String(),
+		)
+	}
+
+	loginReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		bytes.NewReader([]byte(`{"email":"admin-profile-normal@example.com","password":"newpass123"}`)),
+	)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := serve(loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for login with new password, got %d body=%s", loginRec.Code, loginRec.Body.String())
+	}
+}
+
+func TestRouter_AdminMeShowsSpaceManagementForMembers(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ownerUserID, _, _ := registerAccessUser(t, serve, "admin-space-owner@example.com")
+	memberUserID, _, memberToken := registerAccessUser(t, serve, "admin-space-member@example.com")
+
+	spaceID := "01h1adminmemberspace00000001"
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := database.ORM.Table("spaces").Create(map[string]any{
+		"space_id":      spaceID,
+		"name":          "Member Space",
+		"owner_user_id": ownerUserID,
+		"visibility":    "member",
+		"status":        "active",
+		"created_at":    now,
+		"updated_at":    now,
+	}).Error; err != nil {
+		t.Fatalf("insert space failed: %v", err)
+	}
+	if err := database.ORM.Table("space_members").Create(map[string]any{
+		"space_id":   spaceID,
+		"user_id":    memberUserID,
+		"role":       "reader",
+		"created_at": now,
+		"updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("insert space member failed: %v", err)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/admin/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+memberToken)
+	meRec := serve(meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for member /api/admin/me, got %d body=%s", meRec.Code, meRec.Body.String())
+	}
+
+	mePayload := decodeJSONResultData[struct {
+		Capabilities struct {
+			CanViewSpaceManagement bool `json:"canViewSpaceManagement"`
+			CanManageSpace         bool `json:"canManageSpace"`
+		} `json:"capabilities"`
+	}](t, meRec.Body.Bytes())
+	if !mePayload.Capabilities.CanViewSpaceManagement {
+		t.Fatalf("expected member to see space management capability, got %+v", mePayload.Capabilities)
+	}
+	if mePayload.Capabilities.CanManageSpace {
+		t.Fatalf("expected member not to manage spaces, got %+v", mePayload.Capabilities)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/admin/spaces?page=1&pageSize=20", nil)
+	listReq.Header.Set("Authorization", "Bearer "+memberToken)
+	listRec := serve(listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for member /api/admin/spaces, got %d body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	listPayload := decodeJSONResultData[struct {
+		Items []struct {
+			SpaceID string `json:"spaceId"`
+		} `json:"items"`
+		Pagination struct {
+			Total int64 `json:"total"`
+		} `json:"pagination"`
+	}](t, listRec.Body.Bytes())
+	if len(listPayload.Items) != 1 || listPayload.Items[0].SpaceID != spaceID {
+		t.Fatalf("expected only member space in list, got %+v", listPayload.Items)
+	}
+	if listPayload.Pagination.Total != 1 {
+		t.Fatalf("expected total=1, got %d", listPayload.Pagination.Total)
 	}
 }
 

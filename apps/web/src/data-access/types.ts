@@ -426,6 +426,12 @@ export interface AdminIdentity {
   name: string;
   avatarUrl: string;
   roles: AdminRole[];
+  capabilities: AdminAccessCapabilities;
+}
+
+export interface AdminAccessCapabilities {
+  canViewSpaceManagement: boolean;
+  canManageSpace: boolean;
 }
 
 export interface AdminProfile {

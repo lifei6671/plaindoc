@@ -681,13 +681,14 @@ type HomepageVisibleSpaceRecord struct {
 
 // ListAdminSpacesParams 管理后台空间分页查询参数。
 type ListAdminSpacesParams struct {
-	ActorUserID      string
-	RestrictToScopes bool
-	Keyword          string
-	Statuses         []models.EntityStatus
-	Visibilities     []models.Visibility
-	Limit            int
-	Offset           int
+	ActorUserID       string
+	RestrictToScopes  bool
+	RestrictToMembers bool
+	Keyword           string
+	Statuses          []models.EntityStatus
+	Visibilities      []models.Visibility
+	Limit             int
+	Offset            int
 }
 
 // AdminSpaceListRecord 管理后台空间列表项。

@@ -113,3 +113,17 @@ func (s *AdminAccessService) ListAdminRoles(ctx context.Context, userID string) 
 	}
 	return s.adminRoleRepo.ListByUserID(ctx, userID)
 }
+
+// HasSpaceMembership 判断用户是否至少加入了一个空间。
+//
+// 后台普通用户是否能看到“空间管理”入口，不再依赖管理员角色，而是依赖实际成员身份。
+func (s *AdminAccessService) HasSpaceMembership(ctx context.Context, userID string) (bool, error) {
+	if s == nil || s.spaceRepo == nil {
+		return false, errors.New("admin access service dependencies are nil")
+	}
+	spaces, err := s.spaceRepo.ListByUserID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return len(spaces) > 0, nil
+}

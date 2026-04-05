@@ -613,8 +613,8 @@ func newRouter(
 
 		// 后台路由统一挂载在 /api/admin。
 		adminAPI := api.Group("/admin")
-		// 第一层守卫：要求已登录且具备管理员身份（platform_admin 或 space_admin）。
-		adminAPI.Use(middleware.RequireAdmin(authService, adminAccessService))
+		// 第一层守卫：只要求已登录，把后台壳页、个人资料和成员态空间列表暴露给所有登录用户。
+		adminAPI.Use(middleware.RequireAdminSession(authService))
 		// 第二层守卫：向 context 注入审计公共字段（actor_user_id / request_id）。
 		// 后续 service 记录审计时可自动从 context 取值，避免每个 handler 重复传参。
 		adminAPI.Use(middleware.AttachAdminAuditContext())

@@ -122,6 +122,8 @@ PlainDoc 是一个面向中小团队的文档平台：Go 单体后端 + React �
 3. 权限模型：
    - 协作端：`owner > collaborator > reader`
    - 管理端：`platform_admin` 与 `space_admin` 严格隔离
+   - 管理后台壳页：所有已登录用户可进入，`/admin/me` 与 `/admin/profile` 只要求登录态；普通成员若属于某个空间，可看到空间管理但只保留“编辑文档”入口；分享中心对所有登录用户开放，但普通用户只显示“我的分享”，且只能修改/取消自己创建的分享；左下角用户徽章需随当前登录用户角色动态展示。
+   - 个人资料自助更新：普通登录用户可在 `/admin/profile` 修改昵称、头像和密码；后台审计仅对 `profile` / `profile_password` 这类自助场景放行，其他后台审计仍要求管理员身份。
 4. 高风险后台写操作必须走 operation token，并写审计日志。
 
 ---
@@ -137,16 +139,17 @@ PlainDoc 是一个面向中小团队的文档平台：Go 单体后端 + React �
    - Markdown 插件顺序：`rehype-raw -> rehype-sanitize -> rehype-katex`
    - 阅读页 `data-reader-*` hooks 不可随意改
 4. 管理端 `DropdownMenu` 默认 `modal=false`，禁止绕过封装直接引入 Radix 原始包。
-5. 涉及数据库结构改动时，必须同步三套迁移：
+5. 管理后台菜单与右侧操作区必须按“角色 + 能力视图”生成，不能只按 `platform_admin` / `space_admin` 角色硬编码；普通用户进入后台时，至少应能看到个人信息页和分享中心的“我的分享”视图，并且只能对自己创建的分享执行改码、延期、设永久、取消等操作。
+6. 涉及数据库结构改动时，必须同步三套迁移：
    - `apps/server/internal/storage/migrations/sqlite`
    - `apps/server/internal/storage/migrations/mysql`
    - `apps/server/internal/storage/migrations/postgres`
    - PostgreSQL 迁移脚本可以使用 `DO $$...$$` 这类 dollar-quoted block；当前迁移执行器已支持该语法，不要为了拆句器兼容性刻意回避。
-6. 后端分层不能混用：
+7. 后端分层不能混用：
    - `handler` 做参数校验与响应映射
    - `service` 做业务与权限
    - `repository` 做数据访问与事务
-7. 若修改 SSR Worker 相关逻辑，先确认 `apps/web/dist-ssr/worker-entry.js` 存在，避免本地联调误判。
+8. 若修改 SSR Worker 相关逻辑，先确认 `apps/web/dist-ssr/worker-entry.js` 存在，避免本地联调误判。
 
 ---
 

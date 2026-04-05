@@ -277,7 +277,10 @@ func (h *adminSpaceHandler) CreateCoverAsset(c *gin.Context) {
 	response.JSON(c, http.StatusOK, mapAdminSpaceCoverDTO(payload))
 }
 
-// ListSpaces 返回后台空间列表，支持关键词、状态、可见性与分页筛选。
+// ListSpaces 返回后台空间列表。
+//
+// 已登录普通用户会看到自己参与的空间；管理员仍然走原有治理视图，
+// 因此这个接口同时承担“成员态浏览”和“后台治理”两种展示。
 func (h *adminSpaceHandler) ListSpaces(c *gin.Context) {
 	if h == nil || h.adminSpaceService == nil {
 		response.InternalError(c)

@@ -165,8 +165,15 @@
 
 1. 基础实体：`User`、`Space`、`TreeNode`、`Document`、`DocumentRevision`。
 2. 认证协议：`AuthLoginInput`、`AuthSession`、`AuthLoginOptions`。
-3. 后台协议：`AdminUser`、`AdminSpace`、`AdminDocument`、`AdminTheme`、`AdminSystemConfig`、`AdminAudit*`。
+3. 后台协议：`AdminIdentity`、`AdminUser`、`AdminSpace`、`AdminDocument`、`AdminTheme`、`AdminSystemConfig`、`AdminAudit*`。
 4. 错误模型：`ConflictError`（文档/配置版本冲突）。
+
+后台壳页能力模型约定：
+
+1. `AdminIdentity.capabilities.canViewSpaceManagement` 决定普通登录用户是否展示“空间管理”入口。
+2. `AdminIdentity.capabilities.canManageSpace` 决定是否展示完整空间治理按钮组。
+3. 分享中心对所有已登录用户开放，但普通登录用户只显示“我的分享”，且仅在自己创建的分享行显示改码、延期、设永久、取消等操作；管理员再额外展示“分享管理”与行内治理动作。
+4. 前端菜单与右侧操作区必须同时消费这组能力，不允许只靠角色名做判断。
 
 ONLYOFFICE 相关字段约束：
 
@@ -400,11 +407,13 @@ ONLYOFFICE 相关字段约束：
 
 规则：
 
-1. 菜单由管理员角色动态生成：`platform_admin` 与 `space_admin` 权限不同。
+1. 菜单由“角色 + 能力视图”动态生成：`platform_admin` 与 `space_admin` 保持完整后台，普通登录用户至少能看到个人信息和分享中心的“我的分享”，空间成员再额外看到空间管理。
 2. `DropdownMenu` 默认 `modal=false`，禁止写 `modal=true`。
 3. 门禁脚本会扫描源码：
    - 阻止绕过封装直接 `import @radix-ui/react-dropdown-menu`
    - 阻止 `<DropdownMenu modal={true}>` 与等价写法
+4. 左下角用户徽章也必须跟随 `roles` 动态展示：`platform_admin` 显示平台管理员，`space_admin` 显示空间管理员，普通登录用户显示普通用户。
+5. `AdminProfilePage` 对所有已登录用户可编辑，保存昵称、头像、密码都必须走 `dataGateway.admin`；不要再按管理员角色禁用表单按钮，角色只影响左侧菜单、空间管理页和分享中心行内动作能力。
 
 ---
 

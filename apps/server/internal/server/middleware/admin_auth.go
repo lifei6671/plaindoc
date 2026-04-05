@@ -13,6 +13,27 @@ const (
 	adminActorUserIDContextKey = "admin_actor_user_id"
 )
 
+// RequireAdminSession 仅确保请求方已登录，并把当前用户写入后台 actor 上下文。
+//
+// 这个中间件用于后台壳页、个人信息页和成员态空间列表：
+// 只要用户已登录，就允许进入后台，但后续业务层仍会按角色/能力继续收口。
+func RequireAdminSession(authService *service.AuthService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if authService == nil {
+			response.InternalError(c)
+			return
+		}
+
+		actorUserID, ok := resolveAdminActorUserIDFromRequest(c, authService)
+		if !ok {
+			return
+		}
+
+		c.Set(adminActorUserIDContextKey, actorUserID)
+		c.Next()
+	}
+}
+
 // RequireAdmin 确保请求方为已登录管理员。
 func RequireAdmin(
 	authService *service.AuthService,
@@ -24,19 +45,12 @@ func RequireAdmin(
 			return
 		}
 
-		rawToken, ok := bearerTokenFromRequest(c)
+		actorUserID, ok := resolveAdminActorUserIDFromRequest(c, authService)
 		if !ok {
-			response.MiddlewareAdminAuthErrAuthorizationTokenRequired.Write(c)
 			return
 		}
 
-		session, err := authService.Me(c.Request.Context(), rawToken)
-		if err != nil {
-			response.MiddlewareAdminAuthErrInvalidAccessToken.Write(c)
-			return
-		}
-
-		isAdmin, err := adminAccessService.IsAdmin(c.Request.Context(), session.User.ID)
+		isAdmin, err := adminAccessService.IsAdmin(c.Request.Context(), actorUserID)
 		if err != nil {
 			response.InternalError(c)
 			return
@@ -46,9 +60,25 @@ func RequireAdmin(
 			return
 		}
 
-		c.Set(adminActorUserIDContextKey, session.User.ID)
+		c.Set(adminActorUserIDContextKey, actorUserID)
 		c.Next()
 	}
+}
+
+func resolveAdminActorUserIDFromRequest(c *gin.Context, authService *service.AuthService) (string, bool) {
+	rawToken, ok := bearerTokenFromRequest(c)
+	if !ok {
+		response.MiddlewareAdminAuthErrAuthorizationTokenRequired.Write(c)
+		return "", false
+	}
+
+	session, err := authService.Me(c.Request.Context(), rawToken)
+	if err != nil {
+		response.MiddlewareAdminAuthErrInvalidAccessToken.Write(c)
+		return "", false
+	}
+
+	return session.User.ID, true
 }
 
 // RequireSpaceManagement 确保管理员对指定空间具备管理权限。

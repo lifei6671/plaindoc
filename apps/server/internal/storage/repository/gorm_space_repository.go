@@ -539,7 +539,12 @@ func (r *gormSpaceRepository) ListForAdmin(
 		Joins("JOIN users AS u ON u.user_id = s.owner_user_id").
 		Joins("LEFT JOIN space_categories AS sc ON sc.category_id = s.category_id")
 
-	if params.RestrictToScopes {
+	switch {
+	case params.RestrictToMembers:
+		actorUserID := strings.TrimSpace(params.ActorUserID)
+		baseQuery = baseQuery.Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", actorUserID)
+		baseQuery = baseQuery.Where("(s.owner_user_id = ? OR sm.id IS NOT NULL)", actorUserID)
+	case params.RestrictToScopes:
 		actorUserID := strings.TrimSpace(params.ActorUserID)
 		baseQuery = baseQuery.Where(
 			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",

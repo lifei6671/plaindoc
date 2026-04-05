@@ -148,7 +148,7 @@ func (s *AdminAuditService) Record(
 	if err != nil {
 		return err
 	}
-	if !isAdmin {
+	if !isAdmin && !isSelfServiceProfileAudit(actorUserID, input) {
 		return errcode.ErrAdminForbidden
 	}
 
@@ -200,6 +200,26 @@ func (s *AdminAuditService) Record(
 		CreatedAt:   time.Now().UTC(),
 	}
 	return s.auditLogRepo.Create(ctx, auditLog)
+}
+
+// 自助个人资料更新属于后台登录用户的自我服务场景，允许非管理员落审计。
+func isSelfServiceProfileAudit(actorUserID string, input RecordAdminAuditInput) bool {
+	normalizedActorUserID := strings.TrimSpace(actorUserID)
+	if normalizedActorUserID == "" {
+		return false
+	}
+	if strings.TrimSpace(input.TargetID) != normalizedActorUserID {
+		return false
+	}
+	if input.Module != AdminAuditModuleUser {
+		return false
+	}
+	switch strings.TrimSpace(input.TargetType) {
+	case "profile", "profile_password":
+		return true
+	default:
+		return false
+	}
 }
 
 // ListAudits 查询后台审计日志。

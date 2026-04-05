@@ -1,4 +1,4 @@
-import { ArrowLeftRight, ChevronDown, Copy, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Copy, FileText, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -33,6 +33,7 @@ const DEFAULT_PAGE_SIZE = 20;
 
 interface AdminSpacesPageProps {
   dataGateway: DataGateway;
+  mode: "admin" | "member";
 }
 
 interface AdminSpacesState {
@@ -145,8 +146,10 @@ function openPathInNewTab(path: string): void {
 }
 
 // 空间管理页面：承载列表筛选、批量操作与空间设置入口。
-export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
+export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
   const { confirm, prompt, dialogs } = useAdminDialogs();
+  // 成员态只保留编辑文档，管理员态才开放完整治理动作。
+  const isAdminMode = mode === "admin";
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [categoriesDialogOpen, setCategoriesDialogOpen] = useState(false);
@@ -243,12 +246,20 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   }, [loadSpaces]);
 
   useEffect(() => {
+    if (!isAdminMode) {
+      setSpaceCategories([]);
+      return;
+    }
     void loadSpaceCategories();
-  }, [loadSpaceCategories]);
+  }, [isAdminMode, loadSpaceCategories]);
 
   useEffect(() => {
+    if (!isAdminMode) {
+      setCreateDefaultVisibility("member");
+      return;
+    }
     void loadCreateDefaultVisibility();
-  }, [loadCreateDefaultVisibility]);
+  }, [isAdminMode, loadCreateDefaultVisibility]);
 
   useEffect(() => {
     setSelectedSpaceIDs((previous) =>
@@ -713,37 +724,41 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
   return (
     <section aria-label="空间管理">
       {dialogs}
-      <AdminSpaceCategoriesDialog
-        open={categoriesDialogOpen}
-        loading={updatingCategories}
-        categories={spaceCategories}
-        onOpenChange={setCategoriesDialogOpen}
-        onCreate={handleCreateCategory}
-        onRename={handleRenameCategory}
-        onDelete={handleDeleteCategory}
-      />
-      <AdminCreateSpaceDialog
-        open={createDialogOpen}
-        dataGateway={dataGateway}
-        categoryOptions={spaceCategories}
-        defaultVisibility={createDefaultVisibility}
-        onOpenChange={setCreateDialogOpen}
-        onCreated={handleSpaceCreated}
-      />
-      <AdminSpaceSettingsDialog
-        open={settingsDialogOpen}
-        space={editingSpace}
-        dataGateway={dataGateway}
-        categoryOptions={spaceCategories}
-        onOpenChange={handleSettingsOpenChange}
-        onUpdated={handleSpaceCreated}
-      />
-      <AdminSpaceMembersDialog
-        open={membersDialogOpen}
-        space={managingMembersSpace}
-        dataGateway={dataGateway}
-        onOpenChange={handleMembersOpenChange}
-      />
+      {isAdminMode ? (
+        <>
+          <AdminSpaceCategoriesDialog
+            open={categoriesDialogOpen}
+            loading={updatingCategories}
+            categories={spaceCategories}
+            onOpenChange={setCategoriesDialogOpen}
+            onCreate={handleCreateCategory}
+            onRename={handleRenameCategory}
+            onDelete={handleDeleteCategory}
+          />
+          <AdminCreateSpaceDialog
+            open={createDialogOpen}
+            dataGateway={dataGateway}
+            categoryOptions={spaceCategories}
+            defaultVisibility={createDefaultVisibility}
+            onOpenChange={setCreateDialogOpen}
+            onCreated={handleSpaceCreated}
+          />
+          <AdminSpaceSettingsDialog
+            open={settingsDialogOpen}
+            space={editingSpace}
+            dataGateway={dataGateway}
+            categoryOptions={spaceCategories}
+            onOpenChange={handleSettingsOpenChange}
+            onUpdated={handleSpaceCreated}
+          />
+          <AdminSpaceMembersDialog
+            open={membersDialogOpen}
+            space={managingMembersSpace}
+            dataGateway={dataGateway}
+            onOpenChange={handleMembersOpenChange}
+          />
+        </>
+      ) : null}
 
       <AdminPageCard>
         <form className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_190px_auto]" onSubmit={handleSearchSubmit}>
@@ -810,70 +825,83 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
               <RefreshCw size={14} />
               <span>刷新</span>
             </Button>
-            <Button type="button" variant="outline" disabled={loading || batchActioning || updatingCategories} onClick={() => setCategoriesDialogOpen(true)}>
-              <Tags size={14} />
-              <span>分类管理</span>
-            </Button>
-            <Button type="button" disabled={loading || batchActioning} onClick={() => setCreateDialogOpen(true)}>
-              <Plus size={14} />
-              <span>新建空间</span>
-            </Button>
+            {isAdminMode ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading || batchActioning || updatingCategories}
+                  onClick={() => setCategoriesDialogOpen(true)}
+                >
+                  <Tags size={14} />
+                  <span>分类管理</span>
+                </Button>
+                <Button type="button" disabled={loading || batchActioning} onClick={() => setCreateDialogOpen(true)}>
+                  <Plus size={14} />
+                  <span>新建空间</span>
+                </Button>
+              </>
+            ) : null}
           </AdminToolbarActions>
         </form>
 
-        <AdminBulkActionBar selectedCount={selectedSpaceIDs.length}>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-            onClick={() => void handleBatchBan()}
-          >
-            批量封禁
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-            onClick={() => void handleBatchUnban()}
-          >
-            批量解封
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="destructive"
-            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-            onClick={() => void handleBatchDelete()}
-          >
-            批量删除
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={selectionDisabled || selectedSpaceIDs.length === 0}
-            onClick={() => setSelectedSpaceIDs([])}
-          >
-            清空选择
-          </Button>
-        </AdminBulkActionBar>
+        {isAdminMode ? (
+          <AdminBulkActionBar selectedCount={selectedSpaceIDs.length}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+              disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+              onClick={() => void handleBatchBan()}
+            >
+              批量封禁
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+              onClick={() => void handleBatchUnban()}
+            >
+              批量解封
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+              onClick={() => void handleBatchDelete()}
+            >
+              批量删除
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={selectionDisabled || selectedSpaceIDs.length === 0}
+              onClick={() => setSelectedSpaceIDs([])}
+            >
+              清空选择
+            </Button>
+          </AdminBulkActionBar>
+        ) : null}
 
         <TooltipProvider delayDuration={200}>
           <AdminTableContainer>
             <table className="w-full min-w-[1180px] table-fixed border-collapse text-left text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
                 <tr className="text-xs uppercase tracking-wide text-slate-600">
-                  <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
-                    <Checkbox
-                      checked={allSelectableChecked}
-                      disabled={selectionDisabled || selectableSpaceIDs.length === 0}
-                      onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
-                      aria-label="全选空间"
-                    />
-                  </th>
+                  {isAdminMode ? (
+                    <th className="w-10 border-b border-slate-200 px-3 py-2 font-semibold">
+                      <Checkbox
+                        checked={allSelectableChecked}
+                        disabled={selectionDisabled || selectableSpaceIDs.length === 0}
+                        onCheckedChange={(checked) => handleToggleSelectAll(checked === true)}
+                        aria-label="全选空间"
+                      />
+                    </th>
+                  ) : null}
                   <th className="min-w-[360px] border-b border-slate-200 px-3 py-2 font-semibold">空间信息</th>
                   <th className="w-[160px] border-b border-slate-200 px-3 py-2 font-semibold">创建者</th>
                   <th className="w-[110px] border-b border-slate-200 px-3 py-2 font-semibold">可见性</th>
@@ -886,7 +914,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
               <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-12">
+                  <td colSpan={isAdminMode ? 8 : 7} className="px-3 py-12">
                     <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
                       <LoaderCircle size={15} className="animate-spin" />
                       <span>正在加载空间列表...</span>
@@ -895,7 +923,7 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                 </tr>
               ) : spacesState.items.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isAdminMode ? 8 : 7} className="px-3 py-12 text-center text-sm text-slate-500">
                     暂无符合条件的数据
                   </td>
                 </tr>
@@ -905,14 +933,16 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                   const isDeleted = space.status === "deleted";
                   return (
                     <tr key={space.spaceId} className="border-b border-slate-100 align-top text-slate-700">
-                      <td className="px-3 py-3">
-                        <Checkbox
-                          checked={selectedSpaceSet.has(space.spaceId)}
-                          disabled={selectionDisabled || isDeleted}
-                          onCheckedChange={(checked) => handleToggleSelectOne(space.spaceId, checked === true)}
-                          aria-label={`选择空间 ${space.name || space.spaceId}`}
-                        />
-                      </td>
+                      {isAdminMode ? (
+                        <td className="px-3 py-3">
+                          <Checkbox
+                            checked={selectedSpaceSet.has(space.spaceId)}
+                            disabled={selectionDisabled || isDeleted}
+                            onCheckedChange={(checked) => handleToggleSelectOne(space.spaceId, checked === true)}
+                            aria-label={`选择空间 ${space.name || space.spaceId}`}
+                          />
+                        </td>
+                      ) : null}
                       <td className="min-w-0 px-3 py-3">
                         <div className="flex items-start gap-3">
                           <button
@@ -1016,32 +1046,37 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                       <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.createdAt)}</td>
                       <td className="px-3 py-3 text-xs text-slate-600">{formatDateTime(space.updatedAt)}</td>
                       <td className="px-3 py-3">
-                        <div className="inline-flex rounded-md">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="rounded-r-none border-r-0"
-                            disabled={isActioning || isDeleted}
-                            onClick={() => handleOpenSettings(space)}
-                          >
-                            <Settings size={14} />
-                            <span>设置</span>
-                          </Button>
+                        {isAdminMode ? (
                           <DropdownMenu modal={false}>
                             <DropdownMenuTrigger asChild>
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="w-8 rounded-l-none px-0"
                                 disabled={isActioning || isDeleted}
                                 aria-label="展开更多操作"
                               >
+                                <Settings size={14} />
+                                <span>设置</span>
                                 <ChevronDown size={14} />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem
+                                disabled={isActioning || isDeleted}
+                                onSelect={() => handleOpenSpaceEditor(space)}
+                              >
+                                <FileText size={14} className="mr-2" />
+                                <span>编辑文档</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={isActioning || isDeleted}
+                                onSelect={() => handleOpenSettings(space)}
+                              >
+                                <Settings size={14} className="mr-2" />
+                                <span>空间设置</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               {space.status === "banned" ? (
                                 <DropdownMenuItem
                                   disabled={isActioning || isDeleted}
@@ -1087,7 +1122,18 @@ export function AdminSpacesPage({ dataGateway }: AdminSpacesPageProps) {
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
-                        </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={isActioning || isDeleted}
+                            onClick={() => handleOpenSpaceEditor(space)}
+                          >
+                            <FileText size={14} />
+                            <span>编辑文档</span>
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );

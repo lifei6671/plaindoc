@@ -68,7 +68,7 @@ func NewAdminProfileService(
 	}
 }
 
-// GetProfile 返回当前管理员个人资料。
+// GetProfile 返回当前后台用户个人资料。
 func (s *AdminProfileService) GetProfile(
 	ctx context.Context,
 	actorUserID string,
@@ -85,7 +85,7 @@ func (s *AdminProfileService) GetProfile(
 	return mapAdminProfileRecord(user, roles), nil
 }
 
-// UpdateProfile 更新当前管理员昵称和头像地址。
+// UpdateProfile 更新当前后台用户昵称和头像地址。
 func (s *AdminProfileService) UpdateProfile(
 	ctx context.Context,
 	input UpdateAdminProfileInput,
@@ -168,7 +168,7 @@ func (s *AdminProfileService) UpdateProfile(
 	return mapAdminProfileRecord(latestUser, roles), nil
 }
 
-// UpdatePassword 更新当前管理员密码。
+// UpdatePassword 更新当前后台用户密码。
 func (s *AdminProfileService) UpdatePassword(
 	ctx context.Context,
 	input UpdateAdminPasswordInput,
@@ -232,14 +232,6 @@ func (s *AdminProfileService) loadActorUser(
 		return nil, nil, errors.New("admin profile service dependencies are nil")
 	}
 	if actorUserID == "" {
-		return nil, nil, errcode.ErrAdminForbidden
-	}
-
-	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !isAdmin {
 		return nil, nil, errcode.ErrAdminForbidden
 	}
 

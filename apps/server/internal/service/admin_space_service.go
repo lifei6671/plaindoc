@@ -304,7 +304,7 @@ func (s *AdminSpaceService) ListSpaces(
 		return ListAdminSpacesResult{}, errcode.ErrAdminForbidden
 	}
 
-	restrictToScopes, err := s.resolveScopeRestriction(ctx, actorUserID)
+	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
 	if err != nil {
 		return ListAdminSpacesResult{}, err
 	}
@@ -319,15 +319,21 @@ func (s *AdminSpaceService) ListSpaces(
 	}
 
 	page, pageSize := normalizeAdminSpacePagination(input.Page, input.PageSize)
-	records, total, err := s.spaceRepo.ListForAdmin(ctx, repository.ListAdminSpacesParams{
-		ActorUserID:      actorUserID,
-		RestrictToScopes: restrictToScopes,
-		Keyword:          strings.TrimSpace(input.Keyword),
-		Statuses:         statuses,
-		Visibilities:     visibilities,
-		Limit:            pageSize,
-		Offset:           (page - 1) * pageSize,
-	})
+	// 管理员继续走原有空间治理视图，普通登录用户则切换到“我参与的空间”视图。
+	params := repository.ListAdminSpacesParams{
+		ActorUserID:       actorUserID,
+		Keyword:           strings.TrimSpace(input.Keyword),
+		Statuses:          statuses,
+		Visibilities:      visibilities,
+		Limit:             pageSize,
+		Offset:            (page - 1) * pageSize,
+		RestrictToMembers: !isAdmin,
+	}
+	if isAdmin {
+		params.RestrictToScopes = true
+	}
+
+	records, total, err := s.spaceRepo.ListForAdmin(ctx, params)
 	if err != nil {
 		return ListAdminSpacesResult{}, err
 	}

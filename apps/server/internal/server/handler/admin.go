@@ -19,11 +19,17 @@ type adminHandler struct {
 }
 
 type adminMeResponse struct {
-	UserID    string   `json:"userId"`
-	Email     string   `json:"email"`
-	Name      string   `json:"name"`
-	AvatarURL string   `json:"avatarUrl"`
-	Roles     []string `json:"roles"`
+	UserID       string                `json:"userId"`
+	Email        string                `json:"email"`
+	Name         string                `json:"name"`
+	AvatarURL    string                `json:"avatarUrl"`
+	Roles        []string              `json:"roles"`
+	Capabilities adminCapabilitiesMeta `json:"capabilities"`
+}
+
+type adminCapabilitiesMeta struct {
+	CanViewSpaceManagement bool `json:"canViewSpaceManagement"`
+	CanManageSpace         bool `json:"canManageSpace"`
 }
 
 type adminSpaceCheckResponse struct {
@@ -42,7 +48,9 @@ func NewAdminHandler(
 	}
 }
 
-// Me 返回当前管理员身份信息。
+// Me 返回当前后台访问身份信息。
+//
+// 对于普通登录用户，这里只负责告诉前端“能看到什么能力视图”，而不是把所有人都当成管理员。
 func (h *adminHandler) Me(c *gin.Context) {
 	if h == nil || h.adminAccessService == nil || h.userRepo == nil {
 		response.InternalError(c)
@@ -62,6 +70,25 @@ func (h *adminHandler) Me(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
+
+	isAdmin, err := h.adminAccessService.IsAdmin(c.Request.Context(), actorUserID)
+	if err != nil {
+		setRequestErrmsg(c, err, "判断管理员身份失败")
+		response.InternalError(c)
+		return
+	}
+
+	canViewSpaceManagement := isAdmin
+	if !canViewSpaceManagement {
+		hasSpaceMembership, err := h.adminAccessService.HasSpaceMembership(c.Request.Context(), actorUserID)
+		if err != nil {
+			setRequestErrmsg(c, err, "判断空间成员身份失败")
+			response.InternalError(c)
+			return
+		}
+		canViewSpaceManagement = hasSpaceMembership
+	}
+
 	user, err := h.userRepo.GetByUserID(c.Request.Context(), actorUserID)
 	if err != nil {
 		setRequestErrmsg(c, err, "获取管理员用户信息失败")
@@ -84,6 +111,10 @@ func (h *adminHandler) Me(c *gin.Context) {
 		Name:      strings.TrimSpace(user.Name),
 		AvatarURL: strings.TrimSpace(user.AvatarURL),
 		Roles:     payloadRoles,
+		Capabilities: adminCapabilitiesMeta{
+			CanViewSpaceManagement: canViewSpaceManagement,
+			CanManageSpace:         isAdmin,
+		},
 	})
 }
 
