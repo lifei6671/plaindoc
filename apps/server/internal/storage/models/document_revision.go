@@ -18,3 +18,25 @@ type DocumentRevision struct {
 func (DocumentRevision) TableName() string {
 	return "document_revisions"
 }
+
+var DocumentRevisionColumns = struct {
+	ID                 string
+	DocumentRevisionID string
+	DocumentID         string
+	Version            string
+	ContentMD          string
+	BaseVersion        string
+	EditorUserID       string
+	Source             string
+	CreatedAt          string
+}{
+	ID:                 "id",
+	DocumentRevisionID: "document_revision_id",
+	DocumentID:         "document_id",
+	Version:            "version",
+	ContentMD:          "content_md",
+	BaseVersion:        "base_version",
+	EditorUserID:       "editor_user_id",
+	Source:             "source",
+	CreatedAt:          "created_at",
+}

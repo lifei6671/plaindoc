@@ -8,6 +8,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -19,27 +20,9 @@ type gormDocumentTemplateSceneRepository struct {
 	db *gorm.DB
 }
 
-type documentTemplateSceneListRow struct {
-	SceneKey      string `gorm:"column:scene_key"`
-	SceneName     string `gorm:"column:scene_name"`
-	Description   string `gorm:"column:description"`
-	Sort          int    `gorm:"column:sort"`
-	IsBuiltin     bool   `gorm:"column:is_builtin"`
-	TemplateCount int64  `gorm:"column:template_count"`
-	UpdatedAtRaw  string `gorm:"column:updated_at"`
-}
+type documentTemplateSceneListRow = documentTemplateSceneListRowDB
 
-type documentTemplateSceneDetailRow struct {
-	SceneKey        string  `gorm:"column:scene_key"`
-	SceneName       string  `gorm:"column:scene_name"`
-	Description     string  `gorm:"column:description"`
-	Sort            int     `gorm:"column:sort"`
-	IsBuiltin       bool    `gorm:"column:is_builtin"`
-	CreatedByUserID *string `gorm:"column:created_by_user_id"`
-	UpdatedByUserID *string `gorm:"column:updated_by_user_id"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-}
+type documentTemplateSceneDetailRow = documentTemplateSceneDetailRowDB
 
 // NewGormDocumentTemplateSceneRepository 创建文档模板场景仓储。
 func NewGormDocumentTemplateSceneRepository(db *gorm.DB) DocumentTemplateSceneRepository {
@@ -67,11 +50,16 @@ func (r *gormDocumentTemplateSceneRepository) List(
 		offset = 0
 	}
 
-	query := r.db.WithContext(ctx).Table("document_template_scenes AS s")
+	sceneTableName := (models.DocumentTemplateScene{}).TableName()
+	templateTableName := (models.DocumentTemplate{}).TableName()
+	sceneAlias := "s"
+	templateAlias := "t"
+
+	query := r.db.WithContext(ctx).Table(sceneTableName + " AS " + sceneAlias)
 	if keyword != "" {
 		searchKeyword := "%" + keyword + "%"
 		query = query.Where(
-			"(LOWER(s.scene_key) LIKE ? OR LOWER(s.scene_name) LIKE ? OR LOWER(s.description) LIKE ?)",
+			"(LOWER("+qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneKey)+") LIKE ? OR LOWER("+qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneName)+") LIKE ? OR LOWER("+qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Description)+") LIKE ?)",
 			searchKeyword,
 			searchKeyword,
 			searchKeyword,
@@ -86,18 +74,33 @@ func (r *gormDocumentTemplateSceneRepository) List(
 	rows := make([]documentTemplateSceneListRow, 0, limit)
 	if err := query.
 		Select(
-			"s.scene_key",
-			"s.scene_name",
-			"s.description",
-			"s.sort",
-			"s.is_builtin",
-			"s.updated_at",
-			"COUNT(t.template_id) AS template_count",
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneKey),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneName),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Description),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Sort),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.IsBuiltin),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.UpdatedAt)+" AS updated_at_raw",
+			"COUNT("+qualifiedColumn(templateAlias, models.DocumentTemplateColumns.TemplateID)+") AS template_count",
 		).
-		Joins("LEFT JOIN document_templates AS t ON t.scene_key = s.scene_key").
-		Group("s.scene_key, s.scene_name, s.description, s.sort, s.is_builtin, s.updated_at").
-		Order("s.sort ASC").
-		Order("s.scene_key ASC").
+		Joins(
+			"LEFT JOIN " + templateTableName + " AS " + templateAlias +
+				" ON " + qualifiedColumn(templateAlias, models.DocumentTemplateColumns.SceneKey) +
+				" = " + qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneKey),
+		).
+		Group(
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneKey) + ", " +
+				qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneName) + ", " +
+				qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Description) + ", " +
+				qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Sort) + ", " +
+				qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.IsBuiltin) + ", " +
+				qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.UpdatedAt),
+		).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Table: sceneAlias, Name: models.DocumentTemplateSceneColumns.Sort},
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Table: sceneAlias, Name: models.DocumentTemplateSceneColumns.SceneKey},
+		}).
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -133,21 +136,24 @@ func (r *gormDocumentTemplateSceneRepository) GetBySceneKey(
 		return nil, gorm.ErrRecordNotFound
 	}
 
+	sceneTableName := (models.DocumentTemplateScene{}).TableName()
+	sceneAlias := "s"
+
 	var row documentTemplateSceneDetailRow
 	if err := r.db.WithContext(ctx).
-		Table("document_template_scenes AS s").
+		Table(sceneTableName+" AS "+sceneAlias).
 		Select(
-			"s.scene_key",
-			"s.scene_name",
-			"s.description",
-			"s.sort",
-			"s.is_builtin",
-			"s.created_by_user_id",
-			"s.updated_by_user_id",
-			"s.created_at",
-			"s.updated_at",
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneKey),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneName),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Description),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.Sort),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.IsBuiltin),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.CreatedByUserID),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.UpdatedByUserID),
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.CreatedAt)+" AS created_at_raw",
+			qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.UpdatedAt)+" AS updated_at_raw",
 		).
-		Where("s.scene_key = ?", normalizedSceneKey).
+		Where(qualifiedColumn(sceneAlias, models.DocumentTemplateSceneColumns.SceneKey)+" = ?", normalizedSceneKey).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -190,20 +196,20 @@ func (r *gormDocumentTemplateSceneRepository) UpdateBySceneKey(
 
 	updateValues := map[string]any{}
 	if params.SceneName != nil {
-		updateValues["scene_name"] = strings.TrimSpace(*params.SceneName)
+		updateValues[models.DocumentTemplateSceneColumns.SceneName] = strings.TrimSpace(*params.SceneName)
 	}
 	if params.Description != nil {
-		updateValues["description"] = strings.TrimSpace(*params.Description)
+		updateValues[models.DocumentTemplateSceneColumns.Description] = strings.TrimSpace(*params.Description)
 	}
 	if params.Sort != nil {
-		updateValues["sort"] = *params.Sort
+		updateValues[models.DocumentTemplateSceneColumns.Sort] = *params.Sort
 	}
 	if params.UpdatedByUserID != nil {
 		normalizedActorUserID := strings.TrimSpace(*params.UpdatedByUserID)
 		if normalizedActorUserID == "" {
-			updateValues["updated_by_user_id"] = nil
+			updateValues[models.DocumentTemplateSceneColumns.UpdatedByUserID] = nil
 		} else {
-			updateValues["updated_by_user_id"] = normalizedActorUserID
+			updateValues[models.DocumentTemplateSceneColumns.UpdatedByUserID] = normalizedActorUserID
 		}
 	}
 
@@ -211,7 +217,7 @@ func (r *gormDocumentTemplateSceneRepository) UpdateBySceneKey(
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	updateValues["updated_at"] = updatedAt
+	updateValues[models.DocumentTemplateSceneColumns.UpdatedAt] = updatedAt
 
 	if len(updateValues) == 0 {
 		return false, nil
@@ -219,7 +225,7 @@ func (r *gormDocumentTemplateSceneRepository) UpdateBySceneKey(
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.DocumentTemplateScene{}).
-		Where("scene_key = ?", normalizedSceneKey).
+		Where(models.DocumentTemplateSceneColumns.SceneKey+" = ?", normalizedSceneKey).
 		Updates(updateValues)
 	if tx.Error != nil {
 		return false, tx.Error
@@ -241,7 +247,8 @@ func (r *gormDocumentTemplateSceneRepository) DeleteBySceneKey(
 	}
 
 	tx := r.db.WithContext(ctx).
-		Where("scene_key = ?", normalizedSceneKey).
+		Model(&models.DocumentTemplateScene{}).
+		Where(models.DocumentTemplateSceneColumns.SceneKey+" = ?", normalizedSceneKey).
 		Delete(&models.DocumentTemplateScene{})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -262,10 +269,13 @@ func (r *gormDocumentTemplateSceneRepository) CountTemplatesBySceneKey(
 		return 0, nil
 	}
 
+	templateTableName := (models.DocumentTemplate{}).TableName()
+	templateAlias := "t"
+
 	var total int64
 	if err := r.db.WithContext(ctx).
-		Table("document_templates AS t").
-		Where("t.scene_key = ?", normalizedSceneKey).
+		Table(templateTableName+" AS "+templateAlias).
+		Where(qualifiedColumn(templateAlias, models.DocumentTemplateColumns.SceneKey)+" = ?", normalizedSceneKey).
 		Count(&total).Error; err != nil {
 		return 0, err
 	}

@@ -26,3 +26,27 @@ type SearchAnalyzerDictEntry struct {
 func (SearchAnalyzerDictEntry) TableName() string {
 	return "search_analyzer_dict_entries"
 }
+
+var SearchAnalyzerDictEntryColumns = struct {
+	ID              string
+	Analyzer        string
+	Term            string
+	Weight          string
+	Tag             string
+	Status          string
+	CreatedByUserID string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	Analyzer:        "analyzer",
+	Term:            "term",
+	Weight:          "weight",
+	Tag:             "tag",
+	Status:          "status",
+	CreatedByUserID: "created_by_user_id",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

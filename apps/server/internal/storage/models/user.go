@@ -21,3 +21,31 @@ type User struct {
 func (User) TableName() string {
 	return "users"
 }
+
+var UserColumns = struct {
+	ID           string
+	UserID       string
+	Email        string
+	PasswordHash string
+	Name         string
+	AvatarURL    string
+	Status       string
+	BannedReason string
+	BannedAt     string
+	DeletedAt    string
+	CreatedAt    string
+	UpdatedAt    string
+}{
+	ID:           "id",
+	UserID:       "user_id",
+	Email:        "email",
+	PasswordHash: "password_hash",
+	Name:         "name",
+	AvatarURL:    "avatar_url",
+	Status:       "status",
+	BannedReason: "banned_reason",
+	BannedAt:     "banned_at",
+	DeletedAt:    "deleted_at",
+	CreatedAt:    "created_at",
+	UpdatedAt:    "updated_at",
+}

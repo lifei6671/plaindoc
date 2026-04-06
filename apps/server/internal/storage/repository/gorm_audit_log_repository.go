@@ -6,28 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormAuditLogRepository struct {
 	db *gorm.DB
 }
 
-type auditLogListRow struct {
-	ID          int64   `gorm:"column:id"`
-	ActorUserID *string `gorm:"column:actor_user_id"`
-	Module      string  `gorm:"column:module"`
-	Action      string  `gorm:"column:action"`
-	TargetType  string  `gorm:"column:target_type"`
-	TargetID    string  `gorm:"column:target_id"`
-	Summary     string  `gorm:"column:summary"`
-	DetailJSON  string  `gorm:"column:detail_json"`
-	RequestID   string  `gorm:"column:request_id"`
-	CreatedAt   string  `gorm:"column:created_at"`
-	ActorName   *string `gorm:"column:actor_name"`
-	ActorEmail  *string `gorm:"column:actor_email"`
-}
+type auditLogListRow = auditLogListRowDB
 
 // NewGormAuditLogRepository 创建基于 GORM 的审计日志仓储实现。
 func NewGormAuditLogRepository(db *gorm.DB) AuditLogRepository {
@@ -75,44 +64,53 @@ func (r *gormAuditLogRepository) List(
 		return nil, 0, fmt.Errorf("audit log repository db is nil")
 	}
 
+	auditLogTableName := (models.AuditLog{}).TableName()
+	userTableName := (models.User{}).TableName()
+	auditAlias := "al"
+	userAlias := "u"
+
 	baseQuery := r.db.WithContext(ctx).
-		Table("audit_logs AS al").
-		Joins("LEFT JOIN users AS u ON u.user_id = al.actor_user_id")
+		Table(auditLogTableName + " AS " + auditAlias).
+		Joins(
+			"LEFT JOIN " + userTableName + " AS " + userAlias +
+				" ON " + qualifiedColumn(userAlias, models.UserColumns.UserID) +
+				" = " + qualifiedColumn(auditAlias, models.AuditLogColumns.ActorUserID),
+		)
 
 	if actorUserID := strings.TrimSpace(params.ActorUserID); actorUserID != "" {
-		baseQuery = baseQuery.Where("al.actor_user_id = ?", actorUserID)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.ActorUserID)+" = ?", actorUserID)
 	}
 	if module := strings.ToLower(strings.TrimSpace(params.Module)); module != "" {
-		baseQuery = baseQuery.Where("al.module = ?", module)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.Module)+" = ?", module)
 	}
 	if action := strings.ToLower(strings.TrimSpace(params.Action)); action != "" {
-		baseQuery = baseQuery.Where("al.action = ?", action)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.Action)+" = ?", action)
 	}
 	if targetType := strings.ToLower(strings.TrimSpace(params.TargetType)); targetType != "" {
-		baseQuery = baseQuery.Where("al.target_type = ?", targetType)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.TargetType)+" = ?", targetType)
 	}
 	if targetID := strings.TrimSpace(params.TargetID); targetID != "" {
-		baseQuery = baseQuery.Where("al.target_id = ?", targetID)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.TargetID)+" = ?", targetID)
 	}
 	if requestID := strings.TrimSpace(params.RequestID); requestID != "" {
-		baseQuery = baseQuery.Where("al.request_id = ?", requestID)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.RequestID)+" = ?", requestID)
 	}
 	if params.CreatedAtFrom != nil {
-		baseQuery = baseQuery.Where("al.created_at >= ?", params.CreatedAtFrom.UTC())
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.CreatedAt)+" >= ?", params.CreatedAtFrom.UTC())
 	}
 	if params.CreatedAtTo != nil {
-		baseQuery = baseQuery.Where("al.created_at <= ?", params.CreatedAtTo.UTC())
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.CreatedAt)+" <= ?", params.CreatedAtTo.UTC())
 	}
 
 	restrictModules := normalizeAuditModules(params.RestrictModules)
 	if len(restrictModules) > 0 {
-		baseQuery = baseQuery.Where("al.module IN ?", restrictModules)
+		baseQuery = baseQuery.Where(qualifiedColumn(auditAlias, models.AuditLogColumns.Module)+" IN ?", restrictModules)
 	}
 
 	if keyword := strings.ToLower(strings.TrimSpace(params.Keyword)); keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			`LOWER(al.actor_user_id) LIKE ? OR LOWER(al.module) LIKE ? OR LOWER(al.action) LIKE ? OR LOWER(al.target_type) LIKE ? OR LOWER(al.target_id) LIKE ? OR LOWER(al.summary) LIKE ? OR LOWER(al.request_id) LIKE ? OR LOWER(COALESCE(u.name, '')) LIKE ? OR LOWER(COALESCE(u.email, '')) LIKE ?`,
+			`LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.ActorUserID)+`) LIKE ? OR LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.Module)+`) LIKE ? OR LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.Action)+`) LIKE ? OR LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.TargetType)+`) LIKE ? OR LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.TargetID)+`) LIKE ? OR LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.Summary)+`) LIKE ? OR LOWER(`+qualifiedColumn(auditAlias, models.AuditLogColumns.RequestID)+`) LIKE ? OR LOWER(COALESCE(`+qualifiedColumn(userAlias, models.UserColumns.Name)+`, '')) LIKE ? OR LOWER(COALESCE(`+qualifiedColumn(userAlias, models.UserColumns.Email)+`, '')) LIKE ?`,
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -142,21 +140,27 @@ func (r *gormAuditLogRepository) List(
 	var rows []auditLogListRow
 	if err := baseQuery.Session(&gorm.Session{}).
 		Select(
-			"al.id",
-			"al.actor_user_id",
-			"al.module",
-			"al.action",
-			"al.target_type",
-			"al.target_id",
-			"al.summary",
-			"al.detail_json",
-			"al.request_id",
-			"al.created_at",
-			"u.name AS actor_name",
-			"u.email AS actor_email",
+			qualifiedColumn(auditAlias, models.AuditLogColumns.ID),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.ActorUserID),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.Module),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.Action),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.TargetType),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.TargetID),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.Summary),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.DetailJSON),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.RequestID),
+			qualifiedColumn(auditAlias, models.AuditLogColumns.CreatedAt)+" AS created_at_raw",
+			qualifiedColumn(userAlias, models.UserColumns.Name)+" AS actor_name",
+			qualifiedColumn(userAlias, models.UserColumns.Email)+" AS actor_email",
 		).
-		Order("al.created_at DESC").
-		Order("al.id DESC").
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Table: auditAlias, Name: models.AuditLogColumns.CreatedAt},
+			Desc:   true,
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Table: auditAlias, Name: models.AuditLogColumns.ID},
+			Desc:   true,
+		}).
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -175,7 +179,7 @@ func (r *gormAuditLogRepository) List(
 			Summary:     row.Summary,
 			DetailJSON:  row.DetailJSON,
 			RequestID:   row.RequestID,
-			CreatedAt:   parseAuditLogRecordTime(row.CreatedAt),
+			CreatedAt:   recordtime.Parse(row.CreatedAtRaw),
 		}
 
 		record := AdminAuditLogListRecord{AuditLog: auditLog}
@@ -209,45 +213,4 @@ func normalizeAuditModules(input []string) []string {
 		result = append(result, module)
 	}
 	return result
-}
-
-func parseAuditLogRecordTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05.999999-07:00",
-		"2006-01-02 15:04:05.999-07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
-		}
-	}
-	// 兼容数据库返回的 "YYYY-MM-DD HH:MM:SS+00:00" 等格式，统一转为 RFC3339 再解析。
-	normalized := strings.Replace(value, " ", "T", 1)
-	timePart := normalized
-	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
-		timePart = normalized[index+1:]
-	}
-	if !strings.ContainsAny(timePart, "Zz+-") {
-		normalized += "Z"
-	}
-	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
-		return parsedAt.UTC()
-	}
-	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
-		return parsedAt.UTC()
-	}
-	return time.Time{}
 }

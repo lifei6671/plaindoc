@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -15,47 +16,13 @@ type gormReaderPageRepository struct {
 	db *gorm.DB
 }
 
-type readerPageDocumentRow struct {
-	DocumentID     string                      `gorm:"column:document_id"`
-	NodeID         string                      `gorm:"column:node_id"`
-	ReaderSlug     *string                     `gorm:"column:reader_slug"`
-	ThemeID        string                      `gorm:"column:theme_id"`
-	Format         models.DocumentFormat       `gorm:"column:format"`
-	Visibility     string                      `gorm:"column:visibility"`
-	Title          string                      `gorm:"column:title"`
-	ContentMD      string                      `gorm:"column:content_md"`
-	RenderStatus   models.DocumentRenderStatus `gorm:"column:render_status"`
-	RenderError    string                      `gorm:"column:render_error"`
-	RenderedAtRaw  *string                     `gorm:"column:rendered_at"`
-	Version        int                         `gorm:"column:version"`
-	SourceBlobID   *string                     `gorm:"column:source_blob_id"`
-	SourceFileName *string                     `gorm:"column:source_file_name"`
-	SourceMimeType *string                     `gorm:"column:source_mime_type"`
-	ContentVersion int                         `gorm:"column:content_version"`
-	AuthorNickname string                      `gorm:"column:author_nickname"`
-	UpdatedAtRaw   string                      `gorm:"column:updated_at"`
-	SpaceID        string                      `gorm:"column:space_id"`
-}
+type readerPageDocumentRow = readerPageDocumentRowDB
 
-type readerPageTreeNodeRow struct {
-	NodeID             string          `gorm:"column:node_id"`
-	DocumentID         *string         `gorm:"column:document_id"`
-	ReaderSlug         *string         `gorm:"column:reader_slug"`
-	ParentNodeID       *string         `gorm:"column:parent_node_id"`
-	Type               models.NodeType `gorm:"column:type"`
-	Title              string          `gorm:"column:title"`
-	Sort               int             `gorm:"column:sort"`
-	DocumentVisibility *string         `gorm:"column:document_visibility"`
-	DocumentFormat     *string         `gorm:"column:document_format"`
-}
+type readerPageTreeNodeRow = readerPageTreeNodeRowDB
 
-type readerPageDocumentIDRow struct {
-	DocumentID string `gorm:"column:document_id"`
-}
+type readerPageDocumentIDRow = readerPageDocumentIDRowDB
 
-type readerPageResolvedDocumentRow struct {
-	DocumentID string `gorm:"column:document_id"`
-}
+type readerPageResolvedDocumentRow = readerPageResolvedDocumentRowDB
 
 // NewGormReaderPageRepository 创建阅读页数据仓储实现。
 func NewGormReaderPageRepository(db *gorm.DB) ReaderPageRepository {
@@ -83,11 +50,13 @@ func (r *gormReaderPageRepository) ResolveDocumentID(
 		condition string,
 		args ...any,
 	) (string, error) {
-		query := r.db.WithContext(ctx).Table("documents AS d").Select("d.document_id")
+		query := r.db.WithContext(ctx).
+			Table(tableWithAlias(models.Document{}, "d")).
+			Select("d." + models.DocumentColumns.DocumentID + " AS document_id")
 		if useSpaceFilter {
 			query = query.
-				Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-				Where("n.space_id = ?", normalizedSpaceID)
+				Joins("JOIN "+tableName(models.Node{})+" AS n ON n."+models.NodeColumns.NodeID+" = d."+models.DocumentColumns.NodeID).
+				Where("n."+models.NodeColumns.SpaceID+" = ?", normalizedSpaceID)
 		}
 
 		var row readerPageResolvedDocumentRow
@@ -105,9 +74,9 @@ func (r *gormReaderPageRepository) ResolveDocumentID(
 		condition string
 		args      []any
 	}{
-		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "n.reader_slug = ?", args: []any{normalizedDocumentSlug}},
+		{condition: "d." + models.DocumentColumns.DocumentID + " = ?", args: []any{normalizedDocumentID}},
+		{condition: "d." + models.DocumentColumns.NodeID + " = ?", args: []any{normalizedDocumentID}},
+		{condition: "n." + models.NodeColumns.ReaderSlug + " = ?", args: []any{normalizedDocumentSlug}},
 	}
 	for _, matcher := range spaceScopedMatchers {
 		resolvedDocumentID, err := tryResolve(true, matcher.condition, matcher.args...)
@@ -123,8 +92,8 @@ func (r *gormReaderPageRepository) ResolveDocumentID(
 		condition string
 		args      []any
 	}{
-		{condition: "d.document_id = ?", args: []any{normalizedDocumentID}},
-		{condition: "d.node_id = ?", args: []any{normalizedDocumentID}},
+		{condition: "d." + models.DocumentColumns.DocumentID + " = ?", args: []any{normalizedDocumentID}},
+		{condition: "d." + models.DocumentColumns.NodeID + " = ?", args: []any{normalizedDocumentID}},
 	}
 	for _, matcher := range globalMatchers {
 		resolvedDocumentID, err := tryResolve(false, matcher.condition, matcher.args...)
@@ -153,31 +122,31 @@ func (r *gormReaderPageRepository) GetDocumentByDocumentID(
 
 	var row readerPageDocumentRow
 	err := r.db.WithContext(ctx).
-		Table("documents AS d").
+		Table(tableWithAlias(models.Document{}, "d")).
 		Select(
-			"d.document_id",
-			"d.node_id",
-			"n.reader_slug",
-			"d.theme_id",
-			"d.format",
-			"d.visibility",
-			"d.title",
-			"d.content_md",
-			"d.render_status",
-			"d.render_error",
-			"d.rendered_at",
-			"d.version",
-			"d.source_blob_id",
-			"d.source_file_name",
-			"d.source_mime_type",
-			"d.content_version",
-			"COALESCE(NULLIF(TRIM(u_creator.name), ''), '未知作者') AS author_nickname",
-			"d.updated_at",
-			"n.space_id AS space_id",
+			"d."+models.DocumentColumns.DocumentID+" AS document_id",
+			"d."+models.DocumentColumns.NodeID+" AS node_id",
+			"n."+models.NodeColumns.ReaderSlug+" AS reader_slug",
+			"d."+models.DocumentColumns.ThemeID+" AS theme_id",
+			"d."+models.DocumentColumns.Format+" AS format",
+			"d."+models.DocumentColumns.Visibility+" AS visibility",
+			"d."+models.DocumentColumns.Title+" AS title",
+			"d."+models.DocumentColumns.ContentMD+" AS content_md",
+			"d."+models.DocumentColumns.RenderStatus+" AS render_status",
+			"d."+models.DocumentColumns.RenderError+" AS render_error",
+			"d."+models.DocumentColumns.RenderedAt+" AS rendered_at_raw",
+			"d."+models.DocumentColumns.Version+" AS version",
+			"d."+models.DocumentColumns.SourceBlobID+" AS source_blob_id",
+			"d."+models.DocumentColumns.SourceFileName+" AS source_file_name",
+			"d."+models.DocumentColumns.SourceMimeType+" AS source_mime_type",
+			"d."+models.DocumentColumns.ContentVersion+" AS content_version",
+			"COALESCE(NULLIF(TRIM(u_creator."+models.UserColumns.Name+"), ''), '未知作者') AS author_nickname",
+			"d."+models.DocumentColumns.UpdatedAt+" AS updated_at_raw",
+			"n."+models.NodeColumns.SpaceID+" AS space_id",
 		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("LEFT JOIN users AS u_creator ON u_creator.user_id = d.created_by_user_id").
-		Where("d.document_id = ?", normalizedDocumentID).
+		Joins("JOIN "+tableName(models.Node{})+" AS n ON n."+models.NodeColumns.NodeID+" = d."+models.DocumentColumns.NodeID).
+		Joins("LEFT JOIN "+tableName(models.User{})+" AS u_creator ON u_creator."+models.UserColumns.UserID+" = d."+models.DocumentColumns.CreatedByUserID).
+		Where("d."+models.DocumentColumns.DocumentID+" = ?", normalizedDocumentID).
 		Take(&row).Error
 	if err != nil {
 		return nil, err
@@ -194,14 +163,14 @@ func (r *gormReaderPageRepository) GetDocumentByDocumentID(
 		ContentMD:      row.ContentMD,
 		RenderStatus:   models.NormalizeDocumentRenderStatus(row.RenderStatus),
 		RenderError:    strings.TrimSpace(row.RenderError),
-		RenderedAt:     parseNullableRecordTime(row.RenderedAtRaw),
+		RenderedAt:     recordtime.ParseNullable(row.RenderedAtRaw),
 		Version:        row.Version,
 		SourceBlobID:   trimOptionalString(row.SourceBlobID),
 		SourceFileName: trimOptionalString(row.SourceFileName),
 		SourceMimeType: trimOptionalString(row.SourceMimeType),
 		ContentVersion: normalizeContentVersion(row.ContentVersion, row.Version),
 		AuthorNickname: strings.TrimSpace(row.AuthorNickname),
-		UpdatedAt:      parseRecordTime(row.UpdatedAtRaw),
+		UpdatedAt:      recordtime.Parse(row.UpdatedAtRaw),
 		SpaceID:        strings.TrimSpace(row.SpaceID),
 	}, nil
 }
@@ -220,14 +189,14 @@ func (r *gormReaderPageRepository) ListSpaceDocumentIDs(
 
 	rows := make([]readerPageDocumentIDRow, 0, 64)
 	if err := r.db.WithContext(ctx).
-		Table("documents AS d").
-		Select("d.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Where("n.space_id = ?", normalizedSpaceID).
-		Where("d.deleted_at IS NULL").
-		Order("CASE WHEN n.parent_node_id IS NULL THEN 0 ELSE 1 END ASC").
-		Order("n.parent_node_id ASC").
-		Order("n.sort ASC, n.id ASC, d.id ASC").
+		Table(tableWithAlias(models.Document{}, "d")).
+		Select("d."+models.DocumentColumns.DocumentID+" AS document_id").
+		Joins("JOIN "+tableName(models.Node{})+" AS n ON n."+models.NodeColumns.NodeID+" = d."+models.DocumentColumns.NodeID).
+		Where("n."+models.NodeColumns.SpaceID+" = ?", normalizedSpaceID).
+		Where("d." + models.DocumentColumns.DeletedAt + " IS NULL").
+		Order("CASE WHEN n." + models.NodeColumns.ParentNodeID + " IS NULL THEN 0 ELSE 1 END ASC").
+		Order("n." + models.NodeColumns.ParentNodeID + " ASC").
+		Order("n." + models.NodeColumns.Sort + " ASC, n." + models.NodeColumns.ID + " ASC, d." + models.DocumentColumns.ID + " ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -257,21 +226,21 @@ func (r *gormReaderPageRepository) ListTreeNodesBySpaceID(
 
 	rows := make([]readerPageTreeNodeRow, 0, 64)
 	if err := r.db.WithContext(ctx).
-		Table("nodes AS n").
+		Table(tableWithAlias(models.Node{}, "n")).
 		Select(
-			"n.node_id",
-			"d.document_id AS document_id",
-			"n.reader_slug",
-			"n.parent_node_id",
-			"n.type",
-			"n.title",
-			"n.sort",
-			"d.visibility AS document_visibility",
-			"d.format AS document_format",
+			"n."+models.NodeColumns.NodeID+" AS node_id",
+			"d."+models.DocumentColumns.DocumentID+" AS document_id",
+			"n."+models.NodeColumns.ReaderSlug+" AS reader_slug",
+			"n."+models.NodeColumns.ParentNodeID+" AS parent_node_id",
+			"n."+models.NodeColumns.Type+" AS type",
+			"n."+models.NodeColumns.Title+" AS title",
+			"n."+models.NodeColumns.Sort+" AS sort",
+			"d."+models.DocumentColumns.Visibility+" AS document_visibility",
+			"d."+models.DocumentColumns.Format+" AS document_format",
 		).
-		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
-		Where("n.space_id = ?", normalizedSpaceID).
-		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
+		Joins("LEFT JOIN "+tableName(models.Document{})+" AS d ON d."+models.DocumentColumns.NodeID+" = n."+models.NodeColumns.NodeID).
+		Where("n."+models.NodeColumns.SpaceID+" = ?", normalizedSpaceID).
+		Order("n." + models.NodeColumns.ParentNodeID + " ASC, n." + models.NodeColumns.Sort + " ASC, n." + models.NodeColumns.ID + " ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}

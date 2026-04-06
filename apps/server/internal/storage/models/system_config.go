@@ -16,3 +16,21 @@ type SystemConfig struct {
 func (SystemConfig) TableName() string {
 	return "system_configs"
 }
+
+var SystemConfigColumns = struct {
+	ID              string
+	ConfigKey       string
+	ConfigValueJSON string
+	Version         string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	ConfigKey:       "config_key",
+	ConfigValueJSON: "config_value_json",
+	Version:         "version",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

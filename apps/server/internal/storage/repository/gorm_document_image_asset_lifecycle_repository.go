@@ -21,25 +21,11 @@ type gormDocumentImageAssetLifecycleRepository struct {
 	db *gorm.DB
 }
 
-type documentImageAssetLifecycleExistingRow struct {
-	ID              int64   `gorm:"column:id"`
-	BlobID          *string `gorm:"column:blob_id"`
-	StorageProvider string  `gorm:"column:storage_provider"`
-	ObjectKey       string  `gorm:"column:object_key"`
-}
+type documentImageAssetLifecycleExistingRow = documentImageAssetLifecycleExistingRowDB
 
-type documentImageAssetLifecyclePendingCandidateRow struct {
-	ID              int64   `gorm:"column:id"`
-	BlobID          *string `gorm:"column:blob_id"`
-	StorageProvider string  `gorm:"column:storage_provider"`
-	ObjectKey       string  `gorm:"column:object_key"`
-}
+type documentImageAssetLifecyclePendingCandidateRow = documentImageAssetLifecyclePendingCandidateRowDB
 
-type documentImageAssetLifecycleBlobRow struct {
-	BlobID          string `gorm:"column:blob_id"`
-	StorageProvider string `gorm:"column:storage_provider"`
-	ObjectKey       string `gorm:"column:object_key"`
-}
+type documentImageAssetLifecycleBlobRow = documentImageAssetLifecycleBlobRowDB
 
 // NewGormDocumentImageAssetLifecycleRepository 创建文档图片生命周期仓储实现。
 func NewGormDocumentImageAssetLifecycleRepository(db *gorm.DB) DocumentImageAssetLifecycleRepository {
@@ -73,9 +59,15 @@ func (r *gormDocumentImageAssetLifecycleRepository) SyncDocumentReferences(
 	normalizedRefs := normalizeDocumentImageAssetReferenceInputs(referencesWithBlobIDs)
 	existingAssets := make([]documentImageAssetLifecycleExistingRow, 0, len(normalizedRefs)+8)
 	if err := r.db.WithContext(ctx).
-		Table("document_image_assets").
-		Select("id, blob_id, storage_provider, object_key").
-		Where("document_id = ? AND status IN ?", documentID, []string{
+		Model(&models.DocumentImageAsset{}).
+		Select(
+			models.DocumentImageAssetColumns.ID,
+			models.DocumentImageAssetColumns.BlobID,
+			models.DocumentImageAssetColumns.StorageProvider,
+			models.DocumentImageAssetColumns.ObjectKey,
+		).
+		Where(models.DocumentImageAssetColumns.DocumentID+" = ?", documentID).
+		Where(models.DocumentImageAssetColumns.Status+" IN ?", []string{
 			documentImageAssetLifecycleStatusActive,
 			documentImageAssetLifecycleStatusPendingCleanup,
 		}).
@@ -100,16 +92,16 @@ func (r *gormDocumentImageAssetLifecycleRepository) SyncDocumentReferences(
 			}
 			if existing, exists := existingByKey[identityKey]; exists {
 				if err := tx.Model(&models.DocumentImageAsset{}).
-					Where("id = ?", existing.ID).
+					Where(models.DocumentImageAssetColumns.ID+" = ?", existing.ID).
 					Updates(map[string]any{
-						"blob_id":            nullableTrimmedString(reference.BlobID),
-						"space_id":           spaceID,
-						"object_url":         reference.ObjectURL,
-						"status":             documentImageAssetLifecycleStatusActive,
-						"pending_cleanup_at": nil,
-						"deleted_at":         nil,
-						"last_referenced_at": referencedAt,
-						"updated_at":         referencedAt,
+						models.DocumentImageAssetColumns.BlobID:           nullableTrimmedString(reference.BlobID),
+						models.DocumentImageAssetColumns.SpaceID:          spaceID,
+						models.DocumentImageAssetColumns.ObjectURL:        reference.ObjectURL,
+						models.DocumentImageAssetColumns.Status:           documentImageAssetLifecycleStatusActive,
+						models.DocumentImageAssetColumns.PendingCleanupAt: nil,
+						models.DocumentImageAssetColumns.DeletedAt:        nil,
+						models.DocumentImageAssetColumns.LastReferencedAt: referencedAt,
+						models.DocumentImageAssetColumns.UpdatedAt:        referencedAt,
 					}).Error; err != nil {
 					return err
 				}
@@ -146,11 +138,11 @@ func (r *gormDocumentImageAssetLifecycleRepository) SyncDocumentReferences(
 		}
 
 		return tx.Model(&models.DocumentImageAsset{}).
-			Where("id IN ?", staleAssetIDs).
+			Where(models.DocumentImageAssetColumns.ID+" IN ?", staleAssetIDs).
 			Updates(map[string]any{
-				"status":             documentImageAssetLifecycleStatusPendingCleanup,
-				"pending_cleanup_at": gorm.Expr("COALESCE(pending_cleanup_at, ?)", referencedAt),
-				"updated_at":         referencedAt,
+				models.DocumentImageAssetColumns.Status:           documentImageAssetLifecycleStatusPendingCleanup,
+				models.DocumentImageAssetColumns.PendingCleanupAt: gorm.Expr("COALESCE("+models.DocumentImageAssetColumns.PendingCleanupAt+", ?)", referencedAt),
+				models.DocumentImageAssetColumns.UpdatedAt:        referencedAt,
 			}).Error
 	})
 }
@@ -169,13 +161,17 @@ func (r *gormDocumentImageAssetLifecycleRepository) ListPendingCleanupCandidates
 
 	rows := make([]documentImageAssetLifecyclePendingCandidateRow, 0, limit)
 	if err := r.db.WithContext(ctx).
-		Table("document_image_assets").
-		Select("id, blob_id, storage_provider, object_key").
-		Where("status = ? AND pending_cleanup_at IS NOT NULL AND pending_cleanup_at <= ?",
-			documentImageAssetLifecycleStatusPendingCleanup,
-			cutoff,
+		Model(&models.DocumentImageAsset{}).
+		Select(
+			models.DocumentImageAssetColumns.ID,
+			models.DocumentImageAssetColumns.BlobID,
+			models.DocumentImageAssetColumns.StorageProvider,
+			models.DocumentImageAssetColumns.ObjectKey,
 		).
-		Order("pending_cleanup_at ASC").
+		Where(models.DocumentImageAssetColumns.Status+" = ?", documentImageAssetLifecycleStatusPendingCleanup).
+		Where(models.DocumentImageAssetColumns.PendingCleanupAt+" IS NOT NULL").
+		Where(models.DocumentImageAssetColumns.PendingCleanupAt+" <= ?", cutoff).
+		Order(models.DocumentImageAssetColumns.PendingCleanupAt + " ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -204,18 +200,19 @@ func (r *gormDocumentImageAssetLifecycleRepository) MarkDeletedDocumentReference
 	}
 
 	activeDocumentSubquery := r.db.WithContext(ctx).
-		Table("documents").
-		Select("document_id").
-		Where("status = ? AND deleted_at IS NULL", models.EntityStatusActive)
+		Model(&models.Document{}).
+		Select(models.DocumentColumns.DocumentID).
+		Where(models.DocumentColumns.Status+" = ?", models.EntityStatusActive).
+		Where(models.DocumentColumns.DeletedAt + " IS NULL")
 
 	return r.db.WithContext(ctx).
 		Model(&models.DocumentImageAsset{}).
-		Where("status = ?", documentImageAssetLifecycleStatusActive).
-		Where("document_id NOT IN (?)", activeDocumentSubquery).
+		Where(models.DocumentImageAssetColumns.Status+" = ?", documentImageAssetLifecycleStatusActive).
+		Where(models.DocumentImageAssetColumns.DocumentID+" NOT IN (?)", activeDocumentSubquery).
 		Updates(map[string]any{
-			"status":             documentImageAssetLifecycleStatusPendingCleanup,
-			"pending_cleanup_at": gorm.Expr("COALESCE(pending_cleanup_at, ?)", now),
-			"updated_at":         now,
+			models.DocumentImageAssetColumns.Status:           documentImageAssetLifecycleStatusPendingCleanup,
+			models.DocumentImageAssetColumns.PendingCleanupAt: gorm.Expr("COALESCE("+models.DocumentImageAssetColumns.PendingCleanupAt+", ?)", now),
+			models.DocumentImageAssetColumns.UpdatedAt:        now,
 		}).Error
 }
 
@@ -237,11 +234,9 @@ func (r *gormDocumentImageAssetLifecycleRepository) CountActiveReferencesByObjec
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&models.DocumentImageAsset{}).
-		Where("storage_provider = ? AND object_key = ? AND status = ?",
-			normalizedStorageProvider,
-			normalizedObjectKey,
-			documentImageAssetLifecycleStatusActive,
-		).
+		Where(models.DocumentImageAssetColumns.StorageProvider+" = ?", normalizedStorageProvider).
+		Where(models.DocumentImageAssetColumns.ObjectKey+" = ?", normalizedObjectKey).
+		Where(models.DocumentImageAssetColumns.Status+" = ?", documentImageAssetLifecycleStatusActive).
 		Count(&count).Error
 	return count, err
 }
@@ -263,11 +258,12 @@ func (r *gormDocumentImageAssetLifecycleRepository) MarkDeletedByID(
 
 	updateTx := r.db.WithContext(ctx).
 		Model(&models.DocumentImageAsset{}).
-		Where("id = ? AND status <> ?", id, documentImageAssetLifecycleStatusDeleted).
+		Where(models.DocumentImageAssetColumns.ID+" = ?", id).
+		Where(models.DocumentImageAssetColumns.Status+" <> ?", documentImageAssetLifecycleStatusDeleted).
 		Updates(map[string]any{
-			"status":     documentImageAssetLifecycleStatusDeleted,
-			"deleted_at": now,
-			"updated_at": now,
+			models.DocumentImageAssetColumns.Status:    documentImageAssetLifecycleStatusDeleted,
+			models.DocumentImageAssetColumns.DeletedAt: now,
+			models.DocumentImageAssetColumns.UpdatedAt: now,
 		})
 	return updateTx.RowsAffected, updateTx.Error
 }
@@ -287,15 +283,13 @@ func (r *gormDocumentImageAssetLifecycleRepository) MarkDeletedByObject(
 
 	updateTx := r.db.WithContext(ctx).
 		Model(&models.DocumentImageAsset{}).
-		Where("storage_provider = ? AND object_key = ? AND status <> ?",
-			strings.ToLower(strings.TrimSpace(storageProvider)),
-			strings.TrimSpace(objectKey),
-			documentImageAssetLifecycleStatusDeleted,
-		).
+		Where(models.DocumentImageAssetColumns.StorageProvider+" = ?", strings.ToLower(strings.TrimSpace(storageProvider))).
+		Where(models.DocumentImageAssetColumns.ObjectKey+" = ?", strings.TrimSpace(objectKey)).
+		Where(models.DocumentImageAssetColumns.Status+" <> ?", documentImageAssetLifecycleStatusDeleted).
 		Updates(map[string]any{
-			"status":     documentImageAssetLifecycleStatusDeleted,
-			"deleted_at": now,
-			"updated_at": now,
+			models.DocumentImageAssetColumns.Status:    documentImageAssetLifecycleStatusDeleted,
+			models.DocumentImageAssetColumns.DeletedAt: now,
+			models.DocumentImageAssetColumns.UpdatedAt: now,
 		})
 	return updateTx.RowsAffected, updateTx.Error
 }
@@ -365,9 +359,15 @@ func (r *gormDocumentImageAssetLifecycleRepository) resolveBlobIDsByObject(
 		}
 		rows := make([]documentImageAssetLifecycleBlobRow, 0, len(objectKeys))
 		if err := r.db.WithContext(ctx).
-			Table("file_blobs").
-			Select("blob_id, storage_provider, object_key").
-			Where("deleted_at IS NULL AND storage_provider = ? AND object_key IN ?", storageProvider, objectKeys).
+			Model(&models.DocumentAttachmentBlob{}).
+			Select(
+				models.DocumentAttachmentBlobColumns.BlobID,
+				models.DocumentAttachmentBlobColumns.StorageProvider,
+				models.DocumentAttachmentBlobColumns.ObjectKey,
+			).
+			Where(models.DocumentAttachmentBlobColumns.DeletedAt+" IS NULL").
+			Where(models.DocumentAttachmentBlobColumns.StorageProvider+" = ?", storageProvider).
+			Where(models.DocumentAttachmentBlobColumns.ObjectKey+" IN ?", objectKeys).
 			Find(&rows).Error; err != nil {
 			return nil, err
 		}

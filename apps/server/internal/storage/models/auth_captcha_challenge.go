@@ -22,3 +22,33 @@ type AuthCaptchaChallenge struct {
 func (AuthCaptchaChallenge) TableName() string {
 	return "auth_captcha_challenges"
 }
+
+var AuthCaptchaChallengeColumns = struct {
+	ID                string
+	CaptchaID         string
+	Scene             string
+	SubjectHash       string
+	Level             string
+	AnswerHash        string
+	AnswerSalt        string
+	IssuedIPHash      string
+	ExpiresAt         string
+	ConsumedAt        string
+	FailedVerifyCount string
+	CreatedAt         string
+	UpdatedAt         string
+}{
+	ID:                "id",
+	CaptchaID:         "captcha_id",
+	Scene:             "scene",
+	SubjectHash:       "subject_hash",
+	Level:             "level",
+	AnswerHash:        "answer_hash",
+	AnswerSalt:        "answer_salt",
+	IssuedIPHash:      "issued_ip_hash",
+	ExpiresAt:         "expires_at",
+	ConsumedAt:        "consumed_at",
+	FailedVerifyCount: "failed_verify_count",
+	CreatedAt:         "created_at",
+	UpdatedAt:         "updated_at",
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -15,20 +16,7 @@ type gormPasswordResetTokenRepository struct {
 	db *gorm.DB
 }
 
-type passwordResetTokenRow struct {
-	ID                int64   `gorm:"column:id"`
-	TokenID           string  `gorm:"column:token_id"`
-	TokenSecretHash   string  `gorm:"column:token_secret_hash"`
-	UserID            string  `gorm:"column:user_id"`
-	Source            string  `gorm:"column:source"`
-	RequestedByUserID *string `gorm:"column:requested_by_user_id"`
-	RequestIPHash     string  `gorm:"column:request_ip_hash"`
-	ExpiresAtRaw      string  `gorm:"column:expires_at"`
-	ConsumedAtRaw     *string `gorm:"column:consumed_at"`
-	InvalidatedAtRaw  *string `gorm:"column:invalidated_at"`
-	CreatedAtRaw      string  `gorm:"column:created_at"`
-	UpdatedAtRaw      string  `gorm:"column:updated_at"`
-}
+type passwordResetTokenRow = passwordResetTokenRowDB
 
 // NewGormPasswordResetTokenRepository 创建基于 GORM 的密码重置令牌仓储实现。
 func NewGormPasswordResetTokenRepository(db *gorm.DB) PasswordResetTokenRepository {
@@ -62,22 +50,22 @@ func (r *gormPasswordResetTokenRepository) GetByTokenID(
 
 	var row passwordResetTokenRow
 	if err := r.db.WithContext(ctx).
-		Table("password_reset_tokens").
+		Model(&models.PasswordResetToken{}).
 		Select(
-			"id",
-			"token_id",
-			"token_secret_hash",
-			"user_id",
-			"source",
-			"requested_by_user_id",
-			"request_ip_hash",
-			"expires_at",
-			"consumed_at",
-			"invalidated_at",
-			"created_at",
-			"updated_at",
+			models.PasswordResetTokenColumns.ID,
+			models.PasswordResetTokenColumns.TokenID,
+			models.PasswordResetTokenColumns.TokenSecretHash,
+			models.PasswordResetTokenColumns.UserID,
+			models.PasswordResetTokenColumns.Source,
+			models.PasswordResetTokenColumns.RequestedByUserID,
+			models.PasswordResetTokenColumns.RequestIPHash,
+			models.PasswordResetTokenColumns.ExpiresAt+" AS expires_at_raw",
+			models.PasswordResetTokenColumns.ConsumedAt+" AS consumed_at_raw",
+			models.PasswordResetTokenColumns.InvalidatedAt+" AS invalidated_at_raw",
+			models.PasswordResetTokenColumns.CreatedAt+" AS created_at_raw",
+			models.PasswordResetTokenColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("token_id = ?", normalizedTokenID).
+		Where(models.PasswordResetTokenColumns.TokenID+" = ?", normalizedTokenID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -94,13 +82,13 @@ func (r *gormPasswordResetTokenRepository) CountRecent(
 	}
 	query := r.db.WithContext(ctx).Model(&models.PasswordResetToken{})
 	if normalizedUserID := strings.TrimSpace(params.UserID); normalizedUserID != "" {
-		query = query.Where("user_id = ?", normalizedUserID)
+		query = query.Where(models.PasswordResetTokenColumns.UserID+" = ?", normalizedUserID)
 	}
 	if normalizedRequestIPHash := strings.TrimSpace(params.RequestIPHash); normalizedRequestIPHash != "" {
-		query = query.Where("request_ip_hash = ?", normalizedRequestIPHash)
+		query = query.Where(models.PasswordResetTokenColumns.RequestIPHash+" = ?", normalizedRequestIPHash)
 	}
 	if !params.Since.IsZero() {
-		query = query.Where("created_at >= ?", params.Since.UTC())
+		query = query.Where(models.PasswordResetTokenColumns.CreatedAt+" >= ?", params.Since.UTC())
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -127,10 +115,12 @@ func (r *gormPasswordResetTokenRepository) InvalidateActiveByUserID(
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.PasswordResetToken{}).
-		Where("user_id = ? AND consumed_at IS NULL AND invalidated_at IS NULL", normalizedUserID).
+		Where(models.PasswordResetTokenColumns.UserID+" = ?", normalizedUserID).
+		Where(models.PasswordResetTokenColumns.ConsumedAt + " IS NULL").
+		Where(models.PasswordResetTokenColumns.InvalidatedAt + " IS NULL").
 		Updates(map[string]any{
-			"invalidated_at": invalidatedAt,
-			"updated_at":     invalidatedAt,
+			models.PasswordResetTokenColumns.InvalidatedAt: invalidatedAt,
+			models.PasswordResetTokenColumns.UpdatedAt:     invalidatedAt,
 		})
 	if tx.Error != nil {
 		return 0, tx.Error
@@ -164,36 +154,38 @@ func (r *gormPasswordResetTokenRepository) Consume(
 	var result models.PasswordResetToken
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row passwordResetTokenRow
-		if err := tx.Table("password_reset_tokens").
+		if err := tx.Model(&models.PasswordResetToken{}).
 			Select(
-				"id",
-				"token_id",
-				"token_secret_hash",
-				"user_id",
-				"source",
-				"requested_by_user_id",
-				"request_ip_hash",
-				"expires_at",
-				"consumed_at",
-				"invalidated_at",
-				"created_at",
-				"updated_at",
+				models.PasswordResetTokenColumns.ID,
+				models.PasswordResetTokenColumns.TokenID,
+				models.PasswordResetTokenColumns.TokenSecretHash,
+				models.PasswordResetTokenColumns.UserID,
+				models.PasswordResetTokenColumns.Source,
+				models.PasswordResetTokenColumns.RequestedByUserID,
+				models.PasswordResetTokenColumns.RequestIPHash,
+				models.PasswordResetTokenColumns.ExpiresAt+" AS expires_at_raw",
+				models.PasswordResetTokenColumns.ConsumedAt+" AS consumed_at_raw",
+				models.PasswordResetTokenColumns.InvalidatedAt+" AS invalidated_at_raw",
+				models.PasswordResetTokenColumns.CreatedAt+" AS created_at_raw",
+				models.PasswordResetTokenColumns.UpdatedAt+" AS updated_at_raw",
 			).
-			Where(
-				"token_id = ? AND token_secret_hash = ? AND consumed_at IS NULL AND invalidated_at IS NULL AND expires_at > ?",
-				tokenID,
-				tokenSecretHash,
-				now,
-			).
+			Where(models.PasswordResetTokenColumns.TokenID+" = ?", tokenID).
+			Where(models.PasswordResetTokenColumns.TokenSecretHash+" = ?", tokenSecretHash).
+			Where(models.PasswordResetTokenColumns.ConsumedAt+" IS NULL").
+			Where(models.PasswordResetTokenColumns.InvalidatedAt+" IS NULL").
+			Where(models.PasswordResetTokenColumns.ExpiresAt+" > ?", now).
 			Take(&row).Error; err != nil {
 			return err
 		}
 
 		updateTx := tx.Model(&models.PasswordResetToken{}).
-			Where("id = ? AND consumed_at IS NULL AND invalidated_at IS NULL AND expires_at > ?", row.ID, now).
+			Where(models.PasswordResetTokenColumns.ID+" = ?", row.ID).
+			Where(models.PasswordResetTokenColumns.ConsumedAt+" IS NULL").
+			Where(models.PasswordResetTokenColumns.InvalidatedAt+" IS NULL").
+			Where(models.PasswordResetTokenColumns.ExpiresAt+" > ?", now).
 			Updates(map[string]any{
-				"consumed_at": consumedAt,
-				"updated_at":  consumedAt,
+				models.PasswordResetTokenColumns.ConsumedAt: consumedAt,
+				models.PasswordResetTokenColumns.UpdatedAt:  consumedAt,
 			})
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -226,10 +218,10 @@ func mapPasswordResetTokenRow(row passwordResetTokenRow) models.PasswordResetTok
 		Source:            row.Source,
 		RequestedByUserID: row.RequestedByUserID,
 		RequestIPHash:     row.RequestIPHash,
-		ExpiresAt:         parseRecordTime(row.ExpiresAtRaw),
-		ConsumedAt:        parseNullableRecordTime(row.ConsumedAtRaw),
-		InvalidatedAt:     parseNullableRecordTime(row.InvalidatedAtRaw),
-		CreatedAt:         parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:         parseRecordTime(row.UpdatedAtRaw),
+		ExpiresAt:         recordtime.Parse(row.ExpiresAtRaw),
+		ConsumedAt:        recordtime.ParseNullable(row.ConsumedAtRaw),
+		InvalidatedAt:     recordtime.ParseNullable(row.InvalidatedAtRaw),
+		CreatedAt:         recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:         recordtime.Parse(row.UpdatedAtRaw),
 	}
 }

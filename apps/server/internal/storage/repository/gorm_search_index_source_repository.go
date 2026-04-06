@@ -18,17 +18,7 @@ type gormSearchIndexSourceRepository struct {
 	db *gorm.DB
 }
 
-type searchIndexSourceRow struct {
-	SpaceID         string                    `gorm:"column:space_id"`
-	DocumentID      string                    `gorm:"column:document_id"`
-	NodeID          string                    `gorm:"column:node_id"`
-	Format          models.DocumentFormat     `gorm:"column:format"`
-	Title           string                    `gorm:"column:title"`
-	ContentMD       string                    `gorm:"column:content_md"`
-	SpaceVisibility string                    `gorm:"column:space_visibility"`
-	DocVisibility   string                    `gorm:"column:doc_visibility"`
-	UpdatedAt       searchIndexSourceScanTime `gorm:"column:updated_at"`
-}
+type searchIndexSourceRow = searchIndexSourceRowDB
 
 type searchIndexSourceScanTime struct {
 	time.Time
@@ -65,7 +55,7 @@ func (r *gormSearchIndexSourceRepository) ListActiveDocuments(
 
 	rows := make([]searchIndexSourceRow, 0, limit)
 	err := r.selectSearchIndexSourceColumns(r.baseActiveDocumentsQuery(ctx)).
-		Order("d.id ASC").
+		Order(qualifiedColumn("d", models.DocumentColumns.ID) + " ASC").
 		Limit(limit).
 		Offset(offset).
 		Find(&rows).Error
@@ -90,7 +80,7 @@ func (r *gormSearchIndexSourceRepository) GetActiveDocumentByDocumentID(
 
 	var row searchIndexSourceRow
 	err := r.selectSearchIndexSourceColumns(r.baseActiveDocumentsQuery(ctx)).
-		Where("d.document_id = ?", normalizedDocumentID).
+		Where(qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = ?", normalizedDocumentID).
 		Take(&row).Error
 	if err != nil {
 		return nil, err
@@ -124,8 +114,8 @@ func (r *gormSearchIndexSourceRepository) ListActiveDocumentsBySpaceID(
 
 	rows := make([]searchIndexSourceRow, 0, limit)
 	err := r.selectSearchIndexSourceColumns(r.baseActiveDocumentsQuery(ctx)).
-		Where("s.space_id = ?", normalizedSpaceID).
-		Order("d.id ASC").
+		Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = ?", normalizedSpaceID).
+		Order(qualifiedColumn("d", models.DocumentColumns.ID) + " ASC").
 		Limit(limit).
 		Offset(offset).
 		Find(&rows).Error
@@ -137,13 +127,15 @@ func (r *gormSearchIndexSourceRepository) ListActiveDocumentsBySpaceID(
 
 func (r *gormSearchIndexSourceRepository) baseActiveDocumentsQuery(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).
-		Table("documents AS d").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
+		Table(tableWithAlias(models.Document{}, "d")).
+		Joins("JOIN "+tableName(models.Node{})+" AS n ON "+qualifiedColumn("n", models.NodeColumns.NodeID)+" = "+qualifiedColumn("d", models.DocumentColumns.NodeID)).
+		Joins("JOIN "+tableName(models.Space{})+" AS s ON "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = "+qualifiedColumn("n", models.NodeColumns.SpaceID)).
+		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn("d", models.DocumentColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("d", models.DocumentColumns.DeletedAt)+" IS NULL").
 		Where(
-			"(d.format = ?) OR (d.format IN (?, ?) AND d.render_status = ? AND TRIM(d.content_md) <> '')",
+			"("+qualifiedColumn("d", models.DocumentColumns.Format)+" = ?) OR ("+qualifiedColumn("d", models.DocumentColumns.Format)+" IN (?, ?) AND "+qualifiedColumn("d", models.DocumentColumns.RenderStatus)+" = ? AND TRIM("+qualifiedColumn("d", models.DocumentColumns.ContentMD)+") <> '')",
 			models.DocumentFormatMarkdown,
 			models.DocumentFormatDOCX,
 			models.DocumentFormatXLSX,
@@ -153,15 +145,15 @@ func (r *gormSearchIndexSourceRepository) baseActiveDocumentsQuery(ctx context.C
 
 func (r *gormSearchIndexSourceRepository) selectSearchIndexSourceColumns(query *gorm.DB) *gorm.DB {
 	return query.Select(
-		"s.space_id AS space_id",
-		"d.document_id AS document_id",
-		"d.node_id AS node_id",
-		"d.format AS format",
-		"d.title AS title",
-		"d.content_md AS content_md",
-		"s.visibility AS space_visibility",
-		"d.visibility AS doc_visibility",
-		"d.updated_at AS updated_at",
+		qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AS space_id",
+		qualifiedColumn("d", models.DocumentColumns.DocumentID)+" AS document_id",
+		qualifiedColumn("d", models.DocumentColumns.NodeID)+" AS node_id",
+		qualifiedColumn("d", models.DocumentColumns.Format)+" AS format",
+		qualifiedColumn("d", models.DocumentColumns.Title)+" AS title",
+		qualifiedColumn("d", models.DocumentColumns.ContentMD)+" AS content_md",
+		qualifiedColumn("s", models.SpaceColumns.Visibility)+" AS space_visibility",
+		qualifiedColumn("d", models.DocumentColumns.Visibility)+" AS doc_visibility",
+		qualifiedColumn("d", models.DocumentColumns.UpdatedAt)+" AS updated_at",
 	)
 }
 

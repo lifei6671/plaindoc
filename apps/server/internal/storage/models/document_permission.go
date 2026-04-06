@@ -16,3 +16,21 @@ type DocumentPermission struct {
 func (DocumentPermission) TableName() string {
 	return "document_permissions"
 }
+
+var DocumentPermissionColumns = struct {
+	ID              string
+	DocumentID      string
+	UserID          string
+	Role            string
+	GrantedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	DocumentID:      "document_id",
+	UserID:          "user_id",
+	Role:            "role",
+	GrantedByUserID: "granted_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

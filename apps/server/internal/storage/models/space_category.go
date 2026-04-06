@@ -22,3 +22,19 @@ type SpaceCategory struct {
 func (SpaceCategory) TableName() string {
 	return "space_categories"
 }
+
+var SpaceCategoryColumns = struct {
+	ID         string
+	CategoryID string
+	Name       string
+	IsDefault  string
+	CreatedAt  string
+	UpdatedAt  string
+}{
+	ID:         "id",
+	CategoryID: "category_id",
+	Name:       "name",
+	IsDefault:  "is_default",
+	CreatedAt:  "created_at",
+	UpdatedAt:  "updated_at",
+}

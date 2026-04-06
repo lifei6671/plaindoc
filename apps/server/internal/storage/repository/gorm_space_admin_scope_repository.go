@@ -7,6 +7,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 )
 
 type gormSpaceAdminScopeRepository struct {
@@ -32,8 +34,9 @@ func (r *gormSpaceAdminScopeRepository) HasScope(
 
 	var count int64
 	if err := r.db.WithContext(ctx).
-		Table("space_admin_scopes").
-		Where("user_id = ? AND space_id = ?", userID, spaceID).
+		Model(&models.SpaceAdminScope{}).
+		Where(models.SpaceAdminScopeColumns.UserID+" = ?", userID).
+		Where(models.SpaceAdminScopeColumns.SpaceID+" = ?", spaceID).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
@@ -55,16 +58,21 @@ func (r *gormSpaceAdminScopeRepository) UpsertScope(
 
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).
-		Table("space_admin_scopes").
+		Model(&models.SpaceAdminScope{}).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_id"}, {Name: "space_id"}},
-			DoUpdates: clause.Assignments(map[string]any{"updated_at": now}),
+			Columns: []clause.Column{
+				{Name: models.SpaceAdminScopeColumns.UserID},
+				{Name: models.SpaceAdminScopeColumns.SpaceID},
+			},
+			DoUpdates: clause.Assignments(map[string]any{
+				models.SpaceAdminScopeColumns.UpdatedAt: now,
+			}),
 		}).
-		Create(map[string]any{
-			"user_id":    userID,
-			"space_id":   spaceID,
-			"created_at": now,
-			"updated_at": now,
+		Create(&models.SpaceAdminScope{
+			UserID:    userID,
+			SpaceID:   spaceID,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}).Error
 }
 
@@ -81,9 +89,10 @@ func (r *gormSpaceAdminScopeRepository) DeleteScope(
 		return nil
 	}
 	return r.db.WithContext(ctx).
-		Table("space_admin_scopes").
-		Where("user_id = ? AND space_id = ?", userID, spaceID).
-		Delete(nil).Error
+		Model(&models.SpaceAdminScope{}).
+		Where(models.SpaceAdminScopeColumns.UserID+" = ?", userID).
+		Where(models.SpaceAdminScopeColumns.SpaceID+" = ?", spaceID).
+		Delete(&models.SpaceAdminScope{}).Error
 }
 
 func (r *gormSpaceAdminScopeRepository) ListByUserID(
@@ -98,16 +107,15 @@ func (r *gormSpaceAdminScopeRepository) ListByUserID(
 		return []string{}, nil
 	}
 
-	type scopeRow struct {
-		SpaceID string `gorm:"column:space_id"`
-	}
-	var rows []scopeRow
+	var rows []models.SpaceAdminScope
 	if err := r.db.WithContext(ctx).
-		Table("space_admin_scopes").
-		Select("space_id").
-		Where("user_id = ?", userID).
-		Order("space_id ASC").
-		Scan(&rows).Error; err != nil {
+		Model(&models.SpaceAdminScope{}).
+		Select(models.SpaceAdminScopeColumns.SpaceID).
+		Where(models.SpaceAdminScopeColumns.UserID+" = ?", userID).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SpaceAdminScopeColumns.SpaceID},
+		}).
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 

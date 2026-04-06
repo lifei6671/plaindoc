@@ -34,8 +34,16 @@ func (r *gormUserSessionRepository) Rotate(ctx context.Context, params RotateUse
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current models.UserSession
 		if err := tx.
-			Select("session_id", "user_id", "refresh_token_hash", "expires_at", "revoked_at").
-			Where("session_id = ? AND user_id = ?", params.CurrentSessionID, params.UserID).
+			Model(&models.UserSession{}).
+			Select(
+				models.UserSessionColumns.SessionID,
+				models.UserSessionColumns.UserID,
+				models.UserSessionColumns.RefreshTokenHash,
+				models.UserSessionColumns.ExpiresAt,
+				models.UserSessionColumns.RevokedAt,
+			).
+			Where(models.UserSessionColumns.SessionID+" = ?", params.CurrentSessionID).
+			Where(models.UserSessionColumns.UserID+" = ?", params.UserID).
 			Take(&current).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrInvalidSession
@@ -66,11 +74,13 @@ func (r *gormUserSessionRepository) Rotate(ctx context.Context, params RotateUse
 		}
 
 		revokeTx := tx.Model(&models.UserSession{}).
-			Where("session_id = ? AND user_id = ? AND revoked_at IS NULL", params.CurrentSessionID, params.UserID).
+			Where(models.UserSessionColumns.SessionID+" = ?", params.CurrentSessionID).
+			Where(models.UserSessionColumns.UserID+" = ?", params.UserID).
+			Where(models.UserSessionColumns.RevokedAt + " IS NULL").
 			Updates(map[string]any{
-				"revoked_at":             params.Now,
-				"replaced_by_session_id": params.NextSessionID,
-				"updated_at":             params.Now,
+				models.UserSessionColumns.RevokedAt:           params.Now,
+				models.UserSessionColumns.ReplacedBySessionID: params.NextSessionID,
+				models.UserSessionColumns.UpdatedAt:           params.Now,
 			})
 		if revokeTx.Error != nil {
 			return revokeTx.Error
@@ -95,10 +105,12 @@ func (r *gormUserSessionRepository) Revoke(
 
 	return r.db.WithContext(ctx).
 		Model(&models.UserSession{}).
-		Where("session_id = ? AND user_id = ? AND revoked_at IS NULL", sessionID, userID).
+		Where(models.UserSessionColumns.SessionID+" = ?", sessionID).
+		Where(models.UserSessionColumns.UserID+" = ?", userID).
+		Where(models.UserSessionColumns.RevokedAt + " IS NULL").
 		Updates(map[string]any{
-			"revoked_at": revokedAt,
-			"updated_at": revokedAt,
+			models.UserSessionColumns.RevokedAt: revokedAt,
+			models.UserSessionColumns.UpdatedAt: revokedAt,
 		}).Error
 }
 
@@ -119,9 +131,10 @@ func (r *gormUserSessionRepository) RevokeAllByUserID(
 
 	return r.db.WithContext(ctx).
 		Model(&models.UserSession{}).
-		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Where(models.UserSessionColumns.UserID+" = ?", userID).
+		Where(models.UserSessionColumns.RevokedAt + " IS NULL").
 		Updates(map[string]any{
-			"revoked_at": revokedAt,
-			"updated_at": revokedAt,
+			models.UserSessionColumns.RevokedAt: revokedAt,
+			models.UserSessionColumns.UpdatedAt: revokedAt,
 		}).Error
 }

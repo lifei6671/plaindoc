@@ -6,30 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormThemeRepository struct {
 	db *gorm.DB
 }
 
-type themeRow struct {
-	ID                     int64  `gorm:"column:id"`
-	ThemeID                string `gorm:"column:theme_id"`
-	Name                   string `gorm:"column:name"`
-	Description            string `gorm:"column:description"`
-	VariablesJSON          string `gorm:"column:variables_json"`
-	SyntaxTheme            string `gorm:"column:syntax_theme"`
-	CodeBlockStyleJSON     string `gorm:"column:code_block_style_json"`
-	CodeBlockCodeStyleJSON string `gorm:"column:code_block_code_style_json"`
-	InlineCodeStyleJSON    string `gorm:"column:inline_code_style_json"`
-	CustomCSS              string `gorm:"column:custom_css"`
-	IsBuiltin              bool   `gorm:"column:is_builtin"`
-	IsEnabled              bool   `gorm:"column:is_enabled"`
-	CreatedAtRaw           string `gorm:"column:created_at"`
-	UpdatedAtRaw           string `gorm:"column:updated_at"`
-}
+type themeRow = themeRowDB
 
 // NewGormThemeRepository 创建基于 GORM 的主题仓储实现。
 func NewGormThemeRepository(db *gorm.DB) ThemeRepository {
@@ -42,27 +29,30 @@ func (r *gormThemeRepository) List(ctx context.Context, includeDisabled bool) ([
 	}
 
 	query := r.db.WithContext(ctx).
-		Table("themes").
+		Model(&models.Theme{}).
 		Select(
-			"id",
-			"theme_id",
-			"name",
-			"description",
-			"variables_json",
-			"syntax_theme",
-			"code_block_style_json",
-			"code_block_code_style_json",
-			"inline_code_style_json",
-			"custom_css",
-			"is_builtin",
-			"is_enabled",
-			"created_at",
-			"updated_at",
+			models.ThemeColumns.ID,
+			models.ThemeColumns.ThemeID,
+			models.ThemeColumns.Name,
+			models.ThemeColumns.Description,
+			models.ThemeColumns.VariablesJSON,
+			models.ThemeColumns.SyntaxTheme,
+			models.ThemeColumns.CodeBlockStyleJSON,
+			models.ThemeColumns.CodeBlockCodeStyleJSON,
+			models.ThemeColumns.InlineCodeStyleJSON,
+			models.ThemeColumns.CustomCSS,
+			models.ThemeColumns.IsBuiltin,
+			models.ThemeColumns.IsEnabled,
+			models.ThemeColumns.CreatedAt+" AS created_at_raw",
+			models.ThemeColumns.UpdatedAt+" AS updated_at_raw",
 		)
 	if !includeDisabled {
-		query = query.Where("is_enabled = ?", true)
+		query = query.Where(models.ThemeColumns.IsEnabled+" = ?", true)
 	}
-	query = query.Order("id DESC")
+	query = query.Order(clause.OrderByColumn{
+		Column: clause.Column{Name: models.ThemeColumns.ID},
+		Desc:   true,
+	})
 
 	var rows []themeRow
 	if err := query.Find(&rows).Error; err != nil {
@@ -83,24 +73,24 @@ func (r *gormThemeRepository) GetByThemeID(ctx context.Context, themeID string) 
 
 	var row themeRow
 	if err := r.db.WithContext(ctx).
-		Table("themes").
+		Model(&models.Theme{}).
 		Select(
-			"id",
-			"theme_id",
-			"name",
-			"description",
-			"variables_json",
-			"syntax_theme",
-			"code_block_style_json",
-			"code_block_code_style_json",
-			"inline_code_style_json",
-			"custom_css",
-			"is_builtin",
-			"is_enabled",
-			"created_at",
-			"updated_at",
+			models.ThemeColumns.ID,
+			models.ThemeColumns.ThemeID,
+			models.ThemeColumns.Name,
+			models.ThemeColumns.Description,
+			models.ThemeColumns.VariablesJSON,
+			models.ThemeColumns.SyntaxTheme,
+			models.ThemeColumns.CodeBlockStyleJSON,
+			models.ThemeColumns.CodeBlockCodeStyleJSON,
+			models.ThemeColumns.InlineCodeStyleJSON,
+			models.ThemeColumns.CustomCSS,
+			models.ThemeColumns.IsBuiltin,
+			models.ThemeColumns.IsEnabled,
+			models.ThemeColumns.CreatedAt+" AS created_at_raw",
+			models.ThemeColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("theme_id = ?", strings.TrimSpace(themeID)).
+		Where(models.ThemeColumns.ThemeID+" = ?", strings.TrimSpace(themeID)).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -135,39 +125,39 @@ func (r *gormThemeRepository) Update(ctx context.Context, params UpdateThemePara
 	}
 
 	updateValues := map[string]any{
-		"updated_at": updatedAt,
+		models.ThemeColumns.UpdatedAt: updatedAt,
 	}
 	if params.Name != nil {
-		updateValues["name"] = *params.Name
+		updateValues[models.ThemeColumns.Name] = *params.Name
 	}
 	if params.Description != nil {
-		updateValues["description"] = *params.Description
+		updateValues[models.ThemeColumns.Description] = *params.Description
 	}
 	if params.VariablesJSON != nil {
-		updateValues["variables_json"] = *params.VariablesJSON
+		updateValues[models.ThemeColumns.VariablesJSON] = *params.VariablesJSON
 	}
 	if params.SyntaxTheme != nil {
-		updateValues["syntax_theme"] = *params.SyntaxTheme
+		updateValues[models.ThemeColumns.SyntaxTheme] = *params.SyntaxTheme
 	}
 	if params.CodeBlockStyleJSON != nil {
-		updateValues["code_block_style_json"] = *params.CodeBlockStyleJSON
+		updateValues[models.ThemeColumns.CodeBlockStyleJSON] = *params.CodeBlockStyleJSON
 	}
 	if params.CodeBlockCodeStyleJSON != nil {
-		updateValues["code_block_code_style_json"] = *params.CodeBlockCodeStyleJSON
+		updateValues[models.ThemeColumns.CodeBlockCodeStyleJSON] = *params.CodeBlockCodeStyleJSON
 	}
 	if params.InlineCodeStyleJSON != nil {
-		updateValues["inline_code_style_json"] = *params.InlineCodeStyleJSON
+		updateValues[models.ThemeColumns.InlineCodeStyleJSON] = *params.InlineCodeStyleJSON
 	}
 	if params.CustomCSS != nil {
-		updateValues["custom_css"] = *params.CustomCSS
+		updateValues[models.ThemeColumns.CustomCSS] = *params.CustomCSS
 	}
 	if params.IsEnabled != nil {
-		updateValues["is_enabled"] = *params.IsEnabled
+		updateValues[models.ThemeColumns.IsEnabled] = *params.IsEnabled
 	}
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.Theme{}).
-		Where("theme_id = ?", themeID).
+		Where(models.ThemeColumns.ThemeID+" = ?", themeID).
 		Updates(updateValues)
 	if tx.Error != nil {
 		return false, tx.Error
@@ -181,7 +171,8 @@ func (r *gormThemeRepository) Delete(ctx context.Context, themeID string) (bool,
 	}
 
 	tx := r.db.WithContext(ctx).
-		Where("theme_id = ?", strings.TrimSpace(themeID)).
+		Model(&models.Theme{}).
+		Where(models.ThemeColumns.ThemeID+" = ?", strings.TrimSpace(themeID)).
 		Delete(&models.Theme{})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -196,8 +187,8 @@ func (r *gormThemeRepository) CountDocumentReferences(ctx context.Context, theme
 
 	var count int64
 	if err := r.db.WithContext(ctx).
-		Table("documents").
-		Where("theme_id = ?", strings.TrimSpace(themeID)).
+		Model(&models.Document{}).
+		Where(models.DocumentColumns.ThemeID+" = ?", strings.TrimSpace(themeID)).
 		Count(&count).Error; err != nil {
 		return 0, err
 	}
@@ -218,48 +209,7 @@ func mapThemeRow(row themeRow) models.Theme {
 		CustomCSS:              row.CustomCSS,
 		IsBuiltin:              row.IsBuiltin,
 		IsEnabled:              row.IsEnabled,
-		CreatedAt:              parseThemeRecordTime(row.CreatedAtRaw),
-		UpdatedAt:              parseThemeRecordTime(row.UpdatedAtRaw),
+		CreatedAt:              recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:              recordtime.Parse(row.UpdatedAtRaw),
 	}
-}
-
-func parseThemeRecordTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05.999999-07:00",
-		"2006-01-02 15:04:05.999-07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
-		}
-	}
-	// 兼容数据库返回的 "YYYY-MM-DD HH:MM:SS+00:00" 等格式，统一转为 RFC3339 再解析。
-	normalized := strings.Replace(value, " ", "T", 1)
-	timePart := normalized
-	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
-		timePart = normalized[index+1:]
-	}
-	if !strings.ContainsAny(timePart, "Zz+-") {
-		normalized += "Z"
-	}
-	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
-		return parsedAt.UTC()
-	}
-	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
-		return parsedAt.UTC()
-	}
-	return time.Time{}
 }

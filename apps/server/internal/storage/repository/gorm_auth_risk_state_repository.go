@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -14,19 +15,7 @@ type gormAuthRiskStateRepository struct {
 	db *gorm.DB
 }
 
-type authRiskStateRow struct {
-	ID                 int64   `gorm:"column:id"`
-	Scene              string  `gorm:"column:scene"`
-	SubjectType        string  `gorm:"column:subject_type"`
-	SubjectHash        string  `gorm:"column:subject_hash"`
-	WindowStartedAtRaw string  `gorm:"column:window_started_at"`
-	AttemptCount       int     `gorm:"column:attempt_count"`
-	FailedCount        int     `gorm:"column:failed_count"`
-	CaptchaFailedCount int     `gorm:"column:captcha_failed_count"`
-	LockUntilRaw       *string `gorm:"column:lock_until"`
-	CreatedAtRaw       string  `gorm:"column:created_at"`
-	UpdatedAtRaw       string  `gorm:"column:updated_at"`
-}
+type authRiskStateRow = authRiskStateRowDB
 
 // NewGormAuthRiskStateRepository 创建基于 GORM 的认证风控状态仓储实现。
 func NewGormAuthRiskStateRepository(db *gorm.DB) AuthRiskStateRepository {
@@ -52,26 +41,23 @@ func (r *gormAuthRiskStateRepository) GetByKey(
 
 	var row authRiskStateRow
 	if err := r.db.WithContext(ctx).
-		Table("auth_risk_states").
+		Model(&models.AuthRiskState{}).
 		Select(
-			"id",
-			"scene",
-			"subject_type",
-			"subject_hash",
-			"window_started_at",
-			"attempt_count",
-			"failed_count",
-			"captcha_failed_count",
-			"lock_until",
-			"created_at",
-			"updated_at",
+			models.AuthRiskStateColumns.ID,
+			models.AuthRiskStateColumns.Scene,
+			models.AuthRiskStateColumns.SubjectType,
+			models.AuthRiskStateColumns.SubjectHash,
+			models.AuthRiskStateColumns.WindowStartedAt+" AS window_started_at_raw",
+			models.AuthRiskStateColumns.AttemptCount,
+			models.AuthRiskStateColumns.FailedCount,
+			models.AuthRiskStateColumns.CaptchaFailCount+" AS captcha_failed_count",
+			models.AuthRiskStateColumns.LockUntil+" AS lock_until_raw",
+			models.AuthRiskStateColumns.CreatedAt+" AS created_at_raw",
+			models.AuthRiskStateColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where(
-			"scene = ? AND subject_type = ? AND subject_hash = ?",
-			normalizedScene,
-			normalizedSubjectType,
-			normalizedSubjectHash,
-		).
+		Where(models.AuthRiskStateColumns.Scene+" = ?", normalizedScene).
+		Where(models.AuthRiskStateColumns.SubjectType+" = ?", normalizedSubjectType).
+		Where(models.AuthRiskStateColumns.SubjectHash+" = ?", normalizedSubjectHash).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -107,14 +93,14 @@ func (r *gormAuthRiskStateRepository) Update(ctx context.Context, state *models.
 
 	return r.db.WithContext(ctx).
 		Model(&models.AuthRiskState{}).
-		Where("id = ?", state.ID).
+		Where(models.AuthRiskStateColumns.ID+" = ?", state.ID).
 		Updates(map[string]any{
-			"window_started_at":    state.WindowStartedAt,
-			"attempt_count":        state.AttemptCount,
-			"failed_count":         state.FailedCount,
-			"captcha_failed_count": state.CaptchaFailCount,
-			"lock_until":           state.LockUntil,
-			"updated_at":           now,
+			models.AuthRiskStateColumns.WindowStartedAt:  state.WindowStartedAt,
+			models.AuthRiskStateColumns.AttemptCount:     state.AttemptCount,
+			models.AuthRiskStateColumns.FailedCount:      state.FailedCount,
+			models.AuthRiskStateColumns.CaptchaFailCount: state.CaptchaFailCount,
+			models.AuthRiskStateColumns.LockUntil:        state.LockUntil,
+			models.AuthRiskStateColumns.UpdatedAt:        now,
 		}).Error
 }
 
@@ -124,12 +110,12 @@ func mapAuthRiskStateRow(row authRiskStateRow) models.AuthRiskState {
 		Scene:            row.Scene,
 		SubjectType:      row.SubjectType,
 		SubjectHash:      row.SubjectHash,
-		WindowStartedAt:  parseRecordTime(row.WindowStartedAtRaw),
+		WindowStartedAt:  recordtime.Parse(row.WindowStartedAtRaw),
 		AttemptCount:     row.AttemptCount,
 		FailedCount:      row.FailedCount,
 		CaptchaFailCount: row.CaptchaFailedCount,
-		LockUntil:        parseNullableRecordTime(row.LockUntilRaw),
-		CreatedAt:        parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:        parseRecordTime(row.UpdatedAtRaw),
+		LockUntil:        recordtime.ParseNullable(row.LockUntilRaw),
+		CreatedAt:        recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:        recordtime.Parse(row.UpdatedAtRaw),
 	}
 }

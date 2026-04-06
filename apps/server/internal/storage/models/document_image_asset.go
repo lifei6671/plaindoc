@@ -24,3 +24,35 @@ type DocumentImageAsset struct {
 func (DocumentImageAsset) TableName() string {
 	return "document_image_assets"
 }
+
+var DocumentImageAssetColumns = struct {
+	ID               string
+	ImageAssetID     string
+	DocumentID       string
+	SpaceID          string
+	BlobID           string
+	StorageProvider  string
+	ObjectKey        string
+	ObjectURL        string
+	Status           string
+	PendingCleanupAt string
+	DeletedAt        string
+	LastReferencedAt string
+	CreatedAt        string
+	UpdatedAt        string
+}{
+	ID:               "id",
+	ImageAssetID:     "image_asset_id",
+	DocumentID:       "document_id",
+	SpaceID:          "space_id",
+	BlobID:           "blob_id",
+	StorageProvider:  "storage_provider",
+	ObjectKey:        "object_key",
+	ObjectURL:        "object_url",
+	Status:           "status",
+	PendingCleanupAt: "pending_cleanup_at",
+	DeletedAt:        "deleted_at",
+	LastReferencedAt: "last_referenced_at",
+	CreatedAt:        "created_at",
+	UpdatedAt:        "updated_at",
+}

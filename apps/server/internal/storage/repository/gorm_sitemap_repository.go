@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -13,15 +14,7 @@ type gormSitemapRepository struct {
 	db *gorm.DB
 }
 
-type sitemapPublicDocumentSourceRow struct {
-	SpaceID              string  `gorm:"column:space_id"`
-	SpaceUpdatedAtRaw    string  `gorm:"column:space_updated_at"`
-	DocumentID           string  `gorm:"column:document_id"`
-	ReaderSlug           *string `gorm:"column:reader_slug"`
-	DocumentFormat       string  `gorm:"column:document_format"`
-	DocumentContentMD    string  `gorm:"column:document_content_md"`
-	DocumentUpdatedAtRaw string  `gorm:"column:document_updated_at"`
-}
+type sitemapPublicDocumentSourceRow = sitemapPublicDocumentSourceRowDB
 
 // NewGormSitemapRepository 创建 sitemap 仓储实现。
 func NewGormSitemapRepository(db *gorm.DB) SitemapRepository {
@@ -35,29 +28,40 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 		return nil, fmt.Errorf("sitemap repository db is nil")
 	}
 
+	documentAlias := "d"
+	nodeAlias := "n"
+	spaceAlias := "s"
 	rows := make([]sitemapPublicDocumentSourceRow, 0, 256)
 	if err := r.db.WithContext(ctx).
-		Table("documents AS d").
+		Table(tableWithAlias(models.Document{}, documentAlias)).
 		Select(
-			"s.space_id AS space_id",
-			"s.updated_at AS space_updated_at",
-			"d.document_id AS document_id",
-			"n.reader_slug AS reader_slug",
-			"d.format AS document_format",
-			"d.content_md AS document_content_md",
-			"d.updated_at AS document_updated_at",
+			qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)+" AS space_id",
+			qualifiedColumn(spaceAlias, models.SpaceColumns.UpdatedAt)+" AS space_updated_at_raw",
+			qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+" AS document_id",
+			qualifiedColumn(nodeAlias, models.NodeColumns.ReaderSlug)+" AS reader_slug",
+			qualifiedColumn(documentAlias, models.DocumentColumns.Format)+" AS document_format",
+			qualifiedColumn(documentAlias, models.DocumentColumns.ContentMD)+" AS document_content_md",
+			qualifiedColumn(documentAlias, models.DocumentColumns.UpdatedAt)+" AS document_updated_at_raw",
 		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("n.type = ?", models.NodeTypeDoc).
-		Where("s.visibility = ?", models.VisibilityPublic).
-		Where("s.status = ?", models.EntityStatusActive).
-		Where("s.deleted_at IS NULL").
-		Where("d.visibility = ?", models.VisibilityPublic).
-		Where("d.status = ?", models.EntityStatusActive).
-		Where("d.deleted_at IS NULL").
-		Where("d.format = ?", models.DocumentFormatMarkdown).
-		Order("s.space_id ASC, d.document_id ASC").
+		Joins(
+			"JOIN "+tableName(models.Node{})+" AS "+nodeAlias+
+				" ON "+qualifiedColumn(nodeAlias, models.NodeColumns.NodeID)+
+				" = "+qualifiedColumn(documentAlias, models.DocumentColumns.NodeID),
+		).
+		Joins(
+			"JOIN "+tableName(models.Space{})+" AS "+spaceAlias+
+				" ON "+qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)+
+				" = "+qualifiedColumn(nodeAlias, models.NodeColumns.SpaceID),
+		).
+		Where(qualifiedColumn(nodeAlias, models.NodeColumns.Type)+" = ?", models.NodeTypeDoc).
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.Visibility)+" = ?", models.VisibilityPublic).
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Visibility)+" = ?", models.VisibilityPublic).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Format)+" = ?", models.DocumentFormatMarkdown).
+		Order(qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID) + " ASC, " + qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID) + " ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -70,8 +74,8 @@ func (r *gormSitemapRepository) ListPublicDocuments(
 			DocumentRouteKey:  resolveSitemapDocumentRouteKey(strings.TrimSpace(row.DocumentID), row.ReaderSlug),
 			DocumentFormat:    models.NormalizeDocumentFormat(models.DocumentFormat(row.DocumentFormat)),
 			DocumentContentMD: row.DocumentContentMD,
-			SpaceUpdatedAt:    parseRecordTime(row.SpaceUpdatedAtRaw),
-			DocumentUpdatedAt: parseRecordTime(row.DocumentUpdatedAtRaw),
+			SpaceUpdatedAt:    recordtime.Parse(row.SpaceUpdatedAtRaw),
+			DocumentUpdatedAt: recordtime.Parse(row.DocumentUpdatedAtRaw),
 		})
 	}
 	return result, nil

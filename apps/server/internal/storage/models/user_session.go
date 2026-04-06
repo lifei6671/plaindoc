@@ -18,3 +18,25 @@ type UserSession struct {
 func (UserSession) TableName() string {
 	return "user_sessions"
 }
+
+var UserSessionColumns = struct {
+	ID                  string
+	SessionID           string
+	UserID              string
+	RefreshTokenHash    string
+	ExpiresAt           string
+	RevokedAt           string
+	ReplacedBySessionID string
+	CreatedAt           string
+	UpdatedAt           string
+}{
+	ID:                  "id",
+	SessionID:           "session_id",
+	UserID:              "user_id",
+	RefreshTokenHash:    "refresh_token_hash",
+	ExpiresAt:           "expires_at",
+	RevokedAt:           "revoked_at",
+	ReplacedBySessionID: "replaced_by_session_id",
+	CreatedAt:           "created_at",
+	UpdatedAt:           "updated_at",
+}

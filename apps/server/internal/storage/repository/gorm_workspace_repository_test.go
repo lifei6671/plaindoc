@@ -81,7 +81,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentPersistsRevision(t *testing.T
 		UpdatedByUserID *string `gorm:"column:updated_by_user_id"`
 	}
 	if err := database.ORM.WithContext(ctx).
-		Table("documents").
+		Model(&models.Document{}).
 		Select("version", "content_version", "source_blob_id", "source_file_name", "source_mime_type", "updated_by_user_id", "updated_at").
 		Where("document_id = ?", fixture.DocumentID).
 		Take(&document).Error; err != nil {
@@ -103,7 +103,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentPersistsRevision(t *testing.T
 		BaseVersion int    `gorm:"column:base_version"`
 	}
 	if err := database.ORM.WithContext(ctx).
-		Table("document_file_revisions").
+		Model(&models.DocumentFileRevision{}).
 		Select("blob_id", "version", "base_version").
 		Where("document_id = ?", fixture.DocumentID).
 		Order("version DESC").
@@ -195,7 +195,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentRollsBackOnRevisionConflict(t
 		SourceFileName string `gorm:"column:source_file_name"`
 	}
 	if err := database.ORM.WithContext(ctx).
-		Table("documents").
+		Model(&models.Document{}).
 		Select("version", "content_version", "source_blob_id", "source_file_name").
 		Where("document_id = ?", fixture.DocumentID).
 		Take(&document).Error; err != nil {
@@ -210,7 +210,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentRollsBackOnRevisionConflict(t
 
 	var revisionCount int64
 	if err := database.ORM.WithContext(ctx).
-		Table("document_file_revisions").
+		Model(&models.DocumentFileRevision{}).
 		Where("document_id = ?", fixture.DocumentID).
 		Count(&revisionCount).Error; err != nil {
 		t.Fatalf("count rolled back file revisions failed: %v", err)

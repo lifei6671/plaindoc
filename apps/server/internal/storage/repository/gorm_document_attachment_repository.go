@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -14,42 +15,13 @@ type gormDocumentAttachmentRepository struct {
 	db *gorm.DB
 }
 
-type documentAttachmentRow struct {
-	ID              int64   `gorm:"column:id"`
-	AttachmentID    string  `gorm:"column:attachment_id"`
-	BlobID          string  `gorm:"column:blob_id"`
-	DocumentID      string  `gorm:"column:document_id"`
-	SpaceID         string  `gorm:"column:space_id"`
-	StorageProvider string  `gorm:"column:storage_provider"`
-	FileName        string  `gorm:"column:file_name"`
-	ObjectKey       string  `gorm:"column:object_key"`
-	ObjectURL       string  `gorm:"column:object_url"`
-	MimeType        string  `gorm:"column:mime_type"`
-	SizeBytes       int64   `gorm:"column:size_bytes"`
-	ContentHashAlgo string  `gorm:"column:content_hash_algo"`
-	ContentHash     string  `gorm:"column:content_hash"`
-	PreviewKind     string  `gorm:"column:preview_kind"`
-	Status          string  `gorm:"column:status"`
-	DeletedAtRaw    *string `gorm:"column:deleted_at"`
-	CreatedByUserID *string `gorm:"column:created_by_user_id"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-}
+type documentAttachmentRow = documentAttachmentRowDB
 
-type documentAttachmentBlobRow struct {
-	ID              int64   `gorm:"column:id"`
-	BlobID          string  `gorm:"column:blob_id"`
-	StorageProvider string  `gorm:"column:storage_provider"`
-	ObjectKey       string  `gorm:"column:object_key"`
-	ObjectURL       string  `gorm:"column:object_url"`
-	MimeType        string  `gorm:"column:mime_type"`
-	SizeBytes       int64   `gorm:"column:size_bytes"`
-	ContentHashAlgo string  `gorm:"column:content_hash_algo"`
-	ContentHash     string  `gorm:"column:content_hash"`
-	DeletedAtRaw    *string `gorm:"column:deleted_at"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-}
+type documentAttachmentBlobRow = documentAttachmentBlobRowDB
+
+type adminDocumentAttachmentListRow = adminDocumentAttachmentListRowDB
+
+type documentAttachmentReferenceRow = documentAttachmentReferenceRowDB
 
 // NewGormDocumentAttachmentRepository 创建基于 GORM 的文档附件仓储实现。
 func NewGormDocumentAttachmentRepository(db *gorm.DB) DocumentAttachmentRepository {
@@ -87,19 +59,38 @@ func (r *gormDocumentAttachmentRepository) ListByDocumentID(
 	}
 
 	query := r.db.WithContext(ctx).
-		Table("document_attachments").
+		Model(&models.DocumentAttachment{}).
 		Select(
-			"id, attachment_id, blob_id, document_id, space_id, storage_provider, file_name, object_key, object_url, mime_type, "+
-				"size_bytes, content_hash_algo, content_hash, preview_kind, status, deleted_at, created_by_user_id, created_at, updated_at",
+			models.DocumentAttachmentColumns.ID,
+			models.DocumentAttachmentColumns.AttachmentID,
+			models.DocumentAttachmentColumns.BlobID,
+			models.DocumentAttachmentColumns.DocumentID,
+			models.DocumentAttachmentColumns.SpaceID,
+			models.DocumentAttachmentColumns.StorageProvider,
+			models.DocumentAttachmentColumns.FileName,
+			models.DocumentAttachmentColumns.ObjectKey,
+			models.DocumentAttachmentColumns.ObjectURL,
+			models.DocumentAttachmentColumns.MimeType,
+			models.DocumentAttachmentColumns.SizeBytes,
+			models.DocumentAttachmentColumns.ContentHashAlgo,
+			models.DocumentAttachmentColumns.ContentHash,
+			models.DocumentAttachmentColumns.PreviewKind,
+			models.DocumentAttachmentColumns.Status,
+			models.DocumentAttachmentColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentAttachmentColumns.CreatedByUserID,
+			models.DocumentAttachmentColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentAttachmentColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("document_id = ?", normalizedDocumentID)
+		Where(models.DocumentAttachmentColumns.DocumentID+" = ?", normalizedDocumentID)
 	if !includeDeleted {
-		query = query.Where("status = ? AND deleted_at IS NULL", models.EntityStatusActive)
+		query = query.Where(models.DocumentAttachmentColumns.Status+" = ?", models.EntityStatusActive).
+			Where(models.DocumentAttachmentColumns.DeletedAt + " IS NULL")
 	}
 
 	var rows []documentAttachmentRow
 	if err := query.
-		Order("created_at ASC, id ASC").
+		Order(models.DocumentAttachmentColumns.CreatedAt + " ASC").
+		Order(models.DocumentAttachmentColumns.ID + " ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -126,19 +117,24 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 	}
 
 	baseQuery := r.db.WithContext(ctx).
-		Table("document_attachments AS da").
-		Joins("JOIN documents AS d ON d.document_id = da.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Joins("JOIN users AS uo ON uo.user_id = s.owner_user_id").
-		Joins("LEFT JOIN users AS uc ON uc.user_id = da.created_by_user_id")
+		Table(tableWithAlias(models.DocumentAttachment{}, "da")).
+		Joins("JOIN " + tableName(models.Document{}) + " AS d ON d." + models.DocumentColumns.DocumentID + " = da." + models.DocumentAttachmentColumns.DocumentID).
+		Joins("JOIN " + tableName(models.Node{}) + " AS n ON n." + models.NodeColumns.NodeID + " = d." + models.DocumentColumns.NodeID).
+		Joins("JOIN " + tableName(models.Space{}) + " AS s ON s." + models.SpaceColumns.SpaceID + " = n." + models.NodeColumns.SpaceID).
+		Joins("JOIN " + tableName(models.User{}) + " AS uo ON uo." + models.UserColumns.UserID + " = s." + models.SpaceColumns.OwnerUserID).
+		Joins("LEFT JOIN " + tableName(models.User{}) + " AS uc ON uc." + models.UserColumns.UserID + " = da." + models.DocumentAttachmentColumns.CreatedByUserID)
 
 	if params.RestrictToScopes {
 		actorUserID := strings.TrimSpace(params.ActorUserID)
+		spaceAdminScopeQuery := r.db.WithContext(ctx).
+			Model(&models.SpaceAdminScope{}).
+			Select("1").
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", actorUserID)
 		baseQuery = baseQuery.Where(
-			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			"("+qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR EXISTS (?))",
 			actorUserID,
-			actorUserID,
+			spaceAdminScopeQuery,
 		)
 	}
 
@@ -146,7 +142,7 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 	if keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			"LOWER(da.attachment_id) LIKE ? OR LOWER(da.document_id) LIKE ? OR LOWER(da.file_name) LIKE ? OR LOWER(da.object_key) LIKE ? OR LOWER(da.mime_type) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(uo.user_id) LIKE ? OR LOWER(uo.email) LIKE ? OR LOWER(uo.name) LIKE ? OR LOWER(COALESCE(uc.user_id,'')) LIKE ? OR LOWER(COALESCE(uc.email,'')) LIKE ? OR LOWER(COALESCE(uc.name,'')) LIKE ?",
+			"LOWER("+qualifiedColumn("da", models.DocumentAttachmentColumns.AttachmentID)+") LIKE ? OR LOWER("+qualifiedColumn("da", models.DocumentAttachmentColumns.DocumentID)+") LIKE ? OR LOWER("+qualifiedColumn("da", models.DocumentAttachmentColumns.FileName)+") LIKE ? OR LOWER("+qualifiedColumn("da", models.DocumentAttachmentColumns.ObjectKey)+") LIKE ? OR LOWER("+qualifiedColumn("da", models.DocumentAttachmentColumns.MimeType)+") LIKE ? OR LOWER("+qualifiedColumn("d", models.DocumentColumns.Title)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.SpaceID)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.Name)+") LIKE ? OR LOWER("+qualifiedColumn("uo", models.UserColumns.UserID)+") LIKE ? OR LOWER("+qualifiedColumn("uo", models.UserColumns.Email)+") LIKE ? OR LOWER("+qualifiedColumn("uo", models.UserColumns.Name)+") LIKE ? OR LOWER(COALESCE("+qualifiedColumn("uc", models.UserColumns.UserID)+",'')) LIKE ? OR LOWER(COALESCE("+qualifiedColumn("uc", models.UserColumns.Email)+",'')) LIKE ? OR LOWER(COALESCE("+qualifiedColumn("uc", models.UserColumns.Name)+",'')) LIKE ?",
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -166,22 +162,22 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 
 	spaceID := strings.TrimSpace(params.SpaceID)
 	if spaceID != "" {
-		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
+		baseQuery = baseQuery.Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = ?", spaceID)
 	}
 
 	documentID := strings.TrimSpace(params.DocumentID)
 	if documentID != "" {
-		baseQuery = baseQuery.Where("da.document_id = ?", documentID)
+		baseQuery = baseQuery.Where("da."+models.DocumentAttachmentColumns.DocumentID+" = ?", documentID)
 	}
 
 	statuses := normalizeAttachmentStatuses(params.Statuses)
 	if len(statuses) > 0 {
-		baseQuery = baseQuery.Where("da.status IN ?", statuses)
+		baseQuery = baseQuery.Where("da."+models.DocumentAttachmentColumns.Status+" IN ?", statuses)
 	}
 
 	storageProviders := normalizeAttachmentStorageProviders(params.StorageProviders)
 	if len(storageProviders) > 0 {
-		baseQuery = baseQuery.Where("LOWER(da.storage_provider) IN ?", storageProviders)
+		baseQuery = baseQuery.Where("LOWER(da."+models.DocumentAttachmentColumns.StorageProvider+") IN ?", storageProviders)
 	}
 
 	var total int64
@@ -198,71 +194,40 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 		offset = 0
 	}
 
-	type adminDocumentAttachmentListRow struct {
-		ID              int64               `gorm:"column:id"`
-		AttachmentID    string              `gorm:"column:attachment_id"`
-		BlobID          string              `gorm:"column:blob_id"`
-		DocumentID      string              `gorm:"column:document_id"`
-		ReaderSlug      *string             `gorm:"column:reader_slug"`
-		SpaceID         string              `gorm:"column:space_id"`
-		StorageProvider string              `gorm:"column:storage_provider"`
-		FileName        string              `gorm:"column:file_name"`
-		ObjectKey       string              `gorm:"column:object_key"`
-		ObjectURL       string              `gorm:"column:object_url"`
-		MimeType        string              `gorm:"column:mime_type"`
-		SizeBytes       int64               `gorm:"column:size_bytes"`
-		ContentHashAlgo string              `gorm:"column:content_hash_algo"`
-		ContentHash     string              `gorm:"column:content_hash"`
-		PreviewKind     string              `gorm:"column:preview_kind"`
-		Status          models.EntityStatus `gorm:"column:status"`
-		DeletedAtRaw    *string             `gorm:"column:deleted_at"`
-		CreatedByUserID *string             `gorm:"column:created_by_user_id"`
-		CreatedAtRaw    string              `gorm:"column:created_at"`
-		UpdatedAtRaw    string              `gorm:"column:updated_at"`
-
-		DocumentTitle  string              `gorm:"column:document_title"`
-		DocumentStatus models.EntityStatus `gorm:"column:document_status"`
-		SpaceName      string              `gorm:"column:space_name"`
-		SpaceOwnerID   string              `gorm:"column:space_owner_user_id"`
-		SpaceOwnerName string              `gorm:"column:space_owner_name"`
-		SpaceOwnerMail string              `gorm:"column:space_owner_email"`
-		CreatedByName  string              `gorm:"column:created_by_name"`
-		CreatedByEmail string              `gorm:"column:created_by_email"`
-	}
-
 	var rows []adminDocumentAttachmentListRow
 	if err := baseQuery.Session(&gorm.Session{}).
 		Select(
-			"da.id",
-			"da.attachment_id",
-			"da.blob_id",
-			"da.document_id",
-			"n.reader_slug AS reader_slug",
-			"da.space_id",
-			"da.storage_provider",
-			"da.file_name",
-			"da.object_key",
-			"da.object_url",
-			"da.mime_type",
-			"da.size_bytes",
-			"da.content_hash_algo",
-			"da.content_hash",
-			"da.preview_kind",
-			"da.status",
-			"da.deleted_at",
-			"da.created_by_user_id",
-			"da.created_at",
-			"da.updated_at",
-			"d.title AS document_title",
-			"d.status AS document_status",
-			"s.name AS space_name",
-			"s.owner_user_id AS space_owner_user_id",
-			"uo.name AS space_owner_name",
-			"uo.email AS space_owner_email",
-			"COALESCE(uc.name,'') AS created_by_name",
-			"COALESCE(uc.email,'') AS created_by_email",
+			"da."+models.DocumentAttachmentColumns.ID+" AS "+models.DocumentAttachmentColumns.ID,
+			"da."+models.DocumentAttachmentColumns.AttachmentID+" AS "+models.DocumentAttachmentColumns.AttachmentID,
+			"da."+models.DocumentAttachmentColumns.BlobID+" AS "+models.DocumentAttachmentColumns.BlobID,
+			"da."+models.DocumentAttachmentColumns.DocumentID+" AS "+models.DocumentAttachmentColumns.DocumentID,
+			"n."+models.NodeColumns.ReaderSlug+" AS "+models.NodeColumns.ReaderSlug,
+			"da."+models.DocumentAttachmentColumns.SpaceID+" AS "+models.DocumentAttachmentColumns.SpaceID,
+			"da."+models.DocumentAttachmentColumns.StorageProvider+" AS "+models.DocumentAttachmentColumns.StorageProvider,
+			"da."+models.DocumentAttachmentColumns.FileName+" AS "+models.DocumentAttachmentColumns.FileName,
+			"da."+models.DocumentAttachmentColumns.ObjectKey+" AS "+models.DocumentAttachmentColumns.ObjectKey,
+			"da."+models.DocumentAttachmentColumns.ObjectURL+" AS "+models.DocumentAttachmentColumns.ObjectURL,
+			"da."+models.DocumentAttachmentColumns.MimeType+" AS "+models.DocumentAttachmentColumns.MimeType,
+			"da."+models.DocumentAttachmentColumns.SizeBytes+" AS "+models.DocumentAttachmentColumns.SizeBytes,
+			"da."+models.DocumentAttachmentColumns.ContentHashAlgo+" AS "+models.DocumentAttachmentColumns.ContentHashAlgo,
+			"da."+models.DocumentAttachmentColumns.ContentHash+" AS "+models.DocumentAttachmentColumns.ContentHash,
+			"da."+models.DocumentAttachmentColumns.PreviewKind+" AS "+models.DocumentAttachmentColumns.PreviewKind,
+			"da."+models.DocumentAttachmentColumns.Status+" AS "+models.DocumentAttachmentColumns.Status,
+			"da."+models.DocumentAttachmentColumns.DeletedAt+" AS deleted_at_raw",
+			"da."+models.DocumentAttachmentColumns.CreatedByUserID+" AS "+models.DocumentAttachmentColumns.CreatedByUserID,
+			"da."+models.DocumentAttachmentColumns.CreatedAt+" AS created_at_raw",
+			"da."+models.DocumentAttachmentColumns.UpdatedAt+" AS updated_at_raw",
+			"d."+models.DocumentColumns.Title+" AS document_title",
+			"d."+models.DocumentColumns.Status+" AS document_status",
+			"s."+models.SpaceColumns.Name+" AS space_name",
+			"s."+models.SpaceColumns.OwnerUserID+" AS space_owner_id",
+			"uo."+models.UserColumns.Name+" AS space_owner_name",
+			"uo."+models.UserColumns.Email+" AS space_owner_mail",
+			"COALESCE(uc."+models.UserColumns.Name+",'') AS created_by_name",
+			"COALESCE(uc."+models.UserColumns.Email+",'') AS created_by_email",
 		).
-		Order("da.created_at DESC, da.id DESC").
+		Order("da." + models.DocumentAttachmentColumns.CreatedAt + " DESC").
+		Order("da." + models.DocumentAttachmentColumns.ID + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -287,10 +252,10 @@ func (r *gormDocumentAttachmentRepository) ListForAdmin(
 			ContentHash:     strings.TrimSpace(row.ContentHash),
 			PreviewKind:     strings.TrimSpace(row.PreviewKind),
 			Status:          row.Status,
-			DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
+			DeletedAt:       recordtime.ParseNullable(row.DeletedAtRaw),
 			CreatedByUserID: row.CreatedByUserID,
-			CreatedAt:       parseRecordTime(row.CreatedAtRaw),
-			UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+			CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+			UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 		}
 		if !models.IsValidEntityStatus(attachment.Status) {
 			attachment.Status = models.EntityStatusActive
@@ -338,13 +303,27 @@ func (r *gormDocumentAttachmentRepository) FindBlobByHash(
 
 	var row documentAttachmentBlobRow
 	if err := r.db.WithContext(ctx).
-		Table("file_blobs").
+		Model(&models.DocumentAttachmentBlob{}).
 		Select(
-			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
-				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+			models.DocumentAttachmentBlobColumns.ID,
+			models.DocumentAttachmentBlobColumns.BlobID,
+			models.DocumentAttachmentBlobColumns.StorageProvider,
+			models.DocumentAttachmentBlobColumns.ObjectKey,
+			models.DocumentAttachmentBlobColumns.ObjectURL,
+			models.DocumentAttachmentBlobColumns.MimeType,
+			models.DocumentAttachmentBlobColumns.SizeBytes,
+			models.DocumentAttachmentBlobColumns.ContentHashAlgo,
+			models.DocumentAttachmentBlobColumns.ContentHash,
+			models.DocumentAttachmentBlobColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentAttachmentBlobColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentAttachmentBlobColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
 		Where(
-			"storage_provider = ? AND content_hash_algo = ? AND content_hash = ? AND size_bytes = ? AND deleted_at IS NULL",
+			models.DocumentAttachmentBlobColumns.StorageProvider+" = ? AND "+
+				models.DocumentAttachmentBlobColumns.ContentHashAlgo+" = ? AND "+
+				models.DocumentAttachmentBlobColumns.ContentHash+" = ? AND "+
+				models.DocumentAttachmentBlobColumns.SizeBytes+" = ? AND "+
+				models.DocumentAttachmentBlobColumns.DeletedAt+" IS NULL",
 			normalizedStorageProvider,
 			normalizedHashAlgo,
 			normalizedHash,
@@ -373,12 +352,22 @@ func (r *gormDocumentAttachmentRepository) GetBlobByBlobID(
 
 	var row documentAttachmentBlobRow
 	if err := r.db.WithContext(ctx).
-		Table("file_blobs").
+		Model(&models.DocumentAttachmentBlob{}).
 		Select(
-			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
-				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+			models.DocumentAttachmentBlobColumns.ID,
+			models.DocumentAttachmentBlobColumns.BlobID,
+			models.DocumentAttachmentBlobColumns.StorageProvider,
+			models.DocumentAttachmentBlobColumns.ObjectKey,
+			models.DocumentAttachmentBlobColumns.ObjectURL,
+			models.DocumentAttachmentBlobColumns.MimeType,
+			models.DocumentAttachmentBlobColumns.SizeBytes,
+			models.DocumentAttachmentBlobColumns.ContentHashAlgo,
+			models.DocumentAttachmentBlobColumns.ContentHash,
+			models.DocumentAttachmentBlobColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentAttachmentBlobColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentAttachmentBlobColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("blob_id = ?", normalizedBlobID).
+		Where(models.DocumentAttachmentBlobColumns.BlobID+" = ?", normalizedBlobID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -404,13 +393,25 @@ func (r *gormDocumentAttachmentRepository) FindBlobByObject(
 
 	var row documentAttachmentBlobRow
 	if err := r.db.WithContext(ctx).
-		Table("file_blobs").
+		Model(&models.DocumentAttachmentBlob{}).
 		Select(
-			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
-				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+			models.DocumentAttachmentBlobColumns.ID,
+			models.DocumentAttachmentBlobColumns.BlobID,
+			models.DocumentAttachmentBlobColumns.StorageProvider,
+			models.DocumentAttachmentBlobColumns.ObjectKey,
+			models.DocumentAttachmentBlobColumns.ObjectURL,
+			models.DocumentAttachmentBlobColumns.MimeType,
+			models.DocumentAttachmentBlobColumns.SizeBytes,
+			models.DocumentAttachmentBlobColumns.ContentHashAlgo,
+			models.DocumentAttachmentBlobColumns.ContentHash,
+			models.DocumentAttachmentBlobColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentAttachmentBlobColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentAttachmentBlobColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
 		Where(
-			"storage_provider = ? AND object_key = ? AND deleted_at IS NULL",
+			models.DocumentAttachmentBlobColumns.StorageProvider+" = ? AND "+
+				models.DocumentAttachmentBlobColumns.ObjectKey+" = ? AND "+
+				models.DocumentAttachmentBlobColumns.DeletedAt+" IS NULL",
 			normalizedStorageProvider,
 			normalizedObjectKey,
 		).
@@ -438,18 +439,47 @@ func (r *gormDocumentAttachmentRepository) ListOrphanBlobs(
 	}
 
 	rows := make([]documentAttachmentBlobRow, 0, limit)
+	imageAssetReferenceQuery := r.db.WithContext(ctx).
+		Model(&models.DocumentImageAsset{}).
+		Select("1").
+		Where(tableName(models.DocumentImageAsset{})+"."+models.DocumentImageAssetColumns.BlobID+" = "+tableName(models.DocumentAttachmentBlob{})+"."+models.DocumentAttachmentBlobColumns.BlobID).
+		Where(models.DocumentImageAssetColumns.Status+" = ?", documentImageAssetLifecycleStatusActive).
+		Where(models.DocumentImageAssetColumns.DeletedAt + " IS NULL")
+	attachmentReferenceQuery := r.db.WithContext(ctx).
+		Model(&models.DocumentAttachment{}).
+		Select("1").
+		Where(qualifiedColumn("", models.DocumentAttachmentColumns.BlobID) + " = " + tableName(models.DocumentAttachmentBlob{}) + "." + models.DocumentAttachmentBlobColumns.BlobID)
+	documentReferenceQuery := r.db.WithContext(ctx).
+		Model(&models.Document{}).
+		Select("1").
+		Where(qualifiedColumn("", models.DocumentColumns.SourceBlobID) + " = " + tableName(models.DocumentAttachmentBlob{}) + "." + models.DocumentAttachmentBlobColumns.BlobID)
+	fileRevisionReferenceQuery := r.db.WithContext(ctx).
+		Model(&models.DocumentFileRevision{}).
+		Select("1").
+		Where(qualifiedColumn("", models.DocumentFileRevisionColumns.BlobID) + " = " + tableName(models.DocumentAttachmentBlob{}) + "." + models.DocumentAttachmentBlobColumns.BlobID)
 	if err := r.db.WithContext(ctx).
-		Table("file_blobs").
+		Model(&models.DocumentAttachmentBlob{}).
 		Select(
-			"id, blob_id, storage_provider, object_key, object_url, mime_type, size_bytes, "+
-				"content_hash_algo, content_hash, deleted_at, created_at, updated_at",
+			models.DocumentAttachmentBlobColumns.ID,
+			models.DocumentAttachmentBlobColumns.BlobID,
+			models.DocumentAttachmentBlobColumns.StorageProvider,
+			models.DocumentAttachmentBlobColumns.ObjectKey,
+			models.DocumentAttachmentBlobColumns.ObjectURL,
+			models.DocumentAttachmentBlobColumns.MimeType,
+			models.DocumentAttachmentBlobColumns.SizeBytes,
+			models.DocumentAttachmentBlobColumns.ContentHashAlgo,
+			models.DocumentAttachmentBlobColumns.ContentHash,
+			models.DocumentAttachmentBlobColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentAttachmentBlobColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentAttachmentBlobColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("deleted_at IS NULL").
-		Where("NOT EXISTS (SELECT 1 FROM document_attachments WHERE document_attachments.blob_id = file_blobs.blob_id)").
-		Where("NOT EXISTS (SELECT 1 FROM documents WHERE documents.source_blob_id = file_blobs.blob_id)").
-		Where("NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE document_file_revisions.blob_id = file_blobs.blob_id)").
-		Where("NOT EXISTS (SELECT 1 FROM document_image_assets WHERE document_image_assets.blob_id = file_blobs.blob_id AND document_image_assets.status = ? AND document_image_assets.deleted_at IS NULL)", documentImageAssetLifecycleStatusActive).
-		Order("created_at ASC, id ASC").
+		Where(models.DocumentAttachmentBlobColumns.DeletedAt+" IS NULL").
+		Where("NOT EXISTS (?)", attachmentReferenceQuery).
+		Where("NOT EXISTS (?)", documentReferenceQuery).
+		Where("NOT EXISTS (?)", fileRevisionReferenceQuery).
+		Where("NOT EXISTS (?)", imageAssetReferenceQuery).
+		Order(models.DocumentAttachmentBlobColumns.CreatedAt + " ASC").
+		Order(models.DocumentAttachmentBlobColumns.ID + " ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -489,19 +519,25 @@ func (r *gormDocumentAttachmentRepository) HardDeleteBlobIfUnreferenced(
 	}
 
 	deleteResult := r.db.WithContext(ctx).
-		Where(
-			"blob_id = ? AND "+
-				"NOT EXISTS (SELECT 1 FROM document_attachments WHERE blob_id = ?) AND "+
-				"NOT EXISTS (SELECT 1 FROM documents WHERE source_blob_id = ?) AND "+
-				"NOT EXISTS (SELECT 1 FROM document_file_revisions WHERE blob_id = ?) AND "+
-				"NOT EXISTS (SELECT 1 FROM document_image_assets WHERE blob_id = ? AND status = ? AND deleted_at IS NULL)",
-			normalizedBlobID,
-			normalizedBlobID,
-			normalizedBlobID,
-			normalizedBlobID,
-			normalizedBlobID,
-			documentImageAssetLifecycleStatusActive,
-		).
+		Where(models.DocumentAttachmentBlobColumns.BlobID+" = ?", normalizedBlobID).
+		Where("NOT EXISTS (?)", r.db.WithContext(ctx).
+			Model(&models.DocumentAttachment{}).
+			Select("1").
+			Where(qualifiedColumn("", models.DocumentAttachmentColumns.BlobID)+" = "+tableName(models.DocumentAttachmentBlob{})+"."+models.DocumentAttachmentBlobColumns.BlobID)).
+		Where("NOT EXISTS (?)", r.db.WithContext(ctx).
+			Model(&models.Document{}).
+			Select("1").
+			Where(qualifiedColumn("", models.DocumentColumns.SourceBlobID)+" = "+tableName(models.DocumentAttachmentBlob{})+"."+models.DocumentAttachmentBlobColumns.BlobID)).
+		Where("NOT EXISTS (?)", r.db.WithContext(ctx).
+			Model(&models.DocumentFileRevision{}).
+			Select("1").
+			Where(qualifiedColumn("", models.DocumentFileRevisionColumns.BlobID)+" = "+tableName(models.DocumentAttachmentBlob{})+"."+models.DocumentAttachmentBlobColumns.BlobID)).
+		Where("NOT EXISTS (?)", r.db.WithContext(ctx).
+			Model(&models.DocumentImageAsset{}).
+			Select("1").
+			Where(qualifiedColumn("", models.DocumentImageAssetColumns.BlobID)+" = "+tableName(models.DocumentAttachmentBlob{})+"."+models.DocumentAttachmentBlobColumns.BlobID).
+			Where(qualifiedColumn("", models.DocumentImageAssetColumns.Status)+" = ?", documentImageAssetLifecycleStatusActive).
+			Where(qualifiedColumn("", models.DocumentImageAssetColumns.DeletedAt)+" IS NULL")).
 		Delete(&models.DocumentAttachmentBlob{})
 	if deleteResult.Error != nil {
 		return false, deleteResult.Error
@@ -522,32 +558,53 @@ func (r *gormDocumentAttachmentRepository) CountActiveReferencesByBlobID(
 		return 0, nil
 	}
 
-	type countRow struct {
-		Total int64 `gorm:"column:total"`
+	countQuery := func(query *gorm.DB) (int64, error) {
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return 0, err
+		}
+		return total, nil
 	}
 
-	var row countRow
-	if err := r.db.WithContext(ctx).
-		Raw(
-			"SELECT COALESCE(SUM(ref_count), 0) AS total FROM ("+
-				"SELECT COUNT(1) AS ref_count FROM document_attachments WHERE blob_id = ? "+
-				"UNION ALL "+
-				"SELECT COUNT(1) AS ref_count FROM documents WHERE source_blob_id = ? "+
-				"UNION ALL "+
-				"SELECT COUNT(1) AS ref_count FROM document_file_revisions WHERE blob_id = ? "+
-				"UNION ALL "+
-				"SELECT COUNT(1) AS ref_count FROM document_image_assets WHERE blob_id = ? AND status = ? AND deleted_at IS NULL"+
-				") AS ref_counts",
-			normalizedBlobID,
-			normalizedBlobID,
-			normalizedBlobID,
-			normalizedBlobID,
-			documentImageAssetLifecycleStatusActive,
-		).
-		Take(&row).Error; err != nil {
+	attachmentCount, err := countQuery(
+		r.db.WithContext(ctx).
+			Model(&models.DocumentAttachment{}).
+			Where(qualifiedColumn("", models.DocumentAttachmentColumns.BlobID)+" = ?", normalizedBlobID),
+	)
+	if err != nil {
 		return 0, err
 	}
-	return row.Total, nil
+
+	documentCount, err := countQuery(
+		r.db.WithContext(ctx).
+			Model(&models.Document{}).
+			Where(qualifiedColumn("", models.DocumentColumns.SourceBlobID)+" = ?", normalizedBlobID),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	revisionCount, err := countQuery(
+		r.db.WithContext(ctx).
+			Model(&models.DocumentFileRevision{}).
+			Where(qualifiedColumn("", models.DocumentFileRevisionColumns.BlobID)+" = ?", normalizedBlobID),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	imageAssetCount, err := countQuery(
+		r.db.WithContext(ctx).
+			Model(&models.DocumentImageAsset{}).
+			Where(qualifiedColumn("", models.DocumentImageAssetColumns.BlobID)+" = ?", normalizedBlobID).
+			Where(qualifiedColumn("", models.DocumentImageAssetColumns.Status)+" = ?", documentImageAssetLifecycleStatusActive).
+			Where(qualifiedColumn("", models.DocumentImageAssetColumns.DeletedAt) + " IS NULL"),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	return attachmentCount + documentCount + revisionCount + imageAssetCount, nil
 }
 
 func (r *gormDocumentAttachmentRepository) ListActiveReferencesByBlobID(
@@ -571,32 +628,25 @@ func (r *gormDocumentAttachmentRepository) ListActiveReferencesByBlobID(
 		limit = 200
 	}
 
-	type referenceRow struct {
-		AttachmentID  string              `gorm:"column:attachment_id"`
-		DocumentID    string              `gorm:"column:document_id"`
-		DocumentTitle string              `gorm:"column:document_title"`
-		SpaceID       string              `gorm:"column:space_id"`
-		SpaceName     string              `gorm:"column:space_name"`
-		FileName      string              `gorm:"column:file_name"`
-		Status        models.EntityStatus `gorm:"column:status"`
-	}
-
-	rows := make([]referenceRow, 0, limit)
+	rows := make([]documentAttachmentReferenceRow, 0, limit)
 	if err := r.db.WithContext(ctx).
-		Table("document_attachments AS da").
+		Table(tableWithAlias(models.DocumentAttachment{}, "da")).
 		Select(
-			"da.attachment_id",
-			"da.document_id",
-			"d.title AS document_title",
-			"da.space_id",
-			"s.name AS space_name",
-			"da.file_name",
-			"da.status",
+			"da."+models.DocumentAttachmentColumns.AttachmentID+" AS AttachmentID",
+			"da."+models.DocumentAttachmentColumns.DocumentID+" AS DocumentID",
+			"d."+models.DocumentColumns.Title+" AS DocumentTitle",
+			"da."+models.DocumentAttachmentColumns.SpaceID+" AS SpaceID",
+			"s."+models.SpaceColumns.Name+" AS SpaceName",
+			"da."+models.DocumentAttachmentColumns.FileName+" AS FileName",
+			"da."+models.DocumentAttachmentColumns.Status+" AS Status",
 		).
-		Joins("JOIN documents AS d ON d.document_id = da.document_id").
-		Joins("JOIN spaces AS s ON s.space_id = da.space_id").
-		Where("da.blob_id = ? AND da.status = ? AND da.deleted_at IS NULL", normalizedBlobID, models.EntityStatusActive).
-		Order("da.created_at ASC, da.id ASC").
+		Joins("JOIN "+tableName(models.Document{})+" AS d ON d."+models.DocumentColumns.DocumentID+" = da."+models.DocumentAttachmentColumns.DocumentID).
+		Joins("JOIN "+tableName(models.Space{})+" AS s ON s."+models.SpaceColumns.SpaceID+" = da."+models.DocumentAttachmentColumns.SpaceID).
+		Where("da."+models.DocumentAttachmentColumns.BlobID+" = ?", normalizedBlobID).
+		Where("da."+models.DocumentAttachmentColumns.Status+" = ?", models.EntityStatusActive).
+		Where("da." + models.DocumentAttachmentColumns.DeletedAt + " IS NULL").
+		Order("da." + models.DocumentAttachmentColumns.CreatedAt + " ASC").
+		Order("da." + models.DocumentAttachmentColumns.ID + " ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -636,12 +686,29 @@ func (r *gormDocumentAttachmentRepository) GetByAttachmentID(
 
 	var row documentAttachmentRow
 	if err := r.db.WithContext(ctx).
-		Table("document_attachments").
+		Model(&models.DocumentAttachment{}).
 		Select(
-			"id, attachment_id, blob_id, document_id, space_id, storage_provider, file_name, object_key, object_url, mime_type, "+
-				"size_bytes, content_hash_algo, content_hash, preview_kind, status, deleted_at, created_by_user_id, created_at, updated_at",
+			models.DocumentAttachmentColumns.ID,
+			models.DocumentAttachmentColumns.AttachmentID,
+			models.DocumentAttachmentColumns.BlobID,
+			models.DocumentAttachmentColumns.DocumentID,
+			models.DocumentAttachmentColumns.SpaceID,
+			models.DocumentAttachmentColumns.StorageProvider,
+			models.DocumentAttachmentColumns.FileName,
+			models.DocumentAttachmentColumns.ObjectKey,
+			models.DocumentAttachmentColumns.ObjectURL,
+			models.DocumentAttachmentColumns.MimeType,
+			models.DocumentAttachmentColumns.SizeBytes,
+			models.DocumentAttachmentColumns.ContentHashAlgo,
+			models.DocumentAttachmentColumns.ContentHash,
+			models.DocumentAttachmentColumns.PreviewKind,
+			models.DocumentAttachmentColumns.Status,
+			models.DocumentAttachmentColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentAttachmentColumns.CreatedByUserID,
+			models.DocumentAttachmentColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentAttachmentColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("attachment_id = ?", normalizedAttachmentID).
+		Where(models.DocumentAttachmentColumns.AttachmentID+" = ?", normalizedAttachmentID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -671,11 +738,12 @@ func (r *gormDocumentAttachmentRepository) SoftDelete(
 
 	updateResult := r.db.WithContext(ctx).
 		Model(&models.DocumentAttachment{}).
-		Where("attachment_id = ? AND status <> ?", normalizedAttachmentID, models.EntityStatusDeleted).
+		Where(models.DocumentAttachmentColumns.AttachmentID+" = ?", normalizedAttachmentID).
+		Where(models.DocumentAttachmentColumns.Status+" <> ?", models.EntityStatusDeleted).
 		Updates(map[string]any{
-			"status":     models.EntityStatusDeleted,
-			"deleted_at": deletedAt,
-			"updated_at": deletedAt,
+			models.DocumentAttachmentColumns.Status:    models.EntityStatusDeleted,
+			models.DocumentAttachmentColumns.DeletedAt: deletedAt,
+			models.DocumentAttachmentColumns.UpdatedAt: deletedAt,
 		})
 	if updateResult.Error != nil {
 		return false, updateResult.Error
@@ -697,7 +765,7 @@ func (r *gormDocumentAttachmentRepository) HardDelete(
 	}
 
 	deleteResult := r.db.WithContext(ctx).
-		Where("attachment_id = ?", normalizedAttachmentID).
+		Where(models.DocumentAttachmentColumns.AttachmentID+" = ?", normalizedAttachmentID).
 		Delete(&models.DocumentAttachment{})
 	if deleteResult.Error != nil {
 		return false, deleteResult.Error
@@ -722,10 +790,10 @@ func mapDocumentAttachmentRow(row documentAttachmentRow) models.DocumentAttachme
 		ContentHash:     strings.TrimSpace(row.ContentHash),
 		PreviewKind:     strings.TrimSpace(row.PreviewKind),
 		Status:          models.EntityStatus(strings.TrimSpace(row.Status)),
-		DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
+		DeletedAt:       recordtime.ParseNullable(row.DeletedAtRaw),
 		CreatedByUserID: row.CreatedByUserID,
-		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+		CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 	}
 }
 
@@ -740,9 +808,9 @@ func mapDocumentAttachmentBlobRow(row documentAttachmentBlobRow) models.Document
 		SizeBytes:       row.SizeBytes,
 		ContentHashAlgo: strings.TrimSpace(row.ContentHashAlgo),
 		ContentHash:     strings.TrimSpace(row.ContentHash),
-		DeletedAt:       parseNullableRecordTime(row.DeletedAtRaw),
-		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+		DeletedAt:       recordtime.ParseNullable(row.DeletedAtRaw),
+		CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 	}
 }
 

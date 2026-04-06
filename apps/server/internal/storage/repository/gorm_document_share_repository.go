@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -14,64 +15,11 @@ type gormDocumentShareRepository struct {
 	db *gorm.DB
 }
 
-type documentShareRow struct {
-	ID              int64   `gorm:"column:id"`
-	ShareID         string  `gorm:"column:share_id"`
-	DocumentID      string  `gorm:"column:document_id"`
-	SpaceID         string  `gorm:"column:space_id"`
-	Mode            string  `gorm:"column:mode"`
-	PasswordHash    *string `gorm:"column:password_hash"`
-	PasswordHint    string  `gorm:"column:password_hint"`
-	ExpiresAtRaw    *string `gorm:"column:expires_at"`
-	DisabledAtRaw   *string `gorm:"column:disabled_at"`
-	AccessVersion   int     `gorm:"column:access_version"`
-	CreatedByUserID *string `gorm:"column:created_by_user_id"`
-	UpdatedByUserID *string `gorm:"column:updated_by_user_id"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-}
+type documentShareRow = documentShareRowDB
 
-type documentShareAccessRow struct {
-	ShareID          string  `gorm:"column:share_id"`
-	DocumentID       string  `gorm:"column:document_id"`
-	SpaceID          string  `gorm:"column:space_id"`
-	DocumentFormat   string  `gorm:"column:document_format"`
-	Mode             string  `gorm:"column:mode"`
-	PasswordHash     *string `gorm:"column:password_hash"`
-	PasswordHint     string  `gorm:"column:password_hint"`
-	ExpiresAtRaw     *string `gorm:"column:expires_at"`
-	DisabledAtRaw    *string `gorm:"column:disabled_at"`
-	AccessVersion    int     `gorm:"column:access_version"`
-	DocumentRouteKey string  `gorm:"column:document_route_key"`
-}
+type documentShareAccessRow = documentShareAccessRowDB
 
-type adminDocumentShareListRow struct {
-	ID              int64   `gorm:"column:id"`
-	ShareID         string  `gorm:"column:share_id"`
-	DocumentID      string  `gorm:"column:document_id"`
-	SpaceID         string  `gorm:"column:space_id"`
-	Mode            string  `gorm:"column:mode"`
-	PasswordHash    *string `gorm:"column:password_hash"`
-	PasswordHint    string  `gorm:"column:password_hint"`
-	ExpiresAtRaw    *string `gorm:"column:expires_at"`
-	DisabledAtRaw   *string `gorm:"column:disabled_at"`
-	AccessVersion   int     `gorm:"column:access_version"`
-	CreatedByUserID *string `gorm:"column:created_by_user_id"`
-	UpdatedByUserID *string `gorm:"column:updated_by_user_id"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-
-	DocumentRouteKey string `gorm:"column:document_route_key"`
-	DocumentTitle    string `gorm:"column:document_title"`
-	DocumentFormat   string `gorm:"column:document_format"`
-	SpaceName        string `gorm:"column:space_name"`
-	SpaceOwnerID     string `gorm:"column:space_owner_user_id"`
-	SpaceOwnerName   string `gorm:"column:space_owner_name"`
-	SpaceOwnerEmail  string `gorm:"column:space_owner_email"`
-	CreatedByName    string `gorm:"column:created_by_name"`
-	CreatedByEmail   string `gorm:"column:created_by_email"`
-	IsExpired        int    `gorm:"column:is_expired"`
-}
+type adminDocumentShareListRow = adminDocumentShareListRowDB
 
 // NewGormDocumentShareRepository 创建基于 GORM 的文档分享仓储实现。
 func NewGormDocumentShareRepository(db *gorm.DB) DocumentShareRepository {
@@ -125,18 +73,18 @@ func (r *gormDocumentShareRepository) Update(
 		now = share.UpdatedAt.UTC()
 	}
 	updates := map[string]any{
-		"mode":               mode,
-		"password_hash":      share.PasswordHash,
-		"password_hint":      strings.TrimSpace(share.PasswordHint),
-		"expires_at":         share.ExpiresAt,
-		"disabled_at":        share.DisabledAt,
-		"access_version":     accessVersion,
-		"updated_by_user_id": trimOptionalString(share.UpdatedByUserID),
-		"updated_at":         now,
+		models.DocumentShareColumns.Mode:            mode,
+		models.DocumentShareColumns.PasswordHash:    share.PasswordHash,
+		models.DocumentShareColumns.PasswordHint:    strings.TrimSpace(share.PasswordHint),
+		models.DocumentShareColumns.ExpiresAt:       share.ExpiresAt,
+		models.DocumentShareColumns.DisabledAt:      share.DisabledAt,
+		models.DocumentShareColumns.AccessVersion:   accessVersion,
+		models.DocumentShareColumns.UpdatedByUserID: trimOptionalString(share.UpdatedByUserID),
+		models.DocumentShareColumns.UpdatedAt:       now,
 	}
 	result := r.db.WithContext(ctx).
-		Table("document_shares").
-		Where("share_id = ?", shareID).
+		Model(&models.DocumentShare{}).
+		Where(models.DocumentShareColumns.ShareID+" = ?", shareID).
 		Updates(updates)
 	if result.Error != nil {
 		return false, result.Error
@@ -158,12 +106,24 @@ func (r *gormDocumentShareRepository) GetByDocumentID(
 
 	var row documentShareRow
 	if err := r.db.WithContext(ctx).
-		Table("document_shares").
+		Model(&models.DocumentShare{}).
 		Select(
-			"id, share_id, document_id, space_id, mode, password_hash, password_hint, "+
-				"expires_at, disabled_at, access_version, created_by_user_id, updated_by_user_id, created_at, updated_at",
+			models.DocumentShareColumns.ID,
+			models.DocumentShareColumns.ShareID,
+			models.DocumentShareColumns.DocumentID,
+			models.DocumentShareColumns.SpaceID,
+			models.DocumentShareColumns.Mode,
+			models.DocumentShareColumns.PasswordHash,
+			models.DocumentShareColumns.PasswordHint,
+			models.DocumentShareColumns.ExpiresAt+" AS ExpiresAtRaw",
+			models.DocumentShareColumns.DisabledAt+" AS DisabledAtRaw",
+			models.DocumentShareColumns.AccessVersion,
+			models.DocumentShareColumns.CreatedByUserID,
+			models.DocumentShareColumns.UpdatedByUserID,
+			models.DocumentShareColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentShareColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("document_id = ?", normalizedDocumentID).
+		Where(models.DocumentShareColumns.DocumentID+" = ?", normalizedDocumentID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -185,12 +145,24 @@ func (r *gormDocumentShareRepository) GetByShareID(
 
 	var row documentShareRow
 	if err := r.db.WithContext(ctx).
-		Table("document_shares").
+		Model(&models.DocumentShare{}).
 		Select(
-			"id, share_id, document_id, space_id, mode, password_hash, password_hint, "+
-				"expires_at, disabled_at, access_version, created_by_user_id, updated_by_user_id, created_at, updated_at",
+			models.DocumentShareColumns.ID,
+			models.DocumentShareColumns.ShareID,
+			models.DocumentShareColumns.DocumentID,
+			models.DocumentShareColumns.SpaceID,
+			models.DocumentShareColumns.Mode,
+			models.DocumentShareColumns.PasswordHash,
+			models.DocumentShareColumns.PasswordHint,
+			models.DocumentShareColumns.ExpiresAt+" AS ExpiresAtRaw",
+			models.DocumentShareColumns.DisabledAt+" AS DisabledAtRaw",
+			models.DocumentShareColumns.AccessVersion,
+			models.DocumentShareColumns.CreatedByUserID,
+			models.DocumentShareColumns.UpdatedByUserID,
+			models.DocumentShareColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentShareColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("share_id = ?", normalizedShareID).
+		Where(models.DocumentShareColumns.ShareID+" = ?", normalizedShareID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -214,32 +186,54 @@ func (r *gormDocumentShareRepository) ResolveBySpaceAndDocKey(
 
 	now := time.Now().UTC()
 	docKeyLower := strings.ToLower(normalizedDocKey)
+	shareAlias := "ds"
+	documentAlias := "d"
+	nodeAlias := "n"
+	spaceAlias := "s"
 	var row documentShareAccessRow
 	err := r.db.WithContext(ctx).
-		Table("document_shares AS ds").
+		Table(tableWithAlias(models.DocumentShare{}, shareAlias)).
 		Select(
-			"ds.share_id",
-			"ds.document_id",
-			"ds.space_id",
-			"d.format AS document_format",
-			"ds.mode",
-			"ds.password_hash",
-			"ds.password_hint",
-			"ds.expires_at",
-			"ds.disabled_at",
-			"ds.access_version",
-			"COALESCE(NULLIF(TRIM(n.reader_slug), ''), d.document_id) AS document_route_key",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.ShareID)+" AS share_id",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.DocumentID)+" AS document_id",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.SpaceID)+" AS space_id",
+			qualifiedColumn(documentAlias, models.DocumentColumns.Format)+" AS document_format",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.Mode)+" AS mode",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.PasswordHash)+" AS password_hash",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.PasswordHint)+" AS password_hint",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" AS expires_at_raw",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.DisabledAt)+" AS disabled_at_raw",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.AccessVersion)+" AS access_version",
+			"COALESCE(NULLIF(TRIM("+qualifiedColumn(nodeAlias, models.NodeColumns.ReaderSlug)+"), ''), "+qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+") AS document_route_key",
 		).
-		Joins("JOIN documents AS d ON d.document_id = ds.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("ds.space_id = ?", normalizedSpaceID).
-		Where("n.space_id = ?", normalizedSpaceID).
-		Where("(d.document_id = ? OR d.node_id = ? OR n.reader_slug = ?)", normalizedDocKey, normalizedDocKey, docKeyLower).
-		Where("ds.disabled_at IS NULL").
-		Where("(ds.expires_at IS NULL OR ds.expires_at > ?)", now).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
+		Joins(
+			"JOIN "+tableName(models.Document{})+" AS "+documentAlias+
+				" ON "+qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+" = "+qualifiedColumn(shareAlias, models.DocumentShareColumns.DocumentID),
+		).
+		Joins(
+			"JOIN "+tableName(models.Node{})+" AS "+nodeAlias+
+				" ON "+qualifiedColumn(nodeAlias, models.NodeColumns.NodeID)+" = "+qualifiedColumn(documentAlias, models.DocumentColumns.NodeID),
+		).
+		Joins(
+			"JOIN "+tableName(models.Space{})+" AS "+spaceAlias+
+				" ON "+qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)+" = "+qualifiedColumn(nodeAlias, models.NodeColumns.SpaceID),
+		).
+		Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.SpaceID)+" = ?", normalizedSpaceID).
+		Where(qualifiedColumn(nodeAlias, models.NodeColumns.SpaceID)+" = ?", normalizedSpaceID).
+		Where(
+			"("+qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+" = ? OR "+
+				qualifiedColumn(documentAlias, models.DocumentColumns.NodeID)+" = ? OR "+
+				qualifiedColumn(nodeAlias, models.NodeColumns.ReaderSlug)+" = ?)",
+			normalizedDocKey,
+			normalizedDocKey,
+			docKeyLower,
+		).
+		Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.DisabledAt)+" IS NULL").
+		Where("("+qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" IS NULL OR "+qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" > ?)", now).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.DeletedAt) + " IS NULL").
 		Take(&row).Error
 	if err != nil {
 		return nil, err
@@ -261,8 +255,8 @@ func (r *gormDocumentShareRepository) ResolveBySpaceAndDocKey(
 		Mode:             mode,
 		PasswordHash:     trimOptionalString(row.PasswordHash),
 		PasswordHint:     strings.TrimSpace(row.PasswordHint),
-		ExpiresAt:        parseNullableRecordTime(row.ExpiresAtRaw),
-		DisabledAt:       parseNullableRecordTime(row.DisabledAtRaw),
+		ExpiresAt:        recordtime.ParseNullable(row.ExpiresAtRaw),
+		DisabledAt:       recordtime.ParseNullable(row.DisabledAtRaw),
 		AccessVersion:    accessVersion,
 		DocumentRouteKey: strings.TrimSpace(row.DocumentRouteKey),
 	}, nil
@@ -283,45 +277,68 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 	mode := normalizeDocumentShareMode(params.Mode)
 	now := time.Now().UTC()
 	expiredFilter := normalizeDocumentShareExpiredFilter(params.Expired)
+	shareAlias := "ds"
+	documentAlias := "d"
+	nodeAlias := "n"
+	spaceAlias := "s"
+	ownerAlias := "uo"
+	creatorAlias := "uc"
 
 	applyCommonFilters := func(query *gorm.DB) *gorm.DB {
-		query = query.Where("ds.disabled_at IS NULL")
-		query = query.Where("d.deleted_at IS NULL")
-		query = query.Where("s.deleted_at IS NULL")
+		query = query.Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.DisabledAt) + " IS NULL")
+		query = query.Where(qualifiedColumn(documentAlias, models.DocumentColumns.DeletedAt) + " IS NULL")
+		query = query.Where(qualifiedColumn(spaceAlias, models.SpaceColumns.DeletedAt) + " IS NULL")
 		if params.RestrictToScopes {
+			spaceAdminScopeQuery := r.db.WithContext(ctx).
+				Model(&models.SpaceAdminScope{}).
+				Select("1").
+				Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)).
+				Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", actorUserID)
 			query = query.Where(
-				"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+				"("+qualifiedColumn(spaceAlias, models.SpaceColumns.OwnerUserID)+" = ? OR EXISTS (?))",
 				actorUserID,
-				actorUserID,
+				spaceAdminScopeQuery,
 			)
 		}
 		if view == DocumentShareAdminViewMine {
-			query = query.Where("ds.created_by_user_id = ?", actorUserID)
+			query = query.Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.CreatedByUserID)+" = ?", actorUserID)
 		}
 		if keyword != "" {
-			query = query.Where("d.title LIKE ?", "%"+keyword+"%")
+			query = query.Where(qualifiedColumn(documentAlias, models.DocumentColumns.Title)+" LIKE ?", "%"+keyword+"%")
 		}
 		if spaceID != "" {
-			query = query.Where("s.space_id = ?", spaceID)
+			query = query.Where(qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)+" = ?", spaceID)
 		}
 		if mode != "" {
-			query = query.Where("ds.mode = ?", mode)
+			query = query.Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.Mode)+" = ?", mode)
 		}
 		switch expiredFilter {
 		case "yes":
-			query = query.Where("ds.expires_at IS NOT NULL AND ds.expires_at <= ?", now)
+			query = query.
+				Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" IS NOT NULL").
+				Where(qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" <= ?", now)
 		case "no":
-			query = query.Where("(ds.expires_at IS NULL OR ds.expires_at > ?)", now)
+			query = query.Where("("+qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" IS NULL OR "+
+				qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" > ?)", now)
 		}
 		return query
 	}
 
 	var total int64
 	countQuery := r.db.WithContext(ctx).
-		Table("document_shares AS ds").
-		Joins("JOIN documents AS d ON d.document_id = ds.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id")
+		Table(tableWithAlias(models.DocumentShare{}, shareAlias)).
+		Joins(
+			"JOIN " + tableName(models.Document{}) + " AS " + documentAlias +
+				" ON " + qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID) + " = " + qualifiedColumn(shareAlias, models.DocumentShareColumns.DocumentID),
+		).
+		Joins(
+			"JOIN " + tableName(models.Node{}) + " AS " + nodeAlias +
+				" ON " + qualifiedColumn(nodeAlias, models.NodeColumns.NodeID) + " = " + qualifiedColumn(documentAlias, models.DocumentColumns.NodeID),
+		).
+		Joins(
+			"JOIN " + tableName(models.Space{}) + " AS " + spaceAlias +
+				" ON " + qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID) + " = " + qualifiedColumn(nodeAlias, models.NodeColumns.SpaceID),
+		)
 	countQuery = applyCommonFilters(countQuery)
 	if err := countQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -337,27 +354,59 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 	}
 
 	listQuery := r.db.WithContext(ctx).
-		Table("document_shares AS ds").
-		Joins("JOIN documents AS d ON d.document_id = ds.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Joins("JOIN users AS uo ON uo.user_id = s.owner_user_id").
-		Joins("LEFT JOIN users AS uc ON uc.user_id = ds.created_by_user_id")
+		Table(tableWithAlias(models.DocumentShare{}, shareAlias)).
+		Joins(
+			"JOIN " + tableName(models.Document{}) + " AS " + documentAlias +
+				" ON " + qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID) + " = " + qualifiedColumn(shareAlias, models.DocumentShareColumns.DocumentID),
+		).
+		Joins(
+			"JOIN " + tableName(models.Node{}) + " AS " + nodeAlias +
+				" ON " + qualifiedColumn(nodeAlias, models.NodeColumns.NodeID) + " = " + qualifiedColumn(documentAlias, models.DocumentColumns.NodeID),
+		).
+		Joins(
+			"JOIN " + tableName(models.Space{}) + " AS " + spaceAlias +
+				" ON " + qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID) + " = " + qualifiedColumn(nodeAlias, models.NodeColumns.SpaceID),
+		).
+		Joins(
+			"JOIN " + tableName(models.User{}) + " AS " + ownerAlias +
+				" ON " + qualifiedColumn(ownerAlias, models.UserColumns.UserID) + " = " + qualifiedColumn(spaceAlias, models.SpaceColumns.OwnerUserID),
+		).
+		Joins(
+			"LEFT JOIN " + tableName(models.User{}) + " AS " + creatorAlias +
+				" ON " + qualifiedColumn(creatorAlias, models.UserColumns.UserID) + " = " + qualifiedColumn(shareAlias, models.DocumentShareColumns.CreatedByUserID),
+		)
 	listQuery = applyCommonFilters(listQuery)
 
 	rows := make([]adminDocumentShareListRow, 0, limit)
 	if err := listQuery.Session(&gorm.Session{}).
 		Select(
-			"ds.id, ds.share_id, ds.document_id, ds.space_id, ds.mode, ds.password_hash, ds.password_hint, "+
-				"ds.expires_at, ds.disabled_at, ds.access_version, ds.created_by_user_id, ds.updated_by_user_id, "+
-				"ds.created_at, ds.updated_at, COALESCE(NULLIF(TRIM(n.reader_slug), ''), d.document_id) AS document_route_key, "+
-				"d.title AS document_title, d.format AS document_format, s.name AS space_name, s.owner_user_id AS space_owner_user_id, "+
-				"uo.name AS space_owner_name, uo.email AS space_owner_email, "+
-				"COALESCE(uc.name, '') AS created_by_name, COALESCE(uc.email, '') AS created_by_email, "+
-				"CASE WHEN ds.expires_at IS NOT NULL AND ds.expires_at <= ? THEN 1 ELSE 0 END AS is_expired",
-			now,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.ID)+" AS "+models.DocumentShareColumns.ID,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.ShareID)+" AS "+models.DocumentShareColumns.ShareID,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.DocumentID)+" AS "+models.DocumentShareColumns.DocumentID,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.SpaceID)+" AS "+models.DocumentShareColumns.SpaceID,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.Mode)+" AS "+models.DocumentShareColumns.Mode,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.PasswordHash)+" AS "+models.DocumentShareColumns.PasswordHash,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.PasswordHint)+" AS "+models.DocumentShareColumns.PasswordHint,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.ExpiresAt)+" AS expires_at_raw",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.DisabledAt)+" AS disabled_at_raw",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.AccessVersion)+" AS "+models.DocumentShareColumns.AccessVersion,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.CreatedByUserID)+" AS "+models.DocumentShareColumns.CreatedByUserID,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.UpdatedByUserID)+" AS "+models.DocumentShareColumns.UpdatedByUserID,
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.CreatedAt)+" AS created_at_raw",
+			qualifiedColumn(shareAlias, models.DocumentShareColumns.UpdatedAt)+" AS updated_at_raw",
+			"COALESCE(NULLIF(TRIM("+qualifiedColumn(nodeAlias, models.NodeColumns.ReaderSlug)+"), ''), "+
+				qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+") AS document_route_key",
+			qualifiedColumn(documentAlias, models.DocumentColumns.Title)+" AS document_title",
+			qualifiedColumn(documentAlias, models.DocumentColumns.Format)+" AS document_format",
+			qualifiedColumn(spaceAlias, models.SpaceColumns.Name)+" AS space_name",
+			qualifiedColumn(spaceAlias, models.SpaceColumns.OwnerUserID)+" AS space_owner_id",
+			qualifiedColumn(ownerAlias, models.UserColumns.Name)+" AS space_owner_name",
+			qualifiedColumn(ownerAlias, models.UserColumns.Email)+" AS space_owner_email",
+			"COALESCE("+qualifiedColumn(creatorAlias, models.UserColumns.Name)+", '') AS created_by_name",
+			"COALESCE("+qualifiedColumn(creatorAlias, models.UserColumns.Email)+", '') AS created_by_email",
 		).
-		Order("ds.updated_at DESC, ds.id DESC").
+		Order(qualifiedColumn(shareAlias, models.DocumentShareColumns.UpdatedAt) + " DESC").
+		Order(qualifiedColumn(shareAlias, models.DocumentShareColumns.ID) + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -382,6 +431,7 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 			CreatedAtRaw:    row.CreatedAtRaw,
 			UpdatedAtRaw:    row.UpdatedAtRaw,
 		})
+		expiresAt := recordtime.ParseNullable(row.ExpiresAtRaw)
 		result = append(result, AdminDocumentShareListRecord{
 			Share:            share,
 			DocumentRouteKey: strings.TrimSpace(row.DocumentRouteKey),
@@ -393,7 +443,7 @@ func (r *gormDocumentShareRepository) ListForAdmin(
 			SpaceOwnerEmail:  strings.TrimSpace(row.SpaceOwnerEmail),
 			CreatedByName:    strings.TrimSpace(row.CreatedByName),
 			CreatedByEmail:   strings.TrimSpace(row.CreatedByEmail),
-			IsExpired:        row.IsExpired > 0,
+			IsExpired:        expiresAt != nil && !expiresAt.After(now),
 		})
 	}
 	return result, total, nil
@@ -416,13 +466,13 @@ func mapDocumentShareRow(row documentShareRow) models.DocumentShare {
 		Mode:            mode,
 		PasswordHash:    trimOptionalString(row.PasswordHash),
 		PasswordHint:    strings.TrimSpace(row.PasswordHint),
-		ExpiresAt:       parseNullableRecordTime(row.ExpiresAtRaw),
-		DisabledAt:      parseNullableRecordTime(row.DisabledAtRaw),
+		ExpiresAt:       recordtime.ParseNullable(row.ExpiresAtRaw),
+		DisabledAt:      recordtime.ParseNullable(row.DisabledAtRaw),
 		AccessVersion:   accessVersion,
 		CreatedByUserID: trimOptionalString(row.CreatedByUserID),
 		UpdatedByUserID: trimOptionalString(row.UpdatedByUserID),
-		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+		CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -16,22 +17,9 @@ type gormSearchIndexJobRepository struct {
 	db *gorm.DB
 }
 
-type searchIndexJobRow struct {
-	ID           int64   `gorm:"column:id"`
-	JobID        string  `gorm:"column:job_id"`
-	Provider     string  `gorm:"column:provider"`
-	JobType      string  `gorm:"column:job_type"`
-	DedupeKey    string  `gorm:"column:dedupe_key"`
-	PayloadJSON  string  `gorm:"column:payload_json"`
-	Status       string  `gorm:"column:status"`
-	Priority     int     `gorm:"column:priority"`
-	RetryCount   int     `gorm:"column:retry_count"`
-	NextRunAtRaw string  `gorm:"column:next_run_at"`
-	StartedAtRaw *string `gorm:"column:started_at"`
-	LastError    string  `gorm:"column:last_error"`
-	CreatedAtRaw string  `gorm:"column:created_at"`
-	UpdatedAtRaw string  `gorm:"column:updated_at"`
-}
+type searchIndexJobRow = searchIndexJobRowDB
+
+type searchIndexJobIDRow = searchIndexJobIDRowDB
 
 // NewGormSearchIndexJobRepository 创建检索索引任务仓储实现。
 func NewGormSearchIndexJobRepository(db *gorm.DB) SearchIndexJobRepository {
@@ -88,14 +76,14 @@ func (r *gormSearchIndexJobRepository) ClaimRunnableJobs(
 
 	claimed := make([]models.SearchIndexJob, 0, limit)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		type idRow struct {
-			ID int64 `gorm:"column:id"`
-		}
-		idRows := make([]idRow, 0, limit)
-		if err := tx.Table("search_index_jobs").
-			Select("id").
-			Where("status IN ? AND next_run_at <= ?", claimableStatuses, now).
-			Order("priority ASC, next_run_at ASC, id ASC").
+		idRows := make([]searchIndexJobIDRow, 0, limit)
+		if err := tx.Model(&models.SearchIndexJob{}).
+			Select(models.SearchIndexJobColumns.ID).
+			Where(models.SearchIndexJobColumns.Status+" IN ?", claimableStatuses).
+			Where(models.SearchIndexJobColumns.NextRunAt+" <= ?", now).
+			Order(models.SearchIndexJobColumns.Priority + " ASC").
+			Order(models.SearchIndexJobColumns.NextRunAt + " ASC").
+			Order(models.SearchIndexJobColumns.ID + " ASC").
 			Limit(limit).
 			Scan(&idRows).Error; err != nil {
 			return err
@@ -115,36 +103,40 @@ func (r *gormSearchIndexJobRepository) ClaimRunnableJobs(
 			return nil
 		}
 
-		if err := tx.Table("search_index_jobs").
-			Where("id IN ? AND status IN ?", candidateIDs, claimableStatuses).
+		if err := tx.Model(&models.SearchIndexJob{}).
+			Where(models.SearchIndexJobColumns.ID+" IN ?", candidateIDs).
+			Where(models.SearchIndexJobColumns.Status+" IN ?", claimableStatuses).
 			Updates(map[string]any{
-				"status":     models.SearchIndexJobStatusRunning,
-				"started_at": now,
-				"updated_at": now,
+				models.SearchIndexJobColumns.Status:    models.SearchIndexJobStatusRunning,
+				models.SearchIndexJobColumns.StartedAt: now,
+				models.SearchIndexJobColumns.UpdatedAt: now,
 			}).Error; err != nil {
 			return err
 		}
 
 		rows := make([]searchIndexJobRow, 0, len(candidateIDs))
-		if err := tx.Table("search_index_jobs").
+		if err := tx.Model(&models.SearchIndexJob{}).
 			Select(
-				"id",
-				"job_id",
-				"provider",
-				"job_type",
-				"dedupe_key",
-				"payload_json",
-				"status",
-				"priority",
-				"retry_count",
-				"next_run_at",
-				"started_at",
-				"last_error",
-				"created_at",
-				"updated_at",
+				models.SearchIndexJobColumns.ID,
+				models.SearchIndexJobColumns.JobID,
+				models.SearchIndexJobColumns.Provider,
+				models.SearchIndexJobColumns.JobType,
+				models.SearchIndexJobColumns.DedupeKey,
+				models.SearchIndexJobColumns.PayloadJSON,
+				models.SearchIndexJobColumns.Status,
+				models.SearchIndexJobColumns.Priority,
+				models.SearchIndexJobColumns.RetryCount,
+				models.SearchIndexJobColumns.NextRunAt+" AS next_run_at_raw",
+				models.SearchIndexJobColumns.StartedAt+" AS started_at_raw",
+				models.SearchIndexJobColumns.LastError,
+				models.SearchIndexJobColumns.CreatedAt+" AS created_at_raw",
+				models.SearchIndexJobColumns.UpdatedAt+" AS updated_at_raw",
 			).
-			Where("id IN ? AND status = ?", candidateIDs, models.SearchIndexJobStatusRunning).
-			Order("priority ASC, next_run_at ASC, id ASC").
+			Where(models.SearchIndexJobColumns.ID+" IN ?", candidateIDs).
+			Where(models.SearchIndexJobColumns.Status+" = ?", models.SearchIndexJobStatusRunning).
+			Order(models.SearchIndexJobColumns.Priority + " ASC").
+			Order(models.SearchIndexJobColumns.NextRunAt + " ASC").
+			Order(models.SearchIndexJobColumns.ID + " ASC").
 			Find(&rows).Error; err != nil {
 			return err
 		}
@@ -178,13 +170,14 @@ func (r *gormSearchIndexJobRepository) MarkSuccess(
 	}
 
 	updateTx := r.db.WithContext(ctx).
-		Table("search_index_jobs").
-		Where("job_id = ? AND status = ?", normalizedJobID, models.SearchIndexJobStatusRunning).
+		Model(&models.SearchIndexJob{}).
+		Where(models.SearchIndexJobColumns.JobID+" = ?", normalizedJobID).
+		Where(models.SearchIndexJobColumns.Status+" = ?", models.SearchIndexJobStatusRunning).
 		Updates(map[string]any{
-			"status":     models.SearchIndexJobStatusSuccess,
-			"started_at": nil,
-			"last_error": "",
-			"updated_at": finishedAt,
+			models.SearchIndexJobColumns.Status:    models.SearchIndexJobStatusSuccess,
+			models.SearchIndexJobColumns.StartedAt: nil,
+			models.SearchIndexJobColumns.LastError: "",
+			models.SearchIndexJobColumns.UpdatedAt: finishedAt,
 		})
 	if updateTx.Error != nil {
 		return updateTx.Error
@@ -213,15 +206,16 @@ func (r *gormSearchIndexJobRepository) MarkRetry(
 	}
 
 	updateTx := r.db.WithContext(ctx).
-		Table("search_index_jobs").
-		Where("job_id = ? AND status = ?", normalizedJobID, models.SearchIndexJobStatusRunning).
+		Model(&models.SearchIndexJob{}).
+		Where(models.SearchIndexJobColumns.JobID+" = ?", normalizedJobID).
+		Where(models.SearchIndexJobColumns.Status+" = ?", models.SearchIndexJobStatusRunning).
 		Updates(map[string]any{
-			"status":      models.SearchIndexJobStatusFailed,
-			"retry_count": gorm.Expr("retry_count + 1"),
-			"next_run_at": nextRunAt,
-			"started_at":  nil,
-			"last_error":  strings.TrimSpace(params.LastError),
-			"updated_at":  time.Now().UTC(),
+			models.SearchIndexJobColumns.Status:     models.SearchIndexJobStatusFailed,
+			models.SearchIndexJobColumns.RetryCount: gorm.Expr(models.SearchIndexJobColumns.RetryCount + " + 1"),
+			models.SearchIndexJobColumns.NextRunAt:  nextRunAt,
+			models.SearchIndexJobColumns.StartedAt:  nil,
+			models.SearchIndexJobColumns.LastError:  strings.TrimSpace(params.LastError),
+			models.SearchIndexJobColumns.UpdatedAt:  time.Now().UTC(),
 		})
 	if updateTx.Error != nil {
 		return updateTx.Error
@@ -244,29 +238,29 @@ func (r *gormSearchIndexJobRepository) enqueueInTx(
 	now := time.Now().UTC()
 
 	var existing searchIndexJobRow
-	existingErr := tx.Table("search_index_jobs").
+	existingErr := tx.Model(&models.SearchIndexJob{}).
 		Select(
-			"id",
-			"job_id",
-			"provider",
-			"job_type",
-			"dedupe_key",
-			"payload_json",
-			"status",
-			"priority",
-			"retry_count",
-			"next_run_at",
-			"started_at",
-			"last_error",
-			"created_at",
-			"updated_at",
+			models.SearchIndexJobColumns.ID,
+			models.SearchIndexJobColumns.JobID,
+			models.SearchIndexJobColumns.Provider,
+			models.SearchIndexJobColumns.JobType,
+			models.SearchIndexJobColumns.DedupeKey,
+			models.SearchIndexJobColumns.PayloadJSON,
+			models.SearchIndexJobColumns.Status,
+			models.SearchIndexJobColumns.Priority,
+			models.SearchIndexJobColumns.RetryCount,
+			models.SearchIndexJobColumns.NextRunAt+" AS next_run_at_raw",
+			models.SearchIndexJobColumns.StartedAt+" AS started_at_raw",
+			models.SearchIndexJobColumns.LastError,
+			models.SearchIndexJobColumns.CreatedAt+" AS created_at_raw",
+			models.SearchIndexJobColumns.UpdatedAt+" AS updated_at_raw",
 		).
 		Where(
-			"dedupe_key = ? AND status IN ?",
+			models.SearchIndexJobColumns.DedupeKey+" = ? AND "+models.SearchIndexJobColumns.Status+" IN ?",
 			normalized.DedupeKey,
 			[]string{models.SearchIndexJobStatusPending, models.SearchIndexJobStatusFailed},
 		).
-		Order("id DESC").
+		Order(models.SearchIndexJobColumns.ID + " DESC").
 		Take(&existing).Error
 	switch {
 	case existingErr == nil:
@@ -275,37 +269,37 @@ func (r *gormSearchIndexJobRepository) enqueueInTx(
 			return nil
 		}
 		updates := map[string]any{
-			"provider":     merged.Provider,
-			"job_type":     merged.JobType,
-			"payload_json": merged.PayloadJSON,
-			"status":       models.SearchIndexJobStatusPending,
-			"priority":     merged.Priority,
-			"next_run_at":  merged.NextRunAt,
-			"started_at":   nil,
-			"last_error":   "",
-			"updated_at":   now,
+			models.SearchIndexJobColumns.Provider:    merged.Provider,
+			models.SearchIndexJobColumns.JobType:     merged.JobType,
+			models.SearchIndexJobColumns.PayloadJSON: merged.PayloadJSON,
+			models.SearchIndexJobColumns.Status:      models.SearchIndexJobStatusPending,
+			models.SearchIndexJobColumns.Priority:    merged.Priority,
+			models.SearchIndexJobColumns.NextRunAt:   merged.NextRunAt,
+			models.SearchIndexJobColumns.StartedAt:   nil,
+			models.SearchIndexJobColumns.LastError:   "",
+			models.SearchIndexJobColumns.UpdatedAt:   now,
 		}
-		return tx.Table("search_index_jobs").
-			Where("id = ?", existing.ID).
+		return tx.Model(&models.SearchIndexJob{}).
+			Where(models.SearchIndexJobColumns.ID+" = ?", existing.ID).
 			Updates(updates).Error
 	case errors.Is(existingErr, gorm.ErrRecordNotFound):
 		if normalized.NextRunAt.IsZero() {
 			normalized.NextRunAt = now
 		}
-		return tx.Table("search_index_jobs").Create(map[string]any{
-			"job_id":       strings.ToLower(ulid.Make().String()),
-			"provider":     normalized.Provider,
-			"job_type":     normalized.JobType,
-			"dedupe_key":   normalized.DedupeKey,
-			"payload_json": normalized.PayloadJSON,
-			"status":       models.SearchIndexJobStatusPending,
-			"priority":     normalized.Priority,
-			"retry_count":  0,
-			"next_run_at":  normalized.NextRunAt,
-			"started_at":   nil,
-			"last_error":   "",
-			"created_at":   now,
-			"updated_at":   now,
+		return tx.Model(&models.SearchIndexJob{}).Create(map[string]any{
+			models.SearchIndexJobColumns.JobID:       strings.ToLower(ulid.Make().String()),
+			models.SearchIndexJobColumns.Provider:    normalized.Provider,
+			models.SearchIndexJobColumns.JobType:     normalized.JobType,
+			models.SearchIndexJobColumns.DedupeKey:   normalized.DedupeKey,
+			models.SearchIndexJobColumns.PayloadJSON: normalized.PayloadJSON,
+			models.SearchIndexJobColumns.Status:      models.SearchIndexJobStatusPending,
+			models.SearchIndexJobColumns.Priority:    normalized.Priority,
+			models.SearchIndexJobColumns.RetryCount:  0,
+			models.SearchIndexJobColumns.NextRunAt:   normalized.NextRunAt,
+			models.SearchIndexJobColumns.StartedAt:   nil,
+			models.SearchIndexJobColumns.LastError:   "",
+			models.SearchIndexJobColumns.CreatedAt:   now,
+			models.SearchIndexJobColumns.UpdatedAt:   now,
 		}).Error
 	default:
 		return existingErr
@@ -403,22 +397,14 @@ func mapSearchIndexJobRow(row searchIndexJobRow) models.SearchIndexJob {
 		Status:      strings.TrimSpace(strings.ToLower(row.Status)),
 		Priority:    row.Priority,
 		RetryCount:  row.RetryCount,
-		NextRunAt:   parseRecordTime(row.NextRunAtRaw),
+		NextRunAt:   recordtime.Parse(row.NextRunAtRaw),
 		StartedAt:   parseOptionalRecordTime(row.StartedAtRaw),
 		LastError:   strings.TrimSpace(row.LastError),
-		CreatedAt:   parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:   parseRecordTime(row.UpdatedAtRaw),
+		CreatedAt:   recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:   recordtime.Parse(row.UpdatedAtRaw),
 	}
 }
 
 func parseOptionalRecordTime(raw *string) *time.Time {
-	if raw == nil {
-		return nil
-	}
-	parsedAt := parseRecordTime(*raw)
-	if parsedAt.IsZero() {
-		return nil
-	}
-	value := parsedAt.UTC()
-	return &value
+	return recordtime.ParseNullable(raw)
 }

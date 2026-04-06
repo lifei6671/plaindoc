@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -14,21 +15,7 @@ type gormAuthCaptchaChallengeRepository struct {
 	db *gorm.DB
 }
 
-type authCaptchaChallengeRow struct {
-	ID                int64   `gorm:"column:id"`
-	CaptchaID         string  `gorm:"column:captcha_id"`
-	Scene             string  `gorm:"column:scene"`
-	SubjectHash       string  `gorm:"column:subject_hash"`
-	Level             int     `gorm:"column:level"`
-	AnswerHash        string  `gorm:"column:answer_hash"`
-	AnswerSalt        string  `gorm:"column:answer_salt"`
-	IssuedIPHash      string  `gorm:"column:issued_ip_hash"`
-	ExpiresAtRaw      string  `gorm:"column:expires_at"`
-	ConsumedAtRaw     *string `gorm:"column:consumed_at"`
-	FailedVerifyCount int     `gorm:"column:failed_verify_count"`
-	CreatedAtRaw      string  `gorm:"column:created_at"`
-	UpdatedAtRaw      string  `gorm:"column:updated_at"`
-}
+type authCaptchaChallengeRow = authCaptchaChallengeRowDB
 
 // NewGormAuthCaptchaChallengeRepository 创建基于 GORM 的验证码会话仓储实现。
 func NewGormAuthCaptchaChallengeRepository(db *gorm.DB) AuthCaptchaChallengeRepository {
@@ -50,23 +37,23 @@ func (r *gormAuthCaptchaChallengeRepository) GetByCaptchaID(
 
 	var row authCaptchaChallengeRow
 	if err := r.db.WithContext(ctx).
-		Table("auth_captcha_challenges").
+		Model(&models.AuthCaptchaChallenge{}).
 		Select(
-			"id",
-			"captcha_id",
-			"scene",
-			"subject_hash",
-			"level",
-			"answer_hash",
-			"answer_salt",
-			"issued_ip_hash",
-			"expires_at",
-			"consumed_at",
-			"failed_verify_count",
-			"created_at",
-			"updated_at",
+			models.AuthCaptchaChallengeColumns.ID,
+			models.AuthCaptchaChallengeColumns.CaptchaID,
+			models.AuthCaptchaChallengeColumns.Scene,
+			models.AuthCaptchaChallengeColumns.SubjectHash,
+			models.AuthCaptchaChallengeColumns.Level,
+			models.AuthCaptchaChallengeColumns.AnswerHash,
+			models.AuthCaptchaChallengeColumns.AnswerSalt,
+			models.AuthCaptchaChallengeColumns.IssuedIPHash,
+			models.AuthCaptchaChallengeColumns.ExpiresAt+" AS expires_at_raw",
+			models.AuthCaptchaChallengeColumns.ConsumedAt+" AS consumed_at_raw",
+			models.AuthCaptchaChallengeColumns.FailedVerifyCount,
+			models.AuthCaptchaChallengeColumns.CreatedAt+" AS created_at_raw",
+			models.AuthCaptchaChallengeColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("captcha_id = ?", normalizedCaptchaID).
+		Where(models.AuthCaptchaChallengeColumns.CaptchaID+" = ?", normalizedCaptchaID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -108,11 +95,11 @@ func (r *gormAuthCaptchaChallengeRepository) Update(
 
 	return r.db.WithContext(ctx).
 		Model(&models.AuthCaptchaChallenge{}).
-		Where("id = ?", challenge.ID).
+		Where(models.AuthCaptchaChallengeColumns.ID+" = ?", challenge.ID).
 		Updates(map[string]any{
-			"consumed_at":         challenge.ConsumedAt,
-			"failed_verify_count": challenge.FailedVerifyCount,
-			"updated_at":          now,
+			models.AuthCaptchaChallengeColumns.ConsumedAt:        challenge.ConsumedAt,
+			models.AuthCaptchaChallengeColumns.FailedVerifyCount: challenge.FailedVerifyCount,
+			models.AuthCaptchaChallengeColumns.UpdatedAt:         now,
 		}).Error
 }
 
@@ -126,10 +113,10 @@ func mapAuthCaptchaChallengeRow(row authCaptchaChallengeRow) models.AuthCaptchaC
 		AnswerHash:        row.AnswerHash,
 		AnswerSalt:        row.AnswerSalt,
 		IssuedIPHash:      row.IssuedIPHash,
-		ExpiresAt:         parseRecordTime(row.ExpiresAtRaw),
-		ConsumedAt:        parseNullableRecordTime(row.ConsumedAtRaw),
+		ExpiresAt:         recordtime.Parse(row.ExpiresAtRaw),
+		ConsumedAt:        recordtime.ParseNullable(row.ConsumedAtRaw),
 		FailedVerifyCount: row.FailedVerifyCount,
-		CreatedAt:         parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:         parseRecordTime(row.UpdatedAtRaw),
+		CreatedAt:         recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:         recordtime.Parse(row.UpdatedAtRaw),
 	}
 }

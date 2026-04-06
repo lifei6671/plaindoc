@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -14,22 +15,11 @@ type gormDocumentImageAssetRepository struct {
 	db *gorm.DB
 }
 
-type documentImageAssetRow struct {
-	ID                  int64   `gorm:"column:id"`
-	ImageAssetID        string  `gorm:"column:image_asset_id"`
-	DocumentID          string  `gorm:"column:document_id"`
-	SpaceID             string  `gorm:"column:space_id"`
-	BlobID              *string `gorm:"column:blob_id"`
-	StorageProvider     string  `gorm:"column:storage_provider"`
-	ObjectKey           string  `gorm:"column:object_key"`
-	ObjectURL           string  `gorm:"column:object_url"`
-	Status              string  `gorm:"column:status"`
-	PendingCleanupAtRaw *string `gorm:"column:pending_cleanup_at"`
-	DeletedAtRaw        *string `gorm:"column:deleted_at"`
-	LastReferencedAtRaw string  `gorm:"column:last_referenced_at"`
-	CreatedAtRaw        string  `gorm:"column:created_at"`
-	UpdatedAtRaw        string  `gorm:"column:updated_at"`
-}
+type documentImageAssetRow = documentImageAssetRowDB
+
+type adminDocumentImageAssetListRow = adminDocumentImageAssetListRowDB
+
+type documentImageAssetReferenceRow = documentImageAssetReferenceRowDB
 
 // NewGormDocumentImageAssetRepository 创建基于 GORM 的文档图片资源仓储实现。
 func NewGormDocumentImageAssetRepository(db *gorm.DB) DocumentImageAssetRepository {
@@ -45,18 +35,23 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 	}
 
 	baseQuery := r.db.WithContext(ctx).
-		Table("document_image_assets AS dia").
-		Joins("JOIN documents AS d ON d.document_id = dia.document_id").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Joins("JOIN users AS uo ON uo.user_id = s.owner_user_id")
+		Table(tableWithAlias(models.DocumentImageAsset{}, "dia")).
+		Joins("JOIN " + tableName(models.Document{}) + " AS d ON d." + models.DocumentColumns.DocumentID + " = dia." + models.DocumentImageAssetColumns.DocumentID).
+		Joins("JOIN " + tableName(models.Node{}) + " AS n ON n." + models.NodeColumns.NodeID + " = d." + models.DocumentColumns.NodeID).
+		Joins("JOIN " + tableName(models.Space{}) + " AS s ON s." + models.SpaceColumns.SpaceID + " = n." + models.NodeColumns.SpaceID).
+		Joins("JOIN " + tableName(models.User{}) + " AS uo ON uo." + models.UserColumns.UserID + " = s." + models.SpaceColumns.OwnerUserID)
 
 	if params.RestrictToScopes {
 		actorUserID := strings.TrimSpace(params.ActorUserID)
+		spaceAdminScopeQuery := r.db.WithContext(ctx).
+			Model(&models.SpaceAdminScope{}).
+			Select("1").
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", actorUserID)
 		baseQuery = baseQuery.Where(
-			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			"("+qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR EXISTS (?))",
 			actorUserID,
-			actorUserID,
+			spaceAdminScopeQuery,
 		)
 	}
 
@@ -64,7 +59,7 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 	if keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			"LOWER(dia.image_asset_id) LIKE ? OR LOWER(dia.document_id) LIKE ? OR LOWER(dia.object_key) LIKE ? OR LOWER(dia.object_url) LIKE ? OR LOWER(COALESCE(dia.status,'')) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(uo.user_id) LIKE ? OR LOWER(uo.email) LIKE ? OR LOWER(uo.name) LIKE ?",
+			"LOWER("+qualifiedColumn("dia", models.DocumentImageAssetColumns.ImageAssetID)+") LIKE ? OR LOWER("+qualifiedColumn("dia", models.DocumentImageAssetColumns.DocumentID)+") LIKE ? OR LOWER("+qualifiedColumn("dia", models.DocumentImageAssetColumns.ObjectKey)+") LIKE ? OR LOWER("+qualifiedColumn("dia", models.DocumentImageAssetColumns.ObjectURL)+") LIKE ? OR LOWER(COALESCE("+qualifiedColumn("dia", models.DocumentImageAssetColumns.Status)+",'')) LIKE ? OR LOWER("+qualifiedColumn("d", models.DocumentColumns.Title)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.SpaceID)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.Name)+") LIKE ? OR LOWER("+qualifiedColumn("uo", models.UserColumns.UserID)+") LIKE ? OR LOWER("+qualifiedColumn("uo", models.UserColumns.Email)+") LIKE ? OR LOWER("+qualifiedColumn("uo", models.UserColumns.Name)+") LIKE ?",
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -81,22 +76,22 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 
 	spaceID := strings.TrimSpace(params.SpaceID)
 	if spaceID != "" {
-		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
+		baseQuery = baseQuery.Where("s."+models.SpaceColumns.SpaceID+" = ?", spaceID)
 	}
 
 	documentID := strings.TrimSpace(params.DocumentID)
 	if documentID != "" {
-		baseQuery = baseQuery.Where("dia.document_id = ?", documentID)
+		baseQuery = baseQuery.Where("dia."+models.DocumentImageAssetColumns.DocumentID+" = ?", documentID)
 	}
 
 	statuses := normalizeImageAssetStatuses(params.Statuses)
 	if len(statuses) > 0 {
-		baseQuery = baseQuery.Where("LOWER(dia.status) IN ?", statuses)
+		baseQuery = baseQuery.Where("LOWER(dia."+models.DocumentImageAssetColumns.Status+") IN ?", statuses)
 	}
 
 	storageProviders := normalizeImageAssetStorageProviders(params.StorageProviders)
 	if len(storageProviders) > 0 {
-		baseQuery = baseQuery.Where("LOWER(dia.storage_provider) IN ?", storageProviders)
+		baseQuery = baseQuery.Where("LOWER(dia."+models.DocumentImageAssetColumns.StorageProvider+") IN ?", storageProviders)
 	}
 
 	var total int64
@@ -113,57 +108,33 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 		offset = 0
 	}
 
-	type adminDocumentImageAssetListRow struct {
-		ID                  int64   `gorm:"column:id"`
-		ImageAssetID        string  `gorm:"column:image_asset_id"`
-		DocumentID          string  `gorm:"column:document_id"`
-		ReaderSlug          *string `gorm:"column:reader_slug"`
-		SpaceID             string  `gorm:"column:space_id"`
-		BlobID              *string `gorm:"column:blob_id"`
-		StorageProvider     string  `gorm:"column:storage_provider"`
-		ObjectKey           string  `gorm:"column:object_key"`
-		ObjectURL           string  `gorm:"column:object_url"`
-		Status              string  `gorm:"column:status"`
-		PendingCleanupAtRaw *string `gorm:"column:pending_cleanup_at"`
-		DeletedAtRaw        *string `gorm:"column:deleted_at"`
-		LastReferencedAtRaw string  `gorm:"column:last_referenced_at"`
-		CreatedAtRaw        string  `gorm:"column:created_at"`
-		UpdatedAtRaw        string  `gorm:"column:updated_at"`
-
-		DocumentTitle  string              `gorm:"column:document_title"`
-		DocumentStatus models.EntityStatus `gorm:"column:document_status"`
-		SpaceName      string              `gorm:"column:space_name"`
-		SpaceOwnerID   string              `gorm:"column:space_owner_user_id"`
-		SpaceOwnerName string              `gorm:"column:space_owner_name"`
-		SpaceOwnerMail string              `gorm:"column:space_owner_email"`
-	}
-
 	rows := make([]adminDocumentImageAssetListRow, 0, limit)
 	if err := baseQuery.Session(&gorm.Session{}).
 		Select(
-			"dia.id",
-			"dia.image_asset_id",
-			"dia.document_id",
-			"n.reader_slug AS reader_slug",
-			"dia.space_id",
-			"dia.blob_id",
-			"dia.storage_provider",
-			"dia.object_key",
-			"dia.object_url",
-			"dia.status",
-			"dia.pending_cleanup_at",
-			"dia.deleted_at",
-			"dia.last_referenced_at",
-			"dia.created_at",
-			"dia.updated_at",
-			"d.title AS document_title",
-			"d.status AS document_status",
-			"s.name AS space_name",
-			"s.owner_user_id AS space_owner_user_id",
-			"uo.name AS space_owner_name",
-			"uo.email AS space_owner_email",
+			"dia."+models.DocumentImageAssetColumns.ID+" AS id",
+			"dia."+models.DocumentImageAssetColumns.ImageAssetID+" AS image_asset_id",
+			"dia."+models.DocumentImageAssetColumns.DocumentID+" AS document_id",
+			"n."+models.NodeColumns.ReaderSlug+" AS reader_slug",
+			"dia."+models.DocumentImageAssetColumns.SpaceID+" AS space_id",
+			"dia."+models.DocumentImageAssetColumns.BlobID+" AS blob_id",
+			"dia."+models.DocumentImageAssetColumns.StorageProvider+" AS storage_provider",
+			"dia."+models.DocumentImageAssetColumns.ObjectKey+" AS object_key",
+			"dia."+models.DocumentImageAssetColumns.ObjectURL+" AS object_url",
+			"dia."+models.DocumentImageAssetColumns.Status+" AS status",
+			"dia."+models.DocumentImageAssetColumns.PendingCleanupAt+" AS pending_cleanup_at_raw",
+			"dia."+models.DocumentImageAssetColumns.DeletedAt+" AS deleted_at_raw",
+			"dia."+models.DocumentImageAssetColumns.LastReferencedAt+" AS last_referenced_at_raw",
+			"dia."+models.DocumentImageAssetColumns.CreatedAt+" AS created_at_raw",
+			"dia."+models.DocumentImageAssetColumns.UpdatedAt+" AS updated_at_raw",
+			"d."+models.DocumentColumns.Title+" AS document_title",
+			"d."+models.DocumentColumns.Status+" AS document_status",
+			"s."+models.SpaceColumns.Name+" AS space_name",
+			"s."+models.SpaceColumns.OwnerUserID+" AS space_owner_id",
+			"uo."+models.UserColumns.Name+" AS space_owner_name",
+			"uo."+models.UserColumns.Email+" AS space_owner_mail",
 		).
-		Order("dia.created_at DESC, dia.id DESC").
+		Order("dia." + models.DocumentImageAssetColumns.CreatedAt + " DESC").
+		Order("dia." + models.DocumentImageAssetColumns.ID + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -191,11 +162,11 @@ func (r *gormDocumentImageAssetRepository) ListForAdmin(
 				ObjectKey:        strings.TrimSpace(row.ObjectKey),
 				ObjectURL:        strings.TrimSpace(row.ObjectURL),
 				Status:           status,
-				PendingCleanupAt: parseNullableRecordTime(row.PendingCleanupAtRaw),
-				DeletedAt:        parseNullableRecordTime(row.DeletedAtRaw),
-				LastReferencedAt: parseRecordTime(row.LastReferencedAtRaw),
-				CreatedAt:        parseRecordTime(row.CreatedAtRaw),
-				UpdatedAt:        parseRecordTime(row.UpdatedAtRaw),
+				PendingCleanupAt: recordtime.ParseNullable(row.PendingCleanupAtRaw),
+				DeletedAt:        recordtime.ParseNullable(row.DeletedAtRaw),
+				LastReferencedAt: recordtime.Parse(row.LastReferencedAtRaw),
+				CreatedAt:        recordtime.Parse(row.CreatedAtRaw),
+				UpdatedAt:        recordtime.Parse(row.UpdatedAtRaw),
 			},
 			DocumentRouteKey: resolveAdminDocumentRouteKey(row.DocumentID, row.ReaderSlug),
 			DocumentTitle:    strings.TrimSpace(row.DocumentTitle),
@@ -225,11 +196,24 @@ func (r *gormDocumentImageAssetRepository) GetByImageAssetID(
 
 	var row documentImageAssetRow
 	if err := r.db.WithContext(ctx).
-		Table("document_image_assets").
+		Model(&models.DocumentImageAsset{}).
 		Select(
-			"id, image_asset_id, document_id, space_id, blob_id, storage_provider, object_key, object_url, status, pending_cleanup_at, deleted_at, last_referenced_at, created_at, updated_at",
+			models.DocumentImageAssetColumns.ID,
+			models.DocumentImageAssetColumns.ImageAssetID,
+			models.DocumentImageAssetColumns.DocumentID,
+			models.DocumentImageAssetColumns.SpaceID,
+			models.DocumentImageAssetColumns.BlobID,
+			models.DocumentImageAssetColumns.StorageProvider,
+			models.DocumentImageAssetColumns.ObjectKey,
+			models.DocumentImageAssetColumns.ObjectURL,
+			models.DocumentImageAssetColumns.Status,
+			models.DocumentImageAssetColumns.PendingCleanupAt+" AS PendingCleanupAtRaw",
+			models.DocumentImageAssetColumns.DeletedAt+" AS DeletedAtRaw",
+			models.DocumentImageAssetColumns.LastReferencedAt+" AS LastReferencedAtRaw",
+			models.DocumentImageAssetColumns.CreatedAt+" AS CreatedAtRaw",
+			models.DocumentImageAssetColumns.UpdatedAt+" AS UpdatedAtRaw",
 		).
-		Where("image_asset_id = ?", normalizedImageAssetID).
+		Where(models.DocumentImageAssetColumns.ImageAssetID+" = ?", normalizedImageAssetID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -248,11 +232,11 @@ func (r *gormDocumentImageAssetRepository) GetByImageAssetID(
 		ObjectKey:        strings.TrimSpace(row.ObjectKey),
 		ObjectURL:        strings.TrimSpace(row.ObjectURL),
 		Status:           status,
-		PendingCleanupAt: parseNullableRecordTime(row.PendingCleanupAtRaw),
-		DeletedAt:        parseNullableRecordTime(row.DeletedAtRaw),
-		LastReferencedAt: parseRecordTime(row.LastReferencedAtRaw),
-		CreatedAt:        parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:        parseRecordTime(row.UpdatedAtRaw),
+		PendingCleanupAt: recordtime.ParseNullable(row.PendingCleanupAtRaw),
+		DeletedAt:        recordtime.ParseNullable(row.DeletedAtRaw),
+		LastReferencedAt: recordtime.Parse(row.LastReferencedAtRaw),
+		CreatedAt:        recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:        recordtime.Parse(row.UpdatedAtRaw),
 	}
 	return asset, nil
 }
@@ -273,12 +257,13 @@ func (r *gormDocumentImageAssetRepository) SoftDelete(
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.DocumentImageAsset{}).
-		Where("image_asset_id = ? AND LOWER(status) <> ?", normalizedImageAssetID, "deleted").
+		Where(models.DocumentImageAssetColumns.ImageAssetID+" = ?", normalizedImageAssetID).
+		Where("LOWER("+models.DocumentImageAssetColumns.Status+") <> ?", "deleted").
 		Updates(map[string]any{
-			"status":             "deleted",
-			"deleted_at":         deletedAt,
-			"updated_at":         deletedAt,
-			"pending_cleanup_at": nil,
+			models.DocumentImageAssetColumns.Status:           "deleted",
+			models.DocumentImageAssetColumns.DeletedAt:        deletedAt,
+			models.DocumentImageAssetColumns.UpdatedAt:        deletedAt,
+			models.DocumentImageAssetColumns.PendingCleanupAt: nil,
 		})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -300,7 +285,7 @@ func (r *gormDocumentImageAssetRepository) HardDelete(
 	}
 
 	tx := r.db.WithContext(ctx).
-		Where("image_asset_id = ?", normalizedImageAssetID).
+		Where(models.DocumentImageAssetColumns.ImageAssetID+" = ?", normalizedImageAssetID).
 		Delete(&models.DocumentImageAsset{})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -325,8 +310,10 @@ func (r *gormDocumentImageAssetRepository) CountActiveReferencesByObject(
 
 	var total int64
 	if err := r.db.WithContext(ctx).
-		Table("document_image_assets").
-		Where("LOWER(storage_provider) = ? AND object_key = ? AND LOWER(status) = ?", normalizedProvider, normalizedObjectKey, "active").
+		Model(&models.DocumentImageAsset{}).
+		Where("LOWER("+models.DocumentImageAssetColumns.StorageProvider+") = ?", normalizedProvider).
+		Where(models.DocumentImageAssetColumns.ObjectKey+" = ?", normalizedObjectKey).
+		Where("LOWER("+models.DocumentImageAssetColumns.Status+") = ?", "active").
 		Count(&total).Error; err != nil {
 		return 0, err
 	}
@@ -355,37 +342,28 @@ func (r *gormDocumentImageAssetRepository) ListActiveReferencesByObject(
 		limit = 200
 	}
 
-	type referenceRow struct {
-		ImageAssetID        string `gorm:"column:image_asset_id"`
-		DocumentID          string `gorm:"column:document_id"`
-		DocumentTitle       string `gorm:"column:document_title"`
-		SpaceID             string `gorm:"column:space_id"`
-		SpaceName           string `gorm:"column:space_name"`
-		Status              string `gorm:"column:status"`
-		LastReferencedAtRaw string `gorm:"column:last_referenced_at"`
-	}
-
-	rows := make([]referenceRow, 0, limit)
+	rows := make([]documentImageAssetReferenceRow, 0, limit)
 	if err := r.db.WithContext(ctx).
-		Table("document_image_assets AS dia").
+		Table(tableWithAlias(models.DocumentImageAsset{}, "dia")).
 		Select(
-			"dia.image_asset_id",
-			"dia.document_id",
-			"d.title AS document_title",
-			"dia.space_id",
-			"s.name AS space_name",
-			"dia.status",
-			"dia.last_referenced_at",
+			"dia."+models.DocumentImageAssetColumns.ImageAssetID+" AS ImageAssetID",
+			"dia."+models.DocumentImageAssetColumns.DocumentID+" AS DocumentID",
+			"d."+models.DocumentColumns.Title+" AS DocumentTitle",
+			"dia."+models.DocumentImageAssetColumns.SpaceID+" AS SpaceID",
+			"s."+models.SpaceColumns.Name+" AS SpaceName",
+			"dia."+models.DocumentImageAssetColumns.Status+" AS Status",
+			"dia."+models.DocumentImageAssetColumns.LastReferencedAt+" AS LastReferencedAtRaw",
 		).
-		Joins("JOIN documents AS d ON d.document_id = dia.document_id").
-		Joins("JOIN spaces AS s ON s.space_id = dia.space_id").
+		Joins("JOIN "+tableName(models.Document{})+" AS d ON d."+models.DocumentColumns.DocumentID+" = dia."+models.DocumentImageAssetColumns.DocumentID).
+		Joins("JOIN "+tableName(models.Space{})+" AS s ON s."+models.SpaceColumns.SpaceID+" = dia."+models.DocumentImageAssetColumns.SpaceID).
 		Where(
-			"LOWER(dia.storage_provider) = ? AND dia.object_key = ? AND LOWER(dia.status) = ?",
+			"LOWER(dia."+models.DocumentImageAssetColumns.StorageProvider+") = ? AND dia."+models.DocumentImageAssetColumns.ObjectKey+" = ? AND LOWER(dia."+models.DocumentImageAssetColumns.Status+") = ?",
 			normalizedProvider,
 			normalizedObjectKey,
 			"active",
 		).
-		Order("dia.last_referenced_at DESC, dia.id DESC").
+		Order("dia." + models.DocumentImageAssetColumns.LastReferencedAt + " DESC").
+		Order("dia." + models.DocumentImageAssetColumns.ID + " DESC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -400,7 +378,7 @@ func (r *gormDocumentImageAssetRepository) ListActiveReferencesByObject(
 			SpaceID:        strings.TrimSpace(row.SpaceID),
 			SpaceName:      strings.TrimSpace(row.SpaceName),
 			Status:         strings.ToLower(strings.TrimSpace(row.Status)),
-			LastReferenced: parseRecordTime(row.LastReferencedAtRaw),
+			LastReferenced: recordtime.Parse(row.LastReferencedAtRaw),
 		})
 	}
 	return result, nil

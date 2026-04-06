@@ -14,3 +14,17 @@ type SpaceAdminScope struct {
 func (SpaceAdminScope) TableName() string {
 	return "space_admin_scopes"
 }
+
+var SpaceAdminScopeColumns = struct {
+	ID        string
+	UserID    string
+	SpaceID   string
+	CreatedAt string
+	UpdatedAt string
+}{
+	ID:        "id",
+	UserID:    "user_id",
+	SpaceID:   "space_id",
+	CreatedAt: "created_at",
+	UpdatedAt: "updated_at",
+}

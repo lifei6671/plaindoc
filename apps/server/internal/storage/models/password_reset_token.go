@@ -21,3 +21,31 @@ type PasswordResetToken struct {
 func (PasswordResetToken) TableName() string {
 	return "password_reset_tokens"
 }
+
+var PasswordResetTokenColumns = struct {
+	ID                string
+	TokenID           string
+	TokenSecretHash   string
+	UserID            string
+	Source            string
+	RequestedByUserID string
+	RequestIPHash     string
+	ExpiresAt         string
+	ConsumedAt        string
+	InvalidatedAt     string
+	CreatedAt         string
+	UpdatedAt         string
+}{
+	ID:                "id",
+	TokenID:           "token_id",
+	TokenSecretHash:   "token_secret_hash",
+	UserID:            "user_id",
+	Source:            "source",
+	RequestedByUserID: "requested_by_user_id",
+	RequestIPHash:     "request_ip_hash",
+	ExpiresAt:         "expires_at",
+	ConsumedAt:        "consumed_at",
+	InvalidatedAt:     "invalidated_at",
+	CreatedAt:         "created_at",
+	UpdatedAt:         "updated_at",
+}

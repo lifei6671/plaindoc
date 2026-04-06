@@ -6,23 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormSystemConfigRepository struct {
 	db *gorm.DB
 }
 
-type systemConfigRow struct {
-	ID              int64   `gorm:"column:id"`
-	ConfigKey       string  `gorm:"column:config_key"`
-	ConfigValueJSON string  `gorm:"column:config_value_json"`
-	Version         int     `gorm:"column:version"`
-	UpdatedByUserID *string `gorm:"column:updated_by_user_id"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-}
+type systemConfigRow = systemConfigRowDB
 
 // NewGormSystemConfigRepository 创建基于 GORM 的系统配置仓储实现。
 func NewGormSystemConfigRepository(db *gorm.DB) SystemConfigRepository {
@@ -36,17 +30,19 @@ func (r *gormSystemConfigRepository) List(ctx context.Context) ([]models.SystemC
 
 	var rows []systemConfigRow
 	if err := r.db.WithContext(ctx).
-		Table("system_configs").
+		Model(&models.SystemConfig{}).
 		Select(
-			"id",
-			"config_key",
-			"config_value_json",
-			"version",
-			"updated_by_user_id",
-			"created_at",
-			"updated_at",
+			models.SystemConfigColumns.ID,
+			models.SystemConfigColumns.ConfigKey,
+			models.SystemConfigColumns.ConfigValueJSON,
+			models.SystemConfigColumns.Version,
+			models.SystemConfigColumns.UpdatedByUserID,
+			models.SystemConfigColumns.CreatedAt+" AS created_at_raw",
+			models.SystemConfigColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Order("config_key ASC").
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SystemConfigColumns.ConfigKey},
+		}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -68,17 +64,17 @@ func (r *gormSystemConfigRepository) GetByConfigKey(
 
 	var row systemConfigRow
 	if err := r.db.WithContext(ctx).
-		Table("system_configs").
+		Model(&models.SystemConfig{}).
 		Select(
-			"id",
-			"config_key",
-			"config_value_json",
-			"version",
-			"updated_by_user_id",
-			"created_at",
-			"updated_at",
+			models.SystemConfigColumns.ID,
+			models.SystemConfigColumns.ConfigKey,
+			models.SystemConfigColumns.ConfigValueJSON,
+			models.SystemConfigColumns.Version,
+			models.SystemConfigColumns.UpdatedByUserID,
+			models.SystemConfigColumns.CreatedAt+" AS created_at_raw",
+			models.SystemConfigColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("config_key = ?", strings.TrimSpace(configKey)).
+		Where(models.SystemConfigColumns.ConfigKey+" = ?", strings.TrimSpace(configKey)).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -117,12 +113,13 @@ func (r *gormSystemConfigRepository) UpdateByVersion(
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.SystemConfig{}).
-		Where("config_key = ? AND version = ?", configKey, params.ExpectedVersion).
+		Where(models.SystemConfigColumns.ConfigKey+" = ?", configKey).
+		Where(models.SystemConfigColumns.Version+" = ?", params.ExpectedVersion).
 		Updates(map[string]any{
-			"config_value_json":  params.ConfigValueJSON,
-			"version":            params.NextVersion,
-			"updated_by_user_id": params.UpdatedByUserID,
-			"updated_at":         updatedAt,
+			models.SystemConfigColumns.ConfigValueJSON: params.ConfigValueJSON,
+			models.SystemConfigColumns.Version:         params.NextVersion,
+			models.SystemConfigColumns.UpdatedByUserID: params.UpdatedByUserID,
+			models.SystemConfigColumns.UpdatedAt:       updatedAt,
 		})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -137,48 +134,7 @@ func mapSystemConfigRow(row systemConfigRow) models.SystemConfig {
 		ConfigValueJSON: row.ConfigValueJSON,
 		Version:         row.Version,
 		UpdatedByUserID: row.UpdatedByUserID,
-		CreatedAt:       parseSystemConfigRecordTime(row.CreatedAtRaw),
-		UpdatedAt:       parseSystemConfigRecordTime(row.UpdatedAtRaw),
+		CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 	}
-}
-
-func parseSystemConfigRecordTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05.999999-07:00",
-		"2006-01-02 15:04:05.999-07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
-		}
-	}
-	// 兼容数据库返回的 "YYYY-MM-DD HH:MM:SS+00:00" 等格式，统一转为 RFC3339 再解析。
-	normalized := strings.Replace(value, " ", "T", 1)
-	timePart := normalized
-	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
-		timePart = normalized[index+1:]
-	}
-	if !strings.ContainsAny(timePart, "Zz+-") {
-		normalized += "Z"
-	}
-	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
-		return parsedAt.UTC()
-	}
-	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
-		return parsedAt.UTC()
-	}
-	return time.Time{}
 }

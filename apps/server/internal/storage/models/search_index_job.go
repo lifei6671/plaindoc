@@ -53,6 +53,38 @@ func (SearchIndexJob) TableName() string {
 	return "search_index_jobs"
 }
 
+var SearchIndexJobColumns = struct {
+	ID          string
+	JobID       string
+	Provider    string
+	JobType     string
+	DedupeKey   string
+	PayloadJSON string
+	Status      string
+	Priority    string
+	RetryCount  string
+	NextRunAt   string
+	StartedAt   string
+	LastError   string
+	CreatedAt   string
+	UpdatedAt   string
+}{
+	ID:          "id",
+	JobID:       "job_id",
+	Provider:    "provider",
+	JobType:     "job_type",
+	DedupeKey:   "dedupe_key",
+	PayloadJSON: "payload_json",
+	Status:      "status",
+	Priority:    "priority",
+	RetryCount:  "retry_count",
+	NextRunAt:   "next_run_at",
+	StartedAt:   "started_at",
+	LastError:   "last_error",
+	CreatedAt:   "created_at",
+	UpdatedAt:   "updated_at",
+}
+
 // IsValidSearchIndexJobType 判断任务类型是否合法。
 func IsValidSearchIndexJobType(value string) bool {
 	switch value {

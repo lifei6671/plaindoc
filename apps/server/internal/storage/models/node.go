@@ -21,3 +21,31 @@ type Node struct {
 func (Node) TableName() string {
 	return "nodes"
 }
+
+var NodeColumns = struct {
+	ID              string
+	NodeID          string
+	SpaceID         string
+	ParentNodeID    string
+	ReaderSlug      string
+	Type            string
+	Title           string
+	Sort            string
+	CreatedByUserID string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	NodeID:          "node_id",
+	SpaceID:         "space_id",
+	ParentNodeID:    "parent_node_id",
+	ReaderSlug:      "reader_slug",
+	Type:            "type",
+	Title:           "title",
+	Sort:            "sort",
+	CreatedByUserID: "created_by_user_id",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

@@ -39,7 +39,7 @@ func (r *gormSearchVisibilityRepository) SearchVisibleDocuments(
 		clauses := make([]string, 0, len(normalizedTerms))
 		args := make([]any, 0, len(normalizedTerms)*2)
 		for _, item := range normalizedTerms {
-			clauses = append(clauses, "(LOWER(d.title) LIKE ? OR LOWER(d.content_md) LIKE ?)")
+			clauses = append(clauses, "(LOWER("+qualifiedColumn("d", models.DocumentColumns.Title)+") LIKE ? OR LOWER("+qualifiedColumn("d", models.DocumentColumns.ContentMD)+") LIKE ?)")
 			likePattern := "%" + item + "%"
 			args = append(args, likePattern, likePattern)
 		}
@@ -56,22 +56,22 @@ func (r *gormSearchVisibilityRepository) SearchVisibleDocuments(
 
 	rows := make([]SearchVisibleDocumentRow, 0, params.Limit)
 	err := query.Session(&gorm.Session{}).
-		Select(
-			"s.space_id AS space_id",
-			"d.document_id",
-			"d.title",
-			"d.content_md",
+		Select(selectColumns(
+			qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AS space_id",
+			qualifiedColumn("d", models.DocumentColumns.DocumentID),
+			qualifiedColumn("d", models.DocumentColumns.Title),
+			qualifiedColumn("d", models.DocumentColumns.ContentMD),
 			"CASE "+
-				"WHEN (s.visibility = 'member' OR d.visibility = 'member') THEN 'member' "+
-				"WHEN (s.visibility = 'authenticated' OR d.visibility = 'authenticated') THEN 'authenticated' "+
+				"WHEN ("+qualifiedColumn("s", models.SpaceColumns.Visibility)+" = 'member' OR "+qualifiedColumn("d", models.DocumentColumns.Visibility)+" = 'member') THEN 'member' "+
+				"WHEN ("+qualifiedColumn("s", models.SpaceColumns.Visibility)+" = 'authenticated' OR "+qualifiedColumn("d", models.DocumentColumns.Visibility)+" = 'authenticated') THEN 'authenticated' "+
 				"ELSE 'public' "+
 				"END AS visibility_scope",
 			"CASE "+
-				"WHEN (s.visibility = 'member' OR d.visibility = 'member') THEN 1 "+
+				"WHEN ("+qualifiedColumn("s", models.SpaceColumns.Visibility)+" = 'member' OR "+qualifiedColumn("d", models.DocumentColumns.Visibility)+" = 'member') THEN 1 "+
 				"ELSE 0 "+
 				"END AS min_role",
-		).
-		Order("d.updated_at DESC, d.id DESC").
+		)).
+		Order(qualifiedColumn("d", models.DocumentColumns.UpdatedAt) + " DESC, " + qualifiedColumn("d", models.DocumentColumns.ID) + " DESC").
 		Limit(params.Limit).
 		Offset(params.Offset).
 		Find(&rows).Error
@@ -93,13 +93,13 @@ func (r *gormSearchVisibilityRepository) FilterVisibleDocumentIDsByCandidates(
 	}
 
 	query := r.baseVisibleDocumentsQuery(ctx, params.ActorUserID, params.SpaceID, params.ScopeSpaceIDs).
-		Where("d.document_id IN ?", params.CandidateDocumentIDs)
+		Where(qualifiedColumn("d", models.DocumentColumns.DocumentID)+" IN ?", params.CandidateDocumentIDs)
 
 	type row struct {
 		DocumentID string `gorm:"column:document_id"`
 	}
 	rows := make([]row, 0, len(params.CandidateDocumentIDs))
-	if err := query.Select("d.document_id").Find(&rows).Error; err != nil {
+	if err := query.Select(qualifiedColumn("d", models.DocumentColumns.DocumentID)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -124,19 +124,20 @@ func (r *gormSearchVisibilityRepository) ResolveSearchScopeSpaceIDs(
 
 	normalizedActorUserID := strings.TrimSpace(actorUserID)
 	query := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive)
+		Table(tableWithAlias(models.Space{}, "s")).
+		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt) + " IS NULL")
 
 	if normalizedActorUserID == "" {
-		query = query.Where("s.visibility = ?", models.VisibilityPublic)
+		query = query.Where(qualifiedColumn("s", models.SpaceColumns.Visibility)+" = ?", models.VisibilityPublic)
 	} else {
 		query = query.
-			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedActorUserID).
+			Joins("LEFT JOIN "+tableName(models.SpaceMember{})+" AS sm ON sm."+models.SpaceMemberColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AND sm."+models.SpaceMemberColumns.UserID+" = ?", normalizedActorUserID).
 			Where(
 				"("+
-					"s.owner_user_id = ? OR "+
-					"s.visibility IN (?,?) OR "+
-					"sm.id IS NOT NULL"+
+					qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR "+
+					qualifiedColumn("s", models.SpaceColumns.Visibility)+" IN (?,?) OR "+
+					qualifiedColumn("sm", models.SpaceMemberColumns.ID)+" IS NOT NULL"+
 					")",
 				normalizedActorUserID,
 				models.VisibilityPublic,
@@ -148,7 +149,7 @@ func (r *gormSearchVisibilityRepository) ResolveSearchScopeSpaceIDs(
 		SpaceID string `gorm:"column:space_id"`
 	}
 	rows := make([]row, 0, 64)
-	if err := query.Distinct("s.space_id").Select("s.space_id").Find(&rows).Error; err != nil {
+	if err := query.Distinct(qualifiedColumn("s", models.SpaceColumns.SpaceID)).Select(qualifiedColumn("s", models.SpaceColumns.SpaceID)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -201,9 +202,10 @@ func (r *gormSearchVisibilityRepository) ResolveUserRoleLevelsBySpaces(
 	}
 	ownerRows := make([]ownerRow, 0, len(normalizedSpaceIDs))
 	if err := r.db.WithContext(ctx).
-		Table("spaces").
-		Select("space_id").
-		Where("space_id IN ? AND owner_user_id = ?", normalizedSpaceIDs, normalizedActorUserID).
+		Model(&models.Space{}).
+		Select(qualifiedColumn("", models.SpaceColumns.SpaceID)).
+		Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" IN ?", normalizedSpaceIDs).
+		Where(qualifiedColumn("", models.SpaceColumns.OwnerUserID)+" = ?", normalizedActorUserID).
 		Find(&ownerRows).Error; err != nil {
 		return nil, err
 	}
@@ -221,9 +223,13 @@ func (r *gormSearchVisibilityRepository) ResolveUserRoleLevelsBySpaces(
 	}
 	memberRows := make([]memberRoleRow, 0, len(normalizedSpaceIDs))
 	if err := r.db.WithContext(ctx).
-		Table("space_members").
-		Select("space_id", "role").
-		Where("space_id IN ? AND user_id = ?", normalizedSpaceIDs, normalizedActorUserID).
+		Model(&models.SpaceMember{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.SpaceMemberColumns.SpaceID),
+			qualifiedColumn("", models.SpaceMemberColumns.Role),
+		)).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" IN ?", normalizedSpaceIDs).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", normalizedActorUserID).
 		Find(&memberRows).Error; err != nil {
 		return nil, err
 	}
@@ -284,20 +290,22 @@ func (r *gormSearchVisibilityRepository) baseVisibleDocumentsQuery(
 	scopeSpaceIDs []string,
 ) *gorm.DB {
 	query := r.db.WithContext(ctx).
-		Table("documents AS d").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.format = ?", models.DocumentFormatMarkdown)
+		Table(tableWithAlias(models.Document{}, "d")).
+		Joins("JOIN "+tableName(models.Node{})+" AS n ON "+qualifiedColumn("n", models.NodeColumns.NodeID)+" = "+qualifiedColumn("d", models.DocumentColumns.NodeID)).
+		Joins("JOIN "+tableName(models.Space{})+" AS s ON "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = "+qualifiedColumn("n", models.NodeColumns.SpaceID)).
+		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn("d", models.DocumentColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("d", models.DocumentColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn("d", models.DocumentColumns.Format)+" = ?", models.DocumentFormatMarkdown)
 
 	normalizedSpaceID := strings.TrimSpace(spaceID)
 	if normalizedSpaceID != "" {
-		query = query.Where("s.space_id = ?", normalizedSpaceID)
+		query = query.Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = ?", normalizedSpaceID)
 	} else {
 		normalizedScopeSpaceIDs := normalizeSearchVisibilitySpaceIDs(scopeSpaceIDs)
 		if len(normalizedScopeSpaceIDs) > 0 {
-			query = query.Where("s.space_id IN ?", normalizedScopeSpaceIDs)
+			query = query.Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" IN ?", normalizedScopeSpaceIDs)
 		}
 	}
 	return applySearchVisibilityMatrixFilter(query, actorUserID)
@@ -319,19 +327,19 @@ func applySearchVisibilityMatrixFilter(query *gorm.DB, actorUserID string) *gorm
 	normalizedActorUserID := strings.TrimSpace(actorUserID)
 	if normalizedActorUserID == "" {
 		return query.Where(
-			"s.visibility = ? AND d.visibility = ?",
+			qualifiedColumn("s", models.SpaceColumns.Visibility)+" = ? AND "+qualifiedColumn("d", models.DocumentColumns.Visibility)+" = ?",
 			models.VisibilityPublic,
 			models.VisibilityPublic,
 		)
 	}
 
 	return query.
-		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedActorUserID).
+		Joins("LEFT JOIN "+tableName(models.SpaceMember{})+" AS sm ON sm."+models.SpaceMemberColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AND sm."+models.SpaceMemberColumns.UserID+" = ?", normalizedActorUserID).
 		Where(
 			"("+
-				"s.owner_user_id = ? OR "+
-				"((s.visibility IN (?,?)) AND (d.visibility IN (?,?))) OR "+
-				"sm.id IS NOT NULL"+
+				qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR "+
+				"(("+qualifiedColumn("s", models.SpaceColumns.Visibility)+" IN (?,?)) AND ("+qualifiedColumn("d", models.DocumentColumns.Visibility)+" IN (?,?))) OR "+
+				qualifiedColumn("sm", models.SpaceMemberColumns.ID)+" IS NOT NULL"+
 				")",
 			normalizedActorUserID,
 			models.VisibilityPublic,

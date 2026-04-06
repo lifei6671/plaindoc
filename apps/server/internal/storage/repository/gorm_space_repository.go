@@ -98,30 +98,30 @@ func (r *gormSpaceRepository) GetBySpaceID(ctx context.Context, spaceID string) 
 
 	var row spaceRecordRow
 	if err := r.db.WithContext(ctx).
-		Table("spaces").
-		Select(
-			"id",
-			"space_id",
-			"name",
-			"description",
-			"category_id",
-			"category",
-			"owner_user_id",
-			"visibility",
-			"cover_asset_id",
-			"cover_key",
-			"cover_url",
-			"cover_width",
-			"cover_height",
-			"cover_source",
-			"status",
-			"banned_reason",
-			"banned_at",
-			"deleted_at",
-			"created_at",
-			"updated_at",
-		).
-		Where("space_id = ?", spaceID).
+		Model(&models.Space{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.SpaceColumns.ID),
+			qualifiedColumn("", models.SpaceColumns.SpaceID),
+			qualifiedColumn("", models.SpaceColumns.Name),
+			qualifiedColumn("", models.SpaceColumns.Description),
+			qualifiedColumn("", models.SpaceColumns.CategoryID),
+			qualifiedColumn("", models.SpaceColumns.Category),
+			qualifiedColumn("", models.SpaceColumns.OwnerUserID),
+			qualifiedColumn("", models.SpaceColumns.Visibility),
+			qualifiedColumn("", models.SpaceColumns.CoverAssetID),
+			qualifiedColumn("", models.SpaceColumns.CoverKey),
+			qualifiedColumn("", models.SpaceColumns.CoverURL),
+			qualifiedColumn("", models.SpaceColumns.CoverWidth),
+			qualifiedColumn("", models.SpaceColumns.CoverHeight),
+			qualifiedColumn("", models.SpaceColumns.CoverSource),
+			qualifiedColumn("", models.SpaceColumns.Status),
+			qualifiedColumn("", models.SpaceColumns.BannedReason),
+			qualifiedColumn("", models.SpaceColumns.BannedAt),
+			qualifiedColumn("", models.SpaceColumns.DeletedAt),
+			qualifiedColumn("", models.SpaceColumns.CreatedAt),
+			qualifiedColumn("", models.SpaceColumns.UpdatedAt),
+		)).
+		Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -187,22 +187,22 @@ func (r *gormSpaceRepository) GetCoverAssetByAssetID(
 
 	var asset models.SpaceCoverAsset
 	if err := r.db.WithContext(ctx).
-		Select(
-			"id",
-			"asset_id",
-			"source",
-			"object_key",
-			"object_url",
-			"mime_type",
-			"width",
-			"height",
-			"size_bytes",
-			"normalized",
-			"created_by_user_id",
-			"created_at",
-			"updated_at",
-		).
-		Where("asset_id = ?", strings.TrimSpace(assetID)).
+		Select(selectColumns(
+			qualifiedColumn("", models.SpaceCoverAssetColumns.ID),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.AssetID),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.Source),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.ObjectKey),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.ObjectURL),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.MimeType),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.Width),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.Height),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.SizeBytes),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.Normalized),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.CreatedByUserID),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.CreatedAt),
+			qualifiedColumn("", models.SpaceCoverAssetColumns.UpdatedAt),
+		)).
+		Where(qualifiedColumn("", models.SpaceCoverAssetColumns.AssetID)+" = ?", strings.TrimSpace(assetID)).
 		Take(&asset).Error; err != nil {
 		return nil, err
 	}
@@ -232,30 +232,30 @@ func (r *gormSpaceRepository) ListByUserID(ctx context.Context, userID string) (
 
 	var spaces []models.Space
 	if err := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Select(
-			"s.id",
-			"s.space_id",
-			"s.name",
-			"s.description",
-			"s.category_id",
-			"s.category",
-			"s.owner_user_id",
-			"s.visibility",
-			"s.cover_asset_id",
-			"s.cover_key",
-			"s.cover_url",
-			"s.cover_width",
-			"s.cover_height",
-			"s.cover_source",
-			"s.status",
-			"s.banned_reason",
-			"s.banned_at",
-			"s.deleted_at",
-		).
-		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", userID).
-		Where("s.owner_user_id = ? OR sm.id IS NOT NULL", userID).
-		Order("s.id DESC").
+		Table(tableWithAlias(models.Space{}, "s")).
+		Select(selectColumns(
+			qualifiedColumn("s", models.SpaceColumns.ID),
+			qualifiedColumn("s", models.SpaceColumns.SpaceID),
+			qualifiedColumn("s", models.SpaceColumns.Name),
+			qualifiedColumn("s", models.SpaceColumns.Description),
+			qualifiedColumn("s", models.SpaceColumns.CategoryID),
+			qualifiedColumn("s", models.SpaceColumns.Category),
+			qualifiedColumn("s", models.SpaceColumns.OwnerUserID),
+			qualifiedColumn("s", models.SpaceColumns.Visibility),
+			qualifiedColumn("s", models.SpaceColumns.CoverAssetID),
+			qualifiedColumn("s", models.SpaceColumns.CoverKey),
+			qualifiedColumn("s", models.SpaceColumns.CoverURL),
+			qualifiedColumn("s", models.SpaceColumns.CoverWidth),
+			qualifiedColumn("s", models.SpaceColumns.CoverHeight),
+			qualifiedColumn("s", models.SpaceColumns.CoverSource),
+			qualifiedColumn("s", models.SpaceColumns.Status),
+			qualifiedColumn("s", models.SpaceColumns.BannedReason),
+			qualifiedColumn("s", models.SpaceColumns.BannedAt),
+			qualifiedColumn("s", models.SpaceColumns.DeletedAt),
+		)).
+		Joins("LEFT JOIN "+tableName(models.SpaceMember{})+" AS sm ON sm."+models.SpaceMemberColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AND sm."+models.SpaceMemberColumns.UserID+" = ?", userID).
+		Where(qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR sm.id IS NOT NULL", userID).
+		Order(qualifiedColumn("s", models.SpaceColumns.ID) + " DESC").
 		Find(&spaces).Error; err != nil {
 		return nil, err
 	}
@@ -306,24 +306,24 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 
 	// 首页空间展示与阅读页权限必须一致：
 	// 至少存在一篇当前访问者可读（有效状态）的文档时，空间才进入首页/分类列表。
-	const normalizedSpaceVisibilityExpr = "CASE WHEN s.visibility IN ('public','authenticated','member') THEN s.visibility ELSE 'member' END"
-	const normalizedDocumentVisibilityExpr = "CASE WHEN d.visibility IN ('public','authenticated','member') THEN d.visibility ELSE 'member' END"
-	const normalizedDocumentStatusExpr = "CASE WHEN d.status IN ('active','banned','deleted') THEN d.status ELSE 'active' END"
+	normalizedSpaceVisibilityExpr := "CASE WHEN " + qualifiedColumn("s", models.SpaceColumns.Visibility) + " IN ('public','authenticated','member') THEN " + qualifiedColumn("s", models.SpaceColumns.Visibility) + " ELSE 'member' END"
+	normalizedDocumentVisibilityExpr := "CASE WHEN " + qualifiedColumn("d", models.DocumentColumns.Visibility) + " IN ('public','authenticated','member') THEN " + qualifiedColumn("d", models.DocumentColumns.Visibility) + " ELSE 'member' END"
+	normalizedDocumentStatusExpr := "CASE WHEN " + qualifiedColumn("d", models.DocumentColumns.Status) + " IN ('active','banned','deleted') THEN " + qualifiedColumn("d", models.DocumentColumns.Status) + " ELSE 'active' END"
 
 	// 统一首页空间可见性基础过滤，供 count/list 复用。
 	// 这样 count 可以只保留必要 JOIN，避免和列表查询一样携带展示字段 JOIN。
 	applyHomepageCommonFilters := func(query *gorm.DB) *gorm.DB {
-		query = query.Where("s.status = ?", models.EntityStatusActive)
+		query = query.Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive)
 		if categoryID != "" {
-			query = query.Where("s.category_id = ?", categoryID)
+			query = query.Where(qualifiedColumn("s", models.SpaceColumns.CategoryID)+" = ?", categoryID)
 		}
 		if viewerUserID == "" {
-			return query.Where("s.visibility = ?", models.VisibilityPublic)
+			return query.Where(qualifiedColumn("s", models.SpaceColumns.Visibility)+" = ?", models.VisibilityPublic)
 		}
 		return query.
-			Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", viewerUserID).
+			Joins("LEFT JOIN "+tableName(models.SpaceMember{})+" AS sm ON sm."+models.SpaceMemberColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AND sm."+models.SpaceMemberColumns.UserID+" = ?", viewerUserID).
 			Where(
-				"(s.visibility IN ? OR (s.visibility = ? AND (s.owner_user_id = ? OR sm.id IS NOT NULL)))",
+				"("+qualifiedColumn("s", models.SpaceColumns.Visibility)+" IN ? OR ("+qualifiedColumn("s", models.SpaceColumns.Visibility)+" = ? AND ("+qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR sm.id IS NOT NULL)))",
 				[]models.Visibility{models.VisibilityPublic, models.VisibilityAuthenticated},
 				models.VisibilityMember,
 				viewerUserID,
@@ -332,10 +332,10 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 
 	buildDocumentVisibilityQuery := func() *gorm.DB {
 		query := r.db.WithContext(ctx).
-			Table("documents AS d").
+			Table(tableWithAlias(models.Document{}, "d")).
 			Select("1").
-			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-			Where("n.space_id = s.space_id").
+			Joins("JOIN "+tableName(models.Node{})+" AS n ON "+qualifiedColumn("n", models.NodeColumns.NodeID)+" = "+qualifiedColumn("d", models.DocumentColumns.NodeID)).
+			Where(qualifiedColumn("n", models.NodeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
 			Where(normalizedDocumentStatusExpr+" = ?", models.EntityStatusActive)
 
 		if viewerUserID == "" {
@@ -353,7 +353,7 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 		// 3) 非成员时仅允许 public/authenticated 组合。
 		return query.Where(
 			"("+
-				"s.owner_user_id = ? OR "+
+				qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR "+
 				"sm.id IS NOT NULL OR "+
 				"(("+normalizedSpaceVisibilityExpr+" IN (?,?)) AND ("+normalizedDocumentVisibilityExpr+" IN (?,?)))"+
 				")",
@@ -369,15 +369,15 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 		// 空间无文档时也允许展示（点击后会进入“无可读文档”的友好提示），
 		// 仅在存在文档时要求至少有一篇可读文档。
 		return r.db.WithContext(ctx).
-			Table("documents AS d_any").
+			Table(tableWithAlias(models.Document{}, "d_any")).
 			Select("1").
-			Joins("JOIN nodes AS n_any ON n_any.node_id = d_any.node_id").
-			Where("n_any.space_id = s.space_id").
-			Where("d_any.deleted_at IS NULL")
+			Joins("JOIN " + tableName(models.Node{}) + " AS n_any ON " + qualifiedColumn("n_any", models.NodeColumns.NodeID) + " = " + qualifiedColumn("d_any", models.DocumentColumns.NodeID)).
+			Where(qualifiedColumn("n_any", models.NodeColumns.SpaceID) + " = " + qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+			Where(qualifiedColumn("d_any", models.DocumentColumns.DeletedAt) + " IS NULL")
 	}
 
 	var total int64
-	countQuery := r.db.WithContext(ctx).Table("spaces AS s")
+	countQuery := r.db.WithContext(ctx).Table(tableWithAlias(models.Space{}, "s"))
 	countQuery = applyHomepageCommonFilters(countQuery)
 	countQuery = countQuery.Where(
 		"(NOT EXISTS (?) OR EXISTS (?))",
@@ -398,8 +398,8 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 	}
 
 	listQuery := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Joins("LEFT JOIN users AS u ON u.user_id = s.owner_user_id")
+		Table(tableWithAlias(models.Space{}, "s")).
+		Joins("LEFT JOIN " + tableName(models.User{}) + " AS u ON u." + models.UserColumns.UserID + " = " + qualifiedColumn("s", models.SpaceColumns.OwnerUserID))
 	listQuery = applyHomepageCommonFilters(listQuery)
 	listQuery = listQuery.Where(
 		"(NOT EXISTS (?) OR EXISTS (?))",
@@ -434,31 +434,31 @@ func (r *gormSpaceRepository) ListVisibleForHomepage(
 
 	var rows []homepageSpaceRow
 	if err := listQuery.Session(&gorm.Session{}).
-		Select(
-			"s.id",
-			"s.space_id",
-			"s.name",
-			"s.description",
-			"s.category_id",
-			"s.category",
-			"s.owner_user_id",
-			"s.visibility",
-			"s.cover_asset_id",
-			"s.cover_key",
-			"s.cover_url",
-			"s.cover_width",
-			"s.cover_height",
-			"s.cover_source",
-			"s.status",
-			"s.banned_reason",
-			"s.banned_at",
-			"s.deleted_at",
-			"s.created_at",
-			"s.updated_at",
-			"u.name AS owner_name",
-			"u.avatar_url AS owner_avatar_url",
-		).
-		Order("s.created_at DESC, s.id DESC").
+		Select(selectColumns(
+			qualifiedColumn("s", models.SpaceColumns.ID),
+			qualifiedColumn("s", models.SpaceColumns.SpaceID),
+			qualifiedColumn("s", models.SpaceColumns.Name),
+			qualifiedColumn("s", models.SpaceColumns.Description),
+			qualifiedColumn("s", models.SpaceColumns.CategoryID),
+			qualifiedColumn("s", models.SpaceColumns.Category),
+			qualifiedColumn("s", models.SpaceColumns.OwnerUserID),
+			qualifiedColumn("s", models.SpaceColumns.Visibility),
+			qualifiedColumn("s", models.SpaceColumns.CoverAssetID),
+			qualifiedColumn("s", models.SpaceColumns.CoverKey),
+			qualifiedColumn("s", models.SpaceColumns.CoverURL),
+			qualifiedColumn("s", models.SpaceColumns.CoverWidth),
+			qualifiedColumn("s", models.SpaceColumns.CoverHeight),
+			qualifiedColumn("s", models.SpaceColumns.CoverSource),
+			qualifiedColumn("s", models.SpaceColumns.Status),
+			qualifiedColumn("s", models.SpaceColumns.BannedReason),
+			qualifiedColumn("s", models.SpaceColumns.BannedAt),
+			qualifiedColumn("s", models.SpaceColumns.DeletedAt),
+			qualifiedColumn("s", models.SpaceColumns.CreatedAt),
+			qualifiedColumn("s", models.SpaceColumns.UpdatedAt),
+			qualifiedColumn("u", models.UserColumns.Name)+" AS owner_name",
+			qualifiedColumn("u", models.UserColumns.AvatarURL)+" AS owner_avatar_url",
+		)).
+		Order(qualifiedColumn("s", models.SpaceColumns.CreatedAt) + " DESC, " + qualifiedColumn("s", models.SpaceColumns.ID) + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -535,21 +535,26 @@ func (r *gormSpaceRepository) ListForAdmin(
 	}
 
 	baseQuery := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Joins("JOIN users AS u ON u.user_id = s.owner_user_id").
-		Joins("LEFT JOIN space_categories AS sc ON sc.category_id = s.category_id")
+		Table(tableWithAlias(models.Space{}, "s")).
+		Joins("JOIN " + tableName(models.User{}) + " AS u ON u." + models.UserColumns.UserID + " = " + qualifiedColumn("s", models.SpaceColumns.OwnerUserID)).
+		Joins("LEFT JOIN " + tableName(models.SpaceCategory{}) + " AS sc ON sc." + models.SpaceCategoryColumns.CategoryID + " = " + qualifiedColumn("s", models.SpaceColumns.CategoryID))
 
 	switch {
 	case params.RestrictToMembers:
 		actorUserID := strings.TrimSpace(params.ActorUserID)
-		baseQuery = baseQuery.Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", actorUserID)
-		baseQuery = baseQuery.Where("(s.owner_user_id = ? OR sm.id IS NOT NULL)", actorUserID)
+		baseQuery = baseQuery.Joins("LEFT JOIN "+tableName(models.SpaceMember{})+" AS sm ON sm."+models.SpaceMemberColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)+" AND sm."+models.SpaceMemberColumns.UserID+" = ?", actorUserID)
+		baseQuery = baseQuery.Where("("+qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR sm.id IS NOT NULL)", actorUserID)
 	case params.RestrictToScopes:
 		actorUserID := strings.TrimSpace(params.ActorUserID)
+		spaceAdminScopeQuery := r.db.WithContext(ctx).
+			Model(&models.SpaceAdminScope{}).
+			Select("1").
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", actorUserID)
 		baseQuery = baseQuery.Where(
-			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			"("+qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR EXISTS (?))",
 			actorUserID,
-			actorUserID,
+			spaceAdminScopeQuery,
 		)
 	}
 
@@ -557,7 +562,7 @@ func (r *gormSpaceRepository) ListForAdmin(
 	if keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			"LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(s.category) LIKE ? OR LOWER(sc.name) LIKE ? OR LOWER(u.user_id) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.name) LIKE ?",
+			"LOWER("+qualifiedColumn("s", models.SpaceColumns.SpaceID)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.Name)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.Category)+") LIKE ? OR LOWER("+qualifiedColumn("sc", models.SpaceCategoryColumns.Name)+") LIKE ? OR LOWER("+qualifiedColumn("u", models.UserColumns.UserID)+") LIKE ? OR LOWER("+qualifiedColumn("u", models.UserColumns.Email)+") LIKE ? OR LOWER("+qualifiedColumn("u", models.UserColumns.Name)+") LIKE ?",
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -570,12 +575,12 @@ func (r *gormSpaceRepository) ListForAdmin(
 
 	statuses := normalizeSpaceStatuses(params.Statuses)
 	if len(statuses) > 0 {
-		baseQuery = baseQuery.Where("s.status IN ?", statuses)
+		baseQuery = baseQuery.Where(qualifiedColumn("s", models.SpaceColumns.Status)+" IN ?", statuses)
 	}
 
 	visibilities := normalizeSpaceVisibilities(params.Visibilities)
 	if len(visibilities) > 0 {
-		baseQuery = baseQuery.Where("s.visibility IN ?", visibilities)
+		baseQuery = baseQuery.Where(qualifiedColumn("s", models.SpaceColumns.Visibility)+" IN ?", visibilities)
 	}
 
 	var total int64
@@ -623,32 +628,34 @@ func (r *gormSpaceRepository) ListForAdmin(
 	var rows []adminSpaceListRow
 	if err := baseQuery.Session(&gorm.Session{}).
 		Select(
-			"s.id",
-			"s.space_id",
-			"s.name",
-			"s.description",
-			"s.category_id",
-			"s.category",
-			"COALESCE(sc.name, s.category) AS category_name",
-			"COALESCE(sc.is_default, FALSE) AS category_is_default",
-			"s.owner_user_id",
-			"s.visibility",
-			"s.cover_asset_id",
-			"s.cover_key",
-			"s.cover_url",
-			"s.cover_width",
-			"s.cover_height",
-			"s.cover_source",
-			"s.status",
-			"s.banned_reason",
-			"s.banned_at",
-			"s.deleted_at",
-			"s.created_at",
-			"s.updated_at",
-			"u.name AS owner_name",
-			"u.email AS owner_email",
+			selectColumns(
+				qualifiedColumn("s", models.SpaceColumns.ID),
+				qualifiedColumn("s", models.SpaceColumns.SpaceID),
+				qualifiedColumn("s", models.SpaceColumns.Name),
+				qualifiedColumn("s", models.SpaceColumns.Description),
+				qualifiedColumn("s", models.SpaceColumns.CategoryID),
+				qualifiedColumn("s", models.SpaceColumns.Category),
+				"COALESCE("+qualifiedColumn("sc", models.SpaceCategoryColumns.Name)+", "+qualifiedColumn("s", models.SpaceColumns.Category)+") AS category_name",
+				"COALESCE("+qualifiedColumn("sc", models.SpaceCategoryColumns.IsDefault)+", FALSE) AS category_is_default",
+				qualifiedColumn("s", models.SpaceColumns.OwnerUserID),
+				qualifiedColumn("s", models.SpaceColumns.Visibility),
+				qualifiedColumn("s", models.SpaceColumns.CoverAssetID),
+				qualifiedColumn("s", models.SpaceColumns.CoverKey),
+				qualifiedColumn("s", models.SpaceColumns.CoverURL),
+				qualifiedColumn("s", models.SpaceColumns.CoverWidth),
+				qualifiedColumn("s", models.SpaceColumns.CoverHeight),
+				qualifiedColumn("s", models.SpaceColumns.CoverSource),
+				qualifiedColumn("s", models.SpaceColumns.Status),
+				qualifiedColumn("s", models.SpaceColumns.BannedReason),
+				qualifiedColumn("s", models.SpaceColumns.BannedAt),
+				qualifiedColumn("s", models.SpaceColumns.DeletedAt),
+				qualifiedColumn("s", models.SpaceColumns.CreatedAt),
+				qualifiedColumn("s", models.SpaceColumns.UpdatedAt),
+				qualifiedColumn("u", models.UserColumns.Name)+" AS owner_name",
+				qualifiedColumn("u", models.UserColumns.Email)+" AS owner_email",
+			),
 		).
-		Order("s.created_at DESC").
+		Order(qualifiedColumn("s", models.SpaceColumns.CreatedAt) + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -742,18 +749,18 @@ func (r *gormSpaceRepository) ListMembers(ctx context.Context, spaceID string) (
 
 	var rows []spaceMemberRow
 	if err := r.db.WithContext(ctx).
-		Table("space_members AS sm").
-		Select(
-			"sm.user_id",
-			"sm.role",
-			"sm.created_at",
-			"sm.updated_at",
-			"u.email",
-			"u.name",
-		).
-		Joins("JOIN users AS u ON u.user_id = sm.user_id").
-		Where("sm.space_id = ?", normalizedSpaceID).
-		Order("sm.created_at ASC").
+		Table(tableWithAlias(models.SpaceMember{}, "sm")).
+		Select(selectColumns(
+			qualifiedColumn("sm", models.SpaceMemberColumns.UserID),
+			qualifiedColumn("sm", models.SpaceMemberColumns.Role),
+			qualifiedColumn("sm", models.SpaceMemberColumns.CreatedAt),
+			qualifiedColumn("sm", models.SpaceMemberColumns.UpdatedAt),
+			qualifiedColumn("u", models.UserColumns.Email),
+			qualifiedColumn("u", models.UserColumns.Name),
+		)).
+		Joins("JOIN "+tableName(models.User{})+" AS u ON u."+models.UserColumns.UserID+" = "+qualifiedColumn("sm", models.SpaceMemberColumns.UserID)).
+		Where(qualifiedColumn("sm", models.SpaceMemberColumns.SpaceID)+" = ?", normalizedSpaceID).
+		Order(qualifiedColumn("sm", models.SpaceMemberColumns.CreatedAt) + " ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -794,20 +801,20 @@ func (r *gormSpaceRepository) UpsertMember(ctx context.Context, params UpsertSpa
 	}
 
 	return r.db.WithContext(ctx).
-		Table("space_members").
+		Model(&models.SpaceMember{}).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "space_id"}, {Name: "user_id"}},
+			Columns: []clause.Column{{Name: models.SpaceMemberColumns.SpaceID}, {Name: models.SpaceMemberColumns.UserID}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"role":       role,
-				"updated_at": updatedAt,
+				models.SpaceMemberColumns.Role:      role,
+				models.SpaceMemberColumns.UpdatedAt: updatedAt,
 			}),
 		}).
 		Create(map[string]any{
-			"space_id":   spaceID,
-			"user_id":    userID,
-			"role":       role,
-			"created_at": updatedAt,
-			"updated_at": updatedAt,
+			models.SpaceMemberColumns.SpaceID:   spaceID,
+			models.SpaceMemberColumns.UserID:    userID,
+			models.SpaceMemberColumns.Role:      role,
+			models.SpaceMemberColumns.CreatedAt: updatedAt,
+			models.SpaceMemberColumns.UpdatedAt: updatedAt,
 		}).Error
 }
 
@@ -833,11 +840,12 @@ func (r *gormSpaceRepository) UpdateMemberRole(ctx context.Context, params Updat
 	}
 
 	tx := r.db.WithContext(ctx).
-		Table("space_members").
-		Where("space_id = ? AND user_id = ?", spaceID, userID).
+		Model(&models.SpaceMember{}).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = ?", spaceID).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", userID).
 		Updates(map[string]any{
-			"role":       role,
-			"updated_at": updatedAt,
+			models.SpaceMemberColumns.Role:      role,
+			models.SpaceMemberColumns.UpdatedAt: updatedAt,
 		})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -857,7 +865,8 @@ func (r *gormSpaceRepository) DeleteMember(ctx context.Context, spaceID string, 
 	}
 
 	tx := r.db.WithContext(ctx).
-		Where("space_id = ? AND user_id = ?", normalizedSpaceID, normalizedUserID).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = ?", normalizedSpaceID).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", normalizedUserID).
 		Delete(&models.SpaceMember{})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -877,10 +886,10 @@ func (r *gormSpaceRepository) UpdateVisibility(
 	var updatedSpace *models.Space
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Space{}).
-			Where("space_id = ?", spaceID).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
 			Updates(map[string]any{
-				"visibility": visibility,
-				"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
+				models.SpaceColumns.Visibility: visibility,
+				models.SpaceColumns.UpdatedAt:  gorm.Expr("CURRENT_TIMESTAMP"),
 			})
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -948,20 +957,21 @@ func (r *gormSpaceRepository) UpdateStatus(ctx context.Context, params UpdateSpa
 	}
 
 	updateValues := map[string]any{
-		"status":        params.Status,
-		"updated_at":    updatedAt,
-		"banned_reason": "",
-		"banned_at":     nil,
+		models.SpaceColumns.Status:       params.Status,
+		models.SpaceColumns.UpdatedAt:    updatedAt,
+		models.SpaceColumns.BannedReason: "",
+		models.SpaceColumns.BannedAt:     nil,
 	}
 	if params.Status == models.EntityStatusBanned {
-		updateValues["banned_reason"] = strings.TrimSpace(params.BannedReason)
-		updateValues["banned_at"] = params.BannedAt
+		updateValues[models.SpaceColumns.BannedReason] = strings.TrimSpace(params.BannedReason)
+		updateValues[models.SpaceColumns.BannedAt] = params.BannedAt
 	}
 
 	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Space{}).
-			Where("space_id = ? AND status <> ?", params.SpaceID, models.EntityStatusDeleted).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", params.SpaceID).
+			Where(qualifiedColumn("", models.SpaceColumns.Status)+" <> ?", models.EntityStatusDeleted).
 			Updates(updateValues)
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -996,55 +1006,56 @@ func (r *gormSpaceRepository) UpdateMetadata(ctx context.Context, params UpdateS
 	}
 
 	updateValues := map[string]any{
-		"updated_at": updatedAt,
+		models.SpaceColumns.UpdatedAt: updatedAt,
 	}
 	if params.Name != nil {
-		updateValues["name"] = strings.TrimSpace(*params.Name)
+		updateValues[models.SpaceColumns.Name] = strings.TrimSpace(*params.Name)
 	}
 	if params.Description != nil {
-		updateValues["description"] = strings.TrimSpace(*params.Description)
+		updateValues[models.SpaceColumns.Description] = strings.TrimSpace(*params.Description)
 	}
 	if params.CategoryID != nil {
-		updateValues["category_id"] = strings.TrimSpace(*params.CategoryID)
+		updateValues[models.SpaceColumns.CategoryID] = strings.TrimSpace(*params.CategoryID)
 	}
 	if params.Category != nil {
-		updateValues["category"] = strings.TrimSpace(*params.Category)
+		updateValues[models.SpaceColumns.Category] = strings.TrimSpace(*params.Category)
 	}
 	if params.Visibility != nil {
 		if !models.IsValidVisibility(*params.Visibility) {
 			return false, nil
 		}
-		updateValues["visibility"] = *params.Visibility
+		updateValues[models.SpaceColumns.Visibility] = *params.Visibility
 	}
 	if params.CoverAssetID != nil {
 		// 关键分支：封面更新允许清空（传空字符串时转为 NULL）。
 		trimmed := strings.TrimSpace(*params.CoverAssetID)
 		if trimmed == "" {
-			updateValues["cover_asset_id"] = nil
+			updateValues[models.SpaceColumns.CoverAssetID] = nil
 		} else {
-			updateValues["cover_asset_id"] = trimmed
+			updateValues[models.SpaceColumns.CoverAssetID] = trimmed
 		}
 	}
 	if params.CoverKey != nil {
-		updateValues["cover_key"] = strings.TrimSpace(*params.CoverKey)
+		updateValues[models.SpaceColumns.CoverKey] = strings.TrimSpace(*params.CoverKey)
 	}
 	if params.CoverURL != nil {
-		updateValues["cover_url"] = strings.TrimSpace(*params.CoverURL)
+		updateValues[models.SpaceColumns.CoverURL] = strings.TrimSpace(*params.CoverURL)
 	}
 	if params.CoverSource != nil {
-		updateValues["cover_source"] = strings.TrimSpace(*params.CoverSource)
+		updateValues[models.SpaceColumns.CoverSource] = strings.TrimSpace(*params.CoverSource)
 	}
 	if params.CoverWidth != nil {
-		updateValues["cover_width"] = *params.CoverWidth
+		updateValues[models.SpaceColumns.CoverWidth] = *params.CoverWidth
 	}
 	if params.CoverHeight != nil {
-		updateValues["cover_height"] = *params.CoverHeight
+		updateValues[models.SpaceColumns.CoverHeight] = *params.CoverHeight
 	}
 
 	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Space{}).
-			Where("space_id = ? AND status <> ?", params.SpaceID, models.EntityStatusDeleted).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", params.SpaceID).
+			Where(qualifiedColumn("", models.SpaceColumns.Status)+" <> ?", models.EntityStatusDeleted).
 			Updates(updateValues)
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -1098,30 +1109,30 @@ func (r *gormSpaceRepository) getBySpaceIDWithTx(
 
 	var row spaceRecordRow
 	if err := tx.WithContext(ctx).
-		Table("spaces").
-		Select(
-			"id",
-			"space_id",
-			"name",
-			"description",
-			"category_id",
-			"category",
-			"owner_user_id",
-			"visibility",
-			"cover_asset_id",
-			"cover_key",
-			"cover_url",
-			"cover_width",
-			"cover_height",
-			"cover_source",
-			"status",
-			"banned_reason",
-			"banned_at",
-			"deleted_at",
-			"created_at",
-			"updated_at",
-		).
-		Where("space_id = ?", strings.TrimSpace(spaceID)).
+		Model(&models.Space{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.SpaceColumns.ID),
+			qualifiedColumn("", models.SpaceColumns.SpaceID),
+			qualifiedColumn("", models.SpaceColumns.Name),
+			qualifiedColumn("", models.SpaceColumns.Description),
+			qualifiedColumn("", models.SpaceColumns.CategoryID),
+			qualifiedColumn("", models.SpaceColumns.Category),
+			qualifiedColumn("", models.SpaceColumns.OwnerUserID),
+			qualifiedColumn("", models.SpaceColumns.Visibility),
+			qualifiedColumn("", models.SpaceColumns.CoverAssetID),
+			qualifiedColumn("", models.SpaceColumns.CoverKey),
+			qualifiedColumn("", models.SpaceColumns.CoverURL),
+			qualifiedColumn("", models.SpaceColumns.CoverWidth),
+			qualifiedColumn("", models.SpaceColumns.CoverHeight),
+			qualifiedColumn("", models.SpaceColumns.CoverSource),
+			qualifiedColumn("", models.SpaceColumns.Status),
+			qualifiedColumn("", models.SpaceColumns.BannedReason),
+			qualifiedColumn("", models.SpaceColumns.BannedAt),
+			qualifiedColumn("", models.SpaceColumns.DeletedAt),
+			qualifiedColumn("", models.SpaceColumns.CreatedAt),
+			qualifiedColumn("", models.SpaceColumns.UpdatedAt),
+		)).
+		Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", strings.TrimSpace(spaceID)).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -1198,8 +1209,9 @@ func (r *gormSpaceRepository) IsMember(ctx context.Context, spaceID string, user
 
 	var count int64
 	if err := r.db.WithContext(ctx).
-		Table("space_members").
-		Where("space_id = ? AND user_id = ?", spaceID, userID).
+		Model(&models.SpaceMember{}).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = ?", spaceID).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", userID).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
@@ -1229,10 +1241,12 @@ func (r *gormSpaceRepository) TransferOwnership(
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Space{}).
-			Where("space_id = ? AND owner_user_id = ? AND status <> ?", spaceID, fromUserID, models.EntityStatusDeleted).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+			Where(qualifiedColumn("", models.SpaceColumns.OwnerUserID)+" = ?", fromUserID).
+			Where(qualifiedColumn("", models.SpaceColumns.Status)+" <> ?", models.EntityStatusDeleted).
 			Updates(map[string]any{
-				"owner_user_id": toUserID,
-				"updated_at":    updatedAt,
+				models.SpaceColumns.OwnerUserID: toUserID,
+				models.SpaceColumns.UpdatedAt:   updatedAt,
 			})
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -1243,18 +1257,18 @@ func (r *gormSpaceRepository) TransferOwnership(
 
 		memberUpsert := func(userID string, role models.Role) error {
 			now := updatedAt
-			return tx.Table("space_members").Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "space_id"}, {Name: "user_id"}},
+			return tx.Model(&models.SpaceMember{}).Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: models.SpaceMemberColumns.SpaceID}, {Name: models.SpaceMemberColumns.UserID}},
 				DoUpdates: clause.Assignments(map[string]any{
-					"role":       role,
-					"updated_at": now,
+					models.SpaceMemberColumns.Role:      role,
+					models.SpaceMemberColumns.UpdatedAt: now,
 				}),
 			}).Create(map[string]any{
-				"space_id":   spaceID,
-				"user_id":    userID,
-				"role":       role,
-				"created_at": now,
-				"updated_at": now,
+				models.SpaceMemberColumns.SpaceID:   spaceID,
+				models.SpaceMemberColumns.UserID:    userID,
+				models.SpaceMemberColumns.Role:      role,
+				models.SpaceMemberColumns.CreatedAt: now,
+				models.SpaceMemberColumns.UpdatedAt: now,
 			}).Error
 		}
 
@@ -1289,13 +1303,14 @@ func (r *gormSpaceRepository) SoftDelete(ctx context.Context, spaceID string, de
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		spaceTx := tx.Model(&models.Space{}).
-			Where("space_id = ? AND status <> ?", spaceID, models.EntityStatusDeleted).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+			Where(qualifiedColumn("", models.SpaceColumns.Status)+" <> ?", models.EntityStatusDeleted).
 			Updates(map[string]any{
-				"status":        models.EntityStatusDeleted,
-				"deleted_at":    deletedAt,
-				"banned_reason": "",
-				"banned_at":     nil,
-				"updated_at":    deletedAt,
+				models.SpaceColumns.Status:       models.EntityStatusDeleted,
+				models.SpaceColumns.DeletedAt:    deletedAt,
+				models.SpaceColumns.BannedReason: "",
+				models.SpaceColumns.BannedAt:     nil,
+				models.SpaceColumns.UpdatedAt:    deletedAt,
 			})
 		if spaceTx.Error != nil {
 			return spaceTx.Error
@@ -1304,18 +1319,19 @@ func (r *gormSpaceRepository) SoftDelete(ctx context.Context, spaceID string, de
 			return gorm.ErrRecordNotFound
 		}
 
-		documentsQuery := tx.Table("nodes").
-			Select("node_id").
-			Where("space_id = ?", spaceID)
+		documentsQuery := tx.Model(&models.Node{}).
+			Select(qualifiedColumn("", models.NodeColumns.NodeID)).
+			Where(qualifiedColumn("", models.NodeColumns.SpaceID)+" = ?", spaceID)
 
 		documentTx := tx.Model(&models.Document{}).
-			Where("node_id IN (?) AND status <> ?", documentsQuery, models.EntityStatusDeleted).
+			Where(qualifiedColumn("", models.DocumentColumns.NodeID)+" IN ?", documentsQuery).
+			Where(qualifiedColumn("", models.DocumentColumns.Status)+" <> ?", models.EntityStatusDeleted).
 			Updates(map[string]any{
-				"status":        models.EntityStatusDeleted,
-				"deleted_at":    deletedAt,
-				"banned_reason": "",
-				"banned_at":     nil,
-				"updated_at":    deletedAt,
+				models.DocumentColumns.Status:       models.EntityStatusDeleted,
+				models.DocumentColumns.DeletedAt:    deletedAt,
+				models.DocumentColumns.BannedReason: "",
+				models.DocumentColumns.BannedAt:     nil,
+				models.DocumentColumns.UpdatedAt:    deletedAt,
 			})
 		if documentTx.Error != nil {
 			return documentTx.Error
@@ -1343,17 +1359,17 @@ func (r *gormSpaceRepository) HardDelete(ctx context.Context, spaceID string) (b
 
 	var spaceDeleted bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		nodeIDsQuery := tx.Table("nodes").
-			Select("node_id").
-			Where("space_id = ?", normalizedSpaceID)
+		nodeIDsQuery := tx.Model(&models.Node{}).
+			Select(qualifiedColumn("", models.NodeColumns.NodeID)).
+			Where(qualifiedColumn("", models.NodeColumns.SpaceID)+" = ?", normalizedSpaceID)
 		type documentIDRow struct {
 			DocumentID string `gorm:"column:document_id"`
 		}
 		documentIDRows := make([]documentIDRow, 0, 8)
-		if err := tx.Table("documents AS d").
-			Select("d.document_id AS document_id").
-			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-			Where("n.space_id = ?", normalizedSpaceID).
+		if err := tx.Table(tableWithAlias(models.Document{}, "d")).
+			Select(qualifiedColumn("d", models.DocumentColumns.DocumentID)+" AS document_id").
+			Joins("JOIN "+tableName(models.Node{})+" AS n ON "+qualifiedColumn("n", models.NodeColumns.NodeID)+" = "+qualifiedColumn("d", models.DocumentColumns.NodeID)).
+			Where(qualifiedColumn("n", models.NodeColumns.SpaceID)+" = ?", normalizedSpaceID).
 			Scan(&documentIDRows).Error; err != nil {
 			return err
 		}
@@ -1370,28 +1386,28 @@ func (r *gormSpaceRepository) HardDelete(ctx context.Context, spaceID string) (b
 		if _, err := DeleteDocumentsCascadeInTx(tx, uniqueNonEmptyStrings(documentIDs)); err != nil {
 			return err
 		}
-		if err := tx.Table("node_permissions").
-			Where("node_id IN (?)", nodeIDsQuery).
+		if err := tx.Model(&models.NodePermission{}).
+			Where(qualifiedColumn("", models.NodeColumns.NodeID)+" IN (?)", nodeIDsQuery).
 			Delete(nil).Error; err != nil {
 			return err
 		}
-		if err := tx.Table("nodes").
-			Where("space_id = ?", normalizedSpaceID).
+		if err := tx.Model(&models.Node{}).
+			Where(qualifiedColumn("", models.NodeColumns.SpaceID)+" = ?", normalizedSpaceID).
 			Delete(nil).Error; err != nil {
 			return err
 		}
-		if err := tx.Table("space_members").
-			Where("space_id = ?", normalizedSpaceID).
+		if err := tx.Model(&models.SpaceMember{}).
+			Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = ?", normalizedSpaceID).
 			Delete(nil).Error; err != nil {
 			return err
 		}
-		if err := tx.Table("space_admin_scopes").
-			Where("space_id = ?", normalizedSpaceID).
+		if err := tx.Model(&models.SpaceAdminScope{}).
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = ?", normalizedSpaceID).
 			Delete(nil).Error; err != nil {
 			return err
 		}
 
-		deleteSpaceTx := tx.Where("space_id = ?", normalizedSpaceID).Delete(&models.Space{})
+		deleteSpaceTx := tx.Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", normalizedSpaceID).Delete(&models.Space{})
 		if deleteSpaceTx.Error != nil {
 			return deleteSpaceTx.Error
 		}
@@ -1422,23 +1438,35 @@ func (r *gormSpaceRepository) HasReaderAccess(ctx context.Context, spaceID strin
 		Hit int `gorm:"column:hit"`
 	}
 	if err := r.db.WithContext(ctx).
-		Table("spaces AS s").
+		Table(tableWithAlias(models.Space{}, "s")).
 		Select("1 AS hit").
-		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedUserID).
+		Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt)+" IS NULL").
 		Where(
-			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND ("+
-				"s.owner_user_id = ? OR "+
-				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
-				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?) OR "+
-				"(sm.id IS NOT NULL AND sm.role IN ?)"+
+			"("+
+				qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR "+
+				"EXISTS (?) OR "+
+				"EXISTS (?) OR "+
+				"EXISTS (?)"+
 				")",
-			spaceID,
-			models.EntityStatusActive,
 			normalizedUserID,
-			normalizedUserID,
-			models.AdminRolePlatformAdmin,
-			normalizedUserID,
-			[]models.Role{models.RoleOwner, models.RoleCollaborator, models.RoleReader},
+			r.db.WithContext(ctx).
+				Model(&models.UserAdminRole{}).
+				Select("1").
+				Where(qualifiedColumn("", models.UserAdminRoleColumns.UserID)+" = ?", normalizedUserID).
+				Where(qualifiedColumn("", models.UserAdminRoleColumns.Role)+" = ?", models.AdminRolePlatformAdmin),
+			r.db.WithContext(ctx).
+				Model(&models.SpaceAdminScope{}).
+				Select("1").
+				Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+				Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", normalizedUserID),
+			r.db.WithContext(ctx).
+				Model(&models.SpaceMember{}).
+				Select("1").
+				Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+				Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", normalizedUserID).
+				Where(qualifiedColumn("", models.SpaceMemberColumns.Role)+" IN ?", []models.Role{models.RoleOwner, models.RoleCollaborator, models.RoleReader}),
 		).
 		Limit(1).
 		Take(&probe).Error; err != nil {
@@ -1466,23 +1494,35 @@ func (r *gormSpaceRepository) HasWriterAccess(ctx context.Context, spaceID strin
 		Hit int `gorm:"column:hit"`
 	}
 	if err := r.db.WithContext(ctx).
-		Table("spaces AS s").
+		Table(tableWithAlias(models.Space{}, "s")).
 		Select("1 AS hit").
-		Joins("LEFT JOIN space_members AS sm ON sm.space_id = s.space_id AND sm.user_id = ?", normalizedUserID).
+		Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt)+" IS NULL").
 		Where(
-			"s.space_id = ? AND s.status = ? AND s.deleted_at IS NULL AND ("+
-				"s.owner_user_id = ? OR "+
-				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
-				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?) OR "+
-				"(sm.id IS NOT NULL AND sm.role IN ?)"+
+			"("+
+				qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR "+
+				"EXISTS (?) OR "+
+				"EXISTS (?) OR "+
+				"EXISTS (?)"+
 				")",
-			spaceID,
-			models.EntityStatusActive,
 			normalizedUserID,
-			normalizedUserID,
-			models.AdminRolePlatformAdmin,
-			normalizedUserID,
-			[]models.Role{models.RoleOwner, models.RoleCollaborator},
+			r.db.WithContext(ctx).
+				Model(&models.UserAdminRole{}).
+				Select("1").
+				Where(qualifiedColumn("", models.UserAdminRoleColumns.UserID)+" = ?", normalizedUserID).
+				Where(qualifiedColumn("", models.UserAdminRoleColumns.Role)+" = ?", models.AdminRolePlatformAdmin),
+			r.db.WithContext(ctx).
+				Model(&models.SpaceAdminScope{}).
+				Select("1").
+				Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+				Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", normalizedUserID),
+			r.db.WithContext(ctx).
+				Model(&models.SpaceMember{}).
+				Select("1").
+				Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+				Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", normalizedUserID).
+				Where(qualifiedColumn("", models.SpaceMemberColumns.Role)+" IN ?", []models.Role{models.RoleOwner, models.RoleCollaborator}),
 		).
 		Limit(1).
 		Take(&probe).Error; err != nil {

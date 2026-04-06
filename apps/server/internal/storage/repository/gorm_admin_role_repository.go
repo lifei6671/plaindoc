@@ -8,6 +8,7 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormAdminRoleRepository struct {
@@ -33,8 +34,12 @@ func (r *gormAdminRoleRepository) HasRole(
 
 	var count int64
 	if err := r.db.WithContext(ctx).
-		Table("user_admin_roles").
-		Where("user_id = ? AND role = ?", userID, role).
+		Model(&models.UserAdminRole{}).
+		Where(
+			models.UserAdminRoleColumns.UserID+" = ? AND "+models.UserAdminRoleColumns.Role+" = ?",
+			userID,
+			role,
+		).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
@@ -49,21 +54,21 @@ func (r *gormAdminRoleRepository) ListByUserID(ctx context.Context, userID strin
 		return []models.AdminRole{}, nil
 	}
 
-	var rows []struct {
-		Role string `gorm:"column:role"`
-	}
+	var rows []models.UserAdminRole
 	if err := r.db.WithContext(ctx).
-		Table("user_admin_roles").
-		Select("role").
-		Where("user_id = ?", userID).
-		Order("role ASC").
+		Model(&models.UserAdminRole{}).
+		Select(models.UserAdminRoleColumns.Role).
+		Where(models.UserAdminRoleColumns.UserID+" = ?", userID).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.UserAdminRoleColumns.Role},
+		}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
 	roles := make([]models.AdminRole, 0, len(rows))
 	for _, row := range rows {
-		role := models.AdminRole(row.Role)
+		role := row.Role
 		if !models.IsValidAdminRole(role) {
 			continue
 		}
@@ -97,15 +102,20 @@ func (r *gormAdminRoleRepository) ListByUserIDs(
 		return map[string][]models.AdminRole{}, nil
 	}
 
-	var rows []struct {
-		UserID string `gorm:"column:user_id"`
-		Role   string `gorm:"column:role"`
-	}
+	var rows []models.UserAdminRole
 	if err := r.db.WithContext(ctx).
-		Table("user_admin_roles").
-		Select("user_id", "role").
-		Where("user_id IN ?", normalizedUserIDs).
-		Order("user_id ASC, role ASC").
+		Model(&models.UserAdminRole{}).
+		Select(
+			models.UserAdminRoleColumns.UserID,
+			models.UserAdminRoleColumns.Role,
+		).
+		Where(models.UserAdminRoleColumns.UserID+" IN ?", normalizedUserIDs).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.UserAdminRoleColumns.UserID},
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.UserAdminRoleColumns.Role},
+		}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -116,7 +126,7 @@ func (r *gormAdminRoleRepository) ListByUserIDs(
 	}
 
 	for _, row := range rows {
-		role := models.AdminRole(row.Role)
+		role := row.Role
 		if !models.IsValidAdminRole(role) {
 			continue
 		}
@@ -142,7 +152,9 @@ func (r *gormAdminRoleRepository) ReplaceByUserID(
 	normalizedRoles := normalizeAdminRoles(roles)
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Table("user_admin_roles").Where("user_id = ?", normalizedUserID).Delete(&models.UserAdminRole{}).Error; err != nil {
+		if err := tx.Model(&models.UserAdminRole{}).
+			Where(models.UserAdminRoleColumns.UserID+" = ?", normalizedUserID).
+			Delete(&models.UserAdminRole{}).Error; err != nil {
 			return err
 		}
 
@@ -159,7 +171,7 @@ func (r *gormAdminRoleRepository) ReplaceByUserID(
 				UpdatedAt: now,
 			})
 		}
-		return tx.Table("user_admin_roles").Create(&rows).Error
+		return tx.Create(&rows).Error
 	})
 }
 

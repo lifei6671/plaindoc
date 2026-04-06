@@ -14,3 +14,17 @@ type UserAdminRole struct {
 func (UserAdminRole) TableName() string {
 	return "user_admin_roles"
 }
+
+var UserAdminRoleColumns = struct {
+	ID        string
+	UserID    string
+	Role      string
+	CreatedAt string
+	UpdatedAt string
+}{
+	ID:        "id",
+	UserID:    "user_id",
+	Role:      "role",
+	CreatedAt: "created_at",
+	UpdatedAt: "updated_at",
+}

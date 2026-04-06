@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
 
@@ -12,6 +13,12 @@ const defaultDataRetentionDeleteBatchSize = 500
 
 type gormDataRetentionRepository struct {
 	db *gorm.DB
+}
+
+type dataRetentionTableMeta struct {
+	tableName  string
+	idColumn   string
+	timeColumn string
 }
 
 // NewGormDataRetentionRepository 创建数据保留清理仓储实现。
@@ -26,10 +33,14 @@ func (r *gormDataRetentionRepository) DeleteAuditLogsBefore(
 ) (int64, error) {
 	deleted, err := r.deleteRowsByID(
 		ctx,
-		"audit_logs",
+		dataRetentionTableMeta{
+			tableName:  (models.AuditLog{}).TableName(),
+			idColumn:   models.AuditLogColumns.ID,
+			timeColumn: models.AuditLogColumns.CreatedAt,
+		},
 		batchSize,
 		func(query *gorm.DB) *gorm.DB {
-			return query.Where("created_at < ?", cutoff)
+			return query.Where(models.AuditLogColumns.CreatedAt+" < ?", cutoff)
 		},
 	)
 	if err != nil {
@@ -45,10 +56,14 @@ func (r *gormDataRetentionRepository) DeleteAuthCaptchaChallengesBefore(
 ) (int64, error) {
 	deleted, err := r.deleteRowsByID(
 		ctx,
-		"auth_captcha_challenges",
+		dataRetentionTableMeta{
+			tableName:  (models.AuthCaptchaChallenge{}).TableName(),
+			idColumn:   models.AuthCaptchaChallengeColumns.ID,
+			timeColumn: models.AuthCaptchaChallengeColumns.ExpiresAt,
+		},
 		batchSize,
 		func(query *gorm.DB) *gorm.DB {
-			return query.Where("expires_at < ?", cutoff)
+			return query.Where(models.AuthCaptchaChallengeColumns.ExpiresAt+" < ?", cutoff)
 		},
 	)
 	if err != nil {
@@ -64,10 +79,19 @@ func (r *gormDataRetentionRepository) DeleteAuthRiskStatesBefore(
 ) (int64, error) {
 	deleted, err := r.deleteRowsByID(
 		ctx,
-		"auth_risk_states",
+		dataRetentionTableMeta{
+			tableName:  (models.AuthRiskState{}).TableName(),
+			idColumn:   models.AuthRiskStateColumns.ID,
+			timeColumn: models.AuthRiskStateColumns.UpdatedAt,
+		},
 		batchSize,
 		func(query *gorm.DB) *gorm.DB {
-			return query.Where("updated_at < ? AND (lock_until IS NULL OR lock_until < ?)", cutoff, cutoff)
+			return query.
+				Where(models.AuthRiskStateColumns.UpdatedAt+" < ?", cutoff).
+				Where(
+					models.AuthRiskStateColumns.LockUntil+" IS NULL OR "+models.AuthRiskStateColumns.LockUntil+" < ?",
+					cutoff,
+				)
 		},
 	)
 	if err != nil {
@@ -83,10 +107,19 @@ func (r *gormDataRetentionRepository) DeleteUserSessionsBefore(
 ) (int64, error) {
 	deleted, err := r.deleteRowsByID(
 		ctx,
-		"user_sessions",
+		dataRetentionTableMeta{
+			tableName:  (models.UserSession{}).TableName(),
+			idColumn:   models.UserSessionColumns.ID,
+			timeColumn: models.UserSessionColumns.ExpiresAt,
+		},
 		batchSize,
 		func(query *gorm.DB) *gorm.DB {
-			return query.Where("(expires_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)", cutoff, cutoff)
+			return query.
+				Where(models.UserSessionColumns.ExpiresAt+" < ?", cutoff).
+				Or(
+					models.UserSessionColumns.RevokedAt+" IS NOT NULL AND "+models.UserSessionColumns.RevokedAt+" < ?",
+					cutoff,
+				)
 		},
 	)
 	if err != nil {
@@ -97,7 +130,7 @@ func (r *gormDataRetentionRepository) DeleteUserSessionsBefore(
 
 func (r *gormDataRetentionRepository) deleteRowsByID(
 	ctx context.Context,
-	tableName string,
+	tableMeta dataRetentionTableMeta,
 	batchSize int,
 	filterBuilder func(query *gorm.DB) *gorm.DB,
 ) (int64, error) {
@@ -110,20 +143,27 @@ func (r *gormDataRetentionRepository) deleteRowsByID(
 
 	var totalDeleted int64
 	for {
-		query := r.db.WithContext(ctx).Table(tableName).Select("id").Order("id ASC").Limit(batchSize)
+		query := r.db.WithContext(ctx).
+			Table(tableMeta.tableName).
+			Select(tableMeta.idColumn).
+			Order(tableMeta.idColumn + " ASC").
+			Limit(batchSize)
 		if filterBuilder != nil {
 			query = filterBuilder(query)
 		}
 
 		ids := make([]int64, 0, batchSize)
-		if err := query.Pluck("id", &ids).Error; err != nil {
+		if err := query.Pluck(tableMeta.idColumn, &ids).Error; err != nil {
 			return totalDeleted, err
 		}
 		if len(ids) == 0 {
 			break
 		}
 
-		deleteTx := r.db.WithContext(ctx).Table(tableName).Where("id IN ?", ids).Delete(nil)
+		deleteTx := r.db.WithContext(ctx).
+			Table(tableMeta.tableName).
+			Where(tableMeta.idColumn+" IN ?", ids).
+			Delete(nil)
 		if deleteTx.Error != nil {
 			return totalDeleted, deleteTx.Error
 		}

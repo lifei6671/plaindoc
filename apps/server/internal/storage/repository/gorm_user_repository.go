@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -13,6 +14,8 @@ import (
 type gormUserRepository struct {
 	db *gorm.DB
 }
+
+type userListRow = userListRowDB
 
 // NewGormUserRepository 创建基于 GORM 的用户仓储实现。
 func NewGormUserRepository(db *gorm.DB) UserRepository {
@@ -37,8 +40,20 @@ func (r *gormUserRepository) GetByUserID(ctx context.Context, userID string) (*m
 	}
 	var user models.User
 	if err := r.db.WithContext(ctx).
-		Select("id, user_id, email, password_hash, name, avatar_url, status, banned_reason, banned_at, deleted_at").
-		Where("user_id = ?", userID).
+		Model(&models.User{}).
+		Select(
+			models.UserColumns.ID,
+			models.UserColumns.UserID,
+			models.UserColumns.Email,
+			models.UserColumns.PasswordHash,
+			models.UserColumns.Name,
+			models.UserColumns.AvatarURL,
+			models.UserColumns.Status,
+			models.UserColumns.BannedReason,
+			models.UserColumns.BannedAt,
+			models.UserColumns.DeletedAt,
+		).
+		Where(models.UserColumns.UserID+" = ?", userID).
 		Take(&user).Error; err != nil {
 		return nil, err
 	}
@@ -54,8 +69,20 @@ func (r *gormUserRepository) GetByEmail(ctx context.Context, email string) (*mod
 	}
 	var user models.User
 	if err := r.db.WithContext(ctx).
-		Select("id, user_id, email, password_hash, name, avatar_url, status, banned_reason, banned_at, deleted_at").
-		Where("email = ?", email).
+		Model(&models.User{}).
+		Select(
+			models.UserColumns.ID,
+			models.UserColumns.UserID,
+			models.UserColumns.Email,
+			models.UserColumns.PasswordHash,
+			models.UserColumns.Name,
+			models.UserColumns.AvatarURL,
+			models.UserColumns.Status,
+			models.UserColumns.BannedReason,
+			models.UserColumns.BannedAt,
+			models.UserColumns.DeletedAt,
+		).
+		Where(models.UserColumns.Email+" = ?", email).
 		Take(&user).Error; err != nil {
 		return nil, err
 	}
@@ -79,7 +106,9 @@ func (r *gormUserRepository) List(
 	if keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			"LOWER(user_id) LIKE ? OR LOWER(email) LIKE ? OR LOWER(name) LIKE ?",
+			"LOWER("+models.UserColumns.UserID+") LIKE ? OR "+
+				"LOWER("+models.UserColumns.Email+") LIKE ? OR "+
+				"LOWER("+models.UserColumns.Name+") LIKE ?",
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -88,7 +117,7 @@ func (r *gormUserRepository) List(
 
 	statuses := normalizeStatuses(params.Statuses)
 	if len(statuses) > 0 {
-		baseQuery = baseQuery.Where("status IN ?", statuses)
+		baseQuery = baseQuery.Where(models.UserColumns.Status+" IN ?", statuses)
 	}
 
 	var total int64
@@ -105,25 +134,23 @@ func (r *gormUserRepository) List(
 		offset = 0
 	}
 
-	type userListRow struct {
-		ID           int64               `gorm:"column:id"`
-		UserID       string              `gorm:"column:user_id"`
-		Email        string              `gorm:"column:email"`
-		PasswordHash string              `gorm:"column:password_hash"`
-		Name         string              `gorm:"column:name"`
-		AvatarURL    string              `gorm:"column:avatar_url"`
-		Status       models.EntityStatus `gorm:"column:status"`
-		BannedReason string              `gorm:"column:banned_reason"`
-		BannedAt     *time.Time          `gorm:"column:banned_at"`
-		DeletedAt    *time.Time          `gorm:"column:deleted_at"`
-		CreatedAtRaw string              `gorm:"column:created_at"`
-		UpdatedAtRaw string              `gorm:"column:updated_at"`
-	}
-
 	var rows []userListRow
 	if err := baseQuery.Session(&gorm.Session{}).
-		Select("id, user_id, email, password_hash, name, avatar_url, status, banned_reason, banned_at, deleted_at, created_at, updated_at").
-		Order("created_at DESC").
+		Select(
+			models.UserColumns.ID,
+			models.UserColumns.UserID,
+			models.UserColumns.Email,
+			models.UserColumns.PasswordHash,
+			models.UserColumns.Name,
+			models.UserColumns.AvatarURL,
+			models.UserColumns.Status,
+			models.UserColumns.BannedReason,
+			models.UserColumns.BannedAt,
+			models.UserColumns.DeletedAt,
+			models.UserColumns.CreatedAt+" AS created_at_raw",
+			models.UserColumns.UpdatedAt+" AS updated_at_raw",
+		).
+		Order(models.UserColumns.CreatedAt + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -143,8 +170,8 @@ func (r *gormUserRepository) List(
 			BannedReason: row.BannedReason,
 			BannedAt:     row.BannedAt,
 			DeletedAt:    row.DeletedAt,
-			CreatedAt:    parseRecordTime(row.CreatedAtRaw),
-			UpdatedAt:    parseRecordTime(row.UpdatedAtRaw),
+			CreatedAt:    recordtime.Parse(row.CreatedAtRaw),
+			UpdatedAt:    recordtime.Parse(row.UpdatedAtRaw),
 		})
 	}
 
@@ -174,19 +201,19 @@ func (r *gormUserRepository) UpdateStatus(ctx context.Context, params UpdateUser
 	}
 
 	updateValues := map[string]any{
-		"status":        params.Status,
-		"updated_at":    updatedAt,
-		"banned_reason": "",
-		"banned_at":     nil,
+		models.UserColumns.Status:       params.Status,
+		models.UserColumns.UpdatedAt:    updatedAt,
+		models.UserColumns.BannedReason: "",
+		models.UserColumns.BannedAt:     nil,
 	}
 	if params.Status == models.EntityStatusBanned {
-		updateValues["banned_reason"] = strings.TrimSpace(params.BannedReason)
-		updateValues["banned_at"] = params.BannedAt
+		updateValues[models.UserColumns.BannedReason] = strings.TrimSpace(params.BannedReason)
+		updateValues[models.UserColumns.BannedAt] = params.BannedAt
 	}
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.User{}).
-		Where("user_id = ?", params.UserID).
+		Where(models.UserColumns.UserID+" = ?", params.UserID).
 		Updates(updateValues)
 	if tx.Error != nil {
 		return false, tx.Error
@@ -206,10 +233,10 @@ func (r *gormUserRepository) UpdateProfile(ctx context.Context, params UpdateUse
 
 	updateValues := map[string]any{}
 	if params.Name != nil {
-		updateValues["name"] = strings.TrimSpace(*params.Name)
+		updateValues[models.UserColumns.Name] = strings.TrimSpace(*params.Name)
 	}
 	if params.AvatarURL != nil {
-		updateValues["avatar_url"] = strings.TrimSpace(*params.AvatarURL)
+		updateValues[models.UserColumns.AvatarURL] = strings.TrimSpace(*params.AvatarURL)
 	}
 	if len(updateValues) == 0 {
 		return false, nil
@@ -219,11 +246,11 @@ func (r *gormUserRepository) UpdateProfile(ctx context.Context, params UpdateUse
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	updateValues["updated_at"] = updatedAt
+	updateValues[models.UserColumns.UpdatedAt] = updatedAt
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.User{}).
-		Where("user_id = ?", userID).
+		Where(models.UserColumns.UserID+" = ?", userID).
 		Updates(updateValues)
 	if tx.Error != nil {
 		return false, tx.Error
@@ -254,10 +281,10 @@ func (r *gormUserRepository) UpdatePassword(
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.User{}).
-		Where("user_id = ?", targetUserID).
+		Where(models.UserColumns.UserID+" = ?", targetUserID).
 		Updates(map[string]any{
-			"password_hash": targetPasswordHash,
-			"updated_at":    updatedAt,
+			models.UserColumns.PasswordHash: targetPasswordHash,
+			models.UserColumns.UpdatedAt:    updatedAt,
 		})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -278,13 +305,14 @@ func (r *gormUserRepository) SoftDelete(ctx context.Context, userID string, dele
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.User{}).
-		Where("user_id = ? AND status <> ?", userID, models.EntityStatusDeleted).
+		Where(models.UserColumns.UserID+" = ?", userID).
+		Where(models.UserColumns.Status+" <> ?", models.EntityStatusDeleted).
 		Updates(map[string]any{
-			"status":        models.EntityStatusDeleted,
-			"deleted_at":    deletedAt,
-			"banned_reason": "",
-			"banned_at":     nil,
-			"updated_at":    deletedAt,
+			models.UserColumns.Status:       models.EntityStatusDeleted,
+			models.UserColumns.DeletedAt:    deletedAt,
+			models.UserColumns.BannedReason: "",
+			models.UserColumns.BannedAt:     nil,
+			models.UserColumns.UpdatedAt:    deletedAt,
 		})
 	if tx.Error != nil {
 		return false, tx.Error
@@ -313,44 +341,5 @@ func normalizeStatuses(input []models.EntityStatus) []models.EntityStatus {
 }
 
 func parseRecordTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05 -0700 MST",
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05.999999-07:00",
-		"2006-01-02 15:04:05.999-07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
-		}
-	}
-	// 兼容数据库返回的 "YYYY-MM-DD HH:MM:SS+00:00" 等格式，统一转为 RFC3339 再解析。
-	normalized := strings.Replace(value, " ", "T", 1)
-	timePart := normalized
-	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
-		timePart = normalized[index+1:]
-	}
-	if !strings.ContainsAny(timePart, "Zz+-") {
-		normalized += "Z"
-	}
-	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
-		return parsedAt.UTC()
-	}
-	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
-		return parsedAt.UTC()
-	}
-	return time.Time{}
+	return recordtime.Parse(raw)
 }

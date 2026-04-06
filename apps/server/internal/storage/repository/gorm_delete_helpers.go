@@ -9,12 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-type workspaceNodeDeleteSnapshot struct {
-	NodeID       string          `gorm:"column:node_id"`
-	SpaceID      string          `gorm:"column:space_id"`
-	ParentNodeID *string         `gorm:"column:parent_node_id"`
-	Type         models.NodeType `gorm:"column:type"`
-}
+type workspaceNodeDeleteSnapshot = workspaceNodeDeleteSnapshotDB
 
 type workspaceNodeDeleteScope struct {
 	Root        workspaceNodeDeleteSnapshot
@@ -31,33 +26,33 @@ func DeleteDocumentsCascadeInTx(tx *gorm.DB, documentIDSource any) (int64, error
 		return 0, nil
 	}
 
-	if err := tx.Table("document_file_revisions").
-		Where("document_id IN (?)", documentIDSource).
+	if err := tx.Model(&models.DocumentFileRevision{}).
+		Where(qualifiedColumn("", models.DocumentFileRevisionColumns.DocumentID)+" IN (?)", documentIDSource).
 		Delete(nil).Error; err != nil {
 		return 0, err
 	}
-	if err := tx.Table("document_revisions").
-		Where("document_id IN (?)", documentIDSource).
+	if err := tx.Model(&models.DocumentRevision{}).
+		Where(qualifiedColumn("", models.DocumentRevisionColumns.DocumentID)+" IN (?)", documentIDSource).
 		Delete(nil).Error; err != nil {
 		return 0, err
 	}
-	if err := tx.Table("document_permissions").
-		Where("document_id IN (?)", documentIDSource).
+	if err := tx.Model(&models.DocumentPermission{}).
+		Where(qualifiedColumn("", models.DocumentColumns.DocumentID)+" IN (?)", documentIDSource).
 		Delete(nil).Error; err != nil {
 		return 0, err
 	}
-	if err := tx.Table("document_image_assets").
-		Where("document_id IN (?)", documentIDSource).
+	if err := tx.Model(&models.DocumentImageAsset{}).
+		Where(qualifiedColumn("", models.DocumentImageAssetColumns.DocumentID)+" IN (?)", documentIDSource).
 		Delete(nil).Error; err != nil {
 		return 0, err
 	}
-	if err := tx.Table("document_attachments").
-		Where("document_id IN (?)", documentIDSource).
+	if err := tx.Model(&models.DocumentAttachment{}).
+		Where(qualifiedColumn("", models.DocumentAttachmentColumns.DocumentID)+" IN (?)", documentIDSource).
 		Delete(nil).Error; err != nil {
 		return 0, err
 	}
 
-	deleteResult := tx.Where("document_id IN (?)", documentIDSource).Delete(&models.Document{})
+	deleteResult := tx.Where(qualifiedColumn("", models.DocumentColumns.DocumentID)+" IN (?)", documentIDSource).Delete(&models.Document{})
 	if deleteResult.Error != nil {
 		return 0, deleteResult.Error
 	}
@@ -72,13 +67,13 @@ func deleteNodesCascadeInTx(tx *gorm.DB, nodeIDSource any) (int64, error) {
 		return 0, nil
 	}
 
-	if err := tx.Table("node_permissions").
-		Where("node_id IN (?)", nodeIDSource).
+	if err := tx.Model(&models.NodePermission{}).
+		Where(qualifiedColumn("", models.NodeColumns.NodeID)+" IN (?)", nodeIDSource).
 		Delete(nil).Error; err != nil {
 		return 0, err
 	}
 
-	deleteResult := tx.Where("node_id IN (?)", nodeIDSource).Delete(&models.Node{})
+	deleteResult := tx.Where(qualifiedColumn("", models.NodeColumns.NodeID)+" IN (?)", nodeIDSource).Delete(&models.Node{})
 	if deleteResult.Error != nil {
 		return 0, deleteResult.Error
 	}
@@ -101,18 +96,28 @@ func collectWorkspaceNodeDeleteScopeInTx(
 
 	var root workspaceNodeDeleteSnapshot
 	if err := tx.WithContext(ctx).
-		Table("nodes").
-		Select("node_id", "space_id", "parent_node_id", "type").
-		Where("node_id = ?", normalizedRootNodeID).
+		Model(&models.Node{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.NodeColumns.NodeID),
+			qualifiedColumn("", models.NodeColumns.SpaceID),
+			qualifiedColumn("", models.NodeColumns.ParentNodeID),
+			qualifiedColumn("", models.NodeColumns.Type),
+		)).
+		Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", normalizedRootNodeID).
 		Take(&root).Error; err != nil {
 		return workspaceNodeDeleteScope{}, err
 	}
 
 	allNodes := make([]workspaceNodeDeleteSnapshot, 0, 32)
 	if err := tx.WithContext(ctx).
-		Table("nodes").
-		Select("node_id", "space_id", "parent_node_id", "type").
-		Where("space_id = ?", strings.TrimSpace(root.SpaceID)).
+		Model(&models.Node{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.NodeColumns.NodeID),
+			qualifiedColumn("", models.NodeColumns.SpaceID),
+			qualifiedColumn("", models.NodeColumns.ParentNodeID),
+			qualifiedColumn("", models.NodeColumns.Type),
+		)).
+		Where(qualifiedColumn("", models.NodeColumns.SpaceID)+" = ?", strings.TrimSpace(root.SpaceID)).
 		Find(&allNodes).Error; err != nil {
 		return workspaceNodeDeleteScope{}, err
 	}
@@ -164,9 +169,9 @@ func collectWorkspaceNodeDeleteScopeInTx(
 		}
 		documentRows := make([]documentRow, 0, len(nodeIDs))
 		if err := tx.WithContext(ctx).
-			Table("documents").
-			Select("document_id").
-			Where("node_id IN ?", nodeIDs).
+			Model(&models.Document{}).
+			Select(qualifiedColumn("", models.DocumentColumns.DocumentID)).
+			Where(qualifiedColumn("", models.DocumentColumns.NodeID)+" IN ?", nodeIDs).
 			Find(&documentRows).Error; err != nil {
 			return workspaceNodeDeleteScope{}, err
 		}

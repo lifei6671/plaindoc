@@ -19,3 +19,27 @@ type DocumentTemplateScene struct {
 func (DocumentTemplateScene) TableName() string {
 	return "document_template_scenes"
 }
+
+var DocumentTemplateSceneColumns = struct {
+	ID              string
+	SceneKey        string
+	SceneName       string
+	Description     string
+	Sort            string
+	IsBuiltin       string
+	CreatedByUserID string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	SceneKey:        "scene_key",
+	SceneName:       "scene_name",
+	Description:     "description",
+	Sort:            "sort",
+	IsBuiltin:       "is_builtin",
+	CreatedByUserID: "created_by_user_id",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

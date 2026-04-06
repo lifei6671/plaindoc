@@ -23,3 +23,35 @@ type DocumentShare struct {
 func (DocumentShare) TableName() string {
 	return "document_shares"
 }
+
+var DocumentShareColumns = struct {
+	ID              string
+	ShareID         string
+	DocumentID      string
+	SpaceID         string
+	Mode            string
+	PasswordHash    string
+	PasswordHint    string
+	ExpiresAt       string
+	DisabledAt      string
+	AccessVersion   string
+	CreatedByUserID string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	ShareID:         "share_id",
+	DocumentID:      "document_id",
+	SpaceID:         "space_id",
+	Mode:            "mode",
+	PasswordHash:    "password_hash",
+	PasswordHint:    "password_hint",
+	ExpiresAt:       "expires_at",
+	DisabledAt:      "disabled_at",
+	AccessVersion:   "access_version",
+	CreatedByUserID: "created_by_user_id",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -13,14 +14,7 @@ type gormHomeSearchRepository struct {
 	db *gorm.DB
 }
 
-type homeSearchMetadataRow struct {
-	SpaceID      string  `gorm:"column:space_id"`
-	SpaceName    string  `gorm:"column:space_name"`
-	DocumentID   string  `gorm:"column:document_id"`
-	ReaderSlug   *string `gorm:"column:reader_slug"`
-	Title        string  `gorm:"column:title"`
-	UpdatedAtRaw string  `gorm:"column:updated_at"`
-}
+type homeSearchMetadataRow = homeSearchMetadataRowDB
 
 // NewGormHomeSearchRepository 创建首页检索仓储实现。
 func NewGormHomeSearchRepository(db *gorm.DB) HomeSearchRepository {
@@ -39,23 +33,36 @@ func (r *gormHomeSearchRepository) ListActiveDocumentMetadataByDocumentIDs(
 		return []HomeSearchDocumentMetadataRecord{}, nil
 	}
 
+	documentAlias := "d"
+	nodeAlias := "n"
+	spaceAlias := "s"
 	rows := make([]homeSearchMetadataRow, 0, len(normalizedDocumentIDs))
 	if err := r.db.WithContext(ctx).
-		Table("documents AS d").
+		Table(tableWithAlias(models.Document{}, documentAlias)).
 		Select(
-			"s.space_id AS space_id",
-			"s.name AS space_name",
-			"d.document_id AS document_id",
-			"n.reader_slug AS reader_slug",
-			"d.title AS title",
-			"d.updated_at AS updated_at",
+			qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)+" AS space_id",
+			qualifiedColumn(spaceAlias, models.SpaceColumns.Name)+" AS space_name",
+			qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+" AS document_id",
+			qualifiedColumn(nodeAlias, models.NodeColumns.ReaderSlug)+" AS reader_slug",
+			qualifiedColumn(documentAlias, models.DocumentColumns.Title)+" AS title",
+			qualifiedColumn(documentAlias, models.DocumentColumns.UpdatedAt)+" AS updated_at_raw",
 		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("d.document_id IN ?", normalizedDocumentIDs).
-		Where("d.status = ? AND d.deleted_at IS NULL", models.EntityStatusActive).
-		Where("d.format = ?", models.DocumentFormatMarkdown).
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
+		Joins(
+			"JOIN "+tableName(models.Node{})+" AS "+nodeAlias+
+				" ON "+qualifiedColumn(nodeAlias, models.NodeColumns.NodeID)+
+				" = "+qualifiedColumn(documentAlias, models.DocumentColumns.NodeID),
+		).
+		Joins(
+			"JOIN "+tableName(models.Space{})+" AS "+spaceAlias+
+				" ON "+qualifiedColumn(spaceAlias, models.SpaceColumns.SpaceID)+
+				" = "+qualifiedColumn(nodeAlias, models.NodeColumns.SpaceID),
+		).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+" IN ?", normalizedDocumentIDs).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.DeletedAt)+" IS NULL").
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Format)+" = ?", models.DocumentFormatMarkdown).
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn(spaceAlias, models.SpaceColumns.DeletedAt) + " IS NULL").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -68,7 +75,7 @@ func (r *gormHomeSearchRepository) ListActiveDocumentMetadataByDocumentIDs(
 			DocumentID:       strings.TrimSpace(row.DocumentID),
 			DocumentRouteKey: resolveDocumentRouteKey(strings.TrimSpace(row.DocumentID), row.ReaderSlug),
 			Title:            strings.TrimSpace(row.Title),
-			UpdatedAt:        parseRecordTime(row.UpdatedAtRaw),
+			UpdatedAt:        recordtime.Parse(row.UpdatedAtRaw),
 		})
 	}
 	return result, nil

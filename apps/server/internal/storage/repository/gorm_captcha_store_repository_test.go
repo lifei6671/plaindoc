@@ -79,7 +79,8 @@ func TestGormCaptchaStoreRepository_UpsertGetDelete(t *testing.T) {
 	var count int64
 	if err := database.ORM.WithContext(ctx).
 		Model(&models.AuthCaptchaChallenge{}).
-		Where("captcha_id = ? AND scene = ?", storedID, captchaStoreScene).
+		Where("captcha_id = ?", storedID).
+		Where("scene = ?", captchaStoreScene).
 		Count(&count).Error; err != nil {
 		t.Fatalf("count store row failed: %v", err)
 	}
@@ -170,7 +171,8 @@ func TestGormCaptchaStoreRepository_LongIDMappedAndIsolated(t *testing.T) {
 	var normalCount int64
 	if err := database.ORM.WithContext(ctx).
 		Model(&models.AuthCaptchaChallenge{}).
-		Where("captcha_id = ? AND scene = ?", normalChallenge.CaptchaID, "login").
+		Where("captcha_id = ?", normalChallenge.CaptchaID).
+		Where("scene = ?", "login").
 		Count(&normalCount).Error; err != nil {
 		t.Fatalf("count normal challenge failed: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 )
@@ -15,35 +16,9 @@ type gormDocumentRepository struct {
 	searchIndexJobRepo SearchIndexJobRepository
 }
 
-type documentAccessRow struct {
-	ID                int64                 `gorm:"column:id"`
-	DocumentID        string                `gorm:"column:document_id"`
-	NodeID            string                `gorm:"column:node_id"`
-	ThemeID           string                `gorm:"column:theme_id"`
-	Format            models.DocumentFormat `gorm:"column:format"`
-	DocumentVis       models.Visibility     `gorm:"column:document_visibility"`
-	DocumentStatus    models.EntityStatus   `gorm:"column:document_status"`
-	DocumentBanReason string                `gorm:"column:document_banned_reason"`
-	DocumentBannedAt  *time.Time            `gorm:"column:document_banned_at"`
-	DocumentDeletedAt *time.Time            `gorm:"column:document_deleted_at"`
-	Title             string                `gorm:"column:title"`
-	ContentMD         string                `gorm:"column:content_md"`
-	Version           int                   `gorm:"column:version"`
-	SourceBlobID      *string               `gorm:"column:source_blob_id"`
-	SourceFileName    *string               `gorm:"column:source_file_name"`
-	SourceMimeType    *string               `gorm:"column:source_mime_type"`
-	ContentVersion    int                   `gorm:"column:content_version"`
-	CreatedByUserID   *string               `gorm:"column:created_by_user_id"`
-	UpdatedByUserID   *string               `gorm:"column:updated_by_user_id"`
-	SpaceID           string                `gorm:"column:space_id"`
-	SpaceName         string                `gorm:"column:space_name"`
-	SpaceVis          models.Visibility     `gorm:"column:space_visibility"`
-	SpaceStatus       models.EntityStatus   `gorm:"column:space_status"`
-	SpaceBanReason    string                `gorm:"column:space_banned_reason"`
-	SpaceBannedAt     *time.Time            `gorm:"column:space_banned_at"`
-	SpaceDeletedAt    *time.Time            `gorm:"column:space_deleted_at"`
-	SpaceOwnerUser    string                `gorm:"column:space_owner_user_id"`
-}
+type documentAccessRow = documentAccessRowDB
+
+type adminDocumentListRow = adminDocumentListRowDB
 
 // NewGormDocumentRepository 创建基于 GORM 的文档仓储实现。
 func NewGormDocumentRepository(
@@ -92,28 +67,29 @@ func (r *gormDocumentRepository) GetByDocumentID(ctx context.Context, documentID
 
 	var document models.Document
 	if err := r.db.WithContext(ctx).
+		Model(&models.Document{}).
 		Select(
-			"id",
-			"document_id",
-			"node_id",
-			"theme_id",
-			"format",
-			"visibility",
-			"status",
-			"banned_reason",
-			"banned_at",
-			"deleted_at",
-			"title",
-			"content_md",
-			"version",
-			"source_blob_id",
-			"source_file_name",
-			"source_mime_type",
-			"content_version",
-			"created_by_user_id",
-			"updated_by_user_id",
+			models.DocumentColumns.ID,
+			models.DocumentColumns.DocumentID,
+			models.DocumentColumns.NodeID,
+			models.DocumentColumns.ThemeID,
+			models.DocumentColumns.Format,
+			models.DocumentColumns.Visibility,
+			models.DocumentColumns.Status,
+			models.DocumentColumns.BannedReason,
+			models.DocumentColumns.BannedAt,
+			models.DocumentColumns.DeletedAt,
+			models.DocumentColumns.Title,
+			models.DocumentColumns.ContentMD,
+			models.DocumentColumns.Version,
+			models.DocumentColumns.SourceBlobID,
+			models.DocumentColumns.SourceFileName,
+			models.DocumentColumns.SourceMimeType,
+			models.DocumentColumns.ContentVersion,
+			models.DocumentColumns.CreatedByUserID,
+			models.DocumentColumns.UpdatedByUserID,
 		).
-		Where("document_id = ?", documentID).
+		Where(models.DocumentColumns.DocumentID+" = ?", documentID).
 		Take(&document).Error; err != nil {
 		return nil, err
 	}
@@ -141,39 +117,39 @@ func (r *gormDocumentRepository) GetAccessByDocumentID(
 
 	var row documentAccessRow
 	if err := r.db.WithContext(ctx).
-		Table("documents AS d").
+		Table(tableWithAlias(models.Document{}, "d")).
 		Select(
-			"d.id AS id",
-			"d.document_id AS document_id",
-			"d.node_id AS node_id",
-			"d.theme_id AS theme_id",
-			"d.format AS format",
-			"d.visibility AS document_visibility",
-			"d.status AS document_status",
-			"d.banned_reason AS document_banned_reason",
-			"d.banned_at AS document_banned_at",
-			"d.deleted_at AS document_deleted_at",
-			"d.title AS title",
-			"d.content_md AS content_md",
-			"d.version AS version",
-			"d.source_blob_id AS source_blob_id",
-			"d.source_file_name AS source_file_name",
-			"d.source_mime_type AS source_mime_type",
-			"d.content_version AS content_version",
-			"d.created_by_user_id AS created_by_user_id",
-			"d.updated_by_user_id AS updated_by_user_id",
-			"s.space_id AS space_id",
-			"s.name AS space_name",
-			"s.visibility AS space_visibility",
-			"s.status AS space_status",
-			"s.banned_reason AS space_banned_reason",
-			"s.banned_at AS space_banned_at",
-			"s.deleted_at AS space_deleted_at",
-			"s.owner_user_id AS space_owner_user_id",
+			"d."+models.DocumentColumns.ID+" AS id",
+			"d."+models.DocumentColumns.DocumentID+" AS document_id",
+			"d."+models.DocumentColumns.NodeID+" AS node_id",
+			"d."+models.DocumentColumns.ThemeID+" AS theme_id",
+			"d."+models.DocumentColumns.Format+" AS format",
+			"d."+models.DocumentColumns.Visibility+" AS document_vis",
+			"d."+models.DocumentColumns.Status+" AS document_status",
+			"d."+models.DocumentColumns.BannedReason+" AS document_ban_reason",
+			"d."+models.DocumentColumns.BannedAt+" AS document_banned_at",
+			"d."+models.DocumentColumns.DeletedAt+" AS document_deleted_at",
+			"d."+models.DocumentColumns.Title+" AS title",
+			"d."+models.DocumentColumns.ContentMD+" AS content_md",
+			"d."+models.DocumentColumns.Version+" AS version",
+			"d."+models.DocumentColumns.SourceBlobID+" AS source_blob_id",
+			"d."+models.DocumentColumns.SourceFileName+" AS source_file_name",
+			"d."+models.DocumentColumns.SourceMimeType+" AS source_mime_type",
+			"d."+models.DocumentColumns.ContentVersion+" AS content_version",
+			"d."+models.DocumentColumns.CreatedByUserID+" AS created_by_user_id",
+			"d."+models.DocumentColumns.UpdatedByUserID+" AS updated_by_user_id",
+			"s."+models.SpaceColumns.SpaceID+" AS space_id",
+			"s."+models.SpaceColumns.Name+" AS space_name",
+			"s."+models.SpaceColumns.Visibility+" AS space_vis",
+			"s."+models.SpaceColumns.Status+" AS space_status",
+			"s."+models.SpaceColumns.BannedReason+" AS space_ban_reason",
+			"s."+models.SpaceColumns.BannedAt+" AS space_banned_at",
+			"s."+models.SpaceColumns.DeletedAt+" AS space_deleted_at",
+			"s."+models.SpaceColumns.OwnerUserID+" AS space_owner_user",
 		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Where("d.document_id = ?", documentID).
+		Joins("JOIN "+tableName(models.Node{})+" AS n ON n."+models.NodeColumns.NodeID+" = d."+models.DocumentColumns.NodeID).
+		Joins("JOIN "+tableName(models.Space{})+" AS s ON s."+models.SpaceColumns.SpaceID+" = n."+models.NodeColumns.SpaceID).
+		Where("d."+models.DocumentColumns.DocumentID+" = ?", documentID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -233,17 +209,22 @@ func (r *gormDocumentRepository) ListForAdmin(
 	}
 
 	baseQuery := r.db.WithContext(ctx).
-		Table("documents AS d").
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Joins("JOIN spaces AS s ON s.space_id = n.space_id").
-		Joins("JOIN users AS u ON u.user_id = s.owner_user_id")
+		Table(tableWithAlias(models.Document{}, "d")).
+		Joins("JOIN " + tableName(models.Node{}) + " AS n ON n." + models.NodeColumns.NodeID + " = d." + models.DocumentColumns.NodeID).
+		Joins("JOIN " + tableName(models.Space{}) + " AS s ON s." + models.SpaceColumns.SpaceID + " = n." + models.NodeColumns.SpaceID).
+		Joins("JOIN " + tableName(models.User{}) + " AS u ON u." + models.UserColumns.UserID + " = s." + models.SpaceColumns.OwnerUserID)
 
 	if params.RestrictToScopes {
 		actorUserID := strings.TrimSpace(params.ActorUserID)
+		spaceAdminScopeQuery := r.db.WithContext(ctx).
+			Model(&models.SpaceAdminScope{}).
+			Select("1").
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+			Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", actorUserID)
 		baseQuery = baseQuery.Where(
-			"(s.owner_user_id = ? OR EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?))",
+			"("+qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR EXISTS (?))",
 			actorUserID,
-			actorUserID,
+			spaceAdminScopeQuery,
 		)
 	}
 
@@ -251,7 +232,7 @@ func (r *gormDocumentRepository) ListForAdmin(
 	if keyword != "" {
 		likeKeyword := "%" + keyword + "%"
 		baseQuery = baseQuery.Where(
-			"LOWER(d.document_id) LIKE ? OR LOWER(d.node_id) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(s.space_id) LIKE ? OR LOWER(s.name) LIKE ? OR LOWER(u.user_id) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.name) LIKE ?",
+			"LOWER("+qualifiedColumn("d", models.DocumentColumns.DocumentID)+") LIKE ? OR LOWER("+qualifiedColumn("d", models.DocumentColumns.NodeID)+") LIKE ? OR LOWER("+qualifiedColumn("d", models.DocumentColumns.Title)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.SpaceID)+") LIKE ? OR LOWER("+qualifiedColumn("s", models.SpaceColumns.Name)+") LIKE ? OR LOWER("+qualifiedColumn("u", models.UserColumns.UserID)+") LIKE ? OR LOWER("+qualifiedColumn("u", models.UserColumns.Email)+") LIKE ? OR LOWER("+qualifiedColumn("u", models.UserColumns.Name)+") LIKE ?",
 			likeKeyword,
 			likeKeyword,
 			likeKeyword,
@@ -265,21 +246,21 @@ func (r *gormDocumentRepository) ListForAdmin(
 
 	spaceID := strings.TrimSpace(params.SpaceID)
 	if spaceID != "" {
-		baseQuery = baseQuery.Where("s.space_id = ?", spaceID)
+		baseQuery = baseQuery.Where("s."+models.SpaceColumns.SpaceID+" = ?", spaceID)
 	}
 
 	statuses := normalizeDocumentStatuses(params.Statuses)
 	if len(statuses) > 0 {
-		baseQuery = baseQuery.Where("d.status IN ?", statuses)
+		baseQuery = baseQuery.Where("d."+models.DocumentColumns.Status+" IN ?", statuses)
 	}
 
 	visibilities := normalizeDocumentVisibilities(params.Visibilities)
 	if len(visibilities) > 0 {
-		baseQuery = baseQuery.Where("d.visibility IN ?", visibilities)
+		baseQuery = baseQuery.Where("d."+models.DocumentColumns.Visibility+" IN ?", visibilities)
 	}
 	formats := normalizeDocumentFormats(params.Formats)
 	if len(formats) > 0 {
-		baseQuery = baseQuery.Where("d.format IN ?", formats)
+		baseQuery = baseQuery.Where("d."+models.DocumentColumns.Format+" IN ?", formats)
 	}
 
 	var total int64
@@ -296,68 +277,38 @@ func (r *gormDocumentRepository) ListForAdmin(
 		offset = 0
 	}
 
-	type adminDocumentListRow struct {
-		ID              int64                 `gorm:"column:id"`
-		DocumentID      string                `gorm:"column:document_id"`
-		NodeID          string                `gorm:"column:node_id"`
-		ReaderSlug      *string               `gorm:"column:reader_slug"`
-		ThemeID         string                `gorm:"column:theme_id"`
-		Format          models.DocumentFormat `gorm:"column:format"`
-		Visibility      models.Visibility     `gorm:"column:visibility"`
-		Status          models.EntityStatus   `gorm:"column:status"`
-		BannedReason    string                `gorm:"column:banned_reason"`
-		BannedAt        *time.Time            `gorm:"column:banned_at"`
-		DeletedAt       *time.Time            `gorm:"column:deleted_at"`
-		Title           string                `gorm:"column:title"`
-		ContentMD       string                `gorm:"column:content_md"`
-		Version         int                   `gorm:"column:version"`
-		SourceBlobID    *string               `gorm:"column:source_blob_id"`
-		SourceFileName  *string               `gorm:"column:source_file_name"`
-		SourceMimeType  *string               `gorm:"column:source_mime_type"`
-		ContentVersion  int                   `gorm:"column:content_version"`
-		CreatedByUserID *string               `gorm:"column:created_by_user_id"`
-		UpdatedByUserID *string               `gorm:"column:updated_by_user_id"`
-		CreatedAtRaw    string                `gorm:"column:created_at"`
-		UpdatedAtRaw    string                `gorm:"column:updated_at"`
-		SpaceID         string                `gorm:"column:space_id"`
-		SpaceName       string                `gorm:"column:space_name"`
-		SpaceOwnerID    string                `gorm:"column:space_owner_user_id"`
-		SpaceOwnerName  string                `gorm:"column:space_owner_name"`
-		SpaceOwnerEmail string                `gorm:"column:space_owner_email"`
-	}
-
 	var rows []adminDocumentListRow
 	if err := baseQuery.Session(&gorm.Session{}).
 		Select(
-			"d.id",
-			"d.document_id",
-			"d.node_id",
-			"n.reader_slug AS reader_slug",
-			"d.theme_id",
-			"d.format",
-			"d.visibility",
-			"d.status",
-			"d.banned_reason",
-			"d.banned_at",
-			"d.deleted_at",
-			"d.title",
-			"d.content_md",
-			"d.version",
-			"d.source_blob_id",
-			"d.source_file_name",
-			"d.source_mime_type",
-			"d.content_version",
-			"d.created_by_user_id",
-			"d.updated_by_user_id",
-			"d.created_at",
-			"d.updated_at",
-			"s.space_id AS space_id",
-			"s.name AS space_name",
-			"s.owner_user_id AS space_owner_user_id",
-			"u.name AS space_owner_name",
-			"u.email AS space_owner_email",
+			"d."+models.DocumentColumns.ID+" AS "+models.DocumentColumns.ID,
+			"d."+models.DocumentColumns.DocumentID+" AS "+models.DocumentColumns.DocumentID,
+			"d."+models.DocumentColumns.NodeID+" AS "+models.DocumentColumns.NodeID,
+			"n."+models.NodeColumns.ReaderSlug+" AS "+models.NodeColumns.ReaderSlug,
+			"d."+models.DocumentColumns.ThemeID+" AS "+models.DocumentColumns.ThemeID,
+			"d."+models.DocumentColumns.Format+" AS "+models.DocumentColumns.Format,
+			"d."+models.DocumentColumns.Visibility+" AS "+models.DocumentColumns.Visibility,
+			"d."+models.DocumentColumns.Status+" AS "+models.DocumentColumns.Status,
+			"d."+models.DocumentColumns.BannedReason+" AS "+models.DocumentColumns.BannedReason,
+			"d."+models.DocumentColumns.BannedAt+" AS "+models.DocumentColumns.BannedAt,
+			"d."+models.DocumentColumns.DeletedAt+" AS "+models.DocumentColumns.DeletedAt,
+			"d."+models.DocumentColumns.Title+" AS "+models.DocumentColumns.Title,
+			"d."+models.DocumentColumns.ContentMD+" AS "+models.DocumentColumns.ContentMD,
+			"d."+models.DocumentColumns.Version+" AS "+models.DocumentColumns.Version,
+			"d."+models.DocumentColumns.SourceBlobID+" AS "+models.DocumentColumns.SourceBlobID,
+			"d."+models.DocumentColumns.SourceFileName+" AS "+models.DocumentColumns.SourceFileName,
+			"d."+models.DocumentColumns.SourceMimeType+" AS "+models.DocumentColumns.SourceMimeType,
+			"d."+models.DocumentColumns.ContentVersion+" AS "+models.DocumentColumns.ContentVersion,
+			"d."+models.DocumentColumns.CreatedByUserID+" AS "+models.DocumentColumns.CreatedByUserID,
+			"d."+models.DocumentColumns.UpdatedByUserID+" AS "+models.DocumentColumns.UpdatedByUserID,
+			"d."+models.DocumentColumns.CreatedAt+" AS created_at_raw",
+			"d."+models.DocumentColumns.UpdatedAt+" AS updated_at_raw",
+			"s."+models.SpaceColumns.SpaceID+" AS "+models.SpaceColumns.SpaceID,
+			"s."+models.SpaceColumns.Name+" AS space_name",
+			"s."+models.SpaceColumns.OwnerUserID+" AS space_owner_id",
+			"u."+models.UserColumns.Name+" AS space_owner_name",
+			"u."+models.UserColumns.Email+" AS space_owner_email",
 		).
-		Order("d.created_at DESC").
+		Order("d." + models.DocumentColumns.CreatedAt + " DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -386,8 +337,8 @@ func (r *gormDocumentRepository) ListForAdmin(
 			ContentVersion:  normalizeContentVersion(row.ContentVersion, row.Version),
 			CreatedByUserID: row.CreatedByUserID,
 			UpdatedByUserID: row.UpdatedByUserID,
-			CreatedAt:       parseDocumentRecordTime(row.CreatedAtRaw),
-			UpdatedAt:       parseDocumentRecordTime(row.UpdatedAtRaw),
+			CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+			UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 		}
 		if !models.IsValidVisibility(document.Visibility) {
 			document.Visibility = models.VisibilityMember
@@ -420,10 +371,10 @@ func (r *gormDocumentRepository) UpdateTheme(
 
 	updateTx := r.db.WithContext(ctx).
 		Model(&models.Document{}).
-		Where("document_id = ?", documentID).
+		Where(models.DocumentColumns.DocumentID+" = ?", documentID).
 		Updates(map[string]any{
-			"theme_id":   themeID,
-			"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
+			models.DocumentColumns.ThemeID:   themeID,
+			models.DocumentColumns.UpdatedAt: gorm.Expr("CURRENT_TIMESTAMP"),
 		})
 	if updateTx.Error != nil {
 		return nil, updateTx.Error
@@ -447,10 +398,10 @@ func (r *gormDocumentRepository) UpdateVisibility(
 	var updated models.Document
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Document{}).
-			Where("document_id = ?", documentID).
+			Where(models.DocumentColumns.DocumentID+" = ?", documentID).
 			Updates(map[string]any{
-				"visibility": visibility,
-				"updated_at": gorm.Expr("CURRENT_TIMESTAMP"),
+				models.DocumentColumns.Visibility: visibility,
+				models.DocumentColumns.UpdatedAt:  gorm.Expr("CURRENT_TIMESTAMP"),
 			})
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -463,27 +414,27 @@ func (r *gormDocumentRepository) UpdateVisibility(
 		}
 
 		return tx.Select(
-			"id",
-			"document_id",
-			"node_id",
-			"theme_id",
-			"format",
-			"visibility",
-			"status",
-			"banned_reason",
-			"banned_at",
-			"deleted_at",
-			"title",
-			"content_md",
-			"version",
-			"source_blob_id",
-			"source_file_name",
-			"source_mime_type",
-			"content_version",
-			"created_by_user_id",
-			"updated_by_user_id",
+			models.DocumentColumns.ID,
+			models.DocumentColumns.DocumentID,
+			models.DocumentColumns.NodeID,
+			models.DocumentColumns.ThemeID,
+			models.DocumentColumns.Format,
+			models.DocumentColumns.Visibility,
+			models.DocumentColumns.Status,
+			models.DocumentColumns.BannedReason,
+			models.DocumentColumns.BannedAt,
+			models.DocumentColumns.DeletedAt,
+			models.DocumentColumns.Title,
+			models.DocumentColumns.ContentMD,
+			models.DocumentColumns.Version,
+			models.DocumentColumns.SourceBlobID,
+			models.DocumentColumns.SourceFileName,
+			models.DocumentColumns.SourceMimeType,
+			models.DocumentColumns.ContentVersion,
+			models.DocumentColumns.CreatedByUserID,
+			models.DocumentColumns.UpdatedByUserID,
 		).
-			Where("document_id = ?", documentID).
+			Where(models.DocumentColumns.DocumentID+" = ?", documentID).
 			Take(&updated).Error
 	})
 	if err != nil {
@@ -520,20 +471,21 @@ func (r *gormDocumentRepository) UpdateStatus(ctx context.Context, params Update
 	}
 
 	updateValues := map[string]any{
-		"status":        params.Status,
-		"updated_at":    updatedAt,
-		"banned_reason": "",
-		"banned_at":     nil,
+		models.DocumentColumns.Status:       params.Status,
+		models.DocumentColumns.UpdatedAt:    updatedAt,
+		models.DocumentColumns.BannedReason: "",
+		models.DocumentColumns.BannedAt:     nil,
 	}
 	if params.Status == models.EntityStatusBanned {
-		updateValues["banned_reason"] = strings.TrimSpace(params.BannedReason)
-		updateValues["banned_at"] = params.BannedAt
+		updateValues[models.DocumentColumns.BannedReason] = strings.TrimSpace(params.BannedReason)
+		updateValues[models.DocumentColumns.BannedAt] = params.BannedAt
 	}
 
 	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Document{}).
-			Where("document_id = ? AND status <> ?", params.DocumentID, models.EntityStatusDeleted).
+			Where(models.DocumentColumns.DocumentID+" = ?", params.DocumentID).
+			Where(models.DocumentColumns.Status+" <> ?", models.EntityStatusDeleted).
 			Updates(updateValues)
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -571,13 +523,14 @@ func (r *gormDocumentRepository) SoftDelete(ctx context.Context, documentID stri
 	deleted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Document{}).
-			Where("document_id = ? AND status <> ?", documentID, models.EntityStatusDeleted).
+			Where(models.DocumentColumns.DocumentID+" = ?", documentID).
+			Where(models.DocumentColumns.Status+" <> ?", models.EntityStatusDeleted).
 			Updates(map[string]any{
-				"status":        models.EntityStatusDeleted,
-				"deleted_at":    deletedAt,
-				"banned_reason": "",
-				"banned_at":     nil,
-				"updated_at":    deletedAt,
+				models.DocumentColumns.Status:       models.EntityStatusDeleted,
+				models.DocumentColumns.DeletedAt:    deletedAt,
+				models.DocumentColumns.BannedReason: "",
+				models.DocumentColumns.BannedAt:     nil,
+				models.DocumentColumns.UpdatedAt:    deletedAt,
 			})
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -647,21 +600,22 @@ func (r *gormDocumentRepository) UpdateWithVersion(
 	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateTx := tx.Model(&models.Document{}).
-			Where("document_id = ? AND version = ?", document.DocumentID, baseVersion).
+			Where(models.DocumentColumns.DocumentID+" = ?", document.DocumentID).
+			Where(models.DocumentColumns.Version+" = ?", baseVersion).
 			Updates(map[string]any{
-				"title":              document.Title,
-				"content_md":         document.ContentMD,
-				"theme_id":           document.ThemeID,
-				"format":             documentFormat,
-				"visibility":         visibility,
-				"status":             status,
-				"version":            document.Version,
-				"source_blob_id":     trimOptionalString(document.SourceBlobID),
-				"source_file_name":   trimOptionalString(document.SourceFileName),
-				"source_mime_type":   trimOptionalString(document.SourceMimeType),
-				"content_version":    contentVersion,
-				"updated_by_user_id": document.UpdatedByUserID,
-				"updated_at":         gorm.Expr("CURRENT_TIMESTAMP"),
+				models.DocumentColumns.Title:           document.Title,
+				models.DocumentColumns.ContentMD:       document.ContentMD,
+				models.DocumentColumns.ThemeID:         document.ThemeID,
+				models.DocumentColumns.Format:          documentFormat,
+				models.DocumentColumns.Visibility:      visibility,
+				models.DocumentColumns.Status:          status,
+				models.DocumentColumns.Version:         document.Version,
+				models.DocumentColumns.SourceBlobID:    trimOptionalString(document.SourceBlobID),
+				models.DocumentColumns.SourceFileName:  trimOptionalString(document.SourceFileName),
+				models.DocumentColumns.SourceMimeType:  trimOptionalString(document.SourceMimeType),
+				models.DocumentColumns.ContentVersion:  contentVersion,
+				models.DocumentColumns.UpdatedByUserID: document.UpdatedByUserID,
+				models.DocumentColumns.UpdatedAt:       gorm.Expr("CURRENT_TIMESTAMP"),
 			})
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -772,53 +726,4 @@ func resolveAdminDocumentRouteKey(documentID string, readerSlug *string) string 
 		return normalizedReaderSlug
 	}
 	return strings.TrimSpace(documentID)
-}
-
-func parseDocumentRecordTime(raw string) time.Time {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return time.Time{}
-	}
-
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05-07:00",
-		"2006-01-02T15:04:05.999999-07:00",
-		"2006-01-02T15:04:05.999-07:00",
-		"2006-01-02T15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05-07:00",
-		"2006-01-02 15:04:05.999999-07:00",
-		"2006-01-02 15:04:05.999-07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05 -0700 MST",
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05 -0700",
-		"2006-01-02 15:04:05.999999999 -0700",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if parsedAt, err := time.Parse(layout, value); err == nil {
-			return parsedAt.UTC()
-		}
-	}
-	// 兼容数据库返回的 "YYYY-MM-DD HH:MM:SS+00:00" 等格式，统一转为 RFC3339 再解析。
-	normalized := strings.Replace(value, " ", "T", 1)
-	timePart := normalized
-	if index := strings.IndexByte(normalized, 'T'); index >= 0 && index < len(normalized)-1 {
-		timePart = normalized[index+1:]
-	}
-	if !strings.ContainsAny(timePart, "Zz+-") {
-		normalized += "Z"
-	}
-	if parsedAt, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
-		return parsedAt.UTC()
-	}
-	if parsedAt, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC); err == nil {
-		return parsedAt.UTC()
-	}
-	return time.Time{}
 }

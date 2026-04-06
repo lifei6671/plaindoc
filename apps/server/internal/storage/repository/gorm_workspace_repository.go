@@ -52,25 +52,45 @@ func (r *gormWorkspaceRepository) ListSpacesByActor(
 	}
 
 	var rows []spaceRow
+	platformAdminQuery := r.db.WithContext(ctx).
+		Model(&models.UserAdminRole{}).
+		Select("1").
+		Where(qualifiedColumn("", models.UserAdminRoleColumns.UserID)+" = ?", userID).
+		Where(qualifiedColumn("", models.UserAdminRoleColumns.Role)+" = ?", models.AdminRolePlatformAdmin)
+	spaceAdminScopeQuery := r.db.WithContext(ctx).
+		Model(&models.SpaceAdminScope{}).
+		Select("1").
+		Where(qualifiedColumn("", models.SpaceAdminScopeColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+		Where(qualifiedColumn("", models.SpaceAdminScopeColumns.UserID)+" = ?", userID)
+	spaceMemberQuery := r.db.WithContext(ctx).
+		Model(&models.SpaceMember{}).
+		Select("1").
+		Where(qualifiedColumn("", models.SpaceMemberColumns.SpaceID)+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID)).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.UserID)+" = ?", userID).
+		Where(qualifiedColumn("", models.SpaceMemberColumns.Role)+" IN ?", []models.Role{models.RoleOwner, models.RoleCollaborator})
 	if err := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Select("s.space_id", "s.name", "s.created_at", "s.updated_at").
-		Where("s.status = ? AND s.deleted_at IS NULL", models.EntityStatusActive).
+		Table(tableWithAlias(models.Space{}, "s")).
+		Select(selectColumns(
+			qualifiedColumn("s", models.SpaceColumns.SpaceID),
+			qualifiedColumn("s", models.SpaceColumns.Name),
+			qualifiedColumn("s", models.SpaceColumns.CreatedAt),
+			qualifiedColumn("s", models.SpaceColumns.UpdatedAt),
+		)).
+		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
+		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt)+" IS NULL").
 		Where(
 			"("+
-				"EXISTS (SELECT 1 FROM user_admin_roles AS uar WHERE uar.user_id = ? AND uar.role = ?) OR "+
-				"s.owner_user_id = ? OR "+
-				"EXISTS (SELECT 1 FROM space_admin_scopes AS sas WHERE sas.space_id = s.space_id AND sas.user_id = ?) OR "+
-				"EXISTS (SELECT 1 FROM space_members AS sm WHERE sm.space_id = s.space_id AND sm.user_id = ? AND sm.role IN ?)"+
+				"EXISTS (?) OR "+
+				qualifiedColumn("s", models.SpaceColumns.OwnerUserID)+" = ? OR "+
+				"EXISTS (?) OR "+
+				"EXISTS (?)"+
 				")",
+			platformAdminQuery,
 			userID,
-			models.AdminRolePlatformAdmin,
-			userID,
-			userID,
-			userID,
-			[]models.Role{models.RoleOwner, models.RoleCollaborator},
+			spaceAdminScopeQuery,
+			spaceMemberQuery,
 		).
-		Order("s.updated_at DESC, s.id DESC").
+		Order(qualifiedColumn("s", models.SpaceColumns.UpdatedAt) + " DESC, " + qualifiedColumn("s", models.SpaceColumns.ID) + " DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -99,10 +119,13 @@ func (r *gormWorkspaceRepository) GetDefaultCategory(ctx context.Context) (*mode
 
 	var row categoryRow
 	if err := r.db.WithContext(ctx).
-		Table("space_categories").
-		Select("category_id", "name").
-		Where("is_default = ?", true).
-		Order("id ASC").
+		Model(&models.SpaceCategory{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.SpaceCategoryColumns.CategoryID),
+			qualifiedColumn("", models.SpaceCategoryColumns.Name),
+		)).
+		Where(qualifiedColumn("", models.SpaceCategoryColumns.IsDefault)+" = ?", true).
+		Order(qualifiedColumn("", models.SpaceCategoryColumns.ID) + " ASC").
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -166,31 +189,31 @@ func (r *gormWorkspaceRepository) GetSpacePermissionSnapshot(
 
 	var row spacePermissionRow
 	if err := r.db.WithContext(ctx).
-		Table("spaces AS s").
-		Select(
-			"s.space_id",
-			"s.owner_user_id",
-			"s.visibility",
-			"s.status",
-			"s.deleted_at",
-			"CASE WHEN uar.user_id IS NULL THEN 0 ELSE 1 END AS is_platform_admin",
-			"CASE WHEN sas.id IS NULL THEN 0 ELSE 1 END AS has_space_admin_scope",
-			"sm.role AS member_role",
-		).
+		Table(tableWithAlias(models.Space{}, "s")).
+		Select(selectColumns(
+			qualifiedColumn("s", models.SpaceColumns.SpaceID),
+			qualifiedColumn("s", models.SpaceColumns.OwnerUserID),
+			qualifiedColumn("s", models.SpaceColumns.Visibility),
+			qualifiedColumn("s", models.SpaceColumns.Status),
+			qualifiedColumn("s", models.SpaceColumns.DeletedAt),
+			"CASE WHEN uar."+models.UserAdminRoleColumns.UserID+" IS NULL THEN 0 ELSE 1 END AS is_platform_admin",
+			"CASE WHEN sas."+models.SpaceAdminScopeColumns.ID+" IS NULL THEN 0 ELSE 1 END AS has_space_admin_scope",
+			"sm."+models.SpaceMemberColumns.Role+" AS member_role",
+		)).
 		Joins(
-			"LEFT JOIN user_admin_roles AS uar ON uar.user_id = ? AND uar.role = ?",
+			"LEFT JOIN "+tableName(models.UserAdminRole{})+" AS uar ON uar."+models.UserAdminRoleColumns.UserID+" = ? AND uar."+models.UserAdminRoleColumns.Role+" = ?",
 			normalizedActorUserID,
 			models.AdminRolePlatformAdmin,
 		).
 		Joins(
-			"LEFT JOIN space_admin_scopes AS sas ON sas.user_id = ? AND sas.space_id = s.space_id",
+			"LEFT JOIN "+tableName(models.SpaceAdminScope{})+" AS sas ON sas."+models.SpaceAdminScopeColumns.UserID+" = ? AND sas."+models.SpaceAdminScopeColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID),
 			normalizedActorUserID,
 		).
 		Joins(
-			"LEFT JOIN space_members AS sm ON sm.user_id = ? AND sm.space_id = s.space_id",
+			"LEFT JOIN "+tableName(models.SpaceMember{})+" AS sm ON sm."+models.SpaceMemberColumns.UserID+" = ? AND sm."+models.SpaceMemberColumns.SpaceID+" = "+qualifiedColumn("s", models.SpaceColumns.SpaceID),
 			normalizedActorUserID,
 		).
-		Where("s.space_id = ?", normalizedSpaceID).
+		Where(qualifiedColumn("s", models.SpaceColumns.SpaceID)+" = ?", normalizedSpaceID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -251,27 +274,27 @@ func (r *gormWorkspaceRepository) ListTreeNodesBySpaceID(
 
 	var rows []nodeRow
 	if err := r.db.WithContext(ctx).
-		Table("nodes AS n").
-		Select(
-			"n.node_id",
-			"d.document_id AS document_id",
-			"n.reader_slug",
-			"n.space_id",
-			"n.parent_node_id",
-			"n.type",
-			"n.title",
-			"n.sort",
-			"d.visibility AS document_visibility",
-			"d.format AS document_format",
-		).
-		Joins("LEFT JOIN documents AS d ON d.node_id = n.node_id").
-		Where("n.space_id = ?", strings.TrimSpace(spaceID)).
+		Table(tableWithAlias(models.Node{}, "n")).
+		Select(selectColumns(
+			qualifiedColumn("n", models.NodeColumns.NodeID),
+			qualifiedColumn("d", models.DocumentColumns.DocumentID)+" AS document_id",
+			qualifiedColumn("n", models.NodeColumns.ReaderSlug),
+			qualifiedColumn("n", models.NodeColumns.SpaceID),
+			qualifiedColumn("n", models.NodeColumns.ParentNodeID),
+			qualifiedColumn("n", models.NodeColumns.Type),
+			qualifiedColumn("n", models.NodeColumns.Title),
+			qualifiedColumn("n", models.NodeColumns.Sort),
+			qualifiedColumn("d", models.DocumentColumns.Visibility)+" AS document_visibility",
+			qualifiedColumn("d", models.DocumentColumns.Format)+" AS document_format",
+		)).
+		Joins("LEFT JOIN "+tableName(models.Document{})+" AS d ON "+qualifiedColumn("d", models.DocumentColumns.NodeID)+" = "+qualifiedColumn("n", models.NodeColumns.NodeID)).
+		Where(qualifiedColumn("n", models.NodeColumns.SpaceID)+" = ?", strings.TrimSpace(spaceID)).
 		Where(
-			"(n.type <> ? OR (d.document_id IS NOT NULL AND d.deleted_at IS NULL AND d.status <> ?))",
+			"("+qualifiedColumn("n", models.NodeColumns.Type)+" <> ? OR ("+qualifiedColumn("d", models.DocumentColumns.DocumentID)+" IS NOT NULL AND "+qualifiedColumn("d", models.DocumentColumns.DeletedAt)+" IS NULL AND "+qualifiedColumn("d", models.DocumentColumns.Status)+" <> ?))",
 			models.NodeTypeDoc,
 			models.EntityStatusDeleted,
 		).
-		Order("n.parent_node_id ASC, n.sort ASC, n.id ASC").
+		Order(qualifiedColumn("n", models.NodeColumns.ParentNodeID) + " ASC, " + qualifiedColumn("n", models.NodeColumns.Sort) + " ASC, " + qualifiedColumn("n", models.NodeColumns.ID) + " ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -315,9 +338,17 @@ func (r *gormWorkspaceRepository) GetNodeByNodeID(
 
 	var row nodeRow
 	if err := r.db.WithContext(ctx).
-		Table("nodes").
-		Select("node_id", "space_id", "parent_node_id", "reader_slug", "type", "title", "sort").
-		Where("node_id = ?", strings.TrimSpace(nodeID)).
+		Model(&models.Node{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.NodeColumns.NodeID),
+			qualifiedColumn("", models.NodeColumns.SpaceID),
+			qualifiedColumn("", models.NodeColumns.ParentNodeID),
+			qualifiedColumn("", models.NodeColumns.ReaderSlug),
+			qualifiedColumn("", models.NodeColumns.Type),
+			qualifiedColumn("", models.NodeColumns.Title),
+			qualifiedColumn("", models.NodeColumns.Sort),
+		)).
+		Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", strings.TrimSpace(nodeID)).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -352,13 +383,13 @@ func (r *gormWorkspaceRepository) GetMaxNodeSort(
 	}
 
 	query := r.db.WithContext(ctx).
-		Table("nodes").
-		Select("COALESCE(MAX(sort), 0) AS value").
-		Where("space_id = ?", strings.TrimSpace(spaceID))
+		Model(&models.Node{}).
+		Select("COALESCE(MAX("+qualifiedColumn("", models.NodeColumns.Sort)+"), 0) AS value").
+		Where(qualifiedColumn("", models.NodeColumns.SpaceID)+" = ?", strings.TrimSpace(spaceID))
 	if parentNodeID == nil {
-		query = query.Where("parent_node_id IS NULL")
+		query = query.Where(qualifiedColumn("", models.NodeColumns.ParentNodeID) + " IS NULL")
 	} else {
-		query = query.Where("parent_node_id = ?", strings.TrimSpace(*parentNodeID))
+		query = query.Where(qualifiedColumn("", models.NodeColumns.ParentNodeID)+" = ?", strings.TrimSpace(*parentNodeID))
 	}
 
 	var row maxSortRow
@@ -435,9 +466,9 @@ func (r *gormWorkspaceRepository) CreateNode(
 		if spaceID == "" {
 			return nil
 		}
-		return tx.Table("spaces").
-			Where("space_id = ?", spaceID).
-			Update("updated_at", touchedAt).Error
+		return tx.Model(&models.Space{}).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+			Update(models.SpaceColumns.UpdatedAt, touchedAt).Error
 	})
 }
 
@@ -462,7 +493,7 @@ func (r *gormWorkspaceRepository) UpdateNode(
 		updateValues[key] = value
 	}
 	if actorUserID != "" {
-		updateValues["updated_by_user_id"] = actorUserID
+		updateValues[models.NodeColumns.UpdatedByUserID] = actorUserID
 	}
 
 	touchedAt := params.TouchedAt
@@ -472,8 +503,8 @@ func (r *gormWorkspaceRepository) UpdateNode(
 
 	spaceID := strings.TrimSpace(params.TouchSpace)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updateTx := tx.Table("nodes").
-			Where("node_id = ?", nodeID).
+		updateTx := tx.Model(&models.Node{}).
+			Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", nodeID).
 			Updates(updateValues)
 		if updateTx.Error != nil {
 			return updateTx.Error
@@ -487,21 +518,21 @@ func (r *gormWorkspaceRepository) UpdateNode(
 				DocumentID string `gorm:"column:document_id"`
 			}
 			documentUpdates := map[string]any{
-				"title":      strings.TrimSpace(*params.DocumentTitle),
-				"updated_at": touchedAt,
+				models.DocumentColumns.Title:     strings.TrimSpace(*params.DocumentTitle),
+				models.DocumentColumns.UpdatedAt: touchedAt,
 			}
 			if actorUserID != "" {
-				documentUpdates["updated_by_user_id"] = actorUserID
+				documentUpdates[models.DocumentColumns.UpdatedByUserID] = actorUserID
 			}
-			if err := tx.Table("documents").
-				Where("node_id = ?", nodeID).
+			if err := tx.Model(&models.Document{}).
+				Where(qualifiedColumn("", models.DocumentColumns.NodeID)+" = ?", nodeID).
 				Updates(documentUpdates).Error; err != nil {
 				return err
 			}
 			var identity documentIdentityRow
-			if err := tx.Table("documents").
-				Select("document_id").
-				Where("node_id = ?", nodeID).
+			if err := tx.Model(&models.Document{}).
+				Select(qualifiedColumn("", models.DocumentColumns.DocumentID)).
+				Where(qualifiedColumn("", models.DocumentColumns.NodeID)+" = ?", nodeID).
 				Take(&identity).Error; err != nil {
 				if !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
@@ -516,9 +547,9 @@ func (r *gormWorkspaceRepository) UpdateNode(
 		if spaceID == "" {
 			return nil
 		}
-		return tx.Table("spaces").
-			Where("space_id = ?", spaceID).
-			Update("updated_at", touchedAt).Error
+		return tx.Model(&models.Space{}).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+			Update(models.SpaceColumns.UpdatedAt, touchedAt).Error
 	})
 }
 
@@ -552,9 +583,13 @@ func (r *gormWorkspaceRepository) MoveNode(
 		}
 
 		var moving nodeRow
-		if err := tx.Table("nodes").
-			Select("node_id", "space_id", "parent_node_id").
-			Where("node_id = ?", nodeID).
+		if err := tx.Model(&models.Node{}).
+			Select(selectColumns(
+				qualifiedColumn("", models.NodeColumns.NodeID),
+				qualifiedColumn("", models.NodeColumns.SpaceID),
+				qualifiedColumn("", models.NodeColumns.ParentNodeID),
+			)).
+			Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", nodeID).
 			Take(&moving).Error; err != nil {
 			return err
 		}
@@ -620,9 +655,9 @@ func (r *gormWorkspaceRepository) MoveNode(
 			}
 		}
 
-		if err := tx.Table("spaces").
-			Where("space_id = ?", spaceID).
-			Update("updated_at", touchedAt).Error; err != nil {
+		if err := tx.Model(&models.Space{}).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+			Update(models.SpaceColumns.UpdatedAt, touchedAt).Error; err != nil {
 			return err
 		}
 		return nil
@@ -687,9 +722,9 @@ func (r *gormWorkspaceRepository) DeleteNode(
 		if normalizedSpaceID == "" {
 			return nil
 		}
-		return tx.Table("spaces").
-			Where("space_id = ?", normalizedSpaceID).
-			Update("updated_at", touchedAt).Error
+		return tx.Model(&models.Space{}).
+			Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", normalizedSpaceID).
+			Update(models.SpaceColumns.UpdatedAt, touchedAt).Error
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -730,28 +765,28 @@ func (r *gormWorkspaceRepository) GetDocumentByDocumentID(
 
 	var row documentRow
 	if err := r.db.WithContext(ctx).
-		Table("documents AS d").
-		Select(
-			"d.document_id",
-			"d.node_id",
-			"n.reader_slug",
-			"d.theme_id",
-			"d.format",
-			"d.title",
-			"d.content_md",
-			"d.render_status",
-			"d.render_error",
-			"d.rendered_at",
-			"d.version",
-			"d.source_blob_id",
-			"d.source_file_name",
-			"d.source_mime_type",
-			"d.content_version",
-			"d.updated_at",
-			"n.space_id AS space_id",
-		).
-		Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-		Where("d.document_id = ?", strings.TrimSpace(documentID)).
+		Table(tableWithAlias(models.Document{}, "d")).
+		Select(selectColumns(
+			qualifiedColumn("d", models.DocumentColumns.DocumentID),
+			qualifiedColumn("d", models.DocumentColumns.NodeID),
+			qualifiedColumn("n", models.NodeColumns.ReaderSlug),
+			qualifiedColumn("d", models.DocumentColumns.ThemeID),
+			qualifiedColumn("d", models.DocumentColumns.Format),
+			qualifiedColumn("d", models.DocumentColumns.Title),
+			qualifiedColumn("d", models.DocumentColumns.ContentMD),
+			qualifiedColumn("d", models.DocumentColumns.RenderStatus),
+			qualifiedColumn("d", models.DocumentColumns.RenderError),
+			qualifiedColumn("d", models.DocumentColumns.RenderedAt),
+			qualifiedColumn("d", models.DocumentColumns.Version),
+			qualifiedColumn("d", models.DocumentColumns.SourceBlobID),
+			qualifiedColumn("d", models.DocumentColumns.SourceFileName),
+			qualifiedColumn("d", models.DocumentColumns.SourceMimeType),
+			qualifiedColumn("d", models.DocumentColumns.ContentVersion),
+			qualifiedColumn("d", models.DocumentColumns.UpdatedAt),
+			qualifiedColumn("n", models.NodeColumns.SpaceID)+" AS space_id",
+		)).
+		Joins("JOIN "+tableName(models.Node{})+" AS n ON "+qualifiedColumn("n", models.NodeColumns.NodeID)+" = "+qualifiedColumn("d", models.DocumentColumns.NodeID)).
+		Where(qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = ?", strings.TrimSpace(documentID)).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -808,10 +843,14 @@ func (r *gormWorkspaceRepository) UpdateDocumentIdentifier(
 		}
 
 		var identity documentIdentityRow
-		if err := tx.Table("documents AS d").
-			Select("d.document_id", "d.node_id", "n.space_id AS space_id").
-			Joins("JOIN nodes AS n ON n.node_id = d.node_id").
-			Where("d.document_id = ?", documentID).
+		if err := tx.Table(tableWithAlias(models.Document{}, "d")).
+			Select(selectColumns(
+				qualifiedColumn("d", models.DocumentColumns.DocumentID),
+				qualifiedColumn("d", models.DocumentColumns.NodeID),
+				qualifiedColumn("n", models.NodeColumns.SpaceID)+" AS space_id",
+			)).
+			Joins("JOIN "+tableName(models.Node{})+" AS n ON "+qualifiedColumn("n", models.NodeColumns.NodeID)+" = "+qualifiedColumn("d", models.DocumentColumns.NodeID)).
+			Where(qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = ?", documentID).
 			Take(&identity).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
@@ -825,14 +864,14 @@ func (r *gormWorkspaceRepository) UpdateDocumentIdentifier(
 		}
 
 		nodeUpdates := map[string]any{
-			"reader_slug": readerSlug,
-			"updated_at":  touchedAt,
+			models.NodeColumns.ReaderSlug: readerSlug,
+			models.NodeColumns.UpdatedAt:  touchedAt,
 		}
 		if actorUserID != "" {
-			nodeUpdates["updated_by_user_id"] = actorUserID
+			nodeUpdates[models.NodeColumns.UpdatedByUserID] = actorUserID
 		}
-		nodeUpdateResult := tx.Table("nodes").
-			Where("node_id = ?", normalizedNodeID).
+		nodeUpdateResult := tx.Model(&models.Node{}).
+			Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", normalizedNodeID).
 			Updates(nodeUpdates)
 		if nodeUpdateResult.Error != nil {
 			return nodeUpdateResult.Error
@@ -842,13 +881,13 @@ func (r *gormWorkspaceRepository) UpdateDocumentIdentifier(
 		}
 
 		documentUpdates := map[string]any{
-			"updated_at": touchedAt,
+			models.DocumentColumns.UpdatedAt: touchedAt,
 		}
 		if actorUserID != "" {
-			documentUpdates["updated_by_user_id"] = actorUserID
+			documentUpdates[models.DocumentColumns.UpdatedByUserID] = actorUserID
 		}
-		if err := tx.Table("documents").
-			Where("document_id = ?", documentID).
+		if err := tx.Model(&models.Document{}).
+			Where(qualifiedColumn("", models.DocumentColumns.DocumentID)+" = ?", documentID).
 			Updates(documentUpdates).Error; err != nil {
 			return err
 		}
@@ -858,9 +897,9 @@ func (r *gormWorkspaceRepository) UpdateDocumentIdentifier(
 			spaceForTouch = strings.TrimSpace(identity.SpaceID)
 		}
 		if spaceForTouch != "" {
-			if err := tx.Table("spaces").
-				Where("space_id = ?", spaceForTouch).
-				Update("updated_at", touchedAt).Error; err != nil {
+			if err := tx.Model(&models.Space{}).
+				Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceForTouch).
+				Update(models.SpaceColumns.UpdatedAt, touchedAt).Error; err != nil {
 				return err
 			}
 		}
@@ -902,14 +941,15 @@ func (r *gormWorkspaceRepository) SaveDocument(
 	saved := false
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updateResult := tx.Table("documents").
-			Where("document_id = ? AND version = ?", documentID, params.BaseVersion).
+		updateResult := tx.Model(&models.Document{}).
+			Where(qualifiedColumn("", models.DocumentColumns.DocumentID)+" = ?", documentID).
+			Where(qualifiedColumn("", models.DocumentColumns.Version)+" = ?", params.BaseVersion).
 			Updates(map[string]any{
-				"content_md":         params.ContentMD,
-				"version":            params.NextVersion,
-				"content_version":    params.NextVersion,
-				"updated_by_user_id": actorUserID,
-				"updated_at":         touchedAt,
+				models.DocumentColumns.ContentMD:       params.ContentMD,
+				models.DocumentColumns.Version:         params.NextVersion,
+				models.DocumentColumns.ContentVersion:  params.NextVersion,
+				models.DocumentColumns.UpdatedByUserID: actorUserID,
+				models.DocumentColumns.UpdatedAt:       touchedAt,
 			})
 		if updateResult.Error != nil {
 			return updateResult.Error
@@ -930,21 +970,21 @@ func (r *gormWorkspaceRepository) SaveDocument(
 
 		if nodeID != "" {
 			nodeUpdates := map[string]any{
-				"updated_at": touchedAt,
+				models.NodeColumns.UpdatedAt: touchedAt,
 			}
 			if actorUserID != "" {
-				nodeUpdates["updated_by_user_id"] = actorUserID
+				nodeUpdates[models.NodeColumns.UpdatedByUserID] = actorUserID
 			}
-			if err := tx.Table("nodes").
-				Where("node_id = ?", nodeID).
+			if err := tx.Model(&models.Node{}).
+				Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", nodeID).
 				Updates(nodeUpdates).Error; err != nil {
 				return err
 			}
 		}
 		if spaceID != "" {
-			if err := tx.Table("spaces").
-				Where("space_id = ?", spaceID).
-				Update("updated_at", touchedAt).Error; err != nil {
+			if err := tx.Model(&models.Space{}).
+				Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+				Update(models.SpaceColumns.UpdatedAt, touchedAt).Error; err != nil {
 				return err
 			}
 		}
@@ -989,19 +1029,20 @@ func (r *gormWorkspaceRepository) SaveOfficeDocument(
 	saved := false
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updateResult := tx.Table("documents").
-			Where("document_id = ? AND content_version = ?", documentID, params.BaseContentVersion).
+		updateResult := tx.Model(&models.Document{}).
+			Where(qualifiedColumn("", models.DocumentColumns.DocumentID)+" = ?", documentID).
+			Where(qualifiedColumn("", models.DocumentColumns.ContentVersion)+" = ?", params.BaseContentVersion).
 			Updates(map[string]any{
-				"version":            nextVersion,
-				"content_version":    nextContentVersion,
-				"source_blob_id":     sourceBlobID,
-				"source_file_name":   trimOptionalString(pointerString(params.SourceFileName)),
-				"source_mime_type":   trimOptionalString(pointerString(params.SourceMimeType)),
-				"render_status":      models.DocumentRenderStatusPending,
-				"render_error":       "",
-				"rendered_at":        nil,
-				"updated_by_user_id": trimOptionalString(pointerString(actorUserID)),
-				"updated_at":         touchedAt,
+				models.DocumentColumns.Version:         nextVersion,
+				models.DocumentColumns.ContentVersion:  nextContentVersion,
+				models.DocumentColumns.SourceBlobID:    sourceBlobID,
+				models.DocumentColumns.SourceFileName:  trimOptionalString(pointerString(params.SourceFileName)),
+				models.DocumentColumns.SourceMimeType:  trimOptionalString(pointerString(params.SourceMimeType)),
+				models.DocumentColumns.RenderStatus:    models.DocumentRenderStatusPending,
+				models.DocumentColumns.RenderError:     "",
+				models.DocumentColumns.RenderedAt:      nil,
+				models.DocumentColumns.UpdatedByUserID: trimOptionalString(pointerString(actorUserID)),
+				models.DocumentColumns.UpdatedAt:       touchedAt,
 			})
 		if updateResult.Error != nil {
 			return updateResult.Error
@@ -1022,21 +1063,21 @@ func (r *gormWorkspaceRepository) SaveOfficeDocument(
 
 		if nodeID != "" {
 			nodeUpdates := map[string]any{
-				"updated_at": touchedAt,
+				models.NodeColumns.UpdatedAt: touchedAt,
 			}
 			if actorUserID != "" {
-				nodeUpdates["updated_by_user_id"] = actorUserID
+				nodeUpdates[models.NodeColumns.UpdatedByUserID] = actorUserID
 			}
-			if err := tx.Table("nodes").
-				Where("node_id = ?", nodeID).
+			if err := tx.Model(&models.Node{}).
+				Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", nodeID).
 				Updates(nodeUpdates).Error; err != nil {
 				return err
 			}
 		}
 		if spaceID != "" {
-			if err := tx.Table("spaces").
-				Where("space_id = ?", spaceID).
-				Update("updated_at", touchedAt).Error; err != nil {
+			if err := tx.Model(&models.Space{}).
+				Where(qualifiedColumn("", models.SpaceColumns.SpaceID)+" = ?", spaceID).
+				Update(models.SpaceColumns.UpdatedAt, touchedAt).Error; err != nil {
 				return err
 			}
 		}
@@ -1068,18 +1109,18 @@ func (r *gormWorkspaceRepository) ListRevisionsByDocumentID(
 
 	var rows []revisionRow
 	if err := r.db.WithContext(ctx).
-		Table("document_revisions").
-		Select(
-			"document_revision_id",
-			"document_id",
-			"version",
-			"content_md",
-			"base_version",
-			"source",
-			"created_at",
-		).
-		Where("document_id = ?", strings.TrimSpace(documentID)).
-		Order("version DESC, created_at DESC, id DESC").
+		Model(&models.DocumentRevision{}).
+		Select(selectColumns(
+			qualifiedColumn("", models.DocumentRevisionColumns.DocumentRevisionID),
+			qualifiedColumn("", models.DocumentRevisionColumns.DocumentID),
+			qualifiedColumn("", models.DocumentRevisionColumns.Version),
+			qualifiedColumn("", models.DocumentRevisionColumns.ContentMD),
+			qualifiedColumn("", models.DocumentRevisionColumns.BaseVersion),
+			qualifiedColumn("", models.DocumentRevisionColumns.Source),
+			qualifiedColumn("", models.DocumentRevisionColumns.CreatedAt),
+		)).
+		Where(qualifiedColumn("", models.DocumentRevisionColumns.DocumentID)+" = ?", strings.TrimSpace(documentID)).
+		Order(qualifiedColumn("", models.DocumentRevisionColumns.Version) + " DESC, " + qualifiedColumn("", models.DocumentRevisionColumns.CreatedAt) + " DESC, " + qualifiedColumn("", models.DocumentRevisionColumns.ID) + " DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -1214,20 +1255,20 @@ func listWorkspaceSiblingNodeIDs(
 		NodeID string `gorm:"column:node_id"`
 	}
 
-	query := tx.Table("nodes").
-		Select("node_id").
-		Where("space_id = ?", strings.TrimSpace(spaceID))
+	query := tx.Model(&models.Node{}).
+		Select(qualifiedColumn("", models.NodeColumns.NodeID)).
+		Where(qualifiedColumn("", models.NodeColumns.SpaceID)+" = ?", strings.TrimSpace(spaceID))
 	if parentNodeID == nil {
-		query = query.Where("parent_node_id IS NULL")
+		query = query.Where(qualifiedColumn("", models.NodeColumns.ParentNodeID) + " IS NULL")
 	} else {
-		query = query.Where("parent_node_id = ?", strings.TrimSpace(*parentNodeID))
+		query = query.Where(qualifiedColumn("", models.NodeColumns.ParentNodeID)+" = ?", strings.TrimSpace(*parentNodeID))
 	}
 	if normalizedExcludeNodeID := strings.TrimSpace(excludeNodeID); normalizedExcludeNodeID != "" {
-		query = query.Where("node_id <> ?", normalizedExcludeNodeID)
+		query = query.Where(qualifiedColumn("", models.NodeColumns.NodeID)+" <> ?", normalizedExcludeNodeID)
 	}
 
 	var rows []siblingRow
-	if err := query.Order("sort ASC, id ASC").Find(&rows).Error; err != nil {
+	if err := query.Order(qualifiedColumn("", models.NodeColumns.Sort) + " ASC, " + qualifiedColumn("", models.NodeColumns.ID) + " ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -1251,16 +1292,16 @@ func resequenceWorkspaceSiblingNodes(
 ) error {
 	for index, nodeID := range nodeIDs {
 		updateValues := map[string]any{
-			"parent_node_id": parentNodeID,
-			"sort":           index + 1,
-			"updated_at":     touchedAt,
+			models.NodeColumns.ParentNodeID: parentNodeID,
+			models.NodeColumns.Sort:         index + 1,
+			models.NodeColumns.UpdatedAt:    touchedAt,
 		}
 		if actorUserID != "" {
-			updateValues["updated_by_user_id"] = actorUserID
+			updateValues[models.NodeColumns.UpdatedByUserID] = actorUserID
 		}
 
-		updateResult := tx.Table("nodes").
-			Where("node_id = ?", nodeID).
+		updateResult := tx.Model(&models.Node{}).
+			Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", nodeID).
 			Updates(updateValues)
 		if updateResult.Error != nil {
 			return updateResult.Error
@@ -1297,9 +1338,13 @@ func ensureWorkspaceMoveParentPathValid(
 		visitedNodeIDs[currentNodeID] = struct{}{}
 
 		var parent parentRow
-		if err := tx.Table("nodes").
-			Select("node_id", "space_id", "parent_node_id").
-			Where("node_id = ?", currentNodeID).
+		if err := tx.Model(&models.Node{}).
+			Select(selectColumns(
+				qualifiedColumn("", models.NodeColumns.NodeID),
+				qualifiedColumn("", models.NodeColumns.SpaceID),
+				qualifiedColumn("", models.NodeColumns.ParentNodeID),
+			)).
+			Where(qualifiedColumn("", models.NodeColumns.NodeID)+" = ?", currentNodeID).
 			Take(&parent).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrWorkspaceMoveTargetParentNotFound

@@ -29,3 +29,47 @@ type Space struct {
 func (Space) TableName() string {
 	return "spaces"
 }
+
+var SpaceColumns = struct {
+	ID           string
+	SpaceID      string
+	Name         string
+	Description  string
+	CategoryID   string
+	Category     string
+	OwnerUserID  string
+	Visibility   string
+	CoverAssetID string
+	CoverKey     string
+	CoverURL     string
+	CoverWidth   string
+	CoverHeight  string
+	CoverSource  string
+	Status       string
+	BannedReason string
+	BannedAt     string
+	DeletedAt    string
+	CreatedAt    string
+	UpdatedAt    string
+}{
+	ID:           "id",
+	SpaceID:      "space_id",
+	Name:         "name",
+	Description:  "description",
+	CategoryID:   "category_id",
+	Category:     "category",
+	OwnerUserID:  "owner_user_id",
+	Visibility:   "visibility",
+	CoverAssetID: "cover_asset_id",
+	CoverKey:     "cover_key",
+	CoverURL:     "cover_url",
+	CoverWidth:   "cover_width",
+	CoverHeight:  "cover_height",
+	CoverSource:  "cover_source",
+	Status:       "status",
+	BannedReason: "banned_reason",
+	BannedAt:     "banned_at",
+	DeletedAt:    "deleted_at",
+	CreatedAt:    "created_at",
+	UpdatedAt:    "updated_at",
+}

@@ -22,3 +22,33 @@ type SpaceCoverAsset struct {
 func (SpaceCoverAsset) TableName() string {
 	return "space_cover_assets"
 }
+
+var SpaceCoverAssetColumns = struct {
+	ID              string
+	AssetID         string
+	Source          string
+	ObjectKey       string
+	ObjectURL       string
+	MimeType        string
+	Width           string
+	Height          string
+	SizeBytes       string
+	Normalized      string
+	CreatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	AssetID:         "asset_id",
+	Source:          "source",
+	ObjectKey:       "object_key",
+	ObjectURL:       "object_url",
+	MimeType:        "mime_type",
+	Width:           "width",
+	Height:          "height",
+	SizeBytes:       "size_bytes",
+	Normalized:      "normalized",
+	CreatedByUserID: "created_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

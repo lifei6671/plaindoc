@@ -39,6 +39,58 @@ func (Document) TableName() string {
 	return "documents"
 }
 
+var DocumentColumns = struct {
+	ID              string
+	DocumentID      string
+	NodeID          string
+	ThemeID         string
+	Visibility      string
+	Status          string
+	BannedReason    string
+	BannedAt        string
+	DeletedAt       string
+	Title           string
+	Format          string
+	ContentMD       string
+	RenderStatus    string
+	RenderError     string
+	RenderedAt      string
+	Version         string
+	SourceBlobID    string
+	SourceFileName  string
+	SourceMimeType  string
+	ContentVersion  string
+	CreatedByUserID string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	DocumentID:      "document_id",
+	NodeID:          "node_id",
+	ThemeID:         "theme_id",
+	Visibility:      "visibility",
+	Status:          "status",
+	BannedReason:    "banned_reason",
+	BannedAt:        "banned_at",
+	DeletedAt:       "deleted_at",
+	Title:           "title",
+	Format:          "format",
+	ContentMD:       "content_md",
+	RenderStatus:    "render_status",
+	RenderError:     "render_error",
+	RenderedAt:      "rendered_at",
+	Version:         "version",
+	SourceBlobID:    "source_blob_id",
+	SourceFileName:  "source_file_name",
+	SourceMimeType:  "source_mime_type",
+	ContentVersion:  "content_version",
+	CreatedByUserID: "created_by_user_id",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}
+
 func (d *Document) BeforeCreate(_ *gorm.DB) error {
 	if d == nil {
 		return nil

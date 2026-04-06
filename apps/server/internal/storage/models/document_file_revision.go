@@ -20,3 +20,29 @@ type DocumentFileRevision struct {
 func (DocumentFileRevision) TableName() string {
 	return "document_file_revisions"
 }
+
+var DocumentFileRevisionColumns = struct {
+	ID                     string
+	DocumentFileRevisionID string
+	DocumentID             string
+	BlobID                 string
+	FileName               string
+	MimeType               string
+	Version                string
+	BaseVersion            string
+	EditorUserID           string
+	Source                 string
+	CreatedAt              string
+}{
+	ID:                     "id",
+	DocumentFileRevisionID: "document_file_revision_id",
+	DocumentID:             "document_id",
+	BlobID:                 "blob_id",
+	FileName:               "file_name",
+	MimeType:               "mime_type",
+	Version:                "version",
+	BaseVersion:            "base_version",
+	EditorUserID:           "editor_user_id",
+	Source:                 "source",
+	CreatedAt:              "created_at",
+}

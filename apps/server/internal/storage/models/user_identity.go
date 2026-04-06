@@ -18,3 +18,25 @@ type UserIdentity struct {
 func (UserIdentity) TableName() string {
 	return "user_identities"
 }
+
+var UserIdentityColumns = struct {
+	ID           string
+	UserID       string
+	ProviderType string
+	ProviderID   string
+	ExternalID   string
+	LoginName    string
+	LastLoginAt  string
+	CreatedAt    string
+	UpdatedAt    string
+}{
+	ID:           "id",
+	UserID:       "user_id",
+	ProviderType: "provider_type",
+	ProviderID:   "provider_id",
+	ExternalID:   "external_id",
+	LoginName:    "login_name",
+	LastLoginAt:  "last_login_at",
+	CreatedAt:    "created_at",
+	UpdatedAt:    "updated_at",
+}

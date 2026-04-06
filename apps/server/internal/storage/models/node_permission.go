@@ -16,3 +16,21 @@ type NodePermission struct {
 func (NodePermission) TableName() string {
 	return "node_permissions"
 }
+
+var NodePermissionColumns = struct {
+	ID              string
+	NodeID          string
+	UserID          string
+	Role            string
+	GrantedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	NodeID:          "node_id",
+	UserID:          "user_id",
+	Role:            "role",
+	GrantedByUserID: "granted_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

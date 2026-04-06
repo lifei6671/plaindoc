@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/captchastore"
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -35,13 +36,7 @@ type gormCaptchaStoreRepository struct {
 	nowFn func() time.Time
 }
 
-type captchaStoreRow struct {
-	CaptchaID    string `gorm:"column:captcha_id"`
-	AnswerHash   string `gorm:"column:answer_hash"`
-	ExpiresAtRaw string `gorm:"column:expires_at"`
-	CreatedAtRaw string `gorm:"column:created_at"`
-	UpdatedAtRaw string `gorm:"column:updated_at"`
-}
+type captchaStoreRow = captchaStoreRowDB
 
 // NewGormCaptchaStoreRepository 创建基于 auth_captcha_challenges 表的验证码存储仓储。
 func NewGormCaptchaStoreRepository(db *gorm.DB) captchastore.DatabaseRepository {
@@ -106,19 +101,19 @@ func (r *gormCaptchaStoreRepository) UpsertCaptchaRecord(
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{
-				{Name: "captcha_id"},
+				{Name: models.AuthCaptchaChallengeColumns.CaptchaID},
 			},
 			DoUpdates: clause.Assignments(map[string]any{
-				"scene":               captchaStoreScene,
-				"subject_hash":        captchaStoreSubjectHash,
-				"level":               captchaStoreDefaultLevel,
-				"answer_hash":         value,
-				"answer_salt":         captchaStoreAnswerSalt,
-				"issued_ip_hash":      captchaStoreIssuedIPHash,
-				"expires_at":          expiresAt,
-				"consumed_at":         nil,
-				"failed_verify_count": 0,
-				"updated_at":          updatedAt,
+				models.AuthCaptchaChallengeColumns.Scene:             captchaStoreScene,
+				models.AuthCaptchaChallengeColumns.SubjectHash:       captchaStoreSubjectHash,
+				models.AuthCaptchaChallengeColumns.Level:             captchaStoreDefaultLevel,
+				models.AuthCaptchaChallengeColumns.AnswerHash:        value,
+				models.AuthCaptchaChallengeColumns.AnswerSalt:        captchaStoreAnswerSalt,
+				models.AuthCaptchaChallengeColumns.IssuedIPHash:      captchaStoreIssuedIPHash,
+				models.AuthCaptchaChallengeColumns.ExpiresAt:         expiresAt,
+				models.AuthCaptchaChallengeColumns.ConsumedAt:        nil,
+				models.AuthCaptchaChallengeColumns.FailedVerifyCount: 0,
+				models.AuthCaptchaChallengeColumns.UpdatedAt:         updatedAt,
 			}),
 		}).
 		Create(row).Error
@@ -138,9 +133,16 @@ func (r *gormCaptchaStoreRepository) GetCaptchaRecordByID(
 
 	var row captchaStoreRow
 	err := r.db.WithContext(ctx).
-		Table("auth_captcha_challenges").
-		Select("captcha_id", "answer_hash", "expires_at", "created_at", "updated_at").
-		Where("captcha_id = ? AND scene = ?", mapCaptchaStoreID(normalizedID), captchaStoreScene).
+		Model(&models.AuthCaptchaChallenge{}).
+		Select(
+			models.AuthCaptchaChallengeColumns.CaptchaID,
+			models.AuthCaptchaChallengeColumns.AnswerHash,
+			models.AuthCaptchaChallengeColumns.ExpiresAt+" AS expires_at_raw",
+			models.AuthCaptchaChallengeColumns.CreatedAt+" AS created_at_raw",
+			models.AuthCaptchaChallengeColumns.UpdatedAt+" AS updated_at_raw",
+		).
+		Where(models.AuthCaptchaChallengeColumns.CaptchaID+" = ?", mapCaptchaStoreID(normalizedID)).
+		Where(models.AuthCaptchaChallengeColumns.Scene+" = ?", captchaStoreScene).
 		Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -151,9 +153,9 @@ func (r *gormCaptchaStoreRepository) GetCaptchaRecordByID(
 	return captchastore.Record{
 		ID:        normalizedID,
 		Value:     row.AnswerHash,
-		ExpiresAt: parseRecordTime(row.ExpiresAtRaw),
-		CreatedAt: parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt: parseRecordTime(row.UpdatedAtRaw),
+		ExpiresAt: recordtime.Parse(row.ExpiresAtRaw),
+		CreatedAt: recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt: recordtime.Parse(row.UpdatedAtRaw),
 	}, true, nil
 }
 
@@ -169,7 +171,8 @@ func (r *gormCaptchaStoreRepository) DeleteCaptchaRecordByID(
 		return nil
 	}
 	return r.db.WithContext(ctx).
-		Where("captcha_id = ? AND scene = ?", mapCaptchaStoreID(normalizedID), captchaStoreScene).
+		Where(models.AuthCaptchaChallengeColumns.CaptchaID+" = ?", mapCaptchaStoreID(normalizedID)).
+		Where(models.AuthCaptchaChallengeColumns.Scene+" = ?", captchaStoreScene).
 		Delete(&models.AuthCaptchaChallenge{}).Error
 }
 

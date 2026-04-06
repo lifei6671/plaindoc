@@ -12,10 +12,7 @@ type gormDocumentAttachmentCleanupRepository struct {
 	db *gorm.DB
 }
 
-type deletedDocumentAttachmentCleanupCandidateRow struct {
-	AttachmentID string `gorm:"column:attachment_id"`
-	BlobID       string `gorm:"column:blob_id"`
-}
+type deletedDocumentAttachmentCleanupCandidateRow = deletedDocumentAttachmentCleanupCandidateRowDB
 
 // NewGormDocumentAttachmentCleanupRepository 创建文档附件清理仓储实现。
 func NewGormDocumentAttachmentCleanupRepository(db *gorm.DB) DocumentAttachmentCleanupRepository {
@@ -33,13 +30,23 @@ func (r *gormDocumentAttachmentCleanupRepository) ListDeletedDocumentAttachmentC
 		return []DeletedDocumentAttachmentCleanupCandidate{}, nil
 	}
 
+	attachmentAlias := "da"
+	documentAlias := "d"
 	rows := make([]deletedDocumentAttachmentCleanupCandidateRow, 0, batchSize)
 	if err := r.db.WithContext(ctx).
-		Table("document_attachments AS da").
-		Select("da.attachment_id, da.blob_id").
-		Joins("JOIN documents AS d ON d.document_id = da.document_id").
-		Where("d.status = ? OR d.deleted_at IS NOT NULL", models.EntityStatusDeleted).
-		Order("da.id ASC").
+		Table(tableWithAlias(models.DocumentAttachment{}, attachmentAlias)).
+		Select(
+			qualifiedColumn(attachmentAlias, models.DocumentAttachmentColumns.AttachmentID)+" AS AttachmentID",
+			qualifiedColumn(attachmentAlias, models.DocumentAttachmentColumns.BlobID)+" AS BlobID",
+		).
+		Joins(
+			"JOIN "+tableName(models.Document{})+" AS "+documentAlias+
+				" ON "+qualifiedColumn(documentAlias, models.DocumentColumns.DocumentID)+
+				" = "+qualifiedColumn(attachmentAlias, models.DocumentAttachmentColumns.DocumentID),
+		).
+		Where(qualifiedColumn(documentAlias, models.DocumentColumns.Status)+" = ?", models.EntityStatusDeleted).
+		Or(qualifiedColumn(documentAlias, models.DocumentColumns.DeletedAt) + " IS NOT NULL").
+		Order(qualifiedColumn(attachmentAlias, models.DocumentAttachmentColumns.ID) + " ASC").
 		Limit(batchSize).
 		Find(&rows).Error; err != nil {
 		return nil, err

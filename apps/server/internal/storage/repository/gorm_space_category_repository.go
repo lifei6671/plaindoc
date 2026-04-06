@@ -8,19 +8,11 @@ import (
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormSpaceCategoryRepository struct {
 	db *gorm.DB
-}
-
-type spaceCategoryRow struct {
-	ID         int64  `gorm:"column:id"`
-	CategoryID string `gorm:"column:category_id"`
-	Name       string `gorm:"column:name"`
-	IsDefault  bool   `gorm:"column:is_default"`
-	CreatedAt  string `gorm:"column:created_at"`
-	UpdatedAt  string `gorm:"column:updated_at"`
 }
 
 // NewGormSpaceCategoryRepository 创建基于 GORM 的空间分类仓储实现。
@@ -33,18 +25,31 @@ func (r *gormSpaceCategoryRepository) List(ctx context.Context) ([]models.SpaceC
 		return nil, fmt.Errorf("space category repository db is nil")
 	}
 
-	var rows []spaceCategoryRow
+	var rows []models.SpaceCategory
 	if err := r.db.WithContext(ctx).
-		Table("space_categories").
-		Select("id", "category_id", "name", "is_default", "created_at", "updated_at").
-		Order("is_default DESC, name ASC").
+		Model(&models.SpaceCategory{}).
+		Select(
+			models.SpaceCategoryColumns.ID,
+			models.SpaceCategoryColumns.CategoryID,
+			models.SpaceCategoryColumns.Name,
+			models.SpaceCategoryColumns.IsDefault,
+			models.SpaceCategoryColumns.CreatedAt,
+			models.SpaceCategoryColumns.UpdatedAt,
+		).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SpaceCategoryColumns.IsDefault},
+			Desc:   true,
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SpaceCategoryColumns.Name},
+		}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
 	result := make([]models.SpaceCategory, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, mapSpaceCategoryRow(row))
+		result = append(result, normalizeSpaceCategory(row))
 	}
 	return result, nil
 }
@@ -61,16 +66,23 @@ func (r *gormSpaceCategoryRepository) GetByCategoryID(
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	var row spaceCategoryRow
+	var row models.SpaceCategory
 	if err := r.db.WithContext(ctx).
-		Table("space_categories").
-		Select("id", "category_id", "name", "is_default", "created_at", "updated_at").
-		Where("category_id = ?", normalizedCategoryID).
+		Model(&models.SpaceCategory{}).
+		Select(
+			models.SpaceCategoryColumns.ID,
+			models.SpaceCategoryColumns.CategoryID,
+			models.SpaceCategoryColumns.Name,
+			models.SpaceCategoryColumns.IsDefault,
+			models.SpaceCategoryColumns.CreatedAt,
+			models.SpaceCategoryColumns.UpdatedAt,
+		).
+		Where(models.SpaceCategoryColumns.CategoryID+" = ?", normalizedCategoryID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
 
-	category := mapSpaceCategoryRow(row)
+	category := normalizeSpaceCategory(row)
 	return &category, nil
 }
 
@@ -83,16 +95,23 @@ func (r *gormSpaceCategoryRepository) GetByName(ctx context.Context, name string
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	var row spaceCategoryRow
+	var row models.SpaceCategory
 	if err := r.db.WithContext(ctx).
-		Table("space_categories").
-		Select("id", "category_id", "name", "is_default", "created_at", "updated_at").
-		Where("LOWER(name) = ?", strings.ToLower(normalizedName)).
+		Model(&models.SpaceCategory{}).
+		Select(
+			models.SpaceCategoryColumns.ID,
+			models.SpaceCategoryColumns.CategoryID,
+			models.SpaceCategoryColumns.Name,
+			models.SpaceCategoryColumns.IsDefault,
+			models.SpaceCategoryColumns.CreatedAt,
+			models.SpaceCategoryColumns.UpdatedAt,
+		).
+		Where(models.SpaceCategoryColumns.Name+" = ?", normalizedName).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
 
-	category := mapSpaceCategoryRow(row)
+	category := normalizeSpaceCategory(row)
 	return &category, nil
 }
 
@@ -101,17 +120,26 @@ func (r *gormSpaceCategoryRepository) GetDefault(ctx context.Context) (*models.S
 		return nil, fmt.Errorf("space category repository db is nil")
 	}
 
-	var row spaceCategoryRow
+	var row models.SpaceCategory
 	if err := r.db.WithContext(ctx).
-		Table("space_categories").
-		Select("id", "category_id", "name", "is_default", "created_at", "updated_at").
-		Where("is_default = ?", true).
-		Order("id ASC").
+		Model(&models.SpaceCategory{}).
+		Select(
+			models.SpaceCategoryColumns.ID,
+			models.SpaceCategoryColumns.CategoryID,
+			models.SpaceCategoryColumns.Name,
+			models.SpaceCategoryColumns.IsDefault,
+			models.SpaceCategoryColumns.CreatedAt,
+			models.SpaceCategoryColumns.UpdatedAt,
+		).
+		Where(models.SpaceCategoryColumns.IsDefault+" = ?", true).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SpaceCategoryColumns.ID},
+		}).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
 
-	category := mapSpaceCategoryRow(row)
+	category := normalizeSpaceCategory(row)
 	return &category, nil
 }
 
@@ -152,10 +180,10 @@ func (r *gormSpaceCategoryRepository) RenameAndSyncSpaces(
 	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updateCategoryTx := tx.Model(&models.SpaceCategory{}).
-			Where("category_id = ?", normalizedCategoryID).
+			Where(models.SpaceCategoryColumns.CategoryID+" = ?", normalizedCategoryID).
 			Updates(map[string]any{
-				"name":       normalizedName,
-				"updated_at": effectiveUpdatedAt,
+				models.SpaceCategoryColumns.Name:      normalizedName,
+				models.SpaceCategoryColumns.UpdatedAt: effectiveUpdatedAt,
 			})
 		if updateCategoryTx.Error != nil {
 			return updateCategoryTx.Error
@@ -165,10 +193,10 @@ func (r *gormSpaceCategoryRepository) RenameAndSyncSpaces(
 		}
 
 		if err := tx.Model(&models.Space{}).
-			Where("category_id = ?", normalizedCategoryID).
+			Where(models.SpaceColumns.CategoryID+" = ?", normalizedCategoryID).
 			Updates(map[string]any{
-				"category":   normalizedName,
-				"updated_at": effectiveUpdatedAt,
+				models.SpaceColumns.Category:  normalizedName,
+				models.SpaceColumns.UpdatedAt: effectiveUpdatedAt,
 			}).Error; err != nil {
 			return err
 		}
@@ -211,18 +239,19 @@ func (r *gormSpaceCategoryRepository) DeleteAndReassignSpaces(
 	deleted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		moveTx := tx.Model(&models.Space{}).
-			Where("category_id = ?", normalizedCategoryID).
+			Where(models.SpaceColumns.CategoryID+" = ?", normalizedCategoryID).
 			Updates(map[string]any{
-				"category_id": normalizedFallbackCategoryID,
-				"category":    normalizedFallbackCategoryName,
-				"updated_at":  effectiveUpdatedAt,
+				models.SpaceColumns.CategoryID: normalizedFallbackCategoryID,
+				models.SpaceColumns.Category:   normalizedFallbackCategoryName,
+				models.SpaceColumns.UpdatedAt:  effectiveUpdatedAt,
 			})
 		if moveTx.Error != nil {
 			return moveTx.Error
 		}
 		movedCount = moveTx.RowsAffected
 
-		deleteTx := tx.Where("category_id = ? AND is_default = ?", normalizedCategoryID, false).
+		deleteTx := tx.Where(models.SpaceCategoryColumns.CategoryID+" = ?", normalizedCategoryID).
+			Where(models.SpaceCategoryColumns.IsDefault+" = ?", false).
 			Delete(&models.SpaceCategory{})
 		if deleteTx.Error != nil {
 			return deleteTx.Error
@@ -243,13 +272,8 @@ func (r *gormSpaceCategoryRepository) DeleteAndReassignSpaces(
 	return movedCount, deleted, nil
 }
 
-func mapSpaceCategoryRow(row spaceCategoryRow) models.SpaceCategory {
-	return models.SpaceCategory{
-		ID:         row.ID,
-		CategoryID: strings.TrimSpace(row.CategoryID),
-		Name:       strings.TrimSpace(row.Name),
-		IsDefault:  row.IsDefault,
-		CreatedAt:  parseSpaceRecordTime(row.CreatedAt),
-		UpdatedAt:  parseSpaceRecordTime(row.UpdatedAt),
-	}
+func normalizeSpaceCategory(category models.SpaceCategory) models.SpaceCategory {
+	category.CategoryID = strings.TrimSpace(category.CategoryID)
+	category.Name = strings.TrimSpace(category.Name)
+	return category
 }

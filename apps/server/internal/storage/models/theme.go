@@ -23,3 +23,35 @@ type Theme struct {
 func (Theme) TableName() string {
 	return "themes"
 }
+
+var ThemeColumns = struct {
+	ID                     string
+	ThemeID                string
+	Name                   string
+	Description            string
+	VariablesJSON          string
+	SyntaxTheme            string
+	CodeBlockStyleJSON     string
+	CodeBlockCodeStyleJSON string
+	InlineCodeStyleJSON    string
+	CustomCSS              string
+	IsBuiltin              string
+	IsEnabled              string
+	CreatedAt              string
+	UpdatedAt              string
+}{
+	ID:                     "id",
+	ThemeID:                "theme_id",
+	Name:                   "name",
+	Description:            "description",
+	VariablesJSON:          "variables_json",
+	SyntaxTheme:            "syntax_theme",
+	CodeBlockStyleJSON:     "code_block_style_json",
+	CodeBlockCodeStyleJSON: "code_block_code_style_json",
+	InlineCodeStyleJSON:    "inline_code_style_json",
+	CustomCSS:              "custom_css",
+	IsBuiltin:              "is_builtin",
+	IsEnabled:              "is_enabled",
+	CreatedAt:              "created_at",
+	UpdatedAt:              "updated_at",
+}

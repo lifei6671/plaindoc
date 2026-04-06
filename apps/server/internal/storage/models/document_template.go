@@ -23,3 +23,35 @@ type DocumentTemplate struct {
 func (DocumentTemplate) TableName() string {
 	return "document_templates"
 }
+
+var DocumentTemplateColumns = struct {
+	ID              string
+	TemplateID      string
+	SceneKey        string
+	Name            string
+	Description     string
+	DefaultTitle    string
+	ContentMD       string
+	Sort            string
+	IsBuiltin       string
+	IsEnabled       string
+	CreatedByUserID string
+	UpdatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	TemplateID:      "template_id",
+	SceneKey:        "scene_key",
+	Name:            "name",
+	Description:     "description",
+	DefaultTitle:    "default_title",
+	ContentMD:       "content_md",
+	Sort:            "sort",
+	IsBuiltin:       "is_builtin",
+	IsEnabled:       "is_enabled",
+	CreatedByUserID: "created_by_user_id",
+	UpdatedByUserID: "updated_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

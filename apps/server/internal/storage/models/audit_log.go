@@ -19,3 +19,27 @@ type AuditLog struct {
 func (AuditLog) TableName() string {
 	return "audit_logs"
 }
+
+var AuditLogColumns = struct {
+	ID          string
+	ActorUserID string
+	Module      string
+	Action      string
+	TargetType  string
+	TargetID    string
+	Summary     string
+	DetailJSON  string
+	RequestID   string
+	CreatedAt   string
+}{
+	ID:          "id",
+	ActorUserID: "actor_user_id",
+	Module:      "module",
+	Action:      "action",
+	TargetType:  "target_type",
+	TargetID:    "target_id",
+	Summary:     "summary",
+	DetailJSON:  "detail_json",
+	RequestID:   "request_id",
+	CreatedAt:   "created_at",
+}

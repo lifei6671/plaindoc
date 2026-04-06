@@ -28,3 +28,45 @@ type DocumentAttachment struct {
 func (DocumentAttachment) TableName() string {
 	return "document_attachments"
 }
+
+var DocumentAttachmentColumns = struct {
+	ID              string
+	AttachmentID    string
+	BlobID          string
+	DocumentID      string
+	SpaceID         string
+	StorageProvider string
+	FileName        string
+	ObjectKey       string
+	ObjectURL       string
+	MimeType        string
+	SizeBytes       string
+	ContentHashAlgo string
+	ContentHash     string
+	PreviewKind     string
+	Status          string
+	DeletedAt       string
+	CreatedByUserID string
+	CreatedAt       string
+	UpdatedAt       string
+}{
+	ID:              "id",
+	AttachmentID:    "attachment_id",
+	BlobID:          "blob_id",
+	DocumentID:      "document_id",
+	SpaceID:         "space_id",
+	StorageProvider: "storage_provider",
+	FileName:        "file_name",
+	ObjectKey:       "object_key",
+	ObjectURL:       "object_url",
+	MimeType:        "mime_type",
+	SizeBytes:       "size_bytes",
+	ContentHashAlgo: "content_hash_algo",
+	ContentHash:     "content_hash",
+	PreviewKind:     "preview_kind",
+	Status:          "status",
+	DeletedAt:       "deleted_at",
+	CreatedByUserID: "created_by_user_id",
+	CreatedAt:       "created_at",
+	UpdatedAt:       "updated_at",
+}

@@ -6,25 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormUserIdentityRepository struct {
 	db *gorm.DB
 }
 
-type userIdentityRow struct {
-	ID             int64   `gorm:"column:id"`
-	UserID         string  `gorm:"column:user_id"`
-	ProviderType   string  `gorm:"column:provider_type"`
-	ProviderID     string  `gorm:"column:provider_id"`
-	ExternalID     string  `gorm:"column:external_id"`
-	LoginName      string  `gorm:"column:login_name"`
-	LastLoginAtRaw *string `gorm:"column:last_login_at"`
-	CreatedAtRaw   string  `gorm:"column:created_at"`
-	UpdatedAtRaw   string  `gorm:"column:updated_at"`
-}
+type userIdentityRow = userIdentityRowDB
 
 // NewGormUserIdentityRepository 创建基于 GORM 的用户外部身份仓储实现。
 func NewGormUserIdentityRepository(db *gorm.DB) UserIdentityRepository {
@@ -51,30 +43,32 @@ func (r *gormUserIdentityRepository) Upsert(
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	now = now.UTC()
 
 	loginName := strings.TrimSpace(params.LoginName)
-	lastLoginAt := formatNullableRecordTime(params.LastLoginAt)
+	lastLoginAt := normalizeNullableTime(params.LastLoginAt)
 	updateValues := map[string]any{
-		"user_id":       userID,
-		"provider_type": providerType,
-		"login_name":    loginName,
-		"last_login_at": lastLoginAt,
-		"updated_at":    now,
+		models.UserIdentityColumns.UserID:       userID,
+		models.UserIdentityColumns.ProviderType: providerType,
+		models.UserIdentityColumns.LoginName:    loginName,
+		models.UserIdentityColumns.LastLoginAt:  lastLoginAt,
+		models.UserIdentityColumns.UpdatedAt:    now,
 	}
-	insertValues := map[string]any{
-		"user_id":       userID,
-		"provider_type": providerType,
-		"provider_id":   providerID,
-		"external_id":   externalID,
-		"login_name":    loginName,
-		"last_login_at": lastLoginAt,
-		"created_at":    now,
-		"updated_at":    now,
+	insertRecord := &models.UserIdentity{
+		UserID:       userID,
+		ProviderType: providerType,
+		ProviderID:   providerID,
+		ExternalID:   externalID,
+		LoginName:    loginName,
+		LastLoginAt:  lastLoginAt,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	tx := r.db.WithContext(ctx).
-		Table("user_identities").
-		Where("provider_id = ? AND external_id = ?", providerID, externalID).
+		Model(&models.UserIdentity{}).
+		Where(models.UserIdentityColumns.ProviderID+" = ?", providerID).
+		Where(models.UserIdentityColumns.ExternalID+" = ?", externalID).
 		Updates(updateValues)
 	if tx.Error != nil {
 		return nil, tx.Error
@@ -82,14 +76,14 @@ func (r *gormUserIdentityRepository) Upsert(
 
 	if tx.RowsAffected == 0 {
 		if err := r.db.WithContext(ctx).
-			Table("user_identities").
-			Create(insertValues).Error; err != nil {
+			Create(insertRecord).Error; err != nil {
 			if !isUserIdentityUniqueConstraintError(err) {
 				return nil, err
 			}
 			retryTx := r.db.WithContext(ctx).
-				Table("user_identities").
-				Where("provider_id = ? AND external_id = ?", providerID, externalID).
+				Model(&models.UserIdentity{}).
+				Where(models.UserIdentityColumns.ProviderID+" = ?", providerID).
+				Where(models.UserIdentityColumns.ExternalID+" = ?", externalID).
 				Updates(updateValues)
 			if retryTx.Error != nil {
 				return nil, retryTx.Error
@@ -117,11 +111,20 @@ func (r *gormUserIdentityRepository) GetByProviderExternalID(
 
 	var row userIdentityRow
 	if err := r.db.WithContext(ctx).
-		Table("user_identities").
+		Model(&models.UserIdentity{}).
 		Select(
-			"id, user_id, provider_type, provider_id, external_id, login_name, last_login_at, created_at, updated_at",
+			models.UserIdentityColumns.ID,
+			models.UserIdentityColumns.UserID,
+			models.UserIdentityColumns.ProviderType,
+			models.UserIdentityColumns.ProviderID,
+			models.UserIdentityColumns.ExternalID,
+			models.UserIdentityColumns.LoginName,
+			models.UserIdentityColumns.LastLoginAt+" AS last_login_at_raw",
+			models.UserIdentityColumns.CreatedAt+" AS created_at_raw",
+			models.UserIdentityColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("provider_id = ? AND external_id = ?", normalizedProviderID, normalizedExternalID).
+		Where(models.UserIdentityColumns.ProviderID+" = ?", normalizedProviderID).
+		Where(models.UserIdentityColumns.ExternalID+" = ?", normalizedExternalID).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -144,12 +147,25 @@ func (r *gormUserIdentityRepository) ListByUserID(
 
 	var rows []userIdentityRow
 	if err := r.db.WithContext(ctx).
-		Table("user_identities").
+		Model(&models.UserIdentity{}).
 		Select(
-			"id, user_id, provider_type, provider_id, external_id, login_name, last_login_at, created_at, updated_at",
+			models.UserIdentityColumns.ID,
+			models.UserIdentityColumns.UserID,
+			models.UserIdentityColumns.ProviderType,
+			models.UserIdentityColumns.ProviderID,
+			models.UserIdentityColumns.ExternalID,
+			models.UserIdentityColumns.LoginName,
+			models.UserIdentityColumns.LastLoginAt+" AS last_login_at_raw",
+			models.UserIdentityColumns.CreatedAt+" AS created_at_raw",
+			models.UserIdentityColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("user_id = ?", normalizedUserID).
-		Order("created_at ASC, id ASC").
+		Where(models.UserIdentityColumns.UserID+" = ?", normalizedUserID).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.UserIdentityColumns.CreatedAt},
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.UserIdentityColumns.ID},
+		}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -164,37 +180,27 @@ func (r *gormUserIdentityRepository) ListByUserID(
 func mapUserIdentityRow(row userIdentityRow) models.UserIdentity {
 	return models.UserIdentity{
 		ID:           row.ID,
-		UserID:       row.UserID,
-		ProviderType: row.ProviderType,
-		ProviderID:   row.ProviderID,
-		ExternalID:   row.ExternalID,
-		LoginName:    row.LoginName,
-		LastLoginAt:  parseNullableRecordTime(row.LastLoginAtRaw),
-		CreatedAt:    parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:    parseRecordTime(row.UpdatedAtRaw),
+		UserID:       strings.TrimSpace(row.UserID),
+		ProviderType: strings.TrimSpace(row.ProviderType),
+		ProviderID:   strings.TrimSpace(row.ProviderID),
+		ExternalID:   strings.TrimSpace(row.ExternalID),
+		LoginName:    strings.TrimSpace(row.LoginName),
+		LastLoginAt:  recordtime.ParseNullable(row.LastLoginAtRaw),
+		CreatedAt:    recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:    recordtime.Parse(row.UpdatedAtRaw),
 	}
+}
+
+func normalizeNullableTime(raw *time.Time) *time.Time {
+	if raw == nil {
+		return nil
+	}
+	normalized := raw.UTC()
+	return &normalized
 }
 
 func parseNullableRecordTime(raw *string) *time.Time {
-	if raw == nil {
-		return nil
-	}
-	value := strings.TrimSpace(*raw)
-	if value == "" {
-		return nil
-	}
-	parsedAt := parseRecordTime(value)
-	if parsedAt.IsZero() {
-		return nil
-	}
-	return &parsedAt
-}
-
-func formatNullableRecordTime(raw *time.Time) any {
-	if raw == nil {
-		return nil
-	}
-	return raw.UTC().Format(time.RFC3339Nano)
+	return recordtime.ParseNullable(raw)
 }
 
 func isUserIdentityUniqueConstraintError(err error) bool {

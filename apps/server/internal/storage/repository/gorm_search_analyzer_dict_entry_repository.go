@@ -6,26 +6,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormSearchAnalyzerDictEntryRepository struct {
 	db *gorm.DB
 }
 
-type searchAnalyzerDictEntryRow struct {
-	ID              int64   `gorm:"column:id"`
-	Analyzer        string  `gorm:"column:analyzer"`
-	Term            string  `gorm:"column:term"`
-	Weight          *int    `gorm:"column:weight"`
-	Tag             string  `gorm:"column:tag"`
-	Status          string  `gorm:"column:status"`
-	CreatedByUserID *string `gorm:"column:created_by_user_id"`
-	UpdatedByUserID *string `gorm:"column:updated_by_user_id"`
-	CreatedAtRaw    string  `gorm:"column:created_at"`
-	UpdatedAtRaw    string  `gorm:"column:updated_at"`
-}
+type searchAnalyzerDictEntryRow = searchAnalyzerDictEntryRowDB
 
 // NewGormSearchAnalyzerDictEntryRepository 创建分词词典词条仓储实现。
 func NewGormSearchAnalyzerDictEntryRepository(db *gorm.DB) SearchAnalyzerDictEntryRepository {
@@ -40,18 +31,18 @@ func (r *gormSearchAnalyzerDictEntryRepository) List(
 		return nil, 0, fmt.Errorf("search analyzer dict entry repository db is nil")
 	}
 
-	normalizedAnalyzer := strings.ToLower(strings.TrimSpace(params.Analyzer))
+	normalizedAnalyzer := strings.TrimSpace(params.Analyzer)
 	if normalizedAnalyzer == "" {
 		return []models.SearchAnalyzerDictEntry{}, 0, nil
 	}
 
 	baseQuery := r.db.WithContext(ctx).
-		Table("search_analyzer_dict_entries").
-		Where("LOWER(analyzer) = ?", normalizedAnalyzer)
+		Model(&models.SearchAnalyzerDictEntry{}).
+		Where(models.SearchAnalyzerDictEntryColumns.Analyzer+" = ?", normalizedAnalyzer)
 
 	statuses := normalizeSearchAnalyzerDictEntryStatuses(params.Statuses)
 	if len(statuses) > 0 {
-		baseQuery = baseQuery.Where("LOWER(status) IN ?", statuses)
+		baseQuery = baseQuery.Where("LOWER("+models.SearchAnalyzerDictEntryColumns.Status+") IN ?", statuses)
 	}
 
 	var total int64
@@ -71,18 +62,25 @@ func (r *gormSearchAnalyzerDictEntryRepository) List(
 	rows := make([]searchAnalyzerDictEntryRow, 0, limit)
 	if err := baseQuery.Session(&gorm.Session{}).
 		Select(
-			"id",
-			"analyzer",
-			"term",
-			"weight",
-			"tag",
-			"status",
-			"created_by_user_id",
-			"updated_by_user_id",
-			"created_at",
-			"updated_at",
+			models.SearchAnalyzerDictEntryColumns.ID,
+			models.SearchAnalyzerDictEntryColumns.Analyzer,
+			models.SearchAnalyzerDictEntryColumns.Term,
+			models.SearchAnalyzerDictEntryColumns.Weight,
+			models.SearchAnalyzerDictEntryColumns.Tag,
+			models.SearchAnalyzerDictEntryColumns.Status,
+			models.SearchAnalyzerDictEntryColumns.CreatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.UpdatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.CreatedAt+" AS created_at_raw",
+			models.SearchAnalyzerDictEntryColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Order("updated_at DESC, id DESC").
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SearchAnalyzerDictEntryColumns.UpdatedAt},
+			Desc:   true,
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SearchAnalyzerDictEntryColumns.ID},
+			Desc:   true,
+		}).
 		Offset(offset).
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -104,28 +102,37 @@ func (r *gormSearchAnalyzerDictEntryRepository) ListActiveByAnalyzer(
 		return nil, fmt.Errorf("search analyzer dict entry repository db is nil")
 	}
 
-	normalizedAnalyzer := strings.ToLower(strings.TrimSpace(analyzer))
+	normalizedAnalyzer := strings.TrimSpace(analyzer)
 	if normalizedAnalyzer == "" {
 		return []models.SearchAnalyzerDictEntry{}, nil
 	}
 
 	rows := make([]searchAnalyzerDictEntryRow, 0, 32)
 	if err := r.db.WithContext(ctx).
-		Table("search_analyzer_dict_entries").
+		Model(&models.SearchAnalyzerDictEntry{}).
 		Select(
-			"id",
-			"analyzer",
-			"term",
-			"weight",
-			"tag",
-			"status",
-			"created_by_user_id",
-			"updated_by_user_id",
-			"created_at",
-			"updated_at",
+			models.SearchAnalyzerDictEntryColumns.ID,
+			models.SearchAnalyzerDictEntryColumns.Analyzer,
+			models.SearchAnalyzerDictEntryColumns.Term,
+			models.SearchAnalyzerDictEntryColumns.Weight,
+			models.SearchAnalyzerDictEntryColumns.Tag,
+			models.SearchAnalyzerDictEntryColumns.Status,
+			models.SearchAnalyzerDictEntryColumns.CreatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.UpdatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.CreatedAt+" AS created_at_raw",
+			models.SearchAnalyzerDictEntryColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("LOWER(analyzer) = ? AND LOWER(status) = ?", normalizedAnalyzer, models.SearchAnalyzerDictEntryStatusActive).
-		Order("LENGTH(term) DESC, updated_at DESC, id DESC").
+		Where(models.SearchAnalyzerDictEntryColumns.Analyzer+" = ?", normalizedAnalyzer).
+		Where(models.SearchAnalyzerDictEntryColumns.Status+" = ?", models.SearchAnalyzerDictEntryStatusActive).
+		Order("LENGTH(" + models.SearchAnalyzerDictEntryColumns.Term + ") DESC").
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SearchAnalyzerDictEntryColumns.UpdatedAt},
+			Desc:   true,
+		}).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: models.SearchAnalyzerDictEntryColumns.ID},
+			Desc:   true,
+		}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -150,20 +157,20 @@ func (r *gormSearchAnalyzerDictEntryRepository) GetByID(
 
 	var row searchAnalyzerDictEntryRow
 	if err := r.db.WithContext(ctx).
-		Table("search_analyzer_dict_entries").
+		Model(&models.SearchAnalyzerDictEntry{}).
 		Select(
-			"id",
-			"analyzer",
-			"term",
-			"weight",
-			"tag",
-			"status",
-			"created_by_user_id",
-			"updated_by_user_id",
-			"created_at",
-			"updated_at",
+			models.SearchAnalyzerDictEntryColumns.ID,
+			models.SearchAnalyzerDictEntryColumns.Analyzer,
+			models.SearchAnalyzerDictEntryColumns.Term,
+			models.SearchAnalyzerDictEntryColumns.Weight,
+			models.SearchAnalyzerDictEntryColumns.Tag,
+			models.SearchAnalyzerDictEntryColumns.Status,
+			models.SearchAnalyzerDictEntryColumns.CreatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.UpdatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.CreatedAt+" AS created_at_raw",
+			models.SearchAnalyzerDictEntryColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("id = ?", id).
+		Where(models.SearchAnalyzerDictEntryColumns.ID+" = ?", id).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -180,7 +187,7 @@ func (r *gormSearchAnalyzerDictEntryRepository) GetByAnalyzerAndTerm(
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("search analyzer dict entry repository db is nil")
 	}
-	normalizedAnalyzer := strings.ToLower(strings.TrimSpace(analyzer))
+	normalizedAnalyzer := strings.TrimSpace(analyzer)
 	normalizedTerm := strings.TrimSpace(term)
 	if normalizedAnalyzer == "" || normalizedTerm == "" {
 		return nil, gorm.ErrRecordNotFound
@@ -188,20 +195,21 @@ func (r *gormSearchAnalyzerDictEntryRepository) GetByAnalyzerAndTerm(
 
 	var row searchAnalyzerDictEntryRow
 	if err := r.db.WithContext(ctx).
-		Table("search_analyzer_dict_entries").
+		Model(&models.SearchAnalyzerDictEntry{}).
 		Select(
-			"id",
-			"analyzer",
-			"term",
-			"weight",
-			"tag",
-			"status",
-			"created_by_user_id",
-			"updated_by_user_id",
-			"created_at",
-			"updated_at",
+			models.SearchAnalyzerDictEntryColumns.ID,
+			models.SearchAnalyzerDictEntryColumns.Analyzer,
+			models.SearchAnalyzerDictEntryColumns.Term,
+			models.SearchAnalyzerDictEntryColumns.Weight,
+			models.SearchAnalyzerDictEntryColumns.Tag,
+			models.SearchAnalyzerDictEntryColumns.Status,
+			models.SearchAnalyzerDictEntryColumns.CreatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.UpdatedByUserID,
+			models.SearchAnalyzerDictEntryColumns.CreatedAt+" AS created_at_raw",
+			models.SearchAnalyzerDictEntryColumns.UpdatedAt+" AS updated_at_raw",
 		).
-		Where("LOWER(analyzer) = ? AND term = ?", normalizedAnalyzer, normalizedTerm).
+		Where(models.SearchAnalyzerDictEntryColumns.Analyzer+" = ?", normalizedAnalyzer).
+		Where(models.SearchAnalyzerDictEntryColumns.Term+" = ?", normalizedTerm).
 		Take(&row).Error; err != nil {
 		return nil, err
 	}
@@ -234,13 +242,13 @@ func (r *gormSearchAnalyzerDictEntryRepository) UpdateByID(
 	if id <= 0 || len(updates) == 0 {
 		return false, nil
 	}
-	if _, exists := updates["updated_at"]; !exists {
-		updates["updated_at"] = time.Now().UTC()
+	if _, exists := updates[models.SearchAnalyzerDictEntryColumns.UpdatedAt]; !exists {
+		updates[models.SearchAnalyzerDictEntryColumns.UpdatedAt] = time.Now().UTC()
 	}
 
 	tx := r.db.WithContext(ctx).
 		Model(&models.SearchAnalyzerDictEntry{}).
-		Where("id = ?", id).
+		Where(models.SearchAnalyzerDictEntryColumns.ID+" = ?", id).
 		Updates(updates)
 	if tx.Error != nil {
 		return false, tx.Error
@@ -258,8 +266,8 @@ func mapSearchAnalyzerDictEntryRow(row searchAnalyzerDictEntryRow) models.Search
 		Status:          strings.ToLower(strings.TrimSpace(row.Status)),
 		CreatedByUserID: row.CreatedByUserID,
 		UpdatedByUserID: row.UpdatedByUserID,
-		CreatedAt:       parseRecordTime(row.CreatedAtRaw),
-		UpdatedAt:       parseRecordTime(row.UpdatedAtRaw),
+		CreatedAt:       recordtime.Parse(row.CreatedAtRaw),
+		UpdatedAt:       recordtime.Parse(row.UpdatedAtRaw),
 	}
 }
 
