@@ -51,7 +51,7 @@ func TestGormSearchIndexJobRepository_Enqueue_DeleteDominatesUpsert(t *testing.T
 	}
 	var current row
 	if err := database.ORM.WithContext(ctx).
-		Table("search_index_jobs").
+		Model(&models.SearchIndexJob{}).
 		Select("COUNT(*) AS count", "MAX(job_type) AS job_type", "MAX(status) AS status").
 		Scan(&current).Error; err != nil {
 		t.Fatalf("query search index jobs failed: %v", err)

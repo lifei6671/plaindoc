@@ -150,6 +150,7 @@ PlainDoc 是一个面向中小团队的文档平台：Go 单体后端 + React �
    - `service` 做业务与权限
    - `repository` 做数据访问与事务
 8. 若修改 SSR Worker 相关逻辑，先确认 `apps/web/dist-ssr/worker-entry.js` 存在，避免本地联调误判。
+9. `repository` 层构造 GORM 查询时，优先使用 `models` 结构体或其 `TableName()` 派生表名；复合条件优先拆成多个 `Where(...)`，`EXISTS/NOT EXISTS` 优先使用子查询对象传入，避免硬编码表名和长字符串 `AND` 链接。
 
 ---
 
