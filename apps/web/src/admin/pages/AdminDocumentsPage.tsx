@@ -727,8 +727,11 @@ export function AdminDocumentsPage({ dataGateway }: AdminDocumentsPageProps) {
                             </Badge>
                           </td>
                           <td className="px-3 py-3">
-                            <div className="grid gap-1.5">
-                              <Badge variant="outline" className={renderStatusBadgeClass(document.status)}>
+                            <div className="grid justify-items-start gap-1.5">
+                              <Badge
+                                variant="outline"
+                                className={`${renderStatusBadgeClass(document.status)} w-fit whitespace-nowrap`}
+                              >
                                 {renderStatusLabel(document.status)}
                               </Badge>
                               {document.status === "banned" && document.bannedReason ? (
