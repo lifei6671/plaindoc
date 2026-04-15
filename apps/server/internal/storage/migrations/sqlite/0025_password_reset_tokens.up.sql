@@ -6,11 +6,11 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 	source TEXT NOT NULL DEFAULT 'self_service' CHECK (source IN ('self_service', 'admin_initiated')),
 	requested_by_user_id TEXT NULL,
 	request_ip_hash TEXT NOT NULL DEFAULT '',
-	expires_at TEXT NOT NULL,
-	consumed_at TEXT NULL,
-	invalidated_at TEXT NULL,
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	expires_at TIMESTAMP NOT NULL,
+	consumed_at TIMESTAMP NULL,
+	invalidated_at TIMESTAMP NULL,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
 	FOREIGN KEY (requested_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );

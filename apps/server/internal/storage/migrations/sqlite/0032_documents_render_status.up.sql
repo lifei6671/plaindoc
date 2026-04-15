@@ -5,7 +5,7 @@ ALTER TABLE documents
 	ADD COLUMN render_error TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE documents
-	ADD COLUMN rendered_at TEXT NULL;
+	ADD COLUMN rendered_at TIMESTAMP NULL;
 
 CREATE INDEX IF NOT EXISTS idx_documents_render_status
 	ON documents(render_status);

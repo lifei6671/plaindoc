@@ -7,11 +7,11 @@ CREATE TABLE IF NOT EXISTS document_image_assets (
 	object_key TEXT NOT NULL DEFAULT '',
 	object_url TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending_cleanup', 'deleted')),
-	pending_cleanup_at TEXT NULL,
-	deleted_at TEXT NULL,
-	last_referenced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	pending_cleanup_at TIMESTAMP NULL,
+	deleted_at TIMESTAMP NULL,
+	last_referenced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE,
 	FOREIGN KEY (space_id) REFERENCES spaces(space_id) ON DELETE CASCADE
 );

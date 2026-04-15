@@ -7,8 +7,8 @@ CREATE TABLE IF NOT EXISTS search_analyzer_dict_entries (
 	status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deleted')),
 	created_by_user_id TEXT NULL,
 	updated_by_user_id TEXT NULL,
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (created_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL,
 	FOREIGN KEY (updated_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );

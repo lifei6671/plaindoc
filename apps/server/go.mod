@@ -16,10 +16,13 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/mojocn/base64Captcha v1.3.8
 	github.com/oklog/ulid/v2 v2.1.1
+	github.com/xuri/excelize/v2 v2.10.1
 	github.com/yuin/goldmark v1.4.13
 	golang.org/x/crypto v0.48.0
-	golang.org/x/image v0.32.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/image v0.38.0
+	golang.org/x/net v0.50.0
+	golang.org/x/sync v0.20.0
+	golang.org/x/text v0.35.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/driver/sqlite v1.6.0
@@ -103,18 +106,15 @@ require (
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	github.com/vcaesar/cedar v0.20.2 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
-	github.com/xuri/excelize/v2 v2.10.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	go.etcd.io/bbolt v1.4.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/mod v0.32.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/tools v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

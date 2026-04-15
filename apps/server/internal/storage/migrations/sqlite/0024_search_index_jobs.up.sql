@@ -8,11 +8,11 @@ CREATE TABLE IF NOT EXISTS search_index_jobs (
 	status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'success', 'failed')),
 	priority INTEGER NOT NULL DEFAULT 100,
 	retry_count INTEGER NOT NULL DEFAULT 0,
-	next_run_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	started_at TEXT NULL,
+	next_run_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	started_at TIMESTAMP NULL,
 	last_error TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_search_index_jobs_status_next_priority

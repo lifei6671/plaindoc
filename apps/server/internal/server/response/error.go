@@ -2,6 +2,7 @@ package response
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -105,7 +106,8 @@ func FromError(c *gin.Context, err error) {
 	if err == nil {
 		return
 	}
-
+	slog.ErrorContext(c.Request.Context(), "服务端出现异常", logit.Error("errmsg", err))
+	
 	var mappedErr MappedError
 	if errors.As(err, &mappedErr) {
 		Error(c, mappedErr.HTTPStatus(), mappedErr.ErrorCode(), mappedErr.ErrorMessage())

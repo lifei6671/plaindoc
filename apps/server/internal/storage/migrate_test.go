@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/recordtime"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -206,6 +208,266 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 	}
 }
 
+func TestMigrateUp_SQLiteTimeColumnsUseTimestamp(t *testing.T) {
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-migrate-sqlite-time-columns?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := MigrateUp(ctx, database.ORM, DriverSQLite); err != nil {
+		t.Fatalf("MigrateUp failed: %v", err)
+	}
+
+	expectedColumns := map[string][]string{
+		"users":                        {"banned_at", "deleted_at", "created_at", "updated_at"},
+		"user_identities":              {"last_login_at", "created_at", "updated_at"},
+		"user_sessions":                {"expires_at", "revoked_at", "created_at", "updated_at"},
+		"user_admin_roles":             {"created_at", "updated_at"},
+		"space_admin_scopes":           {"created_at", "updated_at"},
+		"system_configs":               {"created_at", "updated_at"},
+		"audit_logs":                   {"created_at"},
+		"spaces":                       {"banned_at", "deleted_at", "created_at", "updated_at"},
+		"space_categories":             {"created_at", "updated_at"},
+		"space_cover_assets":           {"created_at", "updated_at"},
+		"space_members":                {"created_at", "updated_at"},
+		"nodes":                        {"created_at", "updated_at"},
+		"themes":                       {"created_at", "updated_at"},
+		"documents":                    {"banned_at", "deleted_at", "rendered_at", "created_at", "updated_at"},
+		"document_revisions":           {"created_at"},
+		"document_file_revisions":      {"created_at"},
+		"node_permissions":             {"created_at", "updated_at"},
+		"document_permissions":         {"created_at", "updated_at"},
+		"auth_risk_states":             {"window_started_at", "lock_until", "created_at", "updated_at"},
+		"auth_captcha_challenges":      {"expires_at", "consumed_at", "created_at", "updated_at"},
+		"file_blobs":                   {"deleted_at", "created_at", "updated_at"},
+		"document_attachments":         {"deleted_at", "created_at", "updated_at"},
+		"document_image_assets":        {"pending_cleanup_at", "deleted_at", "last_referenced_at", "created_at", "updated_at"},
+		"search_analyzer_dict_entries": {"created_at", "updated_at"},
+		"search_index_jobs":            {"next_run_at", "started_at", "created_at", "updated_at"},
+		"password_reset_tokens":        {"expires_at", "consumed_at", "invalidated_at", "created_at", "updated_at"},
+		"document_templates":           {"created_at", "updated_at"},
+		"document_template_scenes":     {"created_at", "updated_at"},
+		"document_shares":              {"expires_at", "disabled_at", "created_at", "updated_at"},
+	}
+
+	for tableName, columns := range expectedColumns {
+		for _, columnName := range columns {
+			columnType, err := sqliteColumnType(ctx, database.SQL, tableName, columnName)
+			if err != nil {
+				t.Fatalf("sqliteColumnType(%s.%s) failed: %v", tableName, columnName, err)
+			}
+			if columnType != "TIMESTAMP" {
+				t.Fatalf("expected %s.%s to use TIMESTAMP, got %s", tableName, columnName, columnType)
+			}
+		}
+	}
+}
+
+func TestMigrateUp_SQLiteLegacyTextTimeColumnsPreserveData(t *testing.T) {
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-migrate-sqlite-legacy-text-times?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := MigrateUp(ctx, database.ORM, DriverSQLite); err != nil {
+		t.Fatalf("MigrateUp failed: %v", err)
+	}
+
+	const (
+		jobID            = "01legacytimecolsjob00000000001"
+		captchaID        = "01legacytimecolscaptcha0000001"
+		createdAtRaw     = "2026-04-01 08:09:10"
+		updatedAtRaw     = "2026-04-01 11:12:13"
+		nextRunAtRaw     = "2026-04-01 14:15:16"
+		startedAtRaw     = "2026-04-01 17:18:19"
+		windowStartedRaw = "2026-04-02 08:09:10"
+		lockUntilRaw     = "2026-04-02 11:12:13"
+		expiresAtRaw     = "2026-04-03 08:09:10"
+		consumedAtRaw    = "2026-04-03 09:10:11"
+	)
+
+	if _, err := database.SQL.ExecContext(ctx, `
+INSERT INTO search_index_jobs (
+	job_id,
+	provider,
+	job_type,
+	dedupe_key,
+	payload_json,
+	status,
+	priority,
+	retry_count,
+	next_run_at,
+	started_at,
+	last_error,
+	created_at,
+	updated_at
+) VALUES (?, 'bleve', 'DOC_UPSERT', 'legacy-job', '{}', 'running', 10, 2, ?, ?, '', ?, ?)`,
+		jobID,
+		nextRunAtRaw,
+		startedAtRaw,
+		createdAtRaw,
+		updatedAtRaw,
+	); err != nil {
+		t.Fatalf("insert search_index_jobs failed: %v", err)
+	}
+
+	if _, err := database.SQL.ExecContext(ctx, `
+INSERT INTO auth_risk_states (
+	scene,
+	subject_type,
+	subject_hash,
+	window_started_at,
+	attempt_count,
+	failed_count,
+	captcha_failed_count,
+	lock_until,
+	created_at,
+	updated_at
+) VALUES ('login', 'email', 'legacy-subject', ?, 3, 1, 2, ?, ?, ?)`,
+		windowStartedRaw,
+		lockUntilRaw,
+		createdAtRaw,
+		updatedAtRaw,
+	); err != nil {
+		t.Fatalf("insert auth_risk_states failed: %v", err)
+	}
+
+	if _, err := database.SQL.ExecContext(ctx, `
+INSERT INTO auth_captcha_challenges (
+	captcha_id,
+	scene,
+	subject_hash,
+	level,
+	answer_hash,
+	answer_salt,
+	issued_ip_hash,
+	expires_at,
+	consumed_at,
+	failed_verify_count,
+	created_at,
+	updated_at
+) VALUES (?, 'login', 'legacy-subject', 5, 'answer-hash', 'answer-salt', 'ip-hash', ?, ?, 1, ?, ?)`,
+		captchaID,
+		expiresAtRaw,
+		consumedAtRaw,
+		createdAtRaw,
+		updatedAtRaw,
+	); err != nil {
+		t.Fatalf("insert auth_captcha_challenges failed: %v", err)
+	}
+
+	migrations, err := LoadMigrations(DriverSQLite)
+	if err != nil {
+		t.Fatalf("LoadMigrations failed: %v", err)
+	}
+	var migration33 Migration
+	for _, migration := range migrations {
+		if migration.Version == 33 {
+			migration33 = migration
+			break
+		}
+	}
+	if migration33.Version != 33 {
+		t.Fatalf("migration 33 not found")
+	}
+
+	if err := applyMigrationDown(ctx, database.SQL, DriverSQLite, migration33); err != nil {
+		t.Fatalf("applyMigrationDown(33) failed: %v", err)
+	}
+
+	for _, item := range []struct {
+		table  string
+		column string
+	}{
+		{table: "auth_risk_states", column: "window_started_at"},
+		{table: "auth_captcha_challenges", column: "expires_at"},
+		{table: "search_index_jobs", column: "next_run_at"},
+	} {
+		columnType, err := sqliteColumnType(ctx, database.SQL, item.table, item.column)
+		if err != nil {
+			t.Fatalf("sqliteColumnType(%s.%s) failed: %v", item.table, item.column, err)
+		}
+		if columnType != "TEXT" {
+			t.Fatalf("expected downgraded %s.%s to use TEXT, got %s", item.table, item.column, columnType)
+		}
+	}
+
+	if err := applyMigrationUp(ctx, database.SQL, DriverSQLite, migration33); err != nil {
+		t.Fatalf("applyMigrationUp(33) failed: %v", err)
+	}
+
+	for _, item := range []struct {
+		table  string
+		column string
+	}{
+		{table: "auth_risk_states", column: "window_started_at"},
+		{table: "auth_risk_states", column: "lock_until"},
+		{table: "auth_captcha_challenges", column: "expires_at"},
+		{table: "auth_captcha_challenges", column: "consumed_at"},
+		{table: "search_index_jobs", column: "next_run_at"},
+		{table: "search_index_jobs", column: "started_at"},
+	} {
+		columnType, err := sqliteColumnType(ctx, database.SQL, item.table, item.column)
+		if err != nil {
+			t.Fatalf("sqliteColumnType(%s.%s) failed: %v", item.table, item.column, err)
+		}
+		if columnType != "TIMESTAMP" {
+			t.Fatalf("expected upgraded %s.%s to use TIMESTAMP, got %s", item.table, item.column, columnType)
+		}
+	}
+
+	var riskWindowStartedAt, riskLockUntilAt sql.NullString
+	if err := database.SQL.QueryRowContext(ctx, `
+SELECT window_started_at, lock_until
+FROM auth_risk_states
+WHERE scene = 'login' AND subject_type = 'email' AND subject_hash = 'legacy-subject'`,
+	).Scan(&riskWindowStartedAt, &riskLockUntilAt); err != nil {
+		t.Fatalf("query auth_risk_states failed: %v", err)
+	}
+	assertSQLiteTimeValueEqual(t, "auth_risk_states.window_started_at", windowStartedRaw, riskWindowStartedAt)
+	assertSQLiteTimeValueEqual(t, "auth_risk_states.lock_until", lockUntilRaw, riskLockUntilAt)
+
+	var challengeExpiresAt, challengeConsumedAt sql.NullString
+	if err := database.SQL.QueryRowContext(ctx, `
+SELECT expires_at, consumed_at
+FROM auth_captcha_challenges
+WHERE captcha_id = ?`,
+		captchaID,
+	).Scan(&challengeExpiresAt, &challengeConsumedAt); err != nil {
+		t.Fatalf("query auth_captcha_challenges failed: %v", err)
+	}
+	assertSQLiteTimeValueEqual(t, "auth_captcha_challenges.expires_at", expiresAtRaw, challengeExpiresAt)
+	assertSQLiteTimeValueEqual(t, "auth_captcha_challenges.consumed_at", consumedAtRaw, challengeConsumedAt)
+
+	var jobNextRunAt, jobStartedAt, jobCreatedAt, jobUpdatedAt sql.NullString
+	if err := database.SQL.QueryRowContext(ctx, `
+SELECT next_run_at, started_at, created_at, updated_at
+FROM search_index_jobs
+WHERE job_id = ?`,
+		jobID,
+	).Scan(&jobNextRunAt, &jobStartedAt, &jobCreatedAt, &jobUpdatedAt); err != nil {
+		t.Fatalf("query search_index_jobs failed: %v", err)
+	}
+	assertSQLiteTimeValueEqual(t, "search_index_jobs.next_run_at", nextRunAtRaw, jobNextRunAt)
+	assertSQLiteTimeValueEqual(t, "search_index_jobs.started_at", startedAtRaw, jobStartedAt)
+	assertSQLiteTimeValueEqual(t, "search_index_jobs.created_at", createdAtRaw, jobCreatedAt)
+	assertSQLiteTimeValueEqual(t, "search_index_jobs.updated_at", updatedAtRaw, jobUpdatedAt)
+}
+
 func sqliteTableExists(ctx context.Context, db *sql.DB, tableName string) (bool, error) {
 	const query = `SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`
 	var value int
@@ -217,6 +479,47 @@ func sqliteTableExists(ctx context.Context, db *sql.DB, tableName string) (bool,
 		return false, err
 	}
 	return true, nil
+}
+
+func sqliteColumnType(ctx context.Context, db *sql.DB, tableName string, columnName string) (string, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal any
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return "", err
+		}
+		if name == columnName {
+			return strings.ToUpper(strings.TrimSpace(columnType)), nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("column %s not found in table %s", columnName, tableName)
+}
+
+func assertSQLiteTimeValueEqual(t *testing.T, fieldName string, expected string, got sql.NullString) {
+	t.Helper()
+	if !got.Valid {
+		t.Fatalf("expected %s=%q, got NULL", fieldName, expected)
+	}
+	expectedAt := recordtime.Parse(expected)
+	gotAt := recordtime.Parse(got.String)
+	if expectedAt.IsZero() || gotAt.IsZero() || !expectedAt.Equal(gotAt) {
+		t.Fatalf("expected %s=%q, got raw=%q", fieldName, expected, got.String)
+	}
 }
 
 func smokeInsertGraph(ctx context.Context, orm *gorm.DB) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -61,9 +62,20 @@ func OpenDatabase(cfg OpenConfig) (*Database, error) {
 		return nil, err
 	}
 
+	gormlogger.Default = gormlogger.NewSlogLogger(
+		// 中文注释：使用 logrus 日志中间件，统一日志格式。
+		slog.Default(),
+		gormlogger.Config{
+			SlowThreshold:             500 * time.Millisecond,
+			LogLevel:                  gormlogger.Info,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+
 	ormDB, err := gorm.Open(dialector, &gorm.Config{
 		// 中文注释：SQL 输出统一交给现有日志中间件处理，关闭 GORM 默认日志输出。
-		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		Logger: gormlogger.Default.LogMode(gormlogger.Info),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open gorm database failed: %w", err)

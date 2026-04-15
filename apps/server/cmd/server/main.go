@@ -59,6 +59,7 @@ func main() {
 		logger.Error("ssr worker runtime validation failed", logit.Error("error", err))
 		log.Fatalf("ssr worker runtime validation failed: %v", err)
 	}
+	slog.SetDefault(logger)
 
 	var ssrWorkerPool *pool.Pool
 	var ssrDispatcher *pool.Dispatcher

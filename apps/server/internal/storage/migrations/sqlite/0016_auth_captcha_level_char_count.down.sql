@@ -9,11 +9,11 @@ CREATE TABLE auth_captcha_challenges (
 	answer_hash TEXT NOT NULL,
 	answer_salt TEXT NOT NULL,
 	issued_ip_hash TEXT NOT NULL,
-	expires_at TEXT NOT NULL,
-	consumed_at TEXT NULL,
+	expires_at TIMESTAMP NOT NULL,
+	consumed_at TIMESTAMP NULL,
 	failed_verify_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_verify_count >= 0),
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 INSERT INTO auth_captcha_challenges (

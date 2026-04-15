@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS document_file_revisions (
 	base_version INTEGER NOT NULL,
 	editor_user_id TEXT NULL,
 	source TEXT NOT NULL CHECK (source IN ('local', 'remote')),
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	UNIQUE(document_id, version),
 	FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE,
 	FOREIGN KEY (blob_id) REFERENCES file_blobs(blob_id) ON DELETE RESTRICT,

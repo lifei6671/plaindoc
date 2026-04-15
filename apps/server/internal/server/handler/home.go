@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -78,6 +79,7 @@ func (h *homeHandler) Search(c *gin.Context) {
 		PageSize:     1,
 	})
 	if err != nil {
+		slog.Error("获取首页数据失败", "errmsg", err)
 		renderHomeFallback(c)
 		return
 	}
@@ -98,6 +100,7 @@ func (h *homeHandler) Search(c *gin.Context) {
 			PageSize:     pageSize,
 		})
 		if searchErr != nil {
+			slog.Error("全文检索失败", "errmsg", searchErr)
 			renderHomeFallback(c)
 			return
 		}
@@ -136,6 +139,7 @@ func (h *homeHandler) Search(c *gin.Context) {
 		SearchResults:        mapSearchResultHits(searchResult.Items),
 	})
 	if err != nil {
+		slog.Error("渲染首页失败", "errmsg", err)
 		renderHomeFallback(c)
 		return
 	}
