@@ -1347,12 +1347,12 @@ cd apps/server && go test -race -timeout 120s ./...
 
 ### Phase 3：可回灌 Zip 导出
 
-- [ ] 实现目录树读取。
-- [ ] 实现 Markdown 文档导出。
-- [ ] 实现 `manifest.json`。
-- [ ] 实现 `tree.json`。
-- [ ] 实现 zip entry 路径清洗。
-- [ ] 实现 `.part -> .zip` 原子收尾。
+- [x] 实现目录树读取。
+- [x] 实现 Markdown 文档导出。
+- [x] 实现 `manifest.json`。
+- [x] 实现 `tree.json`。
+- [x] 实现 zip entry 路径清洗。
+- [x] 实现 `.part -> .zip` 原子收尾。
 - [ ] 确保导出包默认包含原样导入所需的附件和 Office source。
 
 ### Phase 4：附件与 Office 源文件

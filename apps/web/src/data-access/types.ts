@@ -547,6 +547,75 @@ export interface AdminSpaceCategory {
   updatedAt: string;
 }
 
+export type AdminSpaceExportFormat = "markdown_zip" | "source_zip" | "epub";
+
+export interface AdminSpaceExportStartInput {
+  spaceId: string;
+  format: AdminSpaceExportFormat;
+  includeAttachments?: boolean;
+  includeOfficeSources?: boolean;
+}
+
+export interface AdminSpaceExportStartResult {
+  jobId: string;
+  streamUrl: string;
+}
+
+export type AdminSpaceTransferEventType = "progress" | "completed" | "failed";
+
+export interface AdminSpaceTransferEvent {
+  type: AdminSpaceTransferEventType;
+  stage?: string;
+  progress?: number;
+  message?: string;
+  downloadUrl?: string;
+  fileName?: string;
+  sizeBytes?: number;
+}
+
+export interface AdminSpaceTransferSubscription {
+  close(): void;
+}
+
+export interface AdminSpaceTransferSubscribeInput {
+  streamUrl: string;
+  onEvent(event: AdminSpaceTransferEvent): void;
+  onError?(error: Event): void;
+}
+
+export interface AdminSpaceImportInspectResult {
+  importId: string;
+  packageVersion: number;
+  packageType: string;
+  importable: boolean;
+  space: {
+    spaceId: string;
+    name: string;
+    categoryId?: string;
+    visibility: Visibility;
+  };
+  summary: {
+    folderCount: number;
+    documentCount: number;
+    attachmentCount: number;
+    sourceCount: number;
+  };
+  warnings: string[];
+}
+
+export interface AdminSpaceImportCommitInput {
+  importId: string;
+  spaceName: string;
+  spaceId?: string;
+  categoryId?: string;
+  visibility?: Visibility;
+}
+
+export interface AdminSpaceImportStartResult {
+  jobId: string;
+  streamUrl: string;
+}
+
 export type AdminDocumentStatusFilter = "all" | "active" | "banned" | "deleted";
 export type AdminDocumentVisibilityFilter = "all" | "public" | "authenticated" | "member";
 export type AdminDocumentFormatFilter = "all" | DocumentFormat;
@@ -1067,6 +1136,11 @@ export interface AdminGateway {
     movedSpaceCount: number;
   }>;
   listSpaces(input?: AdminSpaceListInput): Promise<AdminSpaceListResult>;
+  startSpaceExport(input: AdminSpaceExportStartInput): Promise<AdminSpaceExportStartResult>;
+  subscribeSpaceExport(input: AdminSpaceTransferSubscribeInput): AdminSpaceTransferSubscription;
+  inspectSpaceImport(input: { file: File }): Promise<AdminSpaceImportInspectResult>;
+  commitSpaceImport(input: AdminSpaceImportCommitInput): Promise<AdminSpaceImportStartResult>;
+  subscribeSpaceImport(input: AdminSpaceTransferSubscribeInput): AdminSpaceTransferSubscription;
   updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }): Promise<AdminSpace>;
   updateSpaceMetadata(input: {
     spaceId: string;

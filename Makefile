@@ -1,5 +1,3 @@
-SHELL := /usr/bin/env bash
-
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 SERVER_DIR := $(ROOT_DIR)/apps/server
 WEB_DIR := $(ROOT_DIR)/apps/web
@@ -16,11 +14,21 @@ SSR_WORKER_ENTRY_REL := apps/web/dist-ssr/worker-entry.js
 SSR_WORKER_ENTRY_ABS := $(ROOT_DIR)/$(SSR_WORKER_ENTRY_REL)
 SSR_WORKER_EXEC ?= node
 
+ifeq ($(OS),Windows_NT)
+SHELL := cmd.exe
+.SHELLFLAGS := /C
+VERSION ?= $(shell git describe --tags --always --dirty 2>NUL || echo dev)
+BUILD_COMMIT ?= $(shell git rev-parse --verify HEAD 2>NUL || echo unknown)
+BUILD_TIME_UTC ?= $(shell powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')" 2>NUL)
+BUILD_GO_VERSION ?= $(shell cd /D "$(SERVER_DIR)" && go env GOVERSION 2>NUL || echo unknown)
+else
+SHELL := /usr/bin/env bash
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-BUILD_VERSION ?= $(VERSION)
 BUILD_COMMIT ?= $(shell git rev-parse --verify HEAD 2>/dev/null || echo unknown)
 BUILD_TIME_UTC ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 BUILD_GO_VERSION ?= $(shell cd "$(SERVER_DIR)" && go env GOVERSION 2>/dev/null || echo unknown)
+endif
+BUILD_VERSION ?= $(VERSION)
 SERVER_LDFLAGS := -X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.Version=$(BUILD_VERSION) \
 	-X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.CommitSHA=$(BUILD_COMMIT) \
 	-X github.com/lifei6671/plaindoc/apps/server/internal/buildinfo.BuildTimeUTC=$(BUILD_TIME_UTC) \
@@ -70,6 +78,25 @@ help:
 	@echo "  BUILD_TIME_UTC=$(BUILD_TIME_UTC)"
 	@echo "  BUILD_GO_VERSION=$(BUILD_GO_VERSION)"
 
+ifeq ($(OS),Windows_NT)
+check-go-tools:
+	@where go >NUL 2>NUL || (echo go is required but not found && exit /B 1)
+
+check-web-tools:
+	@where npm >NUL 2>NUL || (echo npm is required but not found && exit /B 1)
+
+check-node-exec:
+	@where $(SSR_WORKER_EXEC) >NUL 2>NUL || (echo $(SSR_WORKER_EXEC) is required but not found && exit /B 1)
+
+check-env-file:
+	@if not exist "$(ROOT_DIR)/$(ENV_FILE)" (echo env file $(ENV_FILE) not found. && echo hint: copy apps\server\.env.example apps\server\.env && exit /B 1)
+
+check-web-build:
+	@if not exist "$(ROOT_DIR)/apps/web/dist/index.html" (echo web dist is missing: apps/web/dist/index.html && echo run: make web-build && exit /B 1)
+
+check-web-ssr:
+	@if not exist "$(SSR_WORKER_ENTRY_ABS)" (echo SSR worker entry is missing: $(SSR_WORKER_ENTRY_REL) && echo run: make web-build-ssr  ^(or make web-build^) && exit /B 1)
+else
 check-go-tools:
 	@command -v go >/dev/null 2>&1 || { echo "go is required but not found"; exit 1; }
 
@@ -99,6 +126,7 @@ check-web-ssr:
 		echo "run: make web-build-ssr  (or make web-build)"; \
 		exit 1; \
 	fi
+endif
 
 install: check-web-tools
 	npm ci
@@ -106,6 +134,19 @@ install: check-web-tools
 web-dev: check-web-tools
 	npm run web:dev
 
+ifeq ($(OS),Windows_NT)
+server-dev: check-go-tools
+	@powershell -NoProfile -ExecutionPolicy Bypass -File "$(ROOT_DIR)/scripts/dev-server.ps1" -RootDir "$(ROOT_DIR)" -ServerDir "$(SERVER_DIR)" -EnvFile "$(ENV_FILE)" -AppAddr "$(APP_ADDR)" -WebOrigin "$(WEB_ORIGIN)" -SSREnabled "false"
+
+server-dev-ssr: check-go-tools check-node-exec check-web-ssr
+	@powershell -NoProfile -ExecutionPolicy Bypass -File "$(ROOT_DIR)/scripts/dev-server.ps1" -RootDir "$(ROOT_DIR)" -ServerDir "$(SERVER_DIR)" -EnvFile "$(ENV_FILE)" -AppAddr "$(APP_ADDR)" -WebOrigin "$(WEB_ORIGIN)" -SSREnabled "true" -SSRWorkerExec "$(SSR_WORKER_EXEC)" -SSRWorkerEntry "$(SSR_WORKER_ENTRY_ABS)"
+
+web-build: check-web-tools
+	@set VITE_BUILD_VERSION=$(BUILD_VERSION)&& npm run web:build
+
+web-build-ssr: check-web-tools
+	@set VITE_BUILD_VERSION=$(BUILD_VERSION)&& npm run web:build-ssr
+else
 server-dev: check-go-tools
 	@set -a; \
 	if [ -f "$(ROOT_DIR)/$(ENV_FILE)" ]; then echo "load env from $(ENV_FILE)"; fi; \
@@ -123,6 +164,7 @@ server-dev-ssr: check-go-tools check-node-exec check-web-ssr
 	$(SERVER_ENV) APP_ADDR="$(APP_ADDR)" WEB_ORIGIN="$(WEB_ORIGIN)" \
 	SSR_WORKER_ENABLED=true SSR_WORKER_EXEC="$(SSR_WORKER_EXEC)" SSR_WORKER_ENTRY="$(SSR_WORKER_ENTRY_ABS)" \
 	go run ./cmd/server
+endif
 
 dev:
 	@echo "Start dev in two terminals:"
@@ -132,11 +174,13 @@ dev:
 	@echo "If you need reader SSR in local backend:"
 	@echo "  make web-build-ssr && make server-dev-ssr"
 
+ifneq ($(OS),Windows_NT)
 web-build: check-web-tools
 	VITE_BUILD_VERSION="$(BUILD_VERSION)" npm run web:build
 
 web-build-ssr: check-web-tools
 	VITE_BUILD_VERSION="$(BUILD_VERSION)" npm run web:build-ssr
+endif
 
 server-build: check-go-tools
 	@mkdir -p "$(RELEASE_DIR)"

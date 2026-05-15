@@ -52,24 +52,24 @@ Phase 1 协议与骨架
 
 ### 2.1 后端新增文件
 
-- [ ] `apps/server/internal/service/admin_space_export_service.go`
+- [x] `apps/server/internal/service/admin_space_export_service.go`
   - 空间导出服务：导出任务创建、zip/EPUB 生成、下载链接、SSE 事件。
-- [ ] `apps/server/internal/service/admin_space_import_service.go`
+- [x] `apps/server/internal/service/admin_space_import_service.go`
   - 空间导入服务：zip staging、inspect、commit、导入任务执行、ID 映射。
-- [ ] `apps/server/internal/service/admin_space_export_manifest.go`
+- [x] `apps/server/internal/service/admin_space_export_manifest.go`
   - 空间交换包 manifest/tree 类型、校验、路径清洗、hash 计算。
-- [ ] `apps/server/internal/server/handler/admin_space_export.go`
+- [x] `apps/server/internal/server/handler/admin_space_export.go`
   - 后台导出 handler：创建导出任务、SSE、下载。
-- [ ] `apps/server/internal/server/handler/admin_space_import.go`
+- [x] `apps/server/internal/server/handler/admin_space_import.go`
   - 后台导入 handler：inspect、commit、SSE。
-- [ ] `apps/server/internal/server/response/admin_space_export.go`
+- [x] `apps/server/internal/server/response/error_admin_space_export.go`
   - 空间导出错误码和响应定义。
-- [ ] `apps/server/internal/server/response/admin_space_import.go`
+- [x] `apps/server/internal/server/response/error_admin_space_import.go`
   - 空间导入错误码和响应定义。
 
 ### 2.2 后端修改文件
 
-- [ ] `apps/server/internal/server/router.go`
+- [x] `apps/server/internal/server/router.go`
   - 注册导入导出 API。
 - [ ] `apps/server/internal/server/handler/workspace.go`
   - 如需复用 Office source blob 私有 helper，先抽公共方法，避免复制大段逻辑。
@@ -84,8 +84,8 @@ Phase 1 协议与骨架
 
 ### 2.3 后端测试文件
 
-- [ ] `apps/server/internal/service/admin_space_export_service_test.go`
-- [ ] `apps/server/internal/service/admin_space_import_service_test.go`
+- [x] `apps/server/internal/service/admin_space_export_service_test.go`
+- [x] `apps/server/internal/service/admin_space_import_service_test.go`
 - [ ] `apps/server/internal/server/admin_space_export_handler_test.go`
 - [ ] `apps/server/internal/server/admin_space_import_handler_test.go`
 
@@ -100,9 +100,9 @@ Phase 1 协议与骨架
 
 ### 2.5 前端修改文件
 
-- [ ] `apps/web/src/data-access/types.ts`
+- [x] `apps/web/src/data-access/types.ts`
   - 新增导入导出类型和 `AdminGateway` 方法。
-- [ ] `apps/web/src/data-access/http/adapter.ts`
+- [x] `apps/web/src/data-access/http/adapter.ts`
   - 新增 API 调用、SSE 订阅封装、下载 URL 处理。
 - [ ] `apps/web/src/admin/pages/AdminSpacesPage.tsx`
   - 增加导出菜单项、导入按钮、弹层状态。
@@ -145,14 +145,14 @@ Phase 1 协议与骨架
 
 **步骤**
 
-- [ ] 定义导出格式枚举：`markdown_zip`、`source_zip`、`epub`。
-- [ ] 定义 zip 空间交换包常量：`packageType = "plaindoc-space"`、`version = 1`。
-- [ ] 定义导出请求结构：`format`、`includeAttachments`、`includeOfficeSources`。
-- [ ] 定义导出启动响应：`jobId`、`streamUrl`。
-- [ ] 定义导入 inspect 响应：`importId`、`packageVersion`、`packageType`、`importable`、`space`、`summary`、`warnings`。
-- [ ] 定义导入 commit 请求：`spaceName`、`spaceId`、`categoryId`、`visibility`。
-- [ ] 定义导入 commit 响应：`jobId`、`streamUrl`。
-- [ ] 新增错误语义：
+- [x] 定义导出格式枚举：`markdown_zip`、`source_zip`、`epub`。
+- [x] 定义 zip 空间交换包常量：`packageType = "plaindoc-space"`、`version = 1`。
+- [x] 定义导出请求结构：`format`、`includeAttachments`、`includeOfficeSources`。
+- [x] 定义导出启动响应：`jobId`、`streamUrl`。
+- [x] 定义导入 inspect 响应：`importId`、`packageVersion`、`packageType`、`importable`、`space`、`summary`、`warnings`。
+- [x] 定义导入 commit 请求：`spaceName`、`spaceId`、`categoryId`、`visibility`。
+- [x] 定义导入 commit 响应：`jobId`、`streamUrl`。
+- [x] 新增错误语义：
   - `AdminSpaceExportErrSpaceIDRequired`
   - `AdminSpaceExportErrRequestBody`
   - `AdminSpaceExportErrFormatUnsupported`
@@ -171,13 +171,14 @@ Phase 1 协议与骨架
   - `AdminSpaceImportErrStagingNotFound`
   - `AdminSpaceImportErrStagingExpired`
   - `AdminSpaceImportErrJobRunningLimit`
+  - `AdminSpaceImportErrJobTokenInvalid`
   - `AdminSpaceImportErrCommitForbidden`
 
 **验收**
 
-- [ ] 后端能编译到类型层面。
-- [ ] 错误命名和现有 response 包风格一致。
-- [ ] 没有新增数据库迁移。
+- [x] 后端能编译到类型层面。
+- [x] 错误命名和现有 response 包风格一致。
+- [x] 没有新增数据库迁移。
 
 ### Task 1.2 后端路由与 handler 骨架
 
@@ -189,21 +190,21 @@ Phase 1 协议与骨架
 
 **步骤**
 
-- [ ] 注册 `POST /api/admin/spaces/:spaceId/exports`。
-- [ ] 注册 `GET /api/admin/spaces/:spaceId/exports/:jobId/events`。
-- [ ] 注册 `GET /api/admin/space-exports/:jobId/download`。
-- [ ] 注册 `POST /api/admin/space-imports/inspect`。
-- [ ] 注册 `POST /api/admin/space-imports/:importId/commit`。
-- [ ] 注册 `GET /api/admin/space-imports/:jobId/events`。
-- [ ] 导出创建接口使用 `RequireAdminSession` 取得 actor，再由 service 调用 `CanExportSpace(actorUserID, spaceID)`。
-- [ ] 导入 inspect 和 commit 使用 `RequireAdminSession` 取得 actor，再由 service 调用 `CanImportSpace(actorUserID)`。
-- [ ] handler 骨架返回明确的“未实现”或调用 service stub，不能 panic。
+- [x] 注册 `POST /api/admin/spaces/:spaceId/exports`。
+- [x] 注册 `GET /api/admin/spaces/:spaceId/exports/:jobId/events`。
+- [x] 注册 `GET /api/admin/space-exports/:jobId/download`。
+- [x] 注册 `POST /api/admin/space-imports/inspect`。
+- [x] 注册 `POST /api/admin/space-imports/:importId/commit`。
+- [x] 注册 `GET /api/admin/space-imports/:jobId/events`。
+- [x] 导出创建接口使用 `RequireAdminSession` 取得 actor，再由 service 调用 `CanExportSpace(actorUserID, spaceID)`。
+- [x] 导入 inspect 和 commit 使用 `RequireAdminSession` 取得 actor，再由 service 调用 `CanImportSpace(actorUserID)`。
+- [x] handler 骨架返回明确的“未实现”或调用 service stub，不能 panic。
 
 **验收**
 
-- [ ] 路由命名和技术方案一致。
-- [ ] EventSource URL 不要求 Authorization header。
-- [ ] 导入 commit 只允许具备导入能力的 actor：有空间管理权限，或普通用户当前允许创建空间。
+- [x] 路由命名和技术方案一致。
+- [x] EventSource URL 不要求 Authorization header。
+- [x] 导入 commit 只允许具备导入能力的 actor：有空间管理权限，或普通用户当前允许创建空间。
 
 ### Task 1.3 前端契约类型
 
@@ -213,14 +214,14 @@ Phase 1 协议与骨架
 
 **步骤**
 
-- [ ] 新增 `AdminSpaceExportFormat = "markdown_zip" | "source_zip" | "epub"`。
-- [ ] 新增 `AdminSpaceExportStartInput`。
-- [ ] 新增 `AdminSpaceExportStartResult`。
-- [ ] 新增 `AdminSpaceTransferEvent` 或导入导出共用事件类型。
-- [ ] 新增 `AdminSpaceImportInspectResult`。
-- [ ] 新增 `AdminSpaceImportCommitInput`。
-- [ ] 新增 `AdminSpaceImportStartResult`。
-- [ ] 扩展 `AdminGateway`：
+- [x] 新增 `AdminSpaceExportFormat = "markdown_zip" | "source_zip" | "epub"`。
+- [x] 新增 `AdminSpaceExportStartInput`。
+- [x] 新增 `AdminSpaceExportStartResult`。
+- [x] 新增 `AdminSpaceTransferEvent` 或导入导出共用事件类型。
+- [x] 新增 `AdminSpaceImportInspectResult`。
+- [x] 新增 `AdminSpaceImportCommitInput`。
+- [x] 新增 `AdminSpaceImportStartResult`。
+- [x] 扩展 `AdminGateway`：
   - `startSpaceExport`
   - `subscribeSpaceExport`
   - `inspectSpaceImport`
@@ -229,9 +230,9 @@ Phase 1 协议与骨架
 
 **验收**
 
-- [ ] TypeScript 类型无循环引用。
-- [ ] EPUB 被标记为导出格式，但不是导入包格式。
-- [ ] 页面层后续可完全依赖 `AdminGateway`，不需要直接拼 URL。
+- [x] TypeScript 类型无循环引用。
+- [x] EPUB 被标记为导出格式，但不是导入包格式。
+- [x] 页面层后续可完全依赖 `AdminGateway`，不需要直接拼 URL。
 
 ### Task 1.4 HTTP adapter 骨架
 
@@ -241,19 +242,19 @@ Phase 1 协议与骨架
 
 **步骤**
 
-- [ ] 实现 `startSpaceExport` 请求骨架。
-- [ ] 实现 `inspectSpaceImport` multipart 上传骨架。
-- [ ] 实现 `commitSpaceImport` 请求骨架。
-- [ ] 实现 `subscribeSpaceExport` 的 EventSource 封装。
-- [ ] 实现 `subscribeSpaceImport` 的 EventSource 封装。
-- [ ] 订阅对象返回 `close()`。
-- [ ] SSE 回调至少区分 `progress`、`completed`、`failed`。
+- [x] 实现 `startSpaceExport` 请求骨架。
+- [x] 实现 `inspectSpaceImport` multipart 上传骨架。
+- [x] 实现 `commitSpaceImport` 请求骨架。
+- [x] 实现 `subscribeSpaceExport` 的 EventSource 封装。
+- [x] 实现 `subscribeSpaceImport` 的 EventSource 封装。
+- [x] 订阅对象返回 `close()`。
+- [x] SSE 回调至少区分 `progress`、`completed`、`failed`。
 
 **验收**
 
-- [ ] adapter 内部统一拼接 `baseUrl`。
-- [ ] 页面层不用读取 localStorage token。
-- [ ] SSE 连接关闭时不会遗留 listener。
+- [x] adapter 内部统一拼接 `baseUrl`。
+- [x] 页面层不用读取 localStorage token。
+- [x] SSE 连接关闭时不会遗留 listener。
 
 **Phase 1 验证命令**
 
@@ -266,7 +267,7 @@ cd apps/server && go test ./... -count=1
 
 - [ ] code review 确认 API 契约稳定。
 - [ ] code review 确认权限边界无误。
-- [ ] 更新本清单 Phase 1 checkbox。
+- [x] 更新本清单 Phase 1 checkbox。
 
 ---
 
@@ -282,20 +283,20 @@ cd apps/server && go test ./... -count=1
 
 **步骤**
 
-- [ ] 定义 `AdminSpaceExportJob`。
-- [ ] 定义 `AdminSpaceExportStatus`：`queued`、`running`、`completed`、`failed`。
-- [ ] 实现进程内 `AdminSpaceExportJobStore`。
-- [ ] Store 内部使用 `sync.Mutex` 保护任务 map。
-- [ ] 支持同一 `actorUserID + spaceID` running 限制。
-- [ ] 支持全局 running 导出任务上限 2。
-- [ ] 支持订阅者注册、注销、广播事件。
-- [ ] 导出 worker 从 queued 进入 running 前再次调用 `CanExportSpace(actorUserID, spaceID)`。
+- [x] 定义 `AdminSpaceExportJob`。
+- [x] 定义 `AdminSpaceExportStatus`：`queued`、`running`、`completed`、`failed`。
+- [x] 实现进程内 `AdminSpaceExportJobStore`。
+- [x] Store 内部使用 `sync.Mutex` 保护任务 map。
+- [x] 支持同一 `actorUserID + spaceID` running 限制。
+- [x] 支持全局 running 导出任务上限 2。
+- [x] 支持订阅者注册、注销、广播事件。
+- [x] 导出 worker 从 queued 进入 running 前再次调用 `CanExportSpace(actorUserID, spaceID)`。
 
 **验收**
 
 - [ ] 并发读写无 data race。
-- [ ] 重复创建 running 任务返回明确错误。
-- [ ] 订阅者关闭后不阻塞广播。
+- [x] 重复创建 running 任务返回明确错误。
+- [x] 订阅者关闭后不阻塞广播。
 
 ### Task 2.2 导入 staging 与任务 Store
 
@@ -305,19 +306,19 @@ cd apps/server && go test ./... -count=1
 
 **步骤**
 
-- [ ] 定义 `AdminSpaceImportStaging`。
-- [ ] 定义 `AdminSpaceImportJob`。
-- [ ] 实现 staging map，绑定 `importId + actorUserId`。
-- [ ] 实现导入任务 Store。
-- [ ] 支持同一 actor 同时最多 1 个 running 导入任务。
-- [ ] 支持 staging 过期时间。
-- [ ] 支持导入任务事件广播。
+- [x] 定义 `AdminSpaceImportStaging`。
+- [x] 定义 `AdminSpaceImportJob`。
+- [x] 实现 staging map，绑定 `importId + actorUserId`。
+- [x] 实现导入任务 Store。
+- [x] 支持同一 actor 同时最多 1 个 running 导入任务。
+- [x] 支持 staging 过期时间。
+- [x] 支持导入任务事件广播。
 
 **验收**
 
-- [ ] actor 不能提交别人的 `importId`。
-- [ ] staging 过期后不能 commit。
-- [ ] 导入任务 Store 不依赖数据库表。
+- [x] actor 不能提交别人的 `importId`。
+- [x] staging 过期后不能 commit。
+- [x] 导入任务 Store 不依赖数据库表。
 
 ### Task 2.3 短期 Token
 
@@ -328,20 +329,20 @@ cd apps/server && go test ./... -count=1
 
 **步骤**
 
-- [ ] 实现导出 `streamToken`。
-- [ ] 实现导出 `downloadToken`。
-- [ ] 实现导入 `importStreamToken`。
-- [ ] token 绑定 actor、space/import/job、过期时间。
-- [ ] token 只保存哈希或不可逆摘要，响应里只返回一次明文 token。
-- [ ] token 不在日志中打印。
-- [ ] token 校验失败返回专用错误。
+- [x] 实现导出 `streamToken`。
+- [x] 实现导出 `downloadToken`。
+- [x] 实现导入 `importStreamToken`。
+- [x] token 绑定 actor、space/import/job、过期时间。
+- [x] token 只保存哈希或不可逆摘要，响应里只返回一次明文 token。
+- [x] token 不在日志中打印。
+- [x] token 校验失败返回专用错误。
 
 **验收**
 
-- [ ] token 不能跨用户复用。
-- [ ] token 不能跨 job 复用。
-- [ ] 过期 token 被拒绝。
-- [ ] download token 单次使用，下载成功或过期后不可再次使用。
+- [x] token 不能跨用户复用。
+- [x] token 不能跨 job 复用。
+- [x] 过期 token 被拒绝。
+- [x] download token 单次使用，下载成功或过期后不可再次使用。
 
 ### Task 2.4 SSE handler
 
@@ -352,19 +353,19 @@ cd apps/server && go test ./... -count=1
 
 **步骤**
 
-- [ ] 设置 `Content-Type: text/event-stream`。
-- [ ] 设置 `Cache-Control: no-cache`。
-- [ ] 设置 `X-Accel-Buffering: no`。
-- [ ] 首次连接推送当前任务快照。
-- [ ] 任务 completed 或 failed 后关闭连接。
-- [ ] 客户端断开时注销订阅者。
-- [ ] 心跳策略明确：第一期可每 15 秒发送 comment heartbeat。
+- [x] 设置 `Content-Type: text/event-stream`。
+- [x] 设置 `Cache-Control: no-cache`。
+- [x] 设置 `X-Accel-Buffering: no`。
+- [x] 首次连接推送当前任务快照。
+- [x] 任务 completed 或 failed 后关闭连接。
+- [x] 客户端断开时注销订阅者。
+- [x] 心跳策略明确：第一期可每 15 秒发送 comment heartbeat。
 
 **验收**
 
-- [ ] EventSource 能收到 `progress`。
-- [ ] completed 后连接自然结束。
-- [ ] 客户端断开不取消后端任务。
+- [x] EventSource 能收到 `progress`。
+- [x] completed 后连接自然结束。
+- [x] 客户端断开不取消后端任务。
 
 **Phase 2 验证命令**
 
@@ -373,11 +374,18 @@ cd apps/server && go test ./... -count=1
 cd apps/server && go test -race -timeout 120s ./...
 ```
 
+**Phase 2 当前验证记录（2026-05-15）**
+
+- [x] `go test ./internal/service/admin_space_export_service.go ./internal/service/admin_space_import_service.go ./internal/service/admin_space_export_manifest.go ./internal/service/admin_access_service.go ./internal/service/admin_space_export_service_test.go ./internal/service/admin_space_import_service_test.go -count=1`
+- [x] `npm run build -w @plaindoc/web`
+- [ ] `go test ./... -count=1`：当前 Windows 环境缺少 `gcc`，`runtime/cgo` 无法编译，未完成全量验证。
+- [ ] `go test -race -timeout 120s ./...`：同样受缺少 `gcc` 阻塞，未完成 race 验证。
+
 **Phase 2 Review Gate**
 
 - [ ] code review 确认任务 Store 无并发风险。
 - [ ] code review 确认 token 不泄露长期凭据。
-- [ ] 更新本清单 Phase 2 checkbox。
+- [x] 更新本清单 Phase 2 checkbox。
 
 ---
 
@@ -393,20 +401,20 @@ cd apps/server && go test -race -timeout 120s ./...
 
 **步骤**
 
-- [ ] 定义 `AdminSpaceExportManifest`。
-- [ ] 定义 `AdminSpaceExportTree`。
-- [ ] 定义 `AdminSpaceExportDocumentEntry`。
-- [ ] 定义 `AdminSpaceExportSummary`。
-- [ ] 实现 manifest JSON marshal。
-- [ ] 实现 tree JSON marshal。
-- [ ] 增加 `packageType = "plaindoc-space"`。
-- [ ] 增加 `version = 1`。
+- [x] 定义 `AdminSpaceExportManifest`。
+- [x] 定义 `AdminSpaceExportTree`。
+- [x] 定义 `AdminSpaceExportDocumentEntry`。
+- [x] 定义 `AdminSpaceExportSummary`。
+- [x] 实现 manifest JSON marshal。
+- [x] 实现 tree JSON marshal。
+- [x] 增加 `packageType = "plaindoc-space"`。
+- [x] 增加 `version = 1`。
 
 **验收**
 
-- [ ] manifest 包含 `importable=true`。
-- [ ] manifest 中每个文档包含 `documentId`、`nodeId`、`parentNodeId`、`title`、`format`、`sort`、`visibility`、`path`。
-- [ ] tree 保留原始父子关系。
+- [x] manifest 包含 `importable=true`。
+- [x] manifest 中每个文档包含 `documentId`、`nodeId`、`parentNodeId`、`title`、`format`、`sort`、`visibility`、`path`。
+- [x] tree 保留原始父子关系。
 
 ### Task 3.2 路径清洗与重名处理
 
@@ -417,19 +425,19 @@ cd apps/server && go test -race -timeout 120s ./...
 
 **步骤**
 
-- [ ] 实现 zip entry 名称清洗。
-- [ ] 禁止绝对路径。
-- [ ] 禁止 `..`。
-- [ ] 替换 Windows 非法字符。
-- [ ] 去除控制字符。
-- [ ] 空标题使用安全兜底名。
-- [ ] 同目录重名追加 ` (1)`、` (2)`。
+- [x] 实现 zip entry 名称清洗。
+- [x] 禁止绝对路径。
+- [x] 禁止 `..`。
+- [x] 替换 Windows 非法字符。
+- [x] 去除控制字符。
+- [x] 空标题使用安全兜底名。
+- [x] 同目录重名追加 ` (1)`、` (2)`。
 
 **验收**
 
-- [ ] `../evil.md` 被拒绝或清洗为安全路径。
-- [ ] `C:\evil.md` 不会成为 zip entry。
-- [ ] 两个同名文档不会覆盖。
+- [x] `../evil.md` 被拒绝或清洗为安全路径。
+- [x] `C:\evil.md` 不会成为 zip entry。
+- [x] 两个同名文档不会覆盖。
 
 ### Task 3.3 读取空间与目录树
 
@@ -440,18 +448,18 @@ cd apps/server && go test -race -timeout 120s ./...
 
 **步骤**
 
-- [ ] 读取空间基础信息。
-- [ ] 确认空间未删除。
-- [ ] 读取 `WorkspaceRepository.ListTreeNodesBySpaceID`。
-- [ ] 构造内存树。
-- [ ] 按 sort 和 title 生成稳定顺序。
-- [ ] 统计 folder 和 doc 数量。
+- [x] 读取空间基础信息。
+- [x] 确认空间未删除。
+- [x] 读取 `WorkspaceRepository.ListTreeNodesBySpaceID`。
+- [x] 构造内存树。
+- [x] 按 sort 和 title 生成稳定顺序。
+- [x] 统计 folder 和 doc 数量。
 
 **验收**
 
-- [ ] 空空间也能导出 manifest/tree。
-- [ ] 删除空间不能导出。
-- [ ] tree 顺序稳定。
+- [x] 空空间也能导出 manifest/tree。
+- [x] 删除空间不能导出。
+- [x] tree 顺序稳定。
 
 ### Task 3.4 写入 Markdown 文档
 
@@ -461,18 +469,18 @@ cd apps/server && go test -race -timeout 120s ./...
 
 **步骤**
 
-- [ ] 遍历 doc 节点。
-- [ ] 对 `format=markdown` 的文档读取 `ContentMD`。
-- [ ] 写入 `documents/.../*.md`。
-- [ ] 计算内容 sha256。
-- [ ] 将文档 path 和 hash 写入 manifest。
-- [ ] 对 `docx/xlsx` 先只写 manifest source 占位，不写入 source 文件。
+- [x] 遍历 doc 节点。
+- [x] 对 `format=markdown` 的文档读取 `ContentMD`。
+- [x] 写入 `documents/.../*.md`。
+- [x] 计算内容 sha256。
+- [x] 将文档 path 和 hash 写入 manifest。
+- [x] 对 `docx/xlsx` 先只写 manifest source 占位，不写入 source 文件。
 
 **验收**
 
-- [ ] Markdown 内容与数据库一致。
-- [ ] 文档标题和路径符合目录层级。
-- [ ] manifest 引用的 Markdown path 在 zip 中存在。
+- [x] Markdown 内容与数据库一致。
+- [x] 文档标题和路径符合目录层级。
+- [x] manifest 引用的 Markdown path 在 zip 中存在。
 
 ### Task 3.5 zip 原子写入
 
@@ -482,17 +490,17 @@ cd apps/server && go test -race -timeout 120s ./...
 
 **步骤**
 
-- [ ] 创建私有导出目录：`data/exports/admin-space` 或服务配置决定的目录。
-- [ ] 写入 `{jobId}.part`。
-- [ ] zip writer 正常关闭后 rename 为 `{jobId}.zip`。
-- [ ] 失败时删除 `.part`。
-- [ ] completed 事件写入 `fileName`、`sizeBytes`。
+- [x] 创建私有导出目录：`data/exports/admin-space` 或服务配置决定的目录。
+- [x] 写入 `{jobId}.part`。
+- [x] zip writer 正常关闭后 rename 为 `{jobId}.zip`。
+- [x] 失败时删除 `.part`。
+- [x] completed 事件写入 `fileName`、`sizeBytes`。
 
 **验收**
 
-- [ ] 不会暴露半成品 zip。
-- [ ] 失败后没有残留 `.part`。
-- [ ] completed 事件能拿到 zip 大小。
+- [x] 不会暴露半成品 zip。
+- [x] 失败后没有残留 `.part`。
+- [x] completed 事件能拿到 zip 大小。
 
 **Phase 3 验证命令**
 
@@ -500,11 +508,16 @@ cd apps/server && go test -race -timeout 120s ./...
 cd apps/server && go test ./... -count=1
 ```
 
+**Phase 3 当前验证记录（2026-05-15）**
+
+- [x] `go test ./internal/service/admin_space_export_service.go ./internal/service/admin_space_import_service.go ./internal/service/admin_space_export_manifest.go ./internal/service/admin_access_service.go ./internal/service/admin_space_export_service_test.go ./internal/service/admin_space_import_service_test.go -count=1`
+- [ ] `go test ./... -count=1`：当前 Windows 环境缺少 `gcc`，`runtime/cgo` 无法编译，未完成全量验证。
+
 **Phase 3 Review Gate**
 
 - [ ] code review 确认 zip 结构可被导入解析。
 - [ ] code review 确认路径安全。
-- [ ] 更新本清单 Phase 3 checkbox。
+- [x] 更新本清单 Phase 3 checkbox。
 
 ---
 

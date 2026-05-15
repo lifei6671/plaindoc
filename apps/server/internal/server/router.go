@@ -554,6 +554,14 @@ func newRouter(
 			adminAuditService,
 		)
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService, searchIndexService)
+		adminSpaceExportService := service.NewAdminSpaceExportService(
+			adminAccessService,
+			service.WithAdminSpaceExportRepositories(spaceRepo, workspaceRepo),
+			service.WithAdminSpaceExportDir(filepath.Join("data", "exports", "admin-space")),
+		)
+		adminSpaceExportHandler := handler.NewAdminSpaceExportHandler(adminSpaceExportService)
+		adminSpaceImportService := service.NewAdminSpaceImportService(adminAccessService)
+		adminSpaceImportHandler := handler.NewAdminSpaceImportHandler(adminSpaceImportService)
 		adminDocumentService := service.NewAdminDocumentService(
 			documentRepo,
 			userRepo,
@@ -783,6 +791,13 @@ func newRouter(
 				),
 				adminSpaceHandler.DeleteSpace,
 			)
+			// 空间导入导出：权限统一在 service 层按能力判定。
+			adminAPI.POST("/spaces/:spaceId/exports", adminSpaceExportHandler.StartExport)
+			adminAPI.GET("/spaces/:spaceId/exports/:jobId/events", adminSpaceExportHandler.StreamEvents)
+			adminAPI.GET("/space-exports/:jobId/download", adminSpaceExportHandler.Download)
+			adminAPI.POST("/space-imports/inspect", adminSpaceImportHandler.Inspect)
+			adminAPI.POST("/space-imports/:importId/commit", adminSpaceImportHandler.Commit)
+			adminAPI.GET("/space-imports/:jobId/events", adminSpaceImportHandler.StreamEvents)
 
 			// ---- 文档治理 ----
 			adminAPI.GET("/documents", adminDocumentHandler.ListDocuments)
