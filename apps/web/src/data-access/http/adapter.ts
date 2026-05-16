@@ -403,7 +403,7 @@ function subscribeAdminSpaceTransferEvents(
       return;
     }
     const payload = JSON.parse(message.data) as AdminSpaceTransferEvent;
-    onEvent(payload);
+    onEvent(normalizeAdminSpaceTransferEvent(payload, apiBaseUrl));
   };
 
   source.onmessage = handleMessage;
@@ -418,6 +418,17 @@ function subscribeAdminSpaceTransferEvents(
     close() {
       source.close();
     }
+  };
+}
+
+function normalizeAdminSpaceTransferEvent(event: AdminSpaceTransferEvent, apiBaseUrl: string): AdminSpaceTransferEvent {
+  const downloadUrl = event.downloadUrl?.trim();
+  if (!downloadUrl) {
+    return event;
+  }
+  return {
+    ...event,
+    downloadUrl: resolveBackendPublicUrl(downloadUrl, apiBaseUrl)
   };
 }
 

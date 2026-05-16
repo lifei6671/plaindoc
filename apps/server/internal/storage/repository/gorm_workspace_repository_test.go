@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
-	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm/clause"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 )
 
 func TestGormWorkspaceRepository_SaveOfficeDocumentPersistsRevision(t *testing.T) {
@@ -60,7 +61,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentPersistsRevision(t *testing.T
 			MimeType:               fixture.MimeType,
 			Version:                2,
 			BaseVersion:            1,
-			EditorUserID:           workspaceRepoStringPointer(fixture.UserID),
+			EditorUserID:           new(fixture.UserID),
 			Source:                 models.RevisionSourceRemote,
 			CreatedAt:              touchedAt,
 		},
@@ -149,7 +150,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentRollsBackOnRevisionConflict(t
 		MimeType:               fixture.MimeType,
 		Version:                2,
 		BaseVersion:            1,
-		EditorUserID:           workspaceRepoStringPointer(fixture.UserID),
+		EditorUserID:           new(fixture.UserID),
 		Source:                 models.RevisionSourceRemote,
 		CreatedAt:              now.Add(2 * time.Minute),
 	}).Error; err != nil {
@@ -176,7 +177,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentRollsBackOnRevisionConflict(t
 			MimeType:               fixture.MimeType,
 			Version:                2,
 			BaseVersion:            1,
-			EditorUserID:           workspaceRepoStringPointer(fixture.UserID),
+			EditorUserID:           new(fixture.UserID),
 			Source:                 models.RevisionSourceRemote,
 			CreatedAt:              now.Add(3 * time.Minute),
 		},
@@ -334,11 +335,11 @@ func seedWorkspaceRepositoryOfficeFixture(
 		Format:          models.DocumentFormatDOCX,
 		Version:         1,
 		ContentVersion:  1,
-		SourceBlobID:    workspaceRepoStringPointer(fixture.InitialBlobID),
-		SourceFileName:  workspaceRepoStringPointer("workspace-office.docx"),
-		SourceMimeType:  workspaceRepoStringPointer(fixture.MimeType),
-		CreatedByUserID: workspaceRepoStringPointer(fixture.UserID),
-		UpdatedByUserID: workspaceRepoStringPointer(fixture.UserID),
+		SourceBlobID:    new(fixture.InitialBlobID),
+		SourceFileName:  new("workspace-office.docx"),
+		SourceMimeType:  new(fixture.MimeType),
+		CreatedByUserID: new(fixture.UserID),
+		UpdatedByUserID: new(fixture.UserID),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}).Error; err != nil {
@@ -352,7 +353,7 @@ func seedWorkspaceRepositoryOfficeFixture(
 		MimeType:               fixture.MimeType,
 		Version:                1,
 		BaseVersion:            1,
-		EditorUserID:           workspaceRepoStringPointer(fixture.UserID),
+		EditorUserID:           new(fixture.UserID),
 		Source:                 models.RevisionSourceLocal,
 		CreatedAt:              now,
 	}).Error; err != nil {
@@ -364,8 +365,4 @@ func seedWorkspaceRepositoryOfficeFixture(
 
 func stringsToLowerULID() string {
 	return strings.ToLower(ulid.Make().String())
-}
-
-func workspaceRepoStringPointer(value string) *string {
-	return &value
 }

@@ -26,6 +26,7 @@ type adminSpaceImportInspectResponse struct {
 	ImportID       string                                  `json:"importId"`
 	PackageVersion int                                     `json:"packageVersion"`
 	PackageType    string                                  `json:"packageType"`
+	ExportedAt     string                                  `json:"exportedAt"`
 	Importable     bool                                    `json:"importable"`
 	Space          service.AdminSpaceImportPreviewSpace    `json:"space"`
 	Summary        service.AdminSpaceExportManifestSummary `json:"summary"`
@@ -75,6 +76,7 @@ func (h *adminSpaceImportHandler) Inspect(c *gin.Context) {
 		ActorUserID: actorUserID,
 		FileName:    fileHeader.Filename,
 		ContentType: fileHeader.Header.Get("Content-Type"),
+		SizeBytes:   fileHeader.Size,
 		Reader:      file,
 	})
 	if inspectErr != nil {
@@ -86,6 +88,7 @@ func (h *adminSpaceImportHandler) Inspect(c *gin.Context) {
 		ImportID:       result.ImportID,
 		PackageVersion: result.PackageVersion,
 		PackageType:    result.PackageType,
+		ExportedAt:     result.ExportedAt,
 		Importable:     result.Importable,
 		Space:          result.Space,
 		Summary:        result.Summary,

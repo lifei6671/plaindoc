@@ -34,6 +34,7 @@ type DatabaseConfig struct {
 	Driver      string
 	DSN         string
 	AutoMigrate bool
+	LogSQL      bool
 }
 
 // JWTConfig 为后续认证阶段提供密钥与过期时间基线。
@@ -134,6 +135,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Database.AutoMigrate = autoMigrate
+
+	logSQL, err := parseBool("GORM_LOG_SQL", "false")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Database.LogSQL = logSQL
 
 	requestTimeout, err := parseDuration("REQUEST_TIMEOUT", "10s")
 	if err != nil {

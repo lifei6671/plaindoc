@@ -304,9 +304,16 @@ func (s *AdminSpaceService) ListSpaces(
 		return ListAdminSpacesResult{}, errcode.ErrAdminForbidden
 	}
 
-	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
+	isPlatformAdmin, err := s.adminAccessService.IsPlatformAdmin(ctx, actorUserID)
 	if err != nil {
 		return ListAdminSpacesResult{}, err
+	}
+	isAdmin := isPlatformAdmin
+	if !isPlatformAdmin {
+		isAdmin, err = s.adminAccessService.IsSpaceAdmin(ctx, actorUserID)
+		if err != nil {
+			return ListAdminSpacesResult{}, err
+		}
 	}
 
 	statuses, err := resolveAdminSpaceStatuses(input.StatusFilter)
@@ -329,7 +336,7 @@ func (s *AdminSpaceService) ListSpaces(
 		Offset:            (page - 1) * pageSize,
 		RestrictToMembers: !isAdmin,
 	}
-	if isAdmin {
+	if isAdmin && !isPlatformAdmin {
 		params.RestrictToScopes = true
 	}
 
@@ -1173,14 +1180,6 @@ func (s *AdminSpaceService) CreateCoverAsset(
 	if actorUserID == "" {
 		return AdminSpaceCoverAsset{}, errcode.ErrAdminForbidden
 	}
-	isAdmin, err := s.adminAccessService.IsAdmin(ctx, actorUserID)
-	if err != nil {
-		return AdminSpaceCoverAsset{}, err
-	}
-	if !isAdmin {
-		return AdminSpaceCoverAsset{}, errcode.ErrAdminForbidden
-	}
-
 	source := normalizeAdminSpaceCoverSource(input.Source)
 	if source == "" {
 		return AdminSpaceCoverAsset{}, errcode.ErrAdminSpaceInvalidCoverSource
@@ -1238,6 +1237,12 @@ func (s *AdminSpaceService) CreateCoverAsset(
 	if err := saveAdminSpaceCoverObject(objectKey, encodedBytes); err != nil {
 		return AdminSpaceCoverAsset{}, err
 	}
+	coverObjectSaved := true
+	defer func() {
+		if err != nil && coverObjectSaved {
+			_ = removeAdminSpaceCoverObject(objectKey)
+		}
+	}()
 
 	asset := &models.SpaceCoverAsset{
 		AssetID:         strings.ToLower(ulid.Make().String()),
@@ -1257,6 +1262,7 @@ func (s *AdminSpaceService) CreateCoverAsset(
 	if err := s.spaceRepo.CreateCoverAsset(ctx, asset); err != nil {
 		return AdminSpaceCoverAsset{}, err
 	}
+	coverObjectSaved = false
 
 	payload := mapAdminSpaceCoverAsset(*asset)
 
@@ -1303,8 +1309,18 @@ func (s *AdminSpaceService) UpdateMetadata(
 		return AdminSpaceRecord{}, errcode.ErrAdminSpaceInvalidSpaceID
 	}
 
-	if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
-		return AdminSpaceRecord{}, err
+	coverOnlyMetadataUpdate := isCoverOnlyAdminSpaceMetadataUpdate(input)
+	coverOnlyCanManageSpace := false
+	if coverOnlyMetadataUpdate {
+		var err error
+		coverOnlyCanManageSpace, err = s.ensureCanManageOrOwnSpace(ctx, actorUserID, spaceID)
+		if err != nil {
+			return AdminSpaceRecord{}, err
+		}
+	} else {
+		if err := s.ensureCanManageSpace(ctx, actorUserID, spaceID); err != nil {
+			return AdminSpaceRecord{}, err
+		}
 	}
 
 	if input.Name == nil && input.Visibility == nil && input.Description == nil && input.CategoryID == nil && input.CoverAssetID == nil {
@@ -1380,6 +1396,11 @@ func (s *AdminSpaceService) UpdateMetadata(
 					return AdminSpaceRecord{}, errcode.ErrAdminSpaceCoverAssetNotFound
 				}
 				return AdminSpaceRecord{}, err
+			}
+			if coverOnlyMetadataUpdate &&
+				!coverOnlyCanManageSpace &&
+				strings.TrimSpace(coverAsset.CreatedByUserID) != actorUserID {
+				return AdminSpaceRecord{}, errcode.ErrAdminForbidden
 			}
 
 			assetID := strings.TrimSpace(coverAsset.AssetID)
@@ -1482,12 +1503,18 @@ func (s *AdminSpaceService) UpdateMetadata(
 		detail["coverURLAfter"] = afterCoverURL
 		detail["coverSourceAfter"] = afterCoverSource
 	}
+	auditTargetType := "space"
+	auditSummary := "space metadata updated: " + record.SpaceID
+	if coverOnlyMetadataUpdate {
+		auditTargetType = "space_cover_binding"
+		auditSummary = "space cover binding updated: " + record.SpaceID
+	}
 	if err := s.recordSpaceAudit(ctx, RecordAdminAuditInput{
 		Module:     AdminAuditModuleSpace,
 		Action:     AdminAuditActionUpdate,
-		TargetType: "space",
+		TargetType: auditTargetType,
 		TargetID:   record.SpaceID,
-		Summary:    "space metadata updated: " + record.SpaceID,
+		Summary:    auditSummary,
 		Detail:     detail,
 	}); err != nil {
 		return AdminSpaceRecord{}, err
@@ -1807,6 +1834,38 @@ func (s *AdminSpaceService) ensureCanManageSpace(ctx context.Context, actorUserI
 		return errcode.ErrAdminForbidden
 	}
 	return nil
+}
+
+func (s *AdminSpaceService) ensureCanManageOrOwnSpace(ctx context.Context, actorUserID string, spaceID string) (bool, error) {
+	if strings.TrimSpace(actorUserID) == "" || strings.TrimSpace(spaceID) == "" || s == nil || s.spaceRepo == nil {
+		return false, errcode.ErrAdminForbidden
+	}
+	canManage, err := s.adminAccessService.CanManageSpace(ctx, actorUserID, spaceID)
+	if err != nil {
+		return false, err
+	}
+	if canManage {
+		return true, nil
+	}
+	space, err := s.spaceRepo.GetBySpaceID(ctx, strings.TrimSpace(spaceID))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, errcode.ErrAdminForbidden
+		}
+		return false, err
+	}
+	if space == nil || strings.TrimSpace(space.OwnerUserID) != strings.TrimSpace(actorUserID) {
+		return false, errcode.ErrAdminForbidden
+	}
+	return false, nil
+}
+
+func isCoverOnlyAdminSpaceMetadataUpdate(input UpdateAdminSpaceMetadataInput) bool {
+	return input.CoverAssetID != nil &&
+		input.Name == nil &&
+		input.Visibility == nil &&
+		input.Description == nil &&
+		input.CategoryID == nil
 }
 
 func (s *AdminSpaceService) ensureSpaceAdminRole(ctx context.Context, userID string) error {

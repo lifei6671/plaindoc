@@ -30,6 +30,7 @@ const (
 type OpenConfig struct {
 	Driver string
 	DSN    string
+	LogSQL bool
 }
 
 // Database 包含 GORM 连接和底层 sql.DB，便于迁移与仓储层复用。
@@ -62,20 +63,24 @@ func OpenDatabase(cfg OpenConfig) (*Database, error) {
 		return nil, err
 	}
 
-	gormlogger.Default = gormlogger.NewSlogLogger(
-		// 中文注释：使用 logrus 日志中间件，统一日志格式。
+	gormLogLevel := gormlogger.Silent
+	if cfg.LogSQL {
+		gormLogLevel = gormlogger.Info
+	}
+	gormLogger := gormlogger.NewSlogLogger(
+		// 中文注释：使用 slog 统一 GORM SQL 日志格式。
 		slog.Default(),
 		gormlogger.Config{
 			SlowThreshold:             500 * time.Millisecond,
-			LogLevel:                  gormlogger.Info,
+			LogLevel:                  gormLogLevel,
 			IgnoreRecordNotFoundError: true,
 			Colorful:                  true,
 		},
 	)
 
 	ormDB, err := gorm.Open(dialector, &gorm.Config{
-		// 中文注释：SQL 输出统一交给现有日志中间件处理，关闭 GORM 默认日志输出。
-		Logger: gormlogger.Default.LogMode(gormlogger.Info),
+		// 中文注释：默认关闭 SQL 输出，只有 GORM_LOG_SQL=true 时才进入 Info 模式。
+		Logger: gormLogger.LogMode(gormLogLevel),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open gorm database failed: %w", err)

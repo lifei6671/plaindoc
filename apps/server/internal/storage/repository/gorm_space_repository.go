@@ -940,6 +940,23 @@ func (r *gormSpaceRepository) CreateCoverAsset(ctx context.Context, asset *model
 	return r.db.WithContext(ctx).Create(asset).Error
 }
 
+func (r *gormSpaceRepository) DeleteCoverAssetByAssetID(ctx context.Context, assetID string) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, fmt.Errorf("space repository db is nil")
+	}
+	normalizedAssetID := strings.TrimSpace(assetID)
+	if normalizedAssetID == "" {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).
+		Where("asset_id = ?", normalizedAssetID).
+		Delete(&models.SpaceCoverAsset{})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 func (r *gormSpaceRepository) UpdateStatus(ctx context.Context, params UpdateSpaceStatusParams) (bool, error) {
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("space repository db is nil")

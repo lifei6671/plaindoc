@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +57,56 @@ func TestOpenDatabase_SQLiteMemory(t *testing.T) {
 	}
 	if database.ORM == nil || database.SQL == nil {
 		t.Fatal("expected gorm/sql db both initialized")
+	}
+}
+
+func TestOpenDatabase_GormSQLLoggingDisabledByDefault(t *testing.T) {
+	var buffer bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(previousLogger)
+
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-gorm-sql-log-disabled?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	if err := database.ORM.Exec("SELECT 1").Error; err != nil {
+		t.Fatalf("exec query failed: %v", err)
+	}
+	if strings.Contains(buffer.String(), "SQL executed") {
+		t.Fatalf("expected gorm sql log disabled by default, got logs:\n%s", buffer.String())
+	}
+}
+
+func TestOpenDatabase_GormSQLLoggingEnabled(t *testing.T) {
+	var buffer bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(previousLogger)
+
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-gorm-sql-log-enabled?mode=memory&cache=shared",
+		LogSQL: true,
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	if err := database.ORM.Exec("SELECT 1").Error; err != nil {
+		t.Fatalf("exec query failed: %v", err)
+	}
+	if !strings.Contains(buffer.String(), "SQL executed") {
+		t.Fatalf("expected gorm sql log when enabled, got logs:\n%s", buffer.String())
 	}
 }

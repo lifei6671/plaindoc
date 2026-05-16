@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
-	"gorm.io/gorm"
 )
 
 func TestGormSearchIndexSourceRepository_FiltersNonMarkdownDocuments(t *testing.T) {

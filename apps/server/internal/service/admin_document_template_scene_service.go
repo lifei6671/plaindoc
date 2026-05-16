@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
-	"gorm.io/gorm"
 )
 
 const (
@@ -314,7 +315,7 @@ func (s *AdminDocumentTemplateSceneService) UpdateScene(
 	params := repository.UpdateDocumentTemplateSceneParams{
 		SceneKey:        sceneKey,
 		UpdatedAt:       time.Now().UTC(),
-		UpdatedByUserID: stringPtr(strings.TrimSpace(input.ActorUserID)),
+		UpdatedByUserID: new(strings.TrimSpace(input.ActorUserID)),
 	}
 	if input.SceneName != nil {
 		sceneName, normalizeErr := normalizeAdminDocumentTemplateSceneName(*input.SceneName)

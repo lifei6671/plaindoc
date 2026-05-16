@@ -3,7 +3,7 @@
 **文档状态**: Draft  
 **创建日期**: 2026-05-15  
 **适用范围**: `apps/server`、`apps/web`、`docs`  
-**目标**: 在管理后台空间管理中增加空间导出与导入能力。导出侧从空间操作菜单发起，后端异步生成可回灌的 zip 空间交换包，或生成用于离线阅读分发的 EPUB 文件，并通过 SSE 推送导出进度与下载链接；导入侧在空间管理上方提供“导入空间”按钮，选择 zip 后先解析元数据，再将导出包原样导入为一个新空间。
+**目标**: 在管理后台空间管理中增加空间导出与导入能力。导出侧从空间操作菜单发起，后端异步生成可回灌的 `.plaindoc` 空间交换包，或生成用于离线阅读分发的 EPUB 文件，并通过 SSE 推送导出进度与下载链接；导入侧在空间管理上方提供“导入空间”按钮，选择 `.plaindoc` 后先解析元数据，再将导出包原样导入为一个新空间。
 
 ---
 
@@ -18,10 +18,10 @@
   → 操作菜单点击“导出空间”
   → 打开导出浮层
   → 选择导出格式
-  → 点击 zip 图标开始导出
+  → 点击开始导出
   → POST 创建导出任务
   → 前端订阅 SSE 进度
-  → 后端异步生成 zip
+  → 后端异步生成 `.plaindoc` 或 EPUB
   → SSE 推送 completed + downloadUrl
   → 前端自动触发下载
 ```
@@ -33,7 +33,7 @@
 ```text
 管理后台空间列表上方
   → 点击“导入空间”
-  → 选择 zip 空间交换包
+  → 选择 `.plaindoc` 空间交换包
   → POST 上传并解析 manifest/tree 元数据
   → 前端展示导入预览
   → 用户确认导入到新空间
@@ -43,7 +43,7 @@
   → SSE 推送 completed + 新空间信息
 ```
 
-本方案要求系统导出的 zip 包必须能被同版本或兼容版本的 PlainDoc 原样导入。导入时不复用原空间 ID、节点 ID、文档 ID、附件 ID，而是在新空间中生成新 ID，并通过导入过程中的 `oldID -> newID` 映射恢复引用关系。
+本方案要求系统导出的 `.plaindoc` 包必须能被同版本或兼容版本的 PlainDoc 原样导入。导入时不复用原空间 ID、节点 ID、文档 ID、附件 ID，而是在新空间中生成新 ID，并通过导入过程中的 `oldID -> newID` 映射恢复引用关系。
 
 ---
 
@@ -58,12 +58,12 @@
 5. 导出进度通过 SSE 推送给前端。
 6. 导出完成后，后端通过 SSE 推送下载链接。
 7. 前端收到下载链接后自动拉起下载。
-8. 导出文件支持 zip 空间交换包和 EPUB 阅读包。
-9. 权限按能力判断，不按单一管理员角色判断：有目标空间管理权限的用户可导出该空间；具备创建空间能力的用户可导入 zip 创建新空间。
-10. EPUB 导出复用现有 `docx/xlsx -> 纯 HTML` 阅读渲染链路，不追求 Office 高保真还原。
-11. 在空间管理列表上方增加“导入空间”按钮，支持选择 zip 空间交换包。
+8. 导出文件支持 `.plaindoc` 空间交换包、Markdown ZIP 内容归档包和 EPUB 阅读包。
+9. 权限按能力判断，不按单一管理员角色判断：有目标空间管理权限的用户可导出该空间；具备创建空间能力的用户可导入 `.plaindoc` 创建新空间。
+10. EPUB 导出复用现有阅读渲染链路：Markdown 必须走阅读页 SSR Worker，`docx/xlsx` 走无副作用纯 HTML 渲染，不追求 Office 高保真还原。
+11. 在空间管理列表上方增加“导入空间”按钮，支持选择 `.plaindoc` 空间交换包。
 12. 导入前必须解析 `manifest.json` 和 `tree.json`，展示空间名称、文档数、附件数、Office 源文件数和导出版本。
-13. 用户确认后，系统将 zip 包导入为一个新空间，并原样恢复目录树、文档内容、附件和 Office 源文件。
+13. 用户确认后，系统将 `.plaindoc` 包导入为一个新空间，并原样恢复目录树、文档内容、附件、Office 源文件和空间封面。
 14. 导入过程同样通过 SSE 推送进度，完成后返回新空间 ID 和可跳转入口。
 
 ### 2.2 非目标
@@ -143,9 +143,18 @@
 EPUB 导出可复用现有 Office 本地 HTML 渲染能力：
 
 1. `apps/server/internal/service/office_html_render_service.go`
-2. `OfficeHTMLRenderService.RenderImportHTML`
+2. `OfficeHTMLRenderService.RenderExportHTML`
 3. `docx` 通过 Mammoth 转纯 HTML
 4. `xlsx` 通过 excelize 渲染为多 tab table
+
+`RenderExportHTML` 必须以任务级导出模式内联图片，不能复制 `OfficeHTMLRenderService` 实例来置空依赖；该 service 内含 `sync.Once` 和任务 channel，复制会触发 `copylocks` 风险。
+
+Markdown EPUB 章节必须复用阅读页 SSR Worker：
+
+1. 后端通过 `AdminSpaceExportSSRReaderHTMLRenderer` 构造 `space-reader` payload。
+2. Worker 返回完整阅读页 HTML 后，只提取 `#plaindoc-preview-body` article 作为 EPUB 章节主体。
+3. 不允许用 Go 侧 Markdown 解析器直接渲染正文，也不允许把原始 `.md` 内容作为 EPUB 章节。
+4. SSR Worker 未启用或渲染失败时，EPUB Markdown 章节导出应失败，而不是降级为原始 Markdown。
 
 EPUB 不新建 Office 高保真渲染链路，只把现有阅读/分享页使用的纯 HTML 结果清洗为 EPUB 兼容 XHTML。
 
@@ -166,11 +175,12 @@ EPUB 不新建 Office 高保真渲染链路，只把现有阅读/分享页使用
 第一期支持三个导出 profile：
 
 1. `markdown_zip`
-   - 导出目录树、Markdown 文档、附件。
-   - Office 文档不转换为 Markdown，必须同时导出源文件，否则无法原样导入。
+	 - 导出目录树、Markdown 文档、附件。
+	 - Office 文档不转换为 Markdown，也不导出为可恢复 source；该格式固定为内容归档包，`importable=false`。
 2. `source_zip`
    - 偏完整备份。
-   - 导出目录树、Markdown 文档、Office 源文件、附件和 manifest。
+   - 导出目录树、空间封面、Markdown 文档、Office 源文件、附件和 manifest。
+   - 下载文件后缀为 `.plaindoc`，底层仍是 zip 容器。
 3. `epub`
    - 阅读分发格式。
    - 导出空间标题页、目录、Markdown 文档章节和 Office 文档纯 HTML 章节。
@@ -183,8 +193,13 @@ EPUB 不新建 Office 高保真渲染链路，只把现有阅读/分享页使用
 3. 所有 Markdown 文档正文文件
 4. 所有普通附件文件
 5. 所有 `docx/xlsx` 文档的 source 文件
+6. 源空间已有封面文件和封面元数据
 
-如果用户显式关闭附件或 Office 源文件导出，该 zip 仍可被解析，但导入预览必须提示“非完整交换包”，并禁止执行“原样导入”。第一期推荐不暴露关闭选项，默认导出完整交换包。
+如果源空间没有封面，后端不在导出包中伪造封面；导入完成后，前端会复用“创建空间”的浏览器默认封面生成逻辑生成并上传默认封面。普通导入用户可以创建封面资产，并且只允许对自己导入的新空间执行纯封面绑定，不能借此修改名称、分类、可见性等其它元数据。普通空间 owner 只能绑定自己创建的封面资产；具备空间管理权限的管理员才可以绑定其它已有封面资产。
+
+导入已有封面时，服务端必须在写入封面对象前校验 payload：`sha256`、文件大小、真实 WebP 解码结果、尺寸上限和像素数都必须通过；资产宽高以解码结果为准，不信任 manifest 中的宽高字段。
+
+只有 `source_zip` 且同时包含附件与 Office 源文件时，manifest 才能标记 `importable=true`。服务端创建 `source_zip` 导出任务时会强制开启附件和 Office 源文件，避免前端绕过选项后生成不可回灌的 `.plaindoc`。
 
 EPUB 不参与上述原样导入约束。EPUB 是阅读产物，允许为了阅读器兼容性做语义级降级。
 
@@ -221,7 +236,7 @@ EPUB 导出遵循“可读优先、语义降级、不做高保真”的原则。
 导出内容：
 
 1. 空间标题页。
-2. 基于目录树生成的 EPUB 目录。
+2. 基于完整目录树生成的 EPUB 目录，包含文件夹、父文档和子文档的上下级关系。
 3. Markdown 文档章节。
 4. `docx` 文档章节：复用 Mammoth 生成的纯 HTML。
 5. `xlsx` 文档章节：复用 excelize 生成的多 sheet HTML table。
@@ -263,12 +278,14 @@ OEBPS/
 
 EPUB XHTML 生成规则：
 
-1. Markdown 先转 HTML，再清洗为 EPUB 兼容 XHTML。
-2. Office 文档调用现有 `OfficeHTMLRenderService.RenderImportHTML` 生成纯 HTML。
-3. 清洗阶段移除脚本、事件属性和阅读器不支持的危险属性。
-4. 将 `<img src>` 改写为 EPUB 内部相对路径。
-5. 宽表格允许横向滚动样式降级，但不追求 Excel 原样宽度。
-6. 每个文档节点独立生成一个章节，目录层级来自 `tree.json` 或导出时内存目录树。
+1. Markdown 必须通过阅读页 SSR Worker 渲染为 HTML，再提取 `#plaindoc-preview-body` 并清洗为 EPUB 兼容 XHTML；未注入 SSR renderer 或渲染失败时导出任务失败，禁止使用 Go Markdown fallback 静默生成不一致内容。
+2. EPUB 保留阅读页/分享页的正文语义与代码块内容，但必须剥离代码块复制按钮等浏览器交互控件，避免静态阅读器出现“复制/复制成功”按钮。
+3. Office 文档调用无副作用的 `OfficeHTMLRenderService.RenderExportHTML` 生成纯 HTML。
+4. 清洗阶段移除脚本、事件属性和阅读器不支持的危险属性。
+5. 将可信 `<img src>` 改写为 EPUB 内部相对路径。可信来源仅包括 `data:image/*` 和 `/uploads/*`；写入 EPUB 前先落到服务端私有临时目录，再交给 `go-epub.AddImage`。任意远程 URL、本机绝对路径或其他未知来源必须降级为 alt 文本。单张图片最大 20MiB，超限时按图片缺失降级，不中断 EPUB 导出。
+6. 宽表格允许横向滚动样式降级，但不追求 Excel 原样宽度。
+7. 每个文档节点独立生成一个章节，目录层级来自 `tree.json` 或导出时内存目录树；文档节点本身也可以作为父级继续挂载子文档。
+8. EPUB 输出不得包含 Markdown 源语法（如 `# 标题`、`![图片]`）作为章节正文。
 
 ### 4.4 EPUB 第三方库选择
 
@@ -305,7 +322,7 @@ github.com/go-shiori/go-epub
 导出文件名：
 
 ```text
-space-{spaceId}-{yyyyMMddHHmmss}.zip
+space-{spaceId}-{yyyyMMddHHmmss}.plaindoc
 ```
 
 zip 内部结构：
@@ -314,6 +331,8 @@ zip 内部结构：
 space-{spaceId}/
 ├── manifest.json
 ├── tree.json
+├── covers/
+│   └── space-cover.webp
 ├── documents/
 │   ├── README.md
 │   └── 产品文档/
@@ -337,11 +356,19 @@ space-{spaceId}/
   "exportedAt": "2026-05-15T12:00:00+08:00",
   "format": "markdown_zip",
   "importable": true,
-  "space": {
-    "spaceId": "space-demo",
-    "name": "示例空间",
-    "visibility": "member"
-  },
+	  "space": {
+	    "spaceId": "space-demo",
+	    "name": "示例空间",
+	    "visibility": "member",
+	    "cover": {
+	      "path": "covers/space-cover.webp",
+	      "mimeType": "image/webp",
+	      "width": 1600,
+	      "height": 2560,
+	      "source": "user_upload",
+	      "sha256": "..."
+	    }
+	  },
   "summary": {
     "folderCount": 5,
     "documentCount": 20,
@@ -525,9 +552,10 @@ GET /api/admin/space-exports/:jobId/download?token=***
 1. 下载 token 由 completed 事件下发。
 2. token 绑定 `actorUserId + jobId`，默认 10 分钟有效。
 3. 下载 token 单次使用，下载成功、任务过期或 token 过期后都不可再次使用。
-4. 响应使用 `Content-Disposition: attachment`。
-5. 响应设置 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`。
-6. zip 文件只从服务端私有目录读取，不放到公开 `/uploads` 目录。
+4. 如果前端在任务已 completed 后才建立 SSE 订阅，服务端不得重放旧明文 token，应为该次订阅签发新的短期一次性下载 token。
+5. 响应使用 `Content-Disposition: attachment`。
+6. 响应设置 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`。
+7. zip 文件只从服务端私有目录读取，不放到公开 `/uploads` 目录。
 
 ### 6.4 解析空间导入包
 
@@ -539,7 +567,7 @@ Authorization: Bearer <access-token>
 
 表单字段：
 
-1. `file`: zip 空间交换包。
+1. `file`: `.plaindoc` 空间交换包。
 
 响应：
 
@@ -552,6 +580,7 @@ Authorization: Bearer <access-token>
     "importId": "01hspaceimport0000000001",
     "packageVersion": 1,
     "packageType": "plaindoc-space",
+    "exportedAt": "2026-05-15T12:00:00Z",
     "importable": true,
     "space": {
       "spaceId": "space-demo",
@@ -574,8 +603,10 @@ Authorization: Bearer <access-token>
 1. inspect 只解析元数据，不写入业务空间数据。
 2. 后端将上传 zip 暂存到私有 staging 目录，并绑定 `importId + actorUserId`。
 3. 必须校验 `manifest.json`、`tree.json`、必要文件是否存在。
-4. 若缺少附件或 Office source，返回 `importable=false` 和 warnings。
-5. inspect 必须通过 `CanImportSpace(actorUserID)`，避免无创建空间能力的用户滥用 staging 存储或探测导入包结构。
+4. 若 `manifest.importable=false`，保留预览并返回 warnings，但后续 commit 禁止提交。
+5. 若 `importable=true` 但缺少文档、附件或 Office source 引用文件，inspect 直接返回 package not importable。
+6. inspect 必须通过 `CanImportSpace(actorUserID)`，避免无创建空间能力的用户滥用 staging 存储或探测导入包结构。
+7. inspect 会拒绝 EPUB、重复 zip entry、不安全路径、超大上传、超大元数据 entry、过多 entry 和超出总解压大小上限的包。
 
 ### 6.5 提交导入到新空间
 
@@ -673,7 +704,7 @@ Accept: text/event-stream
 4. `failed`
    - 任务失败，包含失败阶段和错误信息。
 
-导出任务的 `completed` 事件包含 `downloadUrl`；导入任务的 `completed` 事件包含新空间的 `spaceId/editorUrl/readerUrl`。
+导出任务的 `completed` 事件包含 `downloadUrl`；若订阅建立时任务已经完成，初始 `completed` 快照也必须包含重新签发的可用 `downloadUrl`。导入任务的 `completed` 事件包含新空间的 `spaceId/editorUrl/readerUrl`。
 
 ### 7.2 事件示例
 
@@ -917,7 +948,8 @@ data/imports/admin-space/{importId}.zip
 5. 校验 `packageType == "plaindoc-space"`。
 6. 校验 `version` 是否在兼容范围内。
 7. 校验 manifest 引用的文档、附件和 source 文件是否存在。
-8. 返回导入预览。
+8. staging 读取时只物化 manifest 引用的文档、附件、source 和封面 entry；未引用 entry 只参与 zip entry 数量、大小和路径安全校验，不读入内存。
+9. 返回导入预览。
 
 ### 10.2 提交导入任务
 
@@ -940,7 +972,8 @@ data/imports/admin-space/{importId}.zip
 5. 按 `tree.json` 拓扑顺序创建 folder 节点。
 6. 按文档节点创建 document：
    - `markdown`：读取 manifest 中的 `path`，创建 Markdown 文档。
-   - `docx/xlsx`：读取 `sources/{oldDocumentId}/...`，创建 Office 文档并保存 source blob。
+   - `docx/xlsx`：读取 `sources/{oldDocumentId}/...`，创建 Office 文档并保存 source blob；source MIME 必须按文档格式固定映射，不能用内容嗅探把 Office ZIP 容器误判为 `application/zip`。
+   - 新建 document 必须显式写入默认 `theme_id=default`，保持和协作端新建文档路径一致。
 7. 建立 `oldDocumentId -> newDocumentId` 映射。
 8. 导入附件：
    - 读取 `attachments/{oldDocumentId}/...`。
@@ -956,9 +989,10 @@ data/imports/admin-space/{importId}.zip
 1. inspect 阶段发现 zip 结构非法：不创建 staging 记录，直接返回错误。
 2. commit 阶段发现 staging 过期：返回过期错误。
 3. 导入执行中失败：任务进入 `failed`，并尽量回滚已创建的新空间。
-4. 如果无法完整回滚，必须将新空间标记为 deleted 或导入失败状态，并写入审计日志。
+4. 如果无法完整回滚，任务仍保留原始失败阶段和原始错误，同时附带回滚错误，并写入审计日志。
 5. 导入完成后删除 staging zip。
 6. 导入失败后保留 staging zip 到过期时间，便于用户重试或排查。
+7. 导入失败回滚必须清理本次导入新建的空间封面资产、本地封面对象、本地附件 blob 和 Office source blob；复用的既有 blob 只删除新建引用，不删除物理对象。
 
 ---
 
@@ -1043,8 +1077,8 @@ idle
 3. `running`
    - 展示进度条、阶段文案。
 4. `completed`
-   - 自动下载。
-   - 展示手动下载链接。
+   - 展示手动下载按钮。
+   - 下载链接使用一次性 token，前端不自动消耗。
 5. `failed`
    - 展示错误信息。
    - 允许重新导出。
@@ -1069,9 +1103,9 @@ idle
 
 1. `idle`
    - 展示文件选择区。
-   - 只接受 `.zip`。
+   - 只接受 `.plaindoc`。
 2. `inspecting`
-   - 上传 zip 并解析元数据。
+   - 上传 `.plaindoc` 并解析元数据。
 3. `preview`
    - 展示空间名称、导出时间、文档数、附件数、Office 源文件数、warnings。
    - 允许修改新空间名称、空间 ID、分类和可见性。
@@ -1079,21 +1113,28 @@ idle
    - 正在提交导入任务。
 5. `running`
    - 展示导入进度。
+   - 禁止关闭浮层，避免中断 SSE 和导入完成后的默认封面补齐。
+   - 如果 SSE 连接异常，前端关闭订阅并切到 `failed` 状态，恢复关闭/取消能力。
 6. `completed`
    - 展示新空间入口。
 7. `failed`
    - 展示失败原因。
    - 允许重新选择 zip。
 
-### 11.5 自动下载
+### 11.5 手动下载
 
 收到 `completed` 事件后：
 
-1. 创建隐藏 `<a>`。
-2. 设置 `href = downloadUrl`。
-3. 设置 `download = fileName`。
-4. 调用 `click()`。
-5. 保留手动下载按钮，避免浏览器拦截自动下载时用户无路可走。
+1. 展示“下载文件”按钮。
+2. 用户点击后，前端使用原 `streamUrl` 重新订阅 completed 快照，服务端为该次订阅重新签发短期一次性 `downloadUrl`。
+3. 前端创建隐藏 `<a>`。
+4. 设置 `href = downloadUrl`。
+5. 设置 `download = fileName`。
+6. 调用 `click()`。
+
+`downloadToken` 为单次使用 token。前端不要在 `completed` 事件里自动点击下载链接，否则会提前消耗 token，导致用户后续点击手动下载按钮时失败。
+浏览器系统下载框弹出时，请求可能已经到达下载接口并消耗 token；即使用户随后取消保存，也不能复用旧链接。手动下载按钮每次点击都必须重新获取 completed 快照中的新链接。
+如果 `VITE_API_BASE_URL` 是绝对地址，前端必须先把 SSE 事件里的相对 `downloadUrl` 补全到后端 origin，再设置到 `<a href>`。
 
 ### 11.6 SSE 封装
 
@@ -1153,12 +1194,15 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 
 1. zip 文件保存到私有目录，不进入公开上传目录。
 2. 所有 zip entry 路径必须经过清洗。
-3. 下载时只能通过 `jobId` 查找任务文件，禁止用户传任意路径。
+3. 下载时只能通过 `jobId` 查找任务文件，禁止用户传任意路径；消费 `downloadToken` 后仍需校验文件位于导出私有目录内，且扩展名只能是 `.zip`、`.plaindoc` 或 `.epub`。
 4. `.part` 临时文件在失败后删除。
-5. 过期任务和 zip 文件由清理逻辑删除。
+5. 过期终态任务和 zip 文件由清理逻辑删除；`queued` / `running` 任务不因 SSE stream token 过期被清理，避免长任务后续完成事件和下载 token 丢失。
 6. 导入 staging zip 保存到私有目录，不进入公开上传目录。
 7. inspect 阶段必须限制 zip 文件大小、entry 数量、单 entry 大小和总解压后大小。
 8. 导入时只读取 zip 内 entry，不允许按 manifest path 访问本机文件系统。
+9. 导入执行阶段只物化 manifest 引用的 entry，避免未引用大文件造成额外内存占用；但未引用 entry 仍受 zip 总大小、entry 数量和路径清洗约束。
+10. EPUB 导出本地化图片时，`data:image/*` 与 `/uploads/*` 单图都必须限制在 20MiB 内，避免超大图片占用过多内存或临时磁盘。
+11. 审计错误信息只保留业务错误；若错误文本包含 token、私有目录或绝对路径，必须泛化为服务端日志可查。
 
 ### 12.4 敏感信息
 
@@ -1288,17 +1332,17 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 3. 初始态显示 zip 图标和格式选择。
 4. 点击 zip 后调用 `startSpaceExport`。
 5. 收到 `running` 事件后展示进度。
-6. 收到 `completed` 事件后触发下载并展示手动下载入口。
+6. 收到 `completed` 事件后展示手动下载入口，点击后重新订阅 completed 快照并下载新签发的一次性链接。
 7. 收到 `failed` 事件后展示错误信息。
 8. 关闭浮层时正确关闭 SSE 连接。
 9. 空间管理上方显示“导入空间”按钮。
-10. 选择 zip 后调用 `inspectSpaceImport`。
+10. 选择 `.plaindoc` 后调用 `inspectSpaceImport`。
 11. inspect 成功后展示导入预览和 warnings。
 12. `importable=false` 时禁用确认导入。
 13. 确认导入后调用 `commitSpaceImport`。
 14. 收到导入 `completed` 事件后展示新空间入口。
 15. 选择 EPUB 导出格式时，浮层显示 EPUB 阅读包文案。
-16. EPUB completed 后触发 `.epub` 文件下载。
+16. EPUB completed 后展示 `.epub` 文件手动下载入口。
 
 ### 15.3 回归命令
 
@@ -1353,7 +1397,7 @@ cd apps/server && go test -race -timeout 120s ./...
 - [x] 实现 `tree.json`。
 - [x] 实现 zip entry 路径清洗。
 - [x] 实现 `.part -> .zip` 原子收尾。
-- [ ] 确保导出包默认包含原样导入所需的附件和 Office source。
+- [x] 确保导出包默认包含原样导入所需的附件和 Office source。
 
 ### Phase 4：附件与 Office 源文件
 
@@ -1364,48 +1408,50 @@ cd apps/server && go test -race -timeout 120s ./...
 
 ### Phase 5：EPUB 阅读包导出
 
-- [ ] 经确认后引入 `github.com/go-shiori/go-epub` 依赖。
-- [ ] 实现 EPUB 标题页、目录和基础样式生成。
-- [ ] 实现 Markdown 文档 XHTML 章节生成。
-- [ ] 复用 `OfficeHTMLRenderService.RenderImportHTML` 渲染 `docx/xlsx` 纯 HTML。
-- [ ] 实现 Office HTML 到 EPUB XHTML 的清洗与降级。
-- [ ] 实现图片资源本地化与路径改写。
-- [ ] 基于 `go-epub` 组装章节、CSS、图片与 EPUB 输出文件。
-- [ ] 前端导出浮层支持 EPUB 格式选择和 `.epub` 下载。
+- [x] 经确认后引入 `github.com/go-shiori/go-epub` 依赖。
+- [x] 实现 EPUB 标题页、目录和基础样式生成。
+- [x] 实现 Markdown 文档 XHTML 章节生成，SSR renderer 不可用时失败。
+- [x] 复用 `OfficeHTMLRenderService.RenderExportHTML` 渲染 `docx/xlsx` 纯 HTML，避免导出阶段写 blob。
+- [x] 实现 Office HTML 到 EPUB XHTML 的清洗与降级。
+- [x] 实现可信图片资源本地化与路径改写，未知来源降级为 alt 文本。
+- [x] 基于 `go-epub` 组装章节、CSS、图片与 EPUB 输出文件。
+- [x] 前端导出浮层支持 EPUB 格式选择和 `.epub` 下载。
 
 ### Phase 6：导入解析与预览
 
-- [ ] 实现 zip 上传 staging。
-- [ ] 实现 `manifest.json` 和 `tree.json` 解析。
-- [ ] 实现导入包完整性校验。
-- [ ] 实现导入预览响应。
-- [ ] 前端实现“导入空间”按钮和导入浮层。
-- [ ] 前端展示空间元数据、统计信息和 warnings。
+- [x] 实现 zip 上传 staging。
+- [x] 实现 `manifest.json` 和 `tree.json` 解析。
+- [x] 实现导入包完整性校验。
+- [x] 实现导入预览响应。
+- [x] 前端实现“导入空间”按钮和导入浮层。
+- [x] 前端展示空间元数据、统计信息和 warnings。
 
 ### Phase 7：导入落地
 
-- [ ] 实现新空间创建。
-- [ ] 实现 oldID -> newID 映射。
-- [ ] 实现目录树恢复。
-- [ ] 实现 Markdown 文档恢复。
-- [ ] 实现 Office source blob 恢复。
-- [ ] 实现附件恢复。
-- [ ] 导入完成后返回新空间入口。
+- [x] 实现新空间创建。
+- [x] 实现 oldID -> newID 映射。
+- [x] 实现目录树恢复。
+- [x] 实现 Markdown 文档恢复。
+- [x] 实现 Office source blob 恢复。
+- [x] 实现附件恢复。
+- [x] 导入完成后返回新空间入口。
+- [x] 补齐 Office HTML 渲染排队与导入 warning 记录。
+- [x] 补齐附件旧 ID 映射元数据与失败后未引用 blob 清理。
 
 ### Phase 8：下载、审计与清理
 
-- [ ] 实现短期下载 token。
-- [ ] 注册下载接口。
-- [ ] 前端 completed 后自动下载。
-- [ ] 写入导入导出后台审计日志。
-- [ ] 增加过期任务、导出 zip 和导入 staging zip 清理。
+- [x] 实现短期下载 token。
+- [x] 注册下载接口。
+- [x] 前端 completed 后展示手动下载入口。
+- [x] 写入导入导出后台审计日志。
+- [x] 增加过期任务、导出 zip 和导入 staging zip 清理。
 
 ### Phase 9：测试与文档同步
 
-- [ ] 补充后端导入导出服务测试。
-- [ ] 补充 handler 权限测试。
-- [ ] 补充前端导入导出浮层测试。
-- [ ] 执行后端测试和前端构建。
+- [x] 补充后端导入导出服务测试。
+- [x] 补充 handler 权限测试。
+- [x] 补充前端导入导出浮层测试。
+- [x] 执行后端测试和前端构建。
 - [ ] 同步更新 `BACKEND_DEVELOPER_GUIDE.md` 和 `FRONTEND_DEVELOPER_GUIDE.md` 中的空间导入导出说明。
 
 ---
@@ -1417,7 +1463,7 @@ cd apps/server && go test -race -timeout 120s ./...
 1. 大空间导出耗时较长，占用磁盘和内存。
 2. 附件或 Office 源文件可能位于远端对象存储，读取失败需要清晰暴露。
 3. 进程内任务表不支持服务重启恢复。
-4. 浏览器可能拦截自动下载，需要保留手动下载入口。
+4. 下载链接使用一次性 token，需要避免前端自动触发下载提前消耗 token。
 5. 大 zip 导入可能产生大量数据库写入和对象存储写入，需要限制文件大小与并发。
 6. 导入失败回滚需要小心处理，避免留下半成品空间。
 7. 不同版本 manifest 兼容性需要严格校验。

@@ -107,19 +107,34 @@ type xlsxRelationshipsXML struct {
 }
 
 type xlsxRelationshipXML struct {
-	ID     string `xml:"Id,attr"`
-	Type   string `xml:"Type,attr"`
-	Target string `xml:"Target,attr"`
+	ID         string `xml:"Id,attr"`
+	Type       string `xml:"Type,attr"`
+	Target     string `xml:"Target,attr"`
+	TargetMode string `xml:"TargetMode,attr"`
+}
+
+type docxEmbeddedImageCandidate struct {
+	RelationshipID string
+	TargetPath     string
+	FileName       string
+	ContentType    string
+	Content        []byte
+}
+
+type docxInlineImageRenderData struct {
+	URL     string
+	AltText string
 }
 
 // OfficeHTMLRenderTask 表示一次 Office 正文渲染任务。
 type OfficeHTMLRenderTask struct {
-	DocumentID     string
-	SpaceID        string
-	Format         models.DocumentFormat
-	ContentVersion int
-	SourceBlobID   string
-	SourceContent  []byte
+	DocumentID        string
+	SpaceID           string
+	Format            models.DocumentFormat
+	ContentVersion    int
+	SourceBlobID      string
+	SourceContent     []byte
+	InlineImageAssets bool
 }
 
 // OfficeHTMLRenderService 负责异步将 Office 源文件转换为当前阅读 HTML。
@@ -340,10 +355,32 @@ func (s *OfficeHTMLRenderService) RenderImportHTML(
 		return "", errors.New("office html render service is nil")
 	}
 	return s.renderOfficeHTML(ctx, OfficeHTMLRenderTask{
-		DocumentID:    strings.TrimSpace(documentID),
-		SpaceID:       strings.TrimSpace(spaceID),
-		Format:        format,
-		SourceContent: bytes.Clone(sourceContent),
+		DocumentID:        strings.TrimSpace(documentID),
+		SpaceID:           strings.TrimSpace(spaceID),
+		Format:            format,
+		SourceContent:     bytes.Clone(sourceContent),
+		InlineImageAssets: true,
+	})
+}
+
+// RenderExportHTML 同步渲染导出场景的 Office HTML。
+// 该入口不写入 blob 或图片资产；内嵌图片以 data URL 形式返回，供 EPUB 打包器本地化。
+func (s *OfficeHTMLRenderService) RenderExportHTML(
+	ctx context.Context,
+	format models.DocumentFormat,
+	sourceContent []byte,
+	spaceID string,
+	documentID string,
+) (string, error) {
+	if s == nil {
+		return "", errors.New("office html render service is nil")
+	}
+	return s.renderOfficeHTML(ctx, OfficeHTMLRenderTask{
+		DocumentID:        strings.TrimSpace(documentID),
+		SpaceID:           strings.TrimSpace(spaceID),
+		Format:            format,
+		SourceContent:     bytes.Clone(sourceContent),
+		InlineImageAssets: true,
 	})
 }
 
@@ -365,6 +402,10 @@ func (s *OfficeHTMLRenderService) renderDOCXHTML(
 		if err != nil {
 			return "", err
 		}
+	}
+	renderedHTML, err = s.appendDOCXEmbeddedImageFallback(ctx, task, renderedHTML)
+	if err != nil {
+		return "", err
 	}
 	return `<div class="office-docx-reader">` + renderedHTML + `</div>`, nil
 }
@@ -433,6 +474,12 @@ func (s *OfficeHTMLRenderService) materializeMammothImageAssets(
 		if err != nil {
 			return "", fmt.Errorf("decode mammoth image asset %s failed: %w", assetID, err)
 		}
+		if task.InlineImageAssets || s == nil || s.documentAttachmentRepo == nil {
+			imageURL := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(content)
+			placeholder := mammothImagePlaceholderPrefix + assetID
+			output = strings.ReplaceAll(output, placeholder, html.EscapeString(imageURL))
+			continue
+		}
 		fileName := fmt.Sprintf("%s-%s.%s", task.DocumentID, assetID, resolveOfficeRenderFileExtension("", contentType))
 		blob, err := s.ensureImageBlobForContent(
 			ctx,
@@ -450,6 +497,244 @@ func (s *OfficeHTMLRenderService) materializeMammothImageAssets(
 		output = strings.ReplaceAll(output, placeholder, html.EscapeString(strings.TrimSpace(blob.ObjectURL)))
 	}
 	return output, nil
+}
+
+func (s *OfficeHTMLRenderService) appendDOCXEmbeddedImageFallback(
+	ctx context.Context,
+	task OfficeHTMLRenderTask,
+	renderedHTML string,
+) (string, error) {
+	if strings.TrimSpace(renderedHTML) == "" || htmlImageSrcPattern.MatchString(renderedHTML) {
+		return renderedHTML, nil
+	}
+
+	candidates, err := extractDOCXEmbeddedImageCandidates(task.SourceContent)
+	if err != nil || len(candidates) == 0 {
+		return renderedHTML, nil
+	}
+
+	images := make([]docxInlineImageRenderData, 0, len(candidates))
+	now := time.Now().UTC()
+	for index, candidate := range candidates {
+		imageURL, altText, err := s.materializeDOCXEmbeddedImageURL(ctx, task, candidate, index, now)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(imageURL) == "" {
+			continue
+		}
+		images = append(images, docxInlineImageRenderData{
+			URL:     imageURL,
+			AltText: altText,
+		})
+	}
+	if len(images) == 0 {
+		return renderedHTML, nil
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(renderedHTML) + len(images)*160)
+	builder.WriteString(renderedHTML)
+	builder.WriteString(`<div class="office-docx-reader__images">`)
+	for _, image := range images {
+		builder.WriteString(`<figure class="office-docx-reader__image"><img src="`)
+		builder.WriteString(html.EscapeString(strings.TrimSpace(image.URL)))
+		builder.WriteString(`" alt="`)
+		builder.WriteString(html.EscapeString(defaultIfBlank(strings.TrimSpace(image.AltText), "文档图片")))
+		builder.WriteString(`"></figure>`)
+	}
+	builder.WriteString(`</div>`)
+	return builder.String(), nil
+}
+
+func (s *OfficeHTMLRenderService) materializeDOCXEmbeddedImageURL(
+	ctx context.Context,
+	task OfficeHTMLRenderTask,
+	candidate docxEmbeddedImageCandidate,
+	index int,
+	now time.Time,
+) (string, string, error) {
+	altText := strings.TrimSpace(candidate.FileName)
+	if altText == "" {
+		altText = fmt.Sprintf("文档图片 %d", index+1)
+	}
+	if len(candidate.Content) == 0 {
+		return "", altText, nil
+	}
+
+	contentType := strings.TrimSpace(candidate.ContentType)
+	if contentType == "" {
+		contentType = strings.TrimSpace(http.DetectContentType(candidate.Content))
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	fileName := sanitizeOfficeRenderPathSegment(strings.TrimSpace(task.DocumentID), "office-render")
+	fileName += "-" + sanitizeOfficeRenderPathSegment(defaultIfBlank(candidate.FileName, candidate.RelationshipID), "image")
+	if path.Ext(fileName) == "" {
+		fileName += "." + resolveOfficeRenderFileExtension("", contentType)
+	}
+
+	if !task.InlineImageAssets && s != nil && s.documentAttachmentRepo != nil {
+		blob, err := s.ensureImageBlobForContent(
+			ctx,
+			candidate.Content,
+			contentType,
+			fileName,
+			strings.TrimSpace(task.SpaceID),
+			strings.TrimSpace(task.DocumentID),
+			now,
+		)
+		if err != nil {
+			return "", "", err
+		}
+		if blob != nil && strings.TrimSpace(blob.ObjectURL) != "" {
+			return strings.TrimSpace(blob.ObjectURL), altText, nil
+		}
+	}
+
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(candidate.Content), altText, nil
+}
+
+func extractDOCXEmbeddedImageCandidates(sourceContent []byte) ([]docxEmbeddedImageCandidate, error) {
+	if len(sourceContent) == 0 {
+		return nil, nil
+	}
+
+	archive, err := zip.NewReader(bytes.NewReader(sourceContent), int64(len(sourceContent)))
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string]*zip.File, len(archive.File))
+	for _, file := range archive.File {
+		files[strings.TrimSpace(file.Name)] = file
+	}
+
+	documentFile := files["word/document.xml"]
+	relsFile := files["word/_rels/document.xml.rels"]
+	if documentFile == nil || relsFile == nil {
+		return nil, nil
+	}
+
+	documentXML, err := readZipFileContent(documentFile)
+	if err != nil {
+		return nil, err
+	}
+	relationshipIDs, err := extractDOCXEmbeddedImageRelationshipIDs(documentXML)
+	if err != nil {
+		return nil, err
+	}
+	if len(relationshipIDs) == 0 {
+		return nil, nil
+	}
+
+	relsXML, err := readZipFileContent(relsFile)
+	if err != nil {
+		return nil, err
+	}
+	var rels xlsxRelationshipsXML
+	if err := xml.Unmarshal(relsXML, &rels); err != nil {
+		return nil, err
+	}
+	relsByID := make(map[string]xlsxRelationshipXML, len(rels.Relationships))
+	for _, rel := range rels.Relationships {
+		relsByID[strings.TrimSpace(rel.ID)] = rel
+	}
+
+	candidates := make([]docxEmbeddedImageCandidate, 0, len(relationshipIDs))
+	for _, relationshipID := range relationshipIDs {
+		rel, ok := relsByID[relationshipID]
+		if !ok || !isDOCXImageRelationship(rel) {
+			continue
+		}
+		targetPath := resolveDOCXRelationshipTargetPath("word/document.xml", rel.Target)
+		if targetPath == "" {
+			continue
+		}
+		imageFile := files[targetPath]
+		if imageFile == nil {
+			continue
+		}
+		content, err := readZipFileContent(imageFile)
+		if err != nil {
+			return nil, err
+		}
+		if len(content) == 0 {
+			continue
+		}
+		contentType := strings.TrimSpace(mime.TypeByExtension(path.Ext(targetPath)))
+		if contentType == "" {
+			contentType = strings.TrimSpace(http.DetectContentType(content))
+		}
+		candidates = append(candidates, docxEmbeddedImageCandidate{
+			RelationshipID: relationshipID,
+			TargetPath:     targetPath,
+			FileName:       path.Base(targetPath),
+			ContentType:    contentType,
+			Content:        content,
+		})
+	}
+	return candidates, nil
+}
+
+func extractDOCXEmbeddedImageRelationshipIDs(documentXML []byte) ([]string, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(documentXML))
+	relationshipIDs := make([]string, 0)
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		startElement, ok := token.(xml.StartElement)
+		if !ok || startElement.Name.Local != "blip" {
+			continue
+		}
+		for _, attr := range startElement.Attr {
+			if attr.Name.Local != "embed" {
+				continue
+			}
+			relationshipID := strings.TrimSpace(attr.Value)
+			if relationshipID == "" {
+				continue
+			}
+			relationshipIDs = append(relationshipIDs, relationshipID)
+			break
+		}
+	}
+	return relationshipIDs, nil
+}
+
+func isDOCXImageRelationship(rel xlsxRelationshipXML) bool {
+	if strings.EqualFold(strings.TrimSpace(rel.TargetMode), "External") {
+		return false
+	}
+	relationshipType := strings.TrimSpace(rel.Type)
+	return strings.HasSuffix(relationshipType, "/image")
+}
+
+func resolveDOCXRelationshipTargetPath(sourcePartPath string, targetPath string) string {
+	normalizedTarget := strings.TrimSpace(targetPath)
+	if normalizedTarget == "" {
+		return ""
+	}
+	if strings.Contains(normalizedTarget, ":") {
+		return ""
+	}
+	if strings.HasPrefix(normalizedTarget, "/") {
+		normalizedTarget = strings.TrimPrefix(normalizedTarget, "/")
+	} else {
+		normalizedTarget = path.Join(path.Dir(sourcePartPath), normalizedTarget)
+	}
+
+	cleanTarget := path.Clean(normalizedTarget)
+	if cleanTarget == "." || cleanTarget == "/" || strings.HasPrefix(cleanTarget, "../") {
+		return ""
+	}
+	return cleanTarget
 }
 
 func resolveMammothRenderScriptPath() (string, error) {
@@ -936,7 +1221,7 @@ func (s *OfficeHTMLRenderService) materializeXLSXPictureURL(
 	}
 	fileName += defaultIfBlank(strings.TrimSpace(picture.Extension), ".bin")
 
-	if s != nil && s.documentAttachmentRepo != nil {
+	if !task.InlineImageAssets && s != nil && s.documentAttachmentRepo != nil {
 		blob, err := s.ensureImageBlobForContent(
 			ctx,
 			picture.File,

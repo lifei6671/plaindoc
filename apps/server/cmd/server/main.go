@@ -98,6 +98,7 @@ func main() {
 	database, err := storage.OpenDatabase(storage.OpenConfig{
 		Driver: cfg.Database.Driver,
 		DSN:    cfg.Database.DSN,
+		LogSQL: cfg.Database.LogSQL,
 	})
 	if err != nil {
 		logger.Error("open database failed", logit.Error("error", err))
@@ -125,11 +126,11 @@ func main() {
 
 	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
 	dataRetentionCleanupService := service.NewDataRetentionCleanupService(database.ORM, systemConfigRepo)
-	dataRetentionCleanupCtx, cancelDataRetentionCleanup := context.WithCancel(context.Background())
-	defer cancelDataRetentionCleanup()
-	go runDataRetentionCleanupLoop(dataRetentionCleanupCtx, logger, dataRetentionCleanupService)
+	serviceLifecycleCtx, cancelServiceLifecycle := context.WithCancel(context.Background())
+	defer cancelServiceLifecycle()
+	go runDataRetentionCleanupLoop(serviceLifecycleCtx, logger, dataRetentionCleanupService)
 
-	router := server.NewRouterWithSSR(cfg, logger, database.ORM, ssrDispatcher)
+	router := server.NewRouterWithSSRAndLifecycle(serviceLifecycleCtx, cfg, logger, database.ORM, ssrDispatcher)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           router,

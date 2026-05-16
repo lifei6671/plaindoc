@@ -10,6 +10,7 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "")
 	t.Setenv("DB_DRIVER", "")
 	t.Setenv("DB_DSN", "")
+	t.Setenv("GORM_LOG_SQL", "")
 	t.Setenv("JWT_SECRET", "")
 
 	cfg, err := Load()
@@ -22,6 +23,30 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.WebOrigin != "http://localhost:3001" {
 		t.Fatalf("expected default origin http://localhost:3001, got %s", cfg.WebOrigin)
+	}
+	if cfg.Database.LogSQL {
+		t.Fatal("expected gorm sql logging to be disabled by default")
+	}
+}
+
+func TestLoad_EnablesGormSQLLoggingExplicitly(t *testing.T) {
+	t.Setenv("GORM_LOG_SQL", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.Database.LogSQL {
+		t.Fatal("expected gorm sql logging to be enabled")
+	}
+}
+
+func TestLoad_InvalidGormSQLLoggingBool(t *testing.T) {
+	t.Setenv("GORM_LOG_SQL", "maybe")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid GORM_LOG_SQL value")
 	}
 }
 

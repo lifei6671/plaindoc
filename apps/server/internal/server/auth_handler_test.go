@@ -26,7 +26,7 @@ func setupAuthTestRouter(t *testing.T) (*storage.Database, func(*http.Request) *
 
 	database, err := storage.OpenDatabase(storage.OpenConfig{
 		Driver: storage.DriverSQLite,
-		DSN:    "file:test-auth-handler?mode=memory&cache=shared",
+		DSN:    "file:test-auth-handler-" + strings.ToLower(ulid.Make().String()) + "?mode=memory&cache=shared",
 	})
 	if err != nil {
 		t.Fatalf("open database failed: %v", err)

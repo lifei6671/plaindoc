@@ -571,6 +571,8 @@ export interface AdminSpaceTransferEvent {
   downloadUrl?: string;
   fileName?: string;
   sizeBytes?: number;
+  spaceId?: string;
+  spaceName?: string;
 }
 
 export interface AdminSpaceTransferSubscription {
@@ -587,18 +589,20 @@ export interface AdminSpaceImportInspectResult {
   importId: string;
   packageVersion: number;
   packageType: string;
+  exportedAt: string;
   importable: boolean;
-  space: {
-    spaceId: string;
-    name: string;
-    categoryId?: string;
-    visibility: Visibility;
-  };
+	space: {
+		spaceId: string;
+		name: string;
+		categoryId?: string;
+		visibility: Visibility;
+		hasCover?: boolean;
+	};
   summary: {
     folderCount: number;
     documentCount: number;
     attachmentCount: number;
-    sourceCount: number;
+    officeSourceCount: number;
   };
   warnings: string[];
 }

@@ -655,6 +655,29 @@ func saveAdminSpaceCoverObject(objectKey string, content []byte) error {
 	return os.WriteFile(targetPath, content, 0o644)
 }
 
+func removeAdminSpaceCoverObject(objectKey string) error {
+	normalizedObjectKey := strings.TrimLeft(filepath.ToSlash(filepath.Clean(strings.TrimSpace(objectKey))), "/")
+	if normalizedObjectKey == "" || !strings.HasPrefix(normalizedObjectKey, adminSpaceCoverObjectPrefix+"/") {
+		return nil
+	}
+	targetPath := filepath.Join(adminSpaceCoverStorageRootDir, filepath.FromSlash(normalizedObjectKey))
+	targetAbsPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return err
+	}
+	rootAbsPath, err := filepath.Abs(adminSpaceCoverStorageRootDir)
+	if err != nil {
+		return err
+	}
+	if targetAbsPath != rootAbsPath && !strings.HasPrefix(targetAbsPath, rootAbsPath+string(os.PathSeparator)) {
+		return nil
+	}
+	if err := os.Remove(targetAbsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func resolveAdminSpaceCoverPublicURL(objectKey string) string {
 	return strings.TrimRight(adminSpaceCoverPublicPrefix, "/") + "/" + strings.TrimLeft(objectKey, "/")
 }

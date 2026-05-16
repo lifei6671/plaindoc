@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/config"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -485,8 +486,7 @@ func (h *authHandler) RefreshCaptcha(c *gin.Context) {
 	})
 	if err != nil {
 		setRequestErrmsg(c, err, "刷新验证码失败")
-		var riskErr *service.AuthRiskError
-		if errors.As(err, &riskErr) {
+		if riskErr, ok := errors.AsType[*service.AuthRiskError](err); ok {
 			h.writeAuthRiskError(c, riskErr)
 			return
 		}
@@ -693,8 +693,7 @@ func (h *authHandler) checkAuthRisk(c *gin.Context, input service.AuthRiskCheckI
 
 	if err := h.authRiskControlService.Check(c.Request.Context(), input); err != nil {
 		setRequestErrmsg(c, err, "检查风控信息失败")
-		var riskErr *service.AuthRiskError
-		if errors.As(err, &riskErr) {
+		if riskErr, ok := errors.AsType[*service.AuthRiskError](err); ok {
 			h.writeAuthRiskError(c, riskErr)
 			return err
 		}

@@ -1,7 +1,5 @@
 package service
 
-import "encoding/json"
-
 const (
 	AdminSpaceExportPackageType    = "plaindoc-space"
 	AdminSpaceExportPackageVersion = 1
@@ -21,11 +19,26 @@ type AdminSpaceExportManifest struct {
 
 // AdminSpaceExportManifestSpace 记录源空间基础信息，导入时只作为新空间默认值。
 type AdminSpaceExportManifestSpace struct {
-	SpaceID     string `json:"spaceId"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	CategoryID  string `json:"categoryId,omitempty"`
-	Visibility  string `json:"visibility"`
+	SpaceID     string                      `json:"spaceId"`
+	Name        string                      `json:"name"`
+	Description string                      `json:"description,omitempty"`
+	CategoryID  string                      `json:"categoryId,omitempty"`
+	Visibility  string                      `json:"visibility"`
+	Cover       *AdminSpaceExportCoverEntry `json:"cover,omitempty"`
+}
+
+// AdminSpaceExportCoverEntry 记录空间封面在交换包中的文件引用和元数据。
+type AdminSpaceExportCoverEntry struct {
+	AssetID    string `json:"assetId,omitempty"`
+	Path       string `json:"path"`
+	FileName   string `json:"fileName,omitempty"`
+	MimeType   string `json:"mimeType,omitempty"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Normalized bool   `json:"normalized,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
 }
 
 // AdminSpaceExportSummary 记录导出包内容统计。
@@ -41,17 +54,28 @@ type AdminSpaceExportManifestSummary = AdminSpaceExportSummary
 
 // AdminSpaceExportDocumentEntry 记录单个文档在 zip 中的文件引用。
 type AdminSpaceExportDocumentEntry struct {
-	DocumentID    string                       `json:"documentId"`
-	NodeID        string                       `json:"nodeId"`
-	ParentNodeID  string                       `json:"parentNodeId,omitempty"`
-	Title         string                       `json:"title"`
-	Format        string                       `json:"format"`
-	Sort          int                          `json:"sort"`
-	Visibility    string                       `json:"visibility"`
-	Path          string                       `json:"path"`
-	ContentSHA256 string                       `json:"contentSha256,omitempty"`
-	Attachments   []string                     `json:"attachments"`
-	Source        *AdminSpaceExportSourceEntry `json:"source"`
+	DocumentID        string                            `json:"documentId"`
+	NodeID            string                            `json:"nodeId"`
+	ParentNodeID      string                            `json:"parentNodeId,omitempty"`
+	Title             string                            `json:"title"`
+	Format            string                            `json:"format"`
+	Sort              int                               `json:"sort"`
+	Visibility        string                            `json:"visibility"`
+	Path              string                            `json:"path"`
+	ContentSHA256     string                            `json:"contentSha256,omitempty"`
+	Attachments       []string                          `json:"attachments"`
+	AttachmentEntries []AdminSpaceExportAttachmentEntry `json:"attachmentEntries,omitempty"`
+	Source            *AdminSpaceExportSourceEntry      `json:"source"`
+}
+
+// AdminSpaceExportAttachmentEntry 记录附件在 zip 中的文件引用和原始元数据。
+type AdminSpaceExportAttachmentEntry struct {
+	AttachmentID string `json:"attachmentId,omitempty"`
+	Path         string `json:"path"`
+	FileName     string `json:"fileName,omitempty"`
+	MimeType     string `json:"mimeType,omitempty"`
+	SizeBytes    int64  `json:"sizeBytes,omitempty"`
+	SHA256       string `json:"sha256,omitempty"`
 }
 
 // AdminSpaceExportSourceEntry 是 Office 源文件占位或引用。
@@ -77,12 +101,4 @@ type AdminSpaceExportTreeNode struct {
 	Sort         int                        `json:"sort"`
 	Format       string                     `json:"format,omitempty"`
 	Children     []AdminSpaceExportTreeNode `json:"children,omitempty"`
-}
-
-func marshalAdminSpaceExportManifest(manifest AdminSpaceExportManifest) ([]byte, error) {
-	return json.MarshalIndent(manifest, "", "  ")
-}
-
-func marshalAdminSpaceExportTree(tree AdminSpaceExportTree) ([]byte, error) {
-	return json.MarshalIndent(tree, "", "  ")
 }

@@ -10,6 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +34,7 @@ const (
 	adminSpaceTransferEventBufferSize = 8
 	maxRunningAdminSpaceExportJobs    = 2
 	defaultAdminSpaceExportDir        = "data/exports/admin-space"
+	maxAdminSpaceExportBlobReadBytes  = 512 << 20
 )
 
 // AdminSpaceExportFormat 定义后台空间导出格式。
@@ -85,6 +89,8 @@ type AdminSpaceTransferEvent struct {
 	DownloadURL string                      `json:"downloadUrl,omitempty"`
 	FileName    string                      `json:"fileName,omitempty"`
 	SizeBytes   int64                       `json:"sizeBytes,omitempty"`
+	SpaceID     string                      `json:"spaceId,omitempty"`
+	SpaceName   string                      `json:"spaceName,omitempty"`
 }
 
 // AdminSpaceExportJob 记录进程内导出任务状态。
@@ -107,6 +113,12 @@ type AdminSpaceExportJob struct {
 	LastEvent              AdminSpaceTransferEvent
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+	downloadTokens         map[string]adminSpaceExportDownloadToken
+}
+
+type adminSpaceExportDownloadToken struct {
+	ExpiresAt time.Time
+	Used      bool
 }
 
 // AdminSpaceExportDownload 是通过短期 token 解析出的服务端私有下载文件。
@@ -120,9 +132,58 @@ type adminSpaceExportSpaceReader interface {
 	GetBySpaceID(ctx context.Context, spaceID string) (*models.Space, error)
 }
 
+type adminSpaceExportCoverReader interface {
+	GetCoverAssetByAssetID(ctx context.Context, assetID string) (*models.SpaceCoverAsset, error)
+}
+
 type adminSpaceExportWorkspaceReader interface {
 	ListTreeNodesBySpaceID(ctx context.Context, spaceID string) ([]repository.WorkspaceTreeNodeRecord, error)
 	GetDocumentByDocumentID(ctx context.Context, documentID string) (*repository.WorkspaceDocumentRecord, error)
+}
+
+type adminSpaceExportAttachmentReader interface {
+	ListByDocumentID(ctx context.Context, documentID string, includeDeleted bool) ([]models.DocumentAttachment, error)
+	GetBlobByBlobID(ctx context.Context, blobID string) (*models.DocumentAttachmentBlob, error)
+}
+
+type adminSpaceExportBlobContentReader interface {
+	ReadBlobContent(ctx context.Context, blob models.DocumentAttachmentBlob, fallbackFileName string) ([]byte, error)
+}
+
+type adminSpaceExportImageHostingService interface {
+	GetConfig(ctx context.Context) (ImageHostingConfig, error)
+	BuildObjectReadURL(
+		ctx context.Context,
+		config ImageHostingConfig,
+		input BuildImageHostingObjectReadURLInput,
+	) (string, error)
+}
+
+type adminSpaceExportOfficeHTMLRenderer interface {
+	RenderExportHTML(
+		ctx context.Context,
+		format models.DocumentFormat,
+		sourceContent []byte,
+		spaceID string,
+		documentID string,
+	) (string, error)
+}
+
+// AdminSpaceExportReaderHTMLRenderInput 是 EPUB 导出复用阅读页 SSR 的 Markdown 渲染输入。
+type AdminSpaceExportReaderHTMLRenderInput struct {
+	Space      models.Space
+	Document   AdminSpaceExportDocumentEntry
+	Content    string
+	Tree       AdminSpaceExportTree
+	ExportedAt time.Time
+}
+
+type adminSpaceExportReaderHTMLRenderer interface {
+	RenderMarkdownHTML(ctx context.Context, input AdminSpaceExportReaderHTMLRenderInput) (string, error)
+}
+
+type adminAuditRecorder interface {
+	Record(ctx context.Context, input RecordAdminAuditInput) error
 }
 
 // AdminSpaceExportServiceOption 用于按运行环境注入导出依赖。
@@ -136,6 +197,66 @@ func WithAdminSpaceExportRepositories(
 	return func(s *AdminSpaceExportService) {
 		s.spaceReader = spaceReader
 		s.workspaceReader = workspaceReader
+	}
+}
+
+// WithAdminSpaceExportAttachmentReader 注入附件与 blob 元数据读取仓储。
+func WithAdminSpaceExportAttachmentReader(
+	attachmentReader adminSpaceExportAttachmentReader,
+) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		s.attachmentReader = attachmentReader
+	}
+}
+
+// WithAdminSpaceExportBlobContentReader 覆盖 blob 内容读取器，主要用于测试或对象存储适配。
+func WithAdminSpaceExportBlobContentReader(
+	blobReader adminSpaceExportBlobContentReader,
+) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		s.blobReader = blobReader
+	}
+}
+
+// WithAdminSpaceExportImageHostingService 为远端附件/source 读取注入图床配置与签名 URL 能力。
+func WithAdminSpaceExportImageHostingService(
+	imageHostingService adminSpaceExportImageHostingService,
+) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		reader, _ := s.blobReader.(adminSpaceExportDefaultBlobContentReader)
+		reader.imageHostingService = imageHostingService
+		if strings.TrimSpace(reader.localRootDir) == "" {
+			reader.localRootDir = "uploads"
+		}
+		if reader.httpClient == nil {
+			reader.httpClient = &http.Client{Timeout: 30 * time.Second}
+		}
+		s.blobReader = reader
+	}
+}
+
+// WithAdminSpaceExportOfficeHTMLRenderer 注入 Office 源文件到 HTML 的渲染能力，供 EPUB 导出复用。
+func WithAdminSpaceExportOfficeHTMLRenderer(
+	renderer adminSpaceExportOfficeHTMLRenderer,
+) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		s.officeHTMLRenderer = renderer
+	}
+}
+
+// WithAdminSpaceExportReaderHTMLRenderer 注入阅读页 SSR 渲染器，供 EPUB Markdown 章节复用。
+func WithAdminSpaceExportReaderHTMLRenderer(
+	renderer adminSpaceExportReaderHTMLRenderer,
+) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		s.readerHTMLRenderer = renderer
+	}
+}
+
+// WithAdminSpaceExportAuditRecorder 注入后台审计记录器。
+func WithAdminSpaceExportAuditRecorder(auditRecorder adminAuditRecorder) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		s.auditRecorder = auditRecorder
 	}
 }
 
@@ -169,6 +290,11 @@ type AdminSpaceExportService struct {
 	store              *AdminSpaceExportJobStore
 	spaceReader        adminSpaceExportSpaceReader
 	workspaceReader    adminSpaceExportWorkspaceReader
+	attachmentReader   adminSpaceExportAttachmentReader
+	blobReader         adminSpaceExportBlobContentReader
+	officeHTMLRenderer adminSpaceExportOfficeHTMLRenderer
+	readerHTMLRenderer adminSpaceExportReaderHTMLRenderer
+	auditRecorder      adminAuditRecorder
 	exportDir          string
 	nowFn              func() time.Time
 	canExportSpace     func(context.Context, string, string) (bool, error)
@@ -184,6 +310,10 @@ func NewAdminSpaceExportService(
 		store:              NewAdminSpaceExportJobStore(),
 		exportDir:          defaultAdminSpaceExportDir,
 		nowFn:              time.Now,
+	}
+	svc.blobReader = adminSpaceExportDefaultBlobContentReader{
+		localRootDir: "uploads",
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
 	}
 	svc.canExportSpace = svc.defaultCanExportSpace
 	for _, option := range options {
@@ -221,13 +351,18 @@ func (s *AdminSpaceExportService) StartExport(
 		return StartAdminSpaceExportResult{}, tokenErr
 	}
 	now := s.now()
+	includeAttachments, includeOfficeSources := normalizeAdminSpaceExportOptions(
+		input.Format,
+		input.IncludeAttachments,
+		input.IncludeOfficeSources,
+	)
 	job := &AdminSpaceExportJob{
 		JobID:                jobID,
 		ActorUserID:          strings.TrimSpace(input.ActorUserID),
 		SpaceID:              spaceID,
 		Format:               input.Format,
-		IncludeAttachments:   input.IncludeAttachments,
-		IncludeOfficeSources: input.IncludeOfficeSources,
+		IncludeAttachments:   includeAttachments,
+		IncludeOfficeSources: includeOfficeSources,
 		Status:               AdminSpaceExportStatusQueued,
 		StreamTokenHash:      streamTokenHash,
 		StreamTokenExpiresAt: now.Add(defaultAdminSpaceTransferTokenTTL),
@@ -243,6 +378,10 @@ func (s *AdminSpaceExportService) StartExport(
 	if err := s.store.Create(job); err != nil {
 		return StartAdminSpaceExportResult{}, err
 	}
+	if err := s.recordExportAudit(ctx, *job, adminSpaceExportAuditQueued, "queued", "", "", 0); err != nil {
+		s.store.Fail(jobID, "audit", "记录导出审计失败", s.now())
+		return StartAdminSpaceExportResult{}, err
+	}
 	if s.canGenerateAdminSpaceExportPackage() {
 		go s.runAdminSpaceExportJob(context.WithoutCancel(ctx), jobID)
 	}
@@ -251,6 +390,21 @@ func (s *AdminSpaceExportService) StartExport(
 		JobID:     jobID,
 		StreamURL: "/api/admin/spaces/" + spaceID + "/exports/" + jobID + "/events?token=" + streamToken,
 	}, nil
+}
+
+func normalizeAdminSpaceExportOptions(
+	format AdminSpaceExportFormat,
+	includeAttachments bool,
+	includeOfficeSources bool,
+) (bool, bool) {
+	switch format {
+	case AdminSpaceExportFormatSourceZip:
+		return true, true
+	case AdminSpaceExportFormatEPUB:
+		return false, true
+	default:
+		return includeAttachments, includeOfficeSources
+	}
 }
 
 func (s *AdminSpaceExportService) canGenerateAdminSpaceExportPackage() bool {
@@ -272,7 +426,30 @@ func (s *AdminSpaceExportService) defaultCanExportSpace(ctx context.Context, act
 	if s == nil || s.adminAccessService == nil {
 		return false, nil
 	}
-	return s.adminAccessService.CanManageSpace(ctx, strings.TrimSpace(actorUserID), strings.TrimSpace(spaceID))
+	actorUserID = strings.TrimSpace(actorUserID)
+	spaceID = strings.TrimSpace(spaceID)
+	canManage, err := s.adminAccessService.CanManageSpace(ctx, actorUserID, spaceID)
+	if err != nil || canManage {
+		return canManage, err
+	}
+	return s.canExportOwnedSpace(ctx, actorUserID, spaceID)
+}
+
+func (s *AdminSpaceExportService) canExportOwnedSpace(ctx context.Context, actorUserID string, spaceID string) (bool, error) {
+	if s == nil || s.spaceReader == nil || actorUserID == "" || spaceID == "" {
+		return false, nil
+	}
+	space, err := s.spaceReader.GetBySpaceID(ctx, spaceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("读取空间归属: %w", err)
+	}
+	if space == nil || space.DeletedAt != nil || space.Status == models.EntityStatusDeleted {
+		return false, nil
+	}
+	return strings.TrimSpace(space.OwnerUserID) == actorUserID, nil
 }
 
 // Subscribe 校验 streamToken 并订阅导出任务事件。
@@ -323,7 +500,14 @@ func (s *AdminSpaceExportService) CompleteExportJob(jobID string, fileName strin
 	if err != nil {
 		return AdminSpaceTransferEvent{}, err
 	}
-	return s.store.Complete(strings.TrimSpace(jobID), strings.TrimSpace(fileName), "", sizeBytes, downloadToken, downloadTokenHash, s.now())
+	event, err := s.store.Complete(strings.TrimSpace(jobID), strings.TrimSpace(fileName), "", sizeBytes, downloadToken, downloadTokenHash, s.now())
+	if err != nil {
+		return AdminSpaceTransferEvent{}, err
+	}
+	if job, getErr := s.store.Get(strings.TrimSpace(jobID)); getErr == nil {
+		_ = s.recordExportAudit(context.Background(), job, adminSpaceExportAuditSuccess, "completed", "", strings.TrimSpace(fileName), sizeBytes)
+	}
+	return event, nil
 }
 
 // ConsumeDownloadToken 校验并消费导出下载 token。
@@ -335,11 +519,50 @@ func (s *AdminSpaceExportService) ConsumeDownloadToken(
 	if s == nil || s.store == nil {
 		return AdminSpaceExportDownload{}, errcode.ErrAdminSpaceExportJobNotFound
 	}
-	return s.store.ConsumeDownloadToken(strings.TrimSpace(jobID), strings.TrimSpace(actorUserID), strings.TrimSpace(token), s.now())
+	download, err := s.store.ConsumeDownloadToken(strings.TrimSpace(jobID), strings.TrimSpace(actorUserID), strings.TrimSpace(token), s.now())
+	if err != nil {
+		return AdminSpaceExportDownload{}, err
+	}
+	validatedPath, err := s.validateDownloadFilePath(download.FilePath)
+	if err != nil {
+		return AdminSpaceExportDownload{}, err
+	}
+	download.FilePath = validatedPath
+	return download, nil
+}
+
+func (s *AdminSpaceExportService) validateDownloadFilePath(filePath string) (string, error) {
+	normalizedFilePath := strings.TrimSpace(filePath)
+	if normalizedFilePath == "" {
+		return "", errcode.ErrAdminSpaceExportFileNotReady
+	}
+	extension := strings.ToLower(filepath.Ext(normalizedFilePath))
+	if extension != ".zip" && extension != ".plaindoc" && extension != ".epub" {
+		return "", errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	exportDir := defaultAdminSpaceExportDir
+	if s != nil && strings.TrimSpace(s.exportDir) != "" {
+		exportDir = strings.TrimSpace(s.exportDir)
+	}
+	rootAbsPath, err := filepath.Abs(filepath.Clean(exportDir))
+	if err != nil {
+		return "", err
+	}
+	targetAbsPath, err := filepath.Abs(normalizedFilePath)
+	if err != nil {
+		return "", err
+	}
+	if !isAdminSpaceExportPathWithinRoot(rootAbsPath, targetAbsPath) {
+		return "", errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	return targetAbsPath, nil
 }
 
 func (s *AdminSpaceExportService) runAdminSpaceExportJob(ctx context.Context, jobID string) {
 	if err := s.BeginExportJob(ctx, jobID); err != nil {
+		if job, getErr := s.store.Get(strings.TrimSpace(jobID)); getErr == nil {
+			_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditFailed, "permission", err.Error(), "", 0)
+		}
 		return
 	}
 
@@ -351,12 +574,14 @@ func (s *AdminSpaceExportService) runAdminSpaceExportJob(ctx context.Context, jo
 	fileName, filePath, sizeBytes, err := s.exportAdminSpaceZipPackage(ctx, job)
 	if err != nil {
 		s.store.Fail(jobID, "zip", err.Error(), s.now())
+		_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditFailed, "zip", err.Error(), "", 0)
 		return
 	}
 
 	downloadToken, downloadTokenHash, err := generateAdminSpaceTransferToken()
 	if err != nil {
 		s.store.Fail(jobID, "token", "生成下载令牌失败", s.now())
+		_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditFailed, "token", "生成下载令牌失败", "", 0)
 		return
 	}
 	_, _ = s.store.Complete(
@@ -368,6 +593,129 @@ func (s *AdminSpaceExportService) runAdminSpaceExportJob(ctx context.Context, jo
 		downloadTokenHash,
 		s.now(),
 	)
+	_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditSuccess, "completed", "", fileName, sizeBytes)
+}
+
+const (
+	adminSpaceExportAuditQueued  = "queued"
+	adminSpaceExportAuditSuccess = "success"
+	adminSpaceExportAuditFailed  = "failed"
+)
+
+func (s *AdminSpaceExportService) recordExportAudit(
+	ctx context.Context,
+	job AdminSpaceExportJob,
+	status string,
+	stage string,
+	message string,
+	fileName string,
+	sizeBytes int64,
+) error {
+	if s == nil || s.auditRecorder == nil {
+		return nil
+	}
+	targetID := strings.TrimSpace(job.SpaceID)
+	if targetID == "" {
+		return nil
+	}
+	detail := map[string]any{
+		"jobId":                strings.TrimSpace(job.JobID),
+		"spaceId":              targetID,
+		"format":               string(job.Format),
+		"includeAttachments":   job.IncludeAttachments,
+		"includeOfficeSources": job.IncludeOfficeSources,
+		"status":               strings.TrimSpace(status),
+		"stage":                strings.TrimSpace(stage),
+		"abilityType":          "space_manage",
+	}
+	if trimmed := sanitizeAdminSpaceTransferAuditMessage(message, s.exportDir, defaultAdminSpaceExportDir); trimmed != "" {
+		detail["error"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(fileName); trimmed != "" {
+		detail["fileName"] = trimmed
+	}
+	if sizeBytes > 0 {
+		detail["sizeBytes"] = sizeBytes
+	}
+	return s.auditRecorder.Record(ctx, RecordAdminAuditInput{
+		ActorUserID: strings.TrimSpace(job.ActorUserID),
+		Module:      AdminAuditModuleSpace,
+		Action:      AdminAuditActionExport,
+		TargetType:  "space",
+		TargetID:    targetID,
+		Summary:     "space export " + strings.TrimSpace(status) + ": " + targetID,
+		Detail:      detail,
+	})
+}
+
+const adminSpaceTransferAuditHiddenError = "任务失败，详情见服务端日志"
+
+func sanitizeAdminSpaceTransferAuditMessage(message string, privateHints ...string) string {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return ""
+	}
+	normalized := strings.ToLower(trimmed)
+	if strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "downloadurl") ||
+		strings.Contains(normalized, "streamurl") {
+		return adminSpaceTransferAuditHiddenError
+	}
+	for _, hint := range privateHints {
+		if auditMessageContainsPath(trimmed, hint) {
+			return adminSpaceTransferAuditHiddenError
+		}
+	}
+	if auditMessageContainsAbsolutePath(trimmed) {
+		return adminSpaceTransferAuditHiddenError
+	}
+	return trimmed
+}
+
+func auditMessageContainsPath(message string, pathHint string) bool {
+	trimmedHint := strings.TrimSpace(pathHint)
+	if trimmedHint == "" {
+		return false
+	}
+	candidates := []string{trimmedHint, filepath.Clean(trimmedHint)}
+	if absoluteHint, err := filepath.Abs(trimmedHint); err == nil {
+		candidates = append(candidates, absoluteHint)
+	}
+	normalizedMessage := filepath.ToSlash(message)
+	for _, candidate := range candidates {
+		normalizedCandidate := filepath.ToSlash(strings.TrimSpace(candidate))
+		if normalizedCandidate == "" || normalizedCandidate == "." {
+			continue
+		}
+		if strings.Contains(normalizedMessage, normalizedCandidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func auditMessageContainsAbsolutePath(message string) bool {
+	fields := strings.FieldsFunc(message, func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\n', '\r', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', ',':
+			return true
+		default:
+			return false
+		}
+	})
+	for _, field := range fields {
+		token := strings.Trim(field, ".;:")
+		if token == "" {
+			continue
+		}
+		if filepath.IsAbs(token) {
+			return true
+		}
+		if len(token) >= 3 && token[1] == ':' && (token[2] == '\\' || token[2] == '/') {
+			return true
+		}
+	}
+	return false
 }
 
 func isSupportedAdminSpaceExportFormat(format AdminSpaceExportFormat) bool {
@@ -387,7 +735,7 @@ func (s *AdminSpaceExportService) exportAdminSpaceZipPackage(
 		return "", "", 0, fmt.Errorf("导出服务依赖未配置")
 	}
 	if job.Format == AdminSpaceExportFormatEPUB {
-		return "", "", 0, errcode.ErrAdminSpaceExportFormatUnsupported
+		return s.exportAdminSpaceEPUBPackage(ctx, job)
 	}
 
 	s.PublishProgress(job.JobID, AdminSpaceTransferEvent{
@@ -426,13 +774,13 @@ func (s *AdminSpaceExportService) exportAdminSpaceZipPackage(
 		return "", "", 0, err
 	}
 
-	fileName := buildAdminSpaceExportFileName(job.SpaceID, exportedAt)
+	fileName := buildAdminSpaceExportFileName(job.SpaceID, exportedAt, job.Format)
 	exportDir := filepath.Clean(s.exportDir)
 	if err := os.MkdirAll(exportDir, 0o700); err != nil {
 		return "", "", 0, err
 	}
 	partPath := filepath.Join(exportDir, job.JobID+".part")
-	finalPath := filepath.Join(exportDir, job.JobID+".zip")
+	finalPath := filepath.Join(exportDir, job.JobID+adminSpaceExportFileExtension(job.Format))
 	if err := writeAdminSpaceExportZip(partPath, pkg); err != nil {
 		_ = os.Remove(partPath)
 		return "", "", 0, err
@@ -509,14 +857,24 @@ func (s *AdminSpaceExportService) buildAdminSpaceExportPackage(
 				treeNode.Children = childTreeNodes
 			case models.NodeTypeDoc:
 				summary.DocumentCount++
-				entry, content, err := s.buildAdminSpaceExportDocumentEntry(ctx, row, parentPath, usedNames)
+				entry, documentFiles, err := s.buildAdminSpaceExportDocumentEntry(ctx, job, row, parentPath, usedNames)
 				if err != nil {
 					return nil, err
 				}
 				documents = append(documents, entry)
-				if len(content) > 0 && entry.Path != "" {
-					files[entry.Path] = content
+				for filePath, content := range documentFiles {
+					files[filePath] = content
 				}
+				summary.AttachmentCount += len(entry.Attachments)
+				if entry.Source != nil && entry.Source.Included {
+					summary.OfficeSourceCount++
+				}
+				childPath := path.Join(parentPath, uniqueAdminSpaceExportName(usedNames, row.Title, "document-"+row.NodeID, ""))
+				childTreeNodes, err := walk(strings.TrimSpace(row.NodeID), childPath)
+				if err != nil {
+					return nil, err
+				}
+				treeNode.Children = childTreeNodes
 			default:
 				continue
 			}
@@ -530,6 +888,14 @@ func (s *AdminSpaceExportService) buildAdminSpaceExportPackage(
 		return adminSpaceExportPackage{}, err
 	}
 
+	coverEntry, coverContent, err := s.buildAdminSpaceExportCoverEntry(ctx, space)
+	if err != nil {
+		return adminSpaceExportPackage{}, err
+	}
+	if coverEntry != nil {
+		files[coverEntry.Path] = coverContent
+	}
+
 	return adminSpaceExportPackage{
 		RootEntryPrefix: "space-" + sanitizeAdminSpaceExportPathSegment(space.SpaceID, "space"),
 		Manifest: AdminSpaceExportManifest{
@@ -537,13 +903,14 @@ func (s *AdminSpaceExportService) buildAdminSpaceExportPackage(
 			PackageType: AdminSpaceExportPackageType,
 			ExportedAt:  exportedAt.Format(time.RFC3339),
 			Format:      job.Format,
-			Importable:  true,
+			Importable:  isAdminSpaceExportPackageImportable(job),
 			Space: AdminSpaceExportManifestSpace{
 				SpaceID:     strings.TrimSpace(space.SpaceID),
 				Name:        strings.TrimSpace(space.Name),
 				Description: strings.TrimSpace(space.Description),
 				CategoryID:  strings.TrimSpace(space.CategoryID),
 				Visibility:  string(space.Visibility),
+				Cover:       coverEntry,
 			},
 			Summary:   summary,
 			Documents: documents,
@@ -556,12 +923,104 @@ func (s *AdminSpaceExportService) buildAdminSpaceExportPackage(
 	}, nil
 }
 
+func (s *AdminSpaceExportService) buildAdminSpaceExportCoverEntry(
+	ctx context.Context,
+	space models.Space,
+) (*AdminSpaceExportCoverEntry, []byte, error) {
+	coverAssetID := ""
+	if space.CoverAssetID != nil {
+		coverAssetID = strings.TrimSpace(*space.CoverAssetID)
+	}
+	if coverAssetID == "" && strings.TrimSpace(space.CoverKey) == "" && strings.TrimSpace(space.CoverURL) == "" {
+		return nil, nil, nil
+	}
+
+	asset := adminSpaceExportCoverAssetFromSpace(space, coverAssetID)
+	if coverAssetID != "" {
+		if reader, ok := s.spaceReader.(adminSpaceExportCoverReader); ok {
+			storedAsset, err := reader.GetCoverAssetByAssetID(ctx, coverAssetID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if storedAsset != nil {
+				asset = *storedAsset
+			}
+		}
+	}
+	objectKey := strings.TrimSpace(asset.ObjectKey)
+	if objectKey == "" {
+		return nil, nil, fmt.Errorf("空间封面 object key 为空: %s", space.SpaceID)
+	}
+	fileName := sanitizeAdminSpaceExportPathSegment(path.Base(objectKey), "space-cover.webp")
+	if fileName == "" || fileName == "." {
+		fileName = "space-cover.webp"
+	}
+	if !strings.Contains(fileName, ".") {
+		fileName += ".webp"
+	}
+	blobID := strings.TrimSpace(asset.AssetID)
+	if blobID == "" {
+		blobID = coverAssetID
+	}
+	if blobID == "" {
+		blobID = strings.TrimSpace(space.SpaceID) + "-cover"
+	}
+	mimeType := strings.TrimSpace(asset.MimeType)
+	if mimeType == "" {
+		mimeType = "image/webp"
+	}
+	content, err := s.blobReader.ReadBlobContent(ctx, models.DocumentAttachmentBlob{
+		BlobID:          blobID,
+		StorageProvider: string(ImageHostingProviderLocal),
+		ObjectKey:       objectKey,
+		MimeType:        mimeType,
+		SizeBytes:       asset.SizeBytes,
+	}, fileName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("读取空间封面失败: %w", err)
+	}
+	if len(content) == 0 {
+		return nil, nil, fmt.Errorf("空间封面内容为空: %s", space.SpaceID)
+	}
+	sum := sha256.Sum256(content)
+	entry := &AdminSpaceExportCoverEntry{
+		AssetID:    strings.TrimSpace(asset.AssetID),
+		Path:       safeAdminSpaceExportZipEntry("covers", fileName),
+		FileName:   fileName,
+		MimeType:   mimeType,
+		SizeBytes:  int64(len(content)),
+		Width:      asset.Width,
+		Height:     asset.Height,
+		Source:     strings.TrimSpace(asset.Source),
+		Normalized: asset.Normalized,
+		SHA256:     hex.EncodeToString(sum[:]),
+	}
+	if entry.Source == "" {
+		entry.Source = strings.TrimSpace(space.CoverSource)
+	}
+	return entry, content, nil
+}
+
+func adminSpaceExportCoverAssetFromSpace(space models.Space, coverAssetID string) models.SpaceCoverAsset {
+	return models.SpaceCoverAsset{
+		AssetID:   strings.TrimSpace(coverAssetID),
+		Source:    strings.TrimSpace(space.CoverSource),
+		ObjectKey: strings.TrimSpace(space.CoverKey),
+		ObjectURL: strings.TrimSpace(space.CoverURL),
+		MimeType:  "image/webp",
+		Width:     space.CoverWidth,
+		Height:    space.CoverHeight,
+		SizeBytes: 0,
+	}
+}
+
 func (s *AdminSpaceExportService) buildAdminSpaceExportDocumentEntry(
 	ctx context.Context,
+	job AdminSpaceExportJob,
 	row repository.WorkspaceTreeNodeRecord,
 	parentPath string,
 	usedNames map[string]int,
-) (AdminSpaceExportDocumentEntry, []byte, error) {
+) (AdminSpaceExportDocumentEntry, map[string][]byte, error) {
 	documentID := ""
 	if row.DocumentID != nil {
 		documentID = strings.TrimSpace(*row.DocumentID)
@@ -606,6 +1065,7 @@ func (s *AdminSpaceExportService) buildAdminSpaceExportDocumentEntry(
 		entry.ParentNodeID = strings.TrimSpace(*row.ParentNodeID)
 	}
 
+	files := make(map[string][]byte)
 	switch format {
 	case models.DocumentFormatMarkdown:
 		fileName := uniqueAdminSpaceExportName(usedNames, title, "document-"+row.NodeID, ".md")
@@ -613,16 +1073,122 @@ func (s *AdminSpaceExportService) buildAdminSpaceExportDocumentEntry(
 		content := []byte(document.ContentMD)
 		sum := sha256.Sum256(content)
 		entry.ContentSHA256 = hex.EncodeToString(sum[:])
-		return entry, content, nil
+		files[entry.Path] = content
 	case models.DocumentFormatDOCX, models.DocumentFormatXLSX:
-		sourceFileName := uniqueAdminSpaceExportName(usedNames, title, "source-"+row.NodeID, "."+string(format))
+		sourceTitle := title
+		if document.SourceFileName != nil && strings.TrimSpace(*document.SourceFileName) != "" {
+			sourceTitle = strings.TrimSpace(*document.SourceFileName)
+		}
+		sourceFileName := uniqueAdminSpaceExportName(usedNames, sourceTitle, "source-"+row.NodeID, "."+string(format))
 		sourcePath := safeAdminSpaceExportZipEntry("sources", documentID, sourceFileName)
-		entry.Path = sourcePath
 		entry.Source = &AdminSpaceExportSourceEntry{Path: sourcePath, Included: false}
-		return entry, nil, nil
+		if shouldIncludeAdminSpaceExportOfficeSource(job) {
+			entry.Path = sourcePath
+			sourceContent, err := s.readAdminSpaceExportDocumentSource(ctx, *document, sourcePath)
+			if err != nil {
+				return AdminSpaceExportDocumentEntry{}, nil, err
+			}
+			sum := sha256.Sum256(sourceContent)
+			entry.Source.Included = true
+			entry.Source.SHA256 = hex.EncodeToString(sum[:])
+			files[sourcePath] = sourceContent
+		}
 	default:
 		return AdminSpaceExportDocumentEntry{}, nil, errcode.ErrAdminSpaceExportFormatUnsupported
 	}
+
+	if job.IncludeAttachments {
+		if err := s.appendAdminSpaceExportAttachments(ctx, documentID, &entry, files); err != nil {
+			return AdminSpaceExportDocumentEntry{}, nil, err
+		}
+	}
+	return entry, files, nil
+}
+
+func isAdminSpaceExportPackageImportable(job AdminSpaceExportJob) bool {
+	return job.Format == AdminSpaceExportFormatSourceZip &&
+		job.IncludeAttachments &&
+		job.IncludeOfficeSources
+}
+
+func shouldIncludeAdminSpaceExportOfficeSource(job AdminSpaceExportJob) bool {
+	return job.IncludeOfficeSources &&
+		(job.Format == AdminSpaceExportFormatSourceZip || job.Format == AdminSpaceExportFormatEPUB)
+}
+
+func (s *AdminSpaceExportService) appendAdminSpaceExportAttachments(
+	ctx context.Context,
+	documentID string,
+	entry *AdminSpaceExportDocumentEntry,
+	files map[string][]byte,
+) error {
+	if s == nil || s.attachmentReader == nil || s.blobReader == nil {
+		return fmt.Errorf("附件导出依赖未配置")
+	}
+	attachments, err := s.attachmentReader.ListByDocumentID(ctx, documentID, false)
+	if err != nil {
+		return err
+	}
+	usedNames := make(map[string]int)
+	for _, attachment := range attachments {
+		if attachment.Status == models.EntityStatusDeleted || attachment.DeletedAt != nil {
+			continue
+		}
+		blobID := strings.TrimSpace(attachment.BlobID)
+		if blobID == "" {
+			return fmt.Errorf("附件 %s 缺少 blobId", attachment.AttachmentID)
+		}
+		blob, err := s.attachmentReader.GetBlobByBlobID(ctx, blobID)
+		if err != nil {
+			return err
+		}
+		if blob == nil || blob.DeletedAt != nil {
+			return fmt.Errorf("附件 %s 的 blob 不存在", attachment.AttachmentID)
+		}
+		payload, err := s.blobReader.ReadBlobContent(ctx, *blob, attachment.FileName)
+		if err != nil {
+			return err
+		}
+		fileName := uniqueAdminSpaceExportName(usedNames, attachment.FileName, "attachment-"+attachment.AttachmentID, "")
+		attachmentPath := safeAdminSpaceExportZipEntry("attachments", documentID, fileName)
+		files[attachmentPath] = payload
+		sum := sha256.Sum256(payload)
+		entry.Attachments = append(entry.Attachments, attachmentPath)
+		entry.AttachmentEntries = append(entry.AttachmentEntries, AdminSpaceExportAttachmentEntry{
+			AttachmentID: strings.TrimSpace(attachment.AttachmentID),
+			Path:         attachmentPath,
+			FileName:     strings.TrimSpace(attachment.FileName),
+			MimeType:     strings.TrimSpace(attachment.MimeType),
+			SizeBytes:    attachment.SizeBytes,
+			SHA256:       hex.EncodeToString(sum[:]),
+		})
+	}
+	return nil
+}
+
+func (s *AdminSpaceExportService) readAdminSpaceExportDocumentSource(
+	ctx context.Context,
+	document repository.WorkspaceDocumentRecord,
+	sourcePath string,
+) ([]byte, error) {
+	if s == nil || s.attachmentReader == nil || s.blobReader == nil {
+		return nil, fmt.Errorf("Office source 导出依赖未配置")
+	}
+	if document.SourceBlobID == nil || strings.TrimSpace(*document.SourceBlobID) == "" {
+		return nil, fmt.Errorf("Office 文档 %s 缺少 source blob", document.DocumentID)
+	}
+	blob, err := s.attachmentReader.GetBlobByBlobID(ctx, strings.TrimSpace(*document.SourceBlobID))
+	if err != nil {
+		return nil, err
+	}
+	if blob == nil || blob.DeletedAt != nil {
+		return nil, fmt.Errorf("Office 文档 %s 的 source blob 不存在", document.DocumentID)
+	}
+	fileName := path.Base(sourcePath)
+	if document.SourceFileName != nil && strings.TrimSpace(*document.SourceFileName) != "" {
+		fileName = strings.TrimSpace(*document.SourceFileName)
+	}
+	return s.blobReader.ReadBlobContent(ctx, *blob, fileName)
 }
 
 func adminSpaceExportTreeNodeFromRecord(row repository.WorkspaceTreeNodeRecord) AdminSpaceExportTreeNode {
@@ -730,15 +1296,180 @@ func safeAdminSpaceExportZipEntry(parts ...string) string {
 	return entry
 }
 
-func buildAdminSpaceExportFileName(spaceID string, exportedAt time.Time) string {
+type adminSpaceExportDefaultBlobContentReader struct {
+	localRootDir         string
+	httpClient           *http.Client
+	imageHostingService  adminSpaceExportImageHostingService
+	maxBlobReadSizeBytes int64
+}
+
+func (r adminSpaceExportDefaultBlobContentReader) ReadBlobContent(
+	ctx context.Context,
+	blob models.DocumentAttachmentBlob,
+	fallbackFileName string,
+) ([]byte, error) {
+	provider := ImageHostingProvider(strings.ToLower(strings.TrimSpace(blob.StorageProvider)))
+	if provider == "" {
+		provider = ImageHostingProviderLocal
+	}
+	switch provider {
+	case ImageHostingProviderLocal:
+		targetPath, err := resolveAdminSpaceExportLocalBlobPath(r.localRootDir, blob.ObjectKey)
+		if err != nil {
+			return nil, err
+		}
+		file, err := os.Open(targetPath)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		return readAdminSpaceExportLimitedBlob(file, r.readLimit(blob.SizeBytes))
+	case ImageHostingProviderCloudflareR2, ImageHostingProviderAliyunOSS:
+		return r.readRemoteBlobContent(ctx, provider, blob, fallbackFileName)
+	default:
+		return nil, fmt.Errorf("不支持的附件存储 provider: %s", provider)
+	}
+}
+
+func (r adminSpaceExportDefaultBlobContentReader) readRemoteBlobContent(
+	ctx context.Context,
+	provider ImageHostingProvider,
+	blob models.DocumentAttachmentBlob,
+	fallbackFileName string,
+) ([]byte, error) {
+	if r.imageHostingService == nil {
+		return nil, fmt.Errorf("远端附件读取依赖未配置")
+	}
+	config, err := r.imageHostingService.GetConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rawURL, err := r.imageHostingService.BuildObjectReadURL(ctx, config, BuildImageHostingObjectReadURLInput{
+		Provider:  provider,
+		ObjectKey: strings.TrimSpace(blob.ObjectKey),
+		ObjectURL: "",
+		FileName:  strings.TrimSpace(fallbackFileName),
+		Purpose:   DocumentAttachmentLinkPurposeDownload,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if rawURL == "" {
+		return nil, fmt.Errorf("远端附件 %s 缺少可读取 URL", strings.TrimSpace(fallbackFileName))
+	}
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return nil, fmt.Errorf("远端附件 URL scheme 不支持: %s", parsedURL.Scheme)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	client := r.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("读取远端附件失败: status=%d", response.StatusCode)
+	}
+	return readAdminSpaceExportLimitedBlob(response.Body, r.readLimit(blob.SizeBytes))
+}
+
+func (r adminSpaceExportDefaultBlobContentReader) readLimit(blobSizeBytes int64) int64 {
+	limit := r.maxBlobReadSizeBytes
+	if limit <= 0 {
+		limit = maxAdminSpaceExportBlobReadBytes
+	}
+	if blobSizeBytes > 0 && blobSizeBytes < limit {
+		return blobSizeBytes
+	}
+	return limit
+}
+
+func readAdminSpaceExportLimitedBlob(reader io.Reader, limitBytes int64) ([]byte, error) {
+	if reader == nil {
+		return nil, fmt.Errorf("附件内容读取器为空")
+	}
+	if limitBytes <= 0 {
+		limitBytes = maxAdminSpaceExportBlobReadBytes
+	}
+	payload, err := io.ReadAll(io.LimitReader(reader, limitBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(payload)) > limitBytes {
+		return nil, fmt.Errorf("附件内容超过导出读取上限")
+	}
+	return payload, nil
+}
+
+func resolveAdminSpaceExportLocalBlobPath(localRootDir string, objectKey string) (string, error) {
+	normalizedObjectKey := strings.TrimSpace(strings.TrimPrefix(objectKey, "/"))
+	if normalizedObjectKey == "" {
+		return "", fmt.Errorf("附件 object key 为空")
+	}
+	cleanObjectKey := path.Clean(normalizedObjectKey)
+	if cleanObjectKey == "." || cleanObjectKey == "/" || strings.HasPrefix(cleanObjectKey, "../") {
+		return "", fmt.Errorf("附件 object key 非法")
+	}
+	rootDir := strings.TrimSpace(localRootDir)
+	if rootDir == "" {
+		rootDir = "uploads"
+	}
+	targetPath := filepath.Join(rootDir, filepath.FromSlash(cleanObjectKey))
+	targetAbsPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", err
+	}
+	rootAbsPath, err := filepath.Abs(rootDir)
+	if err != nil {
+		return "", err
+	}
+	if !isAdminSpaceExportPathWithinRoot(rootAbsPath, targetAbsPath) {
+		return "", fmt.Errorf("附件 object key 超出本地根目录")
+	}
+	return targetAbsPath, nil
+}
+
+func isAdminSpaceExportPathWithinRoot(rootAbsPath string, targetAbsPath string) bool {
+	rel, err := filepath.Rel(rootAbsPath, targetAbsPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != "" && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != "..")
+}
+
+func buildAdminSpaceExportFileName(spaceID string, exportedAt time.Time, format AdminSpaceExportFormat) string {
 	return fmt.Sprintf(
-		"space-%s-%s.zip",
+		"space-%s-%s%s",
 		sanitizeAdminSpaceExportPathSegment(spaceID, "space"),
 		exportedAt.Format("20060102150405"),
+		adminSpaceExportFileExtension(format),
 	)
 }
 
+func adminSpaceExportFileExtension(format AdminSpaceExportFormat) string {
+	if format == AdminSpaceExportFormatSourceZip {
+		return ".plaindoc"
+	}
+	return ".zip"
+}
+
 func writeAdminSpaceExportZip(partPath string, pkg adminSpaceExportPackage) error {
+	if err := validateAdminSpaceExportPackage(pkg); err != nil {
+		return err
+	}
 	file, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -779,6 +1510,57 @@ func writeAdminSpaceExportZip(partPath string, pkg adminSpaceExportPackage) erro
 		return err
 	}
 	closeFile = false
+	return nil
+}
+
+func validateAdminSpaceExportPackage(pkg adminSpaceExportPackage) error {
+	if !pkg.Manifest.Importable {
+		return nil
+	}
+	if pkg.Manifest.Space.Cover != nil {
+		coverPath := strings.TrimSpace(pkg.Manifest.Space.Cover.Path)
+		if coverPath == "" {
+			return fmt.Errorf("manifest cover 路径为空")
+		}
+		if _, ok := pkg.Files[coverPath]; !ok {
+			return fmt.Errorf("manifest 引用封面缺失: %s", coverPath)
+		}
+	}
+	attachmentCount := 0
+	officeSourceCount := 0
+	for _, document := range pkg.Manifest.Documents {
+		if strings.TrimSpace(document.Path) != "" {
+			if _, ok := pkg.Files[document.Path]; !ok {
+				return fmt.Errorf("manifest 引用文件缺失: %s", document.Path)
+			}
+		}
+		for _, attachmentPath := range document.Attachments {
+			attachmentPath = strings.TrimSpace(attachmentPath)
+			if attachmentPath == "" {
+				continue
+			}
+			attachmentCount++
+			if _, ok := pkg.Files[attachmentPath]; !ok {
+				return fmt.Errorf("manifest 引用附件缺失: %s", attachmentPath)
+			}
+		}
+		if document.Source != nil && document.Source.Included {
+			sourcePath := strings.TrimSpace(document.Source.Path)
+			if sourcePath == "" {
+				return fmt.Errorf("manifest source 路径为空: %s", document.DocumentID)
+			}
+			officeSourceCount++
+			if _, ok := pkg.Files[sourcePath]; !ok {
+				return fmt.Errorf("manifest 引用 source 缺失: %s", sourcePath)
+			}
+		}
+	}
+	if pkg.Manifest.Summary.AttachmentCount != attachmentCount {
+		return fmt.Errorf("manifest 附件数量不一致: summary=%d actual=%d", pkg.Manifest.Summary.AttachmentCount, attachmentCount)
+	}
+	if pkg.Manifest.Summary.OfficeSourceCount != officeSourceCount {
+		return fmt.Errorf("manifest Office source 数量不一致: summary=%d actual=%d", pkg.Manifest.Summary.OfficeSourceCount, officeSourceCount)
+	}
 	return nil
 }
 
@@ -872,23 +1654,53 @@ func (s *AdminSpaceExportJobStore) Subscribe(
 		return AdminSpaceTransferEvent{}, nil, func() {}, errcode.ErrAdminSpaceExportJobTokenInvalid
 	}
 
+	initialEvent := job.LastEvent
+	if job.Status == AdminSpaceExportStatusCompleted && strings.TrimSpace(initialEvent.DownloadURL) == "" {
+		if !job.DownloadTokenExpiresAt.IsZero() && !now.Before(job.DownloadTokenExpiresAt) {
+			return AdminSpaceTransferEvent{}, nil, func() {}, errcode.ErrAdminSpaceExportFileExpired
+		}
+		plainToken, tokenHashValue, err := generateAdminSpaceTransferToken()
+		if err != nil {
+			return AdminSpaceTransferEvent{}, nil, func() {}, err
+		}
+		if job.downloadTokens == nil {
+			job.downloadTokens = make(map[string]adminSpaceExportDownloadToken)
+		}
+		expiresAt := job.DownloadTokenExpiresAt
+		if expiresAt.IsZero() {
+			expiresAt = now.Add(defaultAdminSpaceTransferTokenTTL)
+		}
+		job.downloadTokens[tokenHashValue] = adminSpaceExportDownloadToken{ExpiresAt: expiresAt}
+		job.UpdatedAt = now
+		initialEvent.DownloadURL = "/api/admin/space-exports/" + jobID + "/download?token=" + plainToken
+	}
+
 	ch := make(chan AdminSpaceTransferEvent, adminSpaceTransferEventBufferSize)
 	if s.subscribers[jobID] == nil {
 		s.subscribers[jobID] = make(map[chan AdminSpaceTransferEvent]struct{})
 	}
 	s.subscribers[jobID][ch] = struct{}{}
+	var unsubscribeOnce sync.Once
 	unsubscribe := func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if subscribers := s.subscribers[jobID]; subscribers != nil {
-			delete(subscribers, ch)
-			if len(subscribers) == 0 {
-				delete(s.subscribers, jobID)
+		unsubscribeOnce.Do(func() {
+			s.mu.Lock()
+			removed := false
+			defer s.mu.Unlock()
+			if subscribers := s.subscribers[jobID]; subscribers != nil {
+				if _, ok := subscribers[ch]; ok {
+					delete(subscribers, ch)
+					removed = true
+				}
+				if len(subscribers) == 0 {
+					delete(s.subscribers, jobID)
+				}
 			}
-		}
-		close(ch)
+			if removed {
+				close(ch)
+			}
+		})
 	}
-	return job.LastEvent, ch, unsubscribe, nil
+	return initialEvent, ch, unsubscribe, nil
 }
 
 func (s *AdminSpaceExportJobStore) Publish(jobID string, event AdminSpaceTransferEvent, now time.Time) {
@@ -971,10 +1783,13 @@ func (s *AdminSpaceExportJobStore) Complete(
 	job.DownloadTokenHash = tokenHashValue
 	job.DownloadTokenExpiresAt = now.Add(defaultAdminSpaceTransferTokenTTL)
 	job.DownloadTokenUsed = false
+	job.downloadTokens = map[string]adminSpaceExportDownloadToken{
+		tokenHashValue: {ExpiresAt: job.DownloadTokenExpiresAt},
+	}
 	job.FileName = strings.TrimSpace(fileName)
 	job.FilePath = strings.TrimSpace(filePath)
 	job.SizeBytes = sizeBytes
-	job.LastEvent = AdminSpaceTransferEvent{
+	event := AdminSpaceTransferEvent{
 		Type:        AdminSpaceTransferEventTypeCompleted,
 		Stage:       "done",
 		Progress:    100,
@@ -983,10 +1798,16 @@ func (s *AdminSpaceExportJobStore) Complete(
 		FileName:    strings.TrimSpace(fileName),
 		SizeBytes:   sizeBytes,
 	}
+	job.LastEvent = event
+	job.LastEvent.DownloadURL = ""
 	job.UpdatedAt = now
-	event := job.LastEvent
+	for subscriber := range s.subscribers[jobID] {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
 	s.mu.Unlock()
-	s.Publish(jobID, event, now)
 	return event, nil
 }
 
@@ -1008,12 +1829,19 @@ func (s *AdminSpaceExportJobStore) ConsumeDownloadToken(
 	}
 	if job.ActorUserID != actorUserID ||
 		job.Status != AdminSpaceExportStatusCompleted ||
-		job.DownloadTokenUsed ||
-		job.DownloadTokenHash == "" ||
-		tokenHash(token) != job.DownloadTokenHash {
+		strings.TrimSpace(token) == "" {
 		return AdminSpaceExportDownload{}, errcode.ErrAdminSpaceExportDownloadForbidden
 	}
-	if !now.Before(job.DownloadTokenExpiresAt) {
+	tokenHashValue := tokenHash(token)
+	tokenState, hasToken := job.downloadTokens[tokenHashValue]
+	if !hasToken && job.DownloadTokenHash != "" && tokenHashValue == job.DownloadTokenHash {
+		tokenState = adminSpaceExportDownloadToken{ExpiresAt: job.DownloadTokenExpiresAt, Used: job.DownloadTokenUsed}
+		hasToken = true
+	}
+	if !hasToken || tokenState.Used {
+		return AdminSpaceExportDownload{}, errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	if !now.Before(tokenState.ExpiresAt) {
 		return AdminSpaceExportDownload{}, errcode.ErrAdminSpaceExportFileExpired
 	}
 	if strings.TrimSpace(job.FilePath) == "" {
@@ -1029,7 +1857,13 @@ func (s *AdminSpaceExportJobStore) ConsumeDownloadToken(
 	if info.IsDir() {
 		return AdminSpaceExportDownload{}, errcode.ErrAdminSpaceExportFileNotReady
 	}
-	job.DownloadTokenUsed = true
+	tokenState.Used = true
+	if job.downloadTokens != nil {
+		job.downloadTokens[tokenHashValue] = tokenState
+	}
+	if tokenHashValue == job.DownloadTokenHash {
+		job.DownloadTokenUsed = true
+	}
 	job.UpdatedAt = now
 	return AdminSpaceExportDownload{
 		FileName:  strings.TrimSpace(job.FileName),
@@ -1038,8 +1872,52 @@ func (s *AdminSpaceExportJobStore) ConsumeDownloadToken(
 	}, nil
 }
 
+func (s *AdminSpaceExportJobStore) DeleteExpired(now time.Time) []AdminSpaceExportJob {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	expiredJobs := make([]AdminSpaceExportJob, 0)
+	channelsToClose := make([]chan AdminSpaceTransferEvent, 0)
+	for jobID, job := range s.jobs {
+		if job == nil || !isExpiredAdminSpaceExportJob(*job, now) {
+			continue
+		}
+		expiredJobs = append(expiredJobs, *job)
+		for subscriber := range s.subscribers[jobID] {
+			channelsToClose = append(channelsToClose, subscriber)
+		}
+		delete(s.subscribers, jobID)
+		delete(s.jobs, jobID)
+	}
+	s.mu.Unlock()
+	for _, subscriber := range channelsToClose {
+		close(subscriber)
+	}
+	return expiredJobs
+}
+
 func isActiveAdminSpaceExportStatus(status AdminSpaceExportStatus) bool {
 	return status == AdminSpaceExportStatusQueued || status == AdminSpaceExportStatusRunning
+}
+
+func isExpiredAdminSpaceExportJob(job AdminSpaceExportJob, now time.Time) bool {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if isActiveAdminSpaceExportStatus(job.Status) {
+		return false
+	}
+	if job.Status == AdminSpaceExportStatusCompleted {
+		if !job.DownloadTokenExpiresAt.IsZero() {
+			return !now.Before(job.DownloadTokenExpiresAt)
+		}
+		return !now.Before(job.UpdatedAt.Add(defaultAdminSpaceTransferTokenTTL))
+	}
+	if !job.StreamTokenExpiresAt.IsZero() {
+		return !now.Before(job.StreamTokenExpiresAt)
+	}
+	return !now.Before(job.UpdatedAt.Add(defaultAdminSpaceTransferTokenTTL))
 }
 
 func generateAdminSpaceTransferToken() (string, string, error) {
