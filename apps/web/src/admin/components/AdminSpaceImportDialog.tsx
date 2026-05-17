@@ -16,7 +16,7 @@ import { formatError } from "../../editor/status-utils";
 import { useAdminSpaceTransferTasks } from "../space-transfer/useAdminSpaceTransferTasks";
 
 const NO_CATEGORY_VALUE = "__PD_NO_CATEGORY__";
-const PLAINDOC_ACCEPT = ".plaindoc";
+const SPACE_IMPORT_ACCEPT = ".plaindoc,.epub";
 
 interface AdminSpaceImportDialogProps {
   open: boolean;
@@ -27,8 +27,8 @@ interface AdminSpaceImportDialogProps {
   onImportCompleted(): Promise<void> | void;
 }
 
-function formatDateTime(value: string): string {
-  if (!value.trim()) {
+function formatDateTime(value: string | undefined): string {
+  if (!value?.trim()) {
     return "-";
   }
   const date = new Date(value);
@@ -58,9 +58,32 @@ function normalizeVisibility(value: string | undefined, fallback: Visibility): V
   return fallback;
 }
 
-function isPlaindocFile(file: File): boolean {
+function isSupportedSpaceImportFile(file: File): boolean {
   const fileName = file.name.trim().toLowerCase();
-  return fileName.endsWith(".plaindoc");
+  return fileName.endsWith(".plaindoc") || fileName.endsWith(".epub");
+}
+
+function isEPUBImportPreview(preview: AdminSpaceImportInspectResult): boolean {
+  return preview.packageType === "epub";
+}
+
+function renderSourceAuthors(preview: AdminSpaceImportInspectResult): string {
+  return preview.sourceAuthors?.map((author) => author.trim()).filter(Boolean).join("、") || "-";
+}
+
+function normalizeImportPreviewWarnings(preview: AdminSpaceImportInspectResult): AdminSpaceImportInspectResult {
+  if (Array.isArray(preview.warnings)) {
+    return preview;
+  }
+  // 后端历史分支可能把空 slice 序列化成 null；这里兜底为空数组，避免预览弹窗渲染崩溃。
+  console.warn("空间导入预览 warnings 字段异常，已按空数组处理", {
+    importId: preview.importId,
+    packageType: preview.packageType
+  });
+  return {
+    ...preview,
+    warnings: []
+  };
 }
 
 export function AdminSpaceImportDialog({
@@ -154,14 +177,14 @@ export function AdminSpaceImportDialog({
       if (!file) {
         return;
       }
-      if (!isPlaindocFile(file)) {
-        showToast("请选择 .plaindoc 空间交换包");
+      if (!isSupportedSpaceImportFile(file)) {
+        showToast("请选择 .plaindoc 或 .epub 导入包");
         return;
       }
 
       setInspecting(true);
       try {
-        const result = await dataGateway.admin.inspectSpaceImport({ file });
+        const result = normalizeImportPreviewWarnings(await dataGateway.admin.inspectSpaceImport({ file }));
         setPreview(result);
         setSpaceName(result.space.name.trim() || "导入空间");
         setVisibility(normalizeVisibility(result.space.visibility, defaultVisibility));
@@ -244,7 +267,7 @@ export function AdminSpaceImportDialog({
         <header className="flex items-start justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div className="space-y-1">
             <h3 className="text-lg font-semibold text-slate-900">导入空间</h3>
-            <p className="text-xs text-slate-600">上传 PlainDoc 空间交换包，先解析预览，再创建导入任务。</p>
+            <p className="text-xs text-slate-600">上传 PlainDoc 空间交换包或 EPUB，先解析预览，再创建导入任务。</p>
           </div>
           <Button type="button" size="icon" variant="ghost" className="h-8 w-8" disabled={importLocked} onClick={closeDialog}>
             <X size={16} />
@@ -258,12 +281,12 @@ export function AdminSpaceImportDialog({
                 <FileArchive size={16} />
                 空间交换包
               </span>
-              <span className="mt-1 block text-xs text-slate-500">仅支持 `.plaindoc`，ZIP 和 EPUB 阅读包不能导入。</span>
+              <span className="mt-1 block text-xs text-slate-500">支持 `.plaindoc` 空间交换包和 `.epub` 电子书。</span>
               <input
                 className="mt-3 block w-full rounded-md border border-slate-300 bg-white text-sm text-slate-700 file:mr-3 file:h-9 file:border-0 file:bg-slate-900 file:px-3 file:text-sm file:font-medium file:text-white"
                 type="file"
                 aria-label="空间交换包"
-                accept={PLAINDOC_ACCEPT}
+                accept={SPACE_IMPORT_ACCEPT}
                 disabled={importLocked}
                 onChange={(event) => {
                   void handleFileChange(event.target.files);
@@ -306,7 +329,14 @@ export function AdminSpaceImportDialog({
                   </div>
                   <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
                     <p>空间 ID：<code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-700">{preview.space.spaceId}</code></p>
-                    <p>导出时间：{formatDateTime(preview.exportedAt)}</p>
+                    {isEPUBImportPreview(preview) ? (
+                      <>
+                        <p>作者：{renderSourceAuthors(preview)}</p>
+                        <p>出版日期：{preview.sourcePublishedAt ? formatDateTime(preview.sourcePublishedAt) : "-"}</p>
+                      </>
+                    ) : (
+                      <p>导出时间：{formatDateTime(preview.exportedAt)}</p>
+                    )}
                     <p>包类型：{preview.packageType}</p>
                     <p>版本：v{preview.packageVersion}</p>
                   </div>
@@ -325,6 +355,16 @@ export function AdminSpaceImportDialog({
                   <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
                     Office 源文件 {preview.summary.officeSourceCount}
                   </span>
+                  {isEPUBImportPreview(preview) ? (
+                    <>
+                      <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+                        图片 {preview.summary.imageCount ?? 0}
+                      </span>
+                      <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+                        层级 {preview.summary.maxDepth ?? 0}
+                      </span>
+                    </>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -375,7 +415,7 @@ export function AdminSpaceImportDialog({
             <div className="rounded-lg border border-slate-200 bg-white p-3">
               <p className="text-xs font-semibold text-slate-700">解析状态</p>
               <div className="mt-2 flex min-h-[140px] items-center justify-center rounded-md bg-slate-50 px-4 text-center text-xs text-slate-500">
-                {preview ? "导入包已解析，确认前可调整新空间名称、分类和可见性。" : "选择 .plaindoc 后会在这里显示预览结果。"}
+                {preview ? "导入包已解析，确认前可调整新空间名称、分类和可见性。" : "选择 .plaindoc 或 .epub 后会在这里显示预览结果。"}
               </div>
             </div>
             {preview?.warnings.length ? (

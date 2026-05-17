@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,10 @@ import (
 func Timeout(timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if timeout <= 0 {
+			c.Next()
+			return
+		}
+		if isServerSentEventRequest(c.Request) {
 			c.Next()
 			return
 		}
@@ -31,4 +37,45 @@ func Timeout(timeout time.Duration) gin.HandlerFunc {
 			response.MiddlewareTimeoutErrRequestTimeout.Write(c)
 		}
 	}
+}
+
+func isServerSentEventRequest(request *http.Request) bool {
+	if request == nil {
+		return false
+	}
+	if request.Method != http.MethodGet {
+		return false
+	}
+	accept := strings.ToLower(request.Header.Get("Accept"))
+	if !strings.Contains(accept, "text/event-stream") {
+		return false
+	}
+	return isAdminSpaceTransferSSEPath(request.URL.Path)
+}
+
+func isAdminSpaceTransferSSEPath(rawPath string) bool {
+	segments := strings.Split(strings.Trim(rawPath, "/"), "/")
+	// 只允许后台空间导出 SSE 跳过业务 timeout：
+	// /api/admin/spaces/:spaceId/exports/:jobId/events
+	if len(segments) == 7 &&
+		segments[0] == "api" &&
+		segments[1] == "admin" &&
+		segments[2] == "spaces" &&
+		strings.TrimSpace(segments[3]) != "" &&
+		segments[4] == "exports" &&
+		strings.TrimSpace(segments[5]) != "" &&
+		segments[6] == "events" {
+		return true
+	}
+	// 只允许后台空间导入 SSE 跳过业务 timeout：
+	// /api/admin/space-imports/:jobId/events
+	if len(segments) == 5 &&
+		segments[0] == "api" &&
+		segments[1] == "admin" &&
+		segments[2] == "space-imports" &&
+		strings.TrimSpace(segments[3]) != "" &&
+		segments[4] == "events" {
+		return true
+	}
+	return false
 }

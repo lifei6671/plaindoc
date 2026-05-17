@@ -121,14 +121,44 @@ export interface Document {
   visibility?: Visibility;
 }
 
-export interface DocumentRevision {
+export type DocumentRevisionFormat = "markdown" | "docx" | "xlsx";
+
+export interface DocumentRevisionEditorUser {
+  userId: string;
+  displayName: string;
+}
+
+export interface DocumentRevisionSummary {
   id: string;
   documentId: string;
   version: number;
-  contentMd: string;
   baseVersion: number;
   createdAt: string;
   source: "local" | "remote";
+  format: DocumentRevisionFormat;
+  fileName?: string;
+  mimeType?: string;
+  editorUser?: DocumentRevisionEditorUser | null;
+}
+
+export interface DocumentRevisionFileMetadata {
+  fileName?: string;
+  mimeType?: string;
+  blobId?: string;
+}
+
+export interface DocumentRevisionDetail extends DocumentRevisionSummary {
+  // 历史版本列表只返回摘要；仅详情接口会携带 Markdown 正文。
+  contentMd?: string;
+  // Office 历史版本没有 Markdown 正文，详情接口返回文件版本元数据供预览/恢复使用。
+  file?: DocumentRevisionFileMetadata | null;
+}
+
+export type DocumentRevision = DocumentRevisionDetail;
+
+export interface ListDocumentRevisionsOptions {
+  page?: number;
+  pageSize?: number;
 }
 
 export type DocumentAttachmentPreviewKind = "none" | "image" | "pdf" | "office" | "text";
@@ -261,6 +291,17 @@ export interface SaveDocumentResult {
   document: Document;
 }
 
+export interface RestoreDocumentRevisionInput {
+  docId: string;
+  revisionId: string;
+  // 前端调用方应始终传当前 Document.version，后端据此做并发版本校验。
+  baseVersion: number;
+}
+
+export interface RestoreDocumentRevisionResult extends SaveDocumentResult {
+  restoredFromRevision: DocumentRevisionSummary;
+}
+
 export interface OnlyOfficeEditConfig {
   documentServerUrl: string;
   config: Record<string, unknown>;
@@ -341,7 +382,9 @@ export interface DocumentGateway {
   updateShareConfig(docId: string, input: UpdateDocumentShareInput): Promise<DocumentShareConfig>;
   disableShare(docId: string): Promise<void>;
   localizeRemoteImages(input: LocalizeRemoteImagesInput): Promise<LocalizeRemoteImagesResult>;
-  listRevisions(docId: string): Promise<DocumentRevision[]>;
+  listRevisions(docId: string, options?: ListDocumentRevisionsOptions): Promise<DocumentRevisionSummary[]>;
+  getRevisionDetail(docId: string, revisionId: string): Promise<DocumentRevisionDetail>;
+  restoreRevision(input: RestoreDocumentRevisionInput): Promise<RestoreDocumentRevisionResult>;
   listAttachments(docId: string): Promise<DocumentAttachment[]>;
   uploadAttachment(input: { docId: string; file: File }): Promise<DocumentAttachment>;
   deleteAttachment(input: { docId: string; attachmentId: string; physicalDelete?: boolean }): Promise<void>;
@@ -573,6 +616,7 @@ export interface AdminSpaceTransferEvent {
   sizeBytes?: number;
   spaceId?: string;
   spaceName?: string;
+  newSpaceId?: string;
 }
 
 export interface AdminSpaceTransferSubscription {
@@ -635,24 +679,30 @@ export interface AdminSpaceTransferDownloadTokenResult {
   downloadUrl: string;
 }
 
+export type AdminSpaceImportPackageType = "plaindoc-space" | "plaindoc" | "epub";
+
 export interface AdminSpaceImportInspectResult {
   importId: string;
   packageVersion: number;
-  packageType: string;
-  exportedAt: string;
+  packageType: AdminSpaceImportPackageType;
+  exportedAt?: string;
+  sourcePublishedAt?: string;
+  sourceAuthors?: string[];
   importable: boolean;
-	space: {
-		spaceId: string;
-		name: string;
-		categoryId?: string;
-		visibility: Visibility;
-		hasCover?: boolean;
-	};
+  space: {
+    spaceId: string;
+    name: string;
+    categoryId?: string;
+    visibility: Visibility;
+    hasCover?: boolean;
+  };
   summary: {
     folderCount: number;
     documentCount: number;
     attachmentCount: number;
     officeSourceCount: number;
+    imageCount?: number;
+    maxDepth?: number;
   };
   warnings: string[];
 }

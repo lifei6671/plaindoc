@@ -15,9 +15,11 @@ vi.mock("../components/spaceCoverDefault", () => ({
 }));
 
 function TrackImportTaskButton({
-  onCompleted
+  onCompleted,
+  needsDefaultCover = true
 }: {
   onCompleted(spaceID: string): Promise<void> | void;
+  needsDefaultCover?: boolean;
 }) {
   const { trackImportTask } = useAdminSpaceTransferTasks();
   return (
@@ -29,7 +31,7 @@ function TrackImportTaskButton({
           streamUrl: "/api/admin/space-imports/import-job/events?token=stream",
           importId: "import-a",
           spaceName: "导入空间",
-          needsDefaultCover: true,
+          needsDefaultCover,
           onCompleted
         })
       }
@@ -351,7 +353,7 @@ describe("AdminSpaceTransferTaskProvider", () => {
         stage: "done",
         progress: 100,
         message: "导入完成",
-        spaceId: "new-space",
+        newSpaceId: "new-space",
         spaceName: "导入空间"
       });
     });
@@ -506,5 +508,129 @@ describe("AdminSpaceTransferTaskProvider", () => {
     expect(screen.getByText("切换空间")).toBeInTheDocument();
     expect(screen.getByText("55%")).toBeInTheDocument();
     expect(closeExport).not.toHaveBeenCalled();
+  });
+
+  it("keeps an import task active when the event stream connection is interrupted", async () => {
+    let subscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
+    const closeImport = vi.fn();
+    const subscribeSpaceImport = vi.fn((input: AdminSpaceTransferSubscribeInput) => {
+      subscriptionInput = input;
+      return { close: closeImport };
+    });
+    const getSpaceTransferTask = vi.fn().mockResolvedValue({
+      task: {
+        jobId: "import-job",
+        kind: "space_import",
+        status: "running",
+        stage: "documents",
+        progress: 73,
+        message: "后端仍在导入大文件",
+        importId: "import-a",
+        spaceName: "导入空间",
+        createdAt: "2026-05-17T00:00:00Z",
+        updatedAt: "2026-05-17T00:02:00Z",
+        expiresAt: "2026-05-17T00:12:00Z"
+      }
+    });
+    const issueSpaceTransferStreamToken = vi.fn().mockResolvedValue({
+      streamUrl: "/api/admin/space-imports/import-job/events?token=fresh"
+    });
+    const dataGateway = {
+      admin: {
+        listSpaceTransferTasks: vi.fn().mockResolvedValue({ tasks: [] }),
+        getSpaceTransferTask,
+        issueSpaceTransferStreamToken,
+        issueSpaceTransferDownloadToken: vi.fn(),
+        subscribeSpaceImport
+      }
+    } as unknown as DataGateway;
+
+    const user = userEvent.setup();
+    render(
+      <AdminSpaceTransferTaskProvider dataGateway={dataGateway}>
+        <TrackImportTaskButton onCompleted={vi.fn()} />
+      </AdminSpaceTransferTaskProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "创建导入任务" }));
+    await waitFor(() => expect(subscribeSpaceImport).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      subscriptionInput?.onEvent({
+        type: "progress",
+        stage: "documents",
+        progress: 62,
+        message: "正在导入大文件"
+      });
+    });
+
+    act(() => {
+      subscriptionInput?.onError?.(new Event("error"));
+    });
+
+    await waitFor(() => expect(getSpaceTransferTask).toHaveBeenCalledWith({ kind: "space_import", jobId: "import-job" }));
+    expect(issueSpaceTransferStreamToken).toHaveBeenCalledWith({ kind: "space_import", jobId: "import-job" });
+    await waitFor(() => expect(subscribeSpaceImport).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
+    expect(screen.getByText("导入空间")).toBeInTheDocument();
+    expect(screen.getByText("73%")).toBeInTheDocument();
+    expect(screen.getByText("剩余1个")).toBeInTheDocument();
+    expect(screen.queryByText("失败")).toBeNull();
+    expect(closeImport).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes a completed import task after the event stream is interrupted", async () => {
+    let subscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
+    const onCompleted = vi.fn();
+    const getSpaceTransferTask = vi.fn().mockResolvedValue({
+      task: {
+        jobId: "import-job",
+        kind: "space_import",
+        status: "completed",
+        stage: "done",
+        progress: 100,
+        message: "导入完成",
+        importId: "import-a",
+        spaceName: "导入空间",
+        newSpaceId: "new-space",
+        createdAt: "2026-05-17T00:00:00Z",
+        updatedAt: "2026-05-17T00:03:00Z",
+        expiresAt: "2026-05-17T00:13:00Z"
+      }
+    });
+    const issueSpaceTransferStreamToken = vi.fn();
+    const subscribeSpaceImport = vi.fn((input: AdminSpaceTransferSubscribeInput) => {
+      subscriptionInput = input;
+      return { close: vi.fn() };
+    });
+    const dataGateway = {
+      admin: {
+        listSpaceTransferTasks: vi.fn().mockResolvedValue({ tasks: [] }),
+        getSpaceTransferTask,
+        issueSpaceTransferStreamToken,
+        issueSpaceTransferDownloadToken: vi.fn(),
+        subscribeSpaceImport
+      }
+    } as unknown as DataGateway;
+
+    render(
+      <AdminSpaceTransferTaskProvider dataGateway={dataGateway}>
+        <TrackImportTaskButton onCompleted={onCompleted} needsDefaultCover={false} />
+      </AdminSpaceTransferTaskProvider>
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "创建导入任务" }));
+    await waitFor(() => expect(subscribeSpaceImport).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      subscriptionInput?.onError?.(new Event("error"));
+    });
+
+    await waitFor(() => expect(getSpaceTransferTask).toHaveBeenCalledWith({ kind: "space_import", jobId: "import-job" }));
+    await waitFor(() => expect(onCompleted).toHaveBeenCalledWith("new-space"));
+    expect(issueSpaceTransferStreamToken).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "展开任务中心" }));
+    expect(await screen.findByText("已完成")).toBeInTheDocument();
   });
 });

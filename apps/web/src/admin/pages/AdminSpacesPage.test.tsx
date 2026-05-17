@@ -1082,8 +1082,8 @@ describe("AdminSpacesPage", () => {
     await user.click(await screen.findByRole("button", { name: "导入空间" }));
     const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
     expect(fileInput.accept).toContain(".plaindoc");
+    expect(fileInput.accept).toContain(".epub");
     expect(fileInput.accept).not.toContain(".zip");
-	    expect(fileInput.accept).not.toContain("epub");
 
     const file = new File(["zip"], "space.plaindoc", { type: "application/octet-stream" });
     await user.upload(fileInput, file);
@@ -1096,6 +1096,147 @@ describe("AdminSpacesPage", () => {
     expect(screen.getByText("文档 3")).toBeInTheDocument();
     expect(screen.getByText("附件 4")).toBeInTheDocument();
     expect(screen.getByText("Office 源文件 1")).toBeInTheDocument();
+    expect(screen.queryByText("图片 0")).toBeNull();
+    expect(screen.queryByText("层级 0")).toBeNull();
+    expect(screen.getByText("包类型：plaindoc-space")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeEnabled();
+  });
+
+  it("inspects a selected EPUB package and shows chapter image depth warnings", async () => {
+    const listSpaces = vi.fn().mockResolvedValue({
+      items: [],
+      pagination: {
+        page: 1,
+        pageSize: 20,
+        total: 0
+      }
+    });
+    const listSpaceCategories = vi.fn().mockResolvedValue([]);
+    const listSystemConfigs = vi.fn().mockResolvedValue([
+      {
+        configKey: "site",
+        value: {
+          defaultSpaceVisibility: "member"
+        }
+      }
+    ]);
+    const inspectSpaceImport = vi.fn().mockResolvedValue({
+      importId: "01epubimportpreview",
+      packageVersion: 1,
+      packageType: "epub",
+      sourcePublishedAt: "2026-05-17T08:00:00Z",
+      sourceAuthors: ["张三", "李四"],
+      importable: true,
+      space: {
+        spaceId: "epub-source",
+        name: "EPUB 电子书",
+        visibility: "member",
+        hasCover: false
+      },
+      summary: {
+        folderCount: 2,
+        documentCount: 5,
+        attachmentCount: 3,
+        officeSourceCount: 0,
+        imageCount: 7,
+        maxDepth: 4
+      },
+      warnings: ["章节 item-3 未出现在目录中，已按阅读顺序追加"]
+    });
+
+    const dataGateway = {
+      admin: {
+        listSpaces,
+        listSpaceCategories,
+        listSystemConfigs,
+        inspectSpaceImport
+      }
+    } as unknown as DataGateway;
+
+    const user = userEvent.setup();
+    renderAdminSpacesPage(dataGateway, "admin");
+
+    await user.click(await screen.findByRole("button", { name: "导入空间" }));
+    const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
+    const file = new File(["epub"], "book.epub", { type: "application/epub+zip" });
+    await user.upload(fileInput, file);
+
+    await waitFor(() => expect(inspectSpaceImport).toHaveBeenCalledWith({ file }));
+    expect(await screen.findByText("EPUB 电子书")).toBeInTheDocument();
+    expect(screen.getByText("epub-source")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("EPUB 电子书")).toBeInTheDocument();
+    expect(screen.getByText("作者：张三、李四")).toBeInTheDocument();
+    expect(screen.getByText(/^出版日期：/)).toBeInTheDocument();
+    expect(screen.getByText("包类型：epub")).toBeInTheDocument();
+    expect(screen.getByText("目录 2")).toBeInTheDocument();
+    expect(screen.getByText("文档 5")).toBeInTheDocument();
+    expect(screen.getByText("附件 3")).toBeInTheDocument();
+    expect(screen.getByText("图片 7")).toBeInTheDocument();
+    expect(screen.getByText("层级 4")).toBeInTheDocument();
+    expect(screen.getByText("Warnings")).toBeInTheDocument();
+    expect(screen.getByText("章节 item-3 未出现在目录中，已按阅读顺序追加")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeEnabled();
+  });
+
+  it("keeps the EPUB preview usable when backend returns null warnings", async () => {
+    const listSpaces = vi.fn().mockResolvedValue({
+      items: [],
+      pagination: {
+        page: 1,
+        pageSize: 20,
+        total: 0
+      }
+    });
+    const listSpaceCategories = vi.fn().mockResolvedValue([]);
+    const listSystemConfigs = vi.fn().mockResolvedValue([
+      {
+        configKey: "site",
+        value: {
+          defaultSpaceVisibility: "member"
+        }
+      }
+    ]);
+    const inspectSpaceImport = vi.fn().mockResolvedValue({
+      importId: "01epubimportpreview",
+      packageVersion: 1,
+      packageType: "epub",
+      sourceAuthors: [],
+      importable: true,
+      space: {
+        spaceId: "epub-source",
+        name: "无警告 EPUB",
+        visibility: "member",
+        hasCover: false
+      },
+      summary: {
+        folderCount: 1,
+        documentCount: 2,
+        attachmentCount: 0,
+        officeSourceCount: 0,
+        imageCount: 0,
+        maxDepth: 1
+      },
+      warnings: null as unknown as string[]
+    });
+
+    const dataGateway = {
+      admin: {
+        listSpaces,
+        listSpaceCategories,
+        listSystemConfigs,
+        inspectSpaceImport
+      }
+    } as unknown as DataGateway;
+
+    const user = userEvent.setup();
+    renderAdminSpacesPage(dataGateway, "admin");
+
+    await user.click(await screen.findByRole("button", { name: "导入空间" }));
+    const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
+    await user.upload(fileInput, new File(["epub"], "book.epub", { type: "application/epub+zip" }));
+
+    expect(await screen.findByText("无警告 EPUB")).toBeInTheDocument();
+    expect(screen.queryByText("Warnings")).toBeNull();
     expect(screen.getByRole("button", { name: "确认导入" })).toBeEnabled();
   });
 

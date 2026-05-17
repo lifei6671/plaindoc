@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -99,6 +101,503 @@ func TestAdminSpaceImportService_Commit_FailsJobWhenImportCapabilityRevoked(t *t
 	})
 }
 
+func TestAdminSpaceImportService_Commit_QueuesEPUBWithCreateSpaceSemantics(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+	var permissionChecks int
+	svc.canImportSpace = func(_ context.Context, actorUserID string) (bool, error) {
+		permissionChecks++
+		return strings.TrimSpace(actorUserID) == "member-user", nil
+	}
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+	commitResult, err := svc.Commit(context.Background(), CommitAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		ImportID:    result.ImportID,
+		SpaceID:     "client-should-be-ignored",
+		CategoryID:  "cat-a",
+		Visibility:  "public",
+	})
+	if err != nil {
+		t.Fatalf("commit epub failed: %v", err)
+	}
+
+	job, err := svc.store.GetJob(commitResult.JobID)
+	if err != nil {
+		t.Fatalf("get epub job failed: %v", err)
+	}
+	if job.PackageType != AdminSpaceImportPackageTypeEPUB {
+		t.Fatalf("expected epub package type, got %q", job.PackageType)
+	}
+	if job.RequestedSpaceID != "" {
+		t.Fatalf("expected epub commit to ignore client space id, got %q", job.RequestedSpaceID)
+	}
+	if job.RequestedSpaceName != "EPUB 示例书" {
+		t.Fatalf("expected epub default space name from inspect title, got %q", job.RequestedSpaceName)
+	}
+	if job.RequestedCategoryID != "cat-a" || job.RequestedVisibility != "public" {
+		t.Fatalf("expected epub commit to keep category and visibility, got %#v", job)
+	}
+	if permissionChecks < 2 {
+		t.Fatalf("expected inspect and commit to both check create-space capability, got %d checks", permissionChecks)
+	}
+}
+
+func TestAdminSpaceImportService_Commit_UsesCustomEPUBSpaceName(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+	commitResult, err := svc.Commit(context.Background(), CommitAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		ImportID:    result.ImportID,
+		SpaceName:   "自定义书籍空间",
+	})
+	if err != nil {
+		t.Fatalf("commit epub failed: %v", err)
+	}
+
+	job, err := svc.store.GetJob(commitResult.JobID)
+	if err != nil {
+		t.Fatalf("get epub job failed: %v", err)
+	}
+	if job.RequestedSpaceName != "自定义书籍空间" {
+		t.Fatalf("expected custom epub space name, got %q", job.RequestedSpaceName)
+	}
+}
+
+func TestAdminSpaceImportService_RestoreEPUBPackageCreatesSpaceTreeDocumentsAndRevisions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
+		defaultCategory: &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
+	}
+	spaceRepo := &stubAdminSpaceImportSpaceRepo{}
+	attachmentRepo := &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+	svc.workspaceWriter = workspaceRepo
+	svc.spaceWriter = spaceRepo
+	svc.attachmentWriter = attachmentRepo
+	svc.localBlobRootDir = attachmentRepo.localRootDir
+
+	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+	staging, err := svc.store.GetStaging(result.ImportID, "member-user", svc.now())
+	if err != nil {
+		t.Fatalf("get staging failed: %v", err)
+	}
+	if _, err := os.Stat(staging.FilePath); err != nil {
+		t.Fatalf("expected staging file before restore: %v", err)
+	}
+
+	newSpaceID, err := svc.restoreAdminSpaceImportEPUBPackage(ctx, AdminSpaceImportJob{
+		JobID:               "job-epub",
+		ImportID:            result.ImportID,
+		ActorUserID:         "member-user",
+		PackageType:         AdminSpaceImportPackageTypeEPUB,
+		RequestedSpaceName:  "导入后的 EPUB 空间",
+		RequestedVisibility: "public",
+	})
+	if err != nil {
+		t.Fatalf("restore epub failed: %v", err)
+	}
+	if newSpaceID == "" {
+		t.Fatal("expected new space id")
+	}
+	if _, err := os.Stat(staging.FilePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected staging file to be removed after successful restore, got %v", err)
+	}
+	if len(workspaceRepo.spaces) != 1 {
+		t.Fatalf("expected one created space, got %d", len(workspaceRepo.spaces))
+	}
+	space := workspaceRepo.spaces[0]
+	if space.SpaceID != newSpaceID || space.Name != "导入后的 EPUB 空间" || space.Visibility != models.VisibilityPublic {
+		t.Fatalf("unexpected created space: %#v", space)
+	}
+
+	folderNode := findAdminSpaceImportCreatedNode(t, workspaceRepo.nodes, models.NodeTypeFolder, "第二部分")
+	if folderNode.Node.ParentNodeID != nil {
+		t.Fatalf("expected root folder without parent, got %v", *folderNode.Node.ParentNodeID)
+	}
+	firstChapter := findAdminSpaceImportCreatedNode(t, workspaceRepo.nodes, models.NodeTypeDoc, "第一章")
+	if firstChapter.Document == nil || firstChapter.Revision == nil {
+		t.Fatalf("expected first chapter document and revision, got %#v", firstChapter)
+	}
+	if firstChapter.Document.Format != models.DocumentFormatMarkdown {
+		t.Fatalf("expected markdown document, got %q", firstChapter.Document.Format)
+	}
+	if !strings.Contains(firstChapter.Document.ContentMD, "第一章") || !strings.Contains(firstChapter.Document.ContentMD, "正文") {
+		t.Fatalf("expected converted markdown content, got %q", firstChapter.Document.ContentMD)
+	}
+	if firstChapter.Document.ContentMD != firstChapter.Revision.ContentMD ||
+		firstChapter.Document.Version != 1 ||
+		firstChapter.Revision.Version != 1 ||
+		firstChapter.Revision.BaseVersion != 0 {
+		t.Fatalf("expected first revision to mirror document content, document=%#v revision=%#v", firstChapter.Document, firstChapter.Revision)
+	}
+
+	secondChapter := findAdminSpaceImportCreatedNode(t, workspaceRepo.nodes, models.NodeTypeDoc, "第二章")
+	if secondChapter.Node.ParentNodeID == nil || *secondChapter.Node.ParentNodeID != folderNode.Node.NodeID {
+		t.Fatalf("expected second chapter under folder %q, got %#v", folderNode.Node.NodeID, secondChapter.Node.ParentNodeID)
+	}
+	if secondChapter.Document == nil || !strings.Contains(secondChapter.Document.ContentMD, "/uploads/") {
+		t.Fatalf("expected second chapter image to be localized, got %#v", secondChapter.Document)
+	}
+	if len(attachmentRepo.blobs) != 1 {
+		t.Fatalf("expected one localized image blob, got %d", len(attachmentRepo.blobs))
+	}
+}
+
+func TestAdminSpaceImportService_RestoreEPUBPackageUsesCoverAndDescription(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
+		defaultCategory: &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
+	}
+	spaceRepo := &stubAdminSpaceImportSpaceRepo{}
+	attachmentRepo := &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+	svc.workspaceWriter = workspaceRepo
+	svc.spaceWriter = spaceRepo
+	svc.attachmentWriter = attachmentRepo
+	svc.localBlobRootDir = attachmentRepo.localRootDir
+
+	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3WithCoverAndDescription(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+	if !result.Space.HasCover {
+		t.Fatalf("expected EPUB preview to report cover")
+	}
+
+	newSpaceID, err := svc.restoreAdminSpaceImportEPUBPackage(ctx, AdminSpaceImportJob{
+		JobID:               "job-epub-cover",
+		ImportID:            result.ImportID,
+		ActorUserID:         "member-user",
+		PackageType:         AdminSpaceImportPackageTypeEPUB,
+		RequestedVisibility: "member",
+	})
+	if err != nil {
+		t.Fatalf("restore epub failed: %v", err)
+	}
+	if len(workspaceRepo.spaces) != 1 {
+		t.Fatalf("expected one created space, got %d", len(workspaceRepo.spaces))
+	}
+	space := workspaceRepo.spaces[0]
+	if space.SpaceID != newSpaceID {
+		t.Fatalf("expected created space id %q, got %#v", newSpaceID, space)
+	}
+	if space.Description != "这是 EPUB 简介" {
+		t.Fatalf("expected EPUB description to become space description, got %q", space.Description)
+	}
+	if space.CoverAssetID == nil || strings.TrimSpace(*space.CoverAssetID) == "" {
+		t.Fatalf("expected EPUB cover asset id, got %#v", space)
+	}
+	if space.CoverURL == "" || space.CoverWidth != 2 || space.CoverHeight != 3 || space.CoverSource != string(AdminSpaceCoverSourceUserUpload) {
+		t.Fatalf("unexpected EPUB cover fields: %#v", space)
+	}
+	if len(spaceRepo.coverAssets) != 1 {
+		t.Fatalf("expected one EPUB cover asset, got %#v", spaceRepo.coverAssets)
+	}
+	coverAsset := spaceRepo.coverAssets[0]
+	if coverAsset.AssetID != *space.CoverAssetID ||
+		coverAsset.MimeType != "image/png" ||
+		coverAsset.Width != 2 ||
+		coverAsset.Height != 3 ||
+		coverAsset.Source != string(AdminSpaceCoverSourceUserUpload) {
+		t.Fatalf("unexpected persisted EPUB cover asset: %#v", coverAsset)
+	}
+}
+
+func TestAdminSpaceImportService_RestoreEPUBPackageCleansSpaceOnCreateNodeFailureAndKeepsStaging(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
+		defaultCategory: &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
+		createNodeErr:   errors.New("create node failed"),
+	}
+	spaceRepo := &stubAdminSpaceImportSpaceRepo{}
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+	svc.workspaceWriter = workspaceRepo
+	svc.spaceWriter = spaceRepo
+	svc.attachmentWriter = &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	svc.localBlobRootDir = t.TempDir()
+
+	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+	staging, err := svc.store.GetStaging(result.ImportID, "member-user", svc.now())
+	if err != nil {
+		t.Fatalf("get staging failed: %v", err)
+	}
+
+	newSpaceID, err := svc.restoreAdminSpaceImportEPUBPackage(ctx, AdminSpaceImportJob{
+		JobID:       "job-epub-fail",
+		ImportID:    result.ImportID,
+		ActorUserID: "member-user",
+		PackageType: AdminSpaceImportPackageTypeEPUB,
+	})
+	if err == nil {
+		t.Fatal("expected restore epub to fail")
+	}
+	if newSpaceID == "" {
+		t.Fatal("expected restore to return created space id for audit target")
+	}
+	if len(spaceRepo.hardDeletedSpaceIDs) != 1 || spaceRepo.hardDeletedSpaceIDs[0] != newSpaceID {
+		t.Fatalf("expected failed restore to hard delete created space %q, got %#v", newSpaceID, spaceRepo.hardDeletedSpaceIDs)
+	}
+	if _, statErr := os.Stat(staging.FilePath); statErr != nil {
+		t.Fatalf("expected failed restore to keep staging file for short-term investigation, got %v", statErr)
+	}
+}
+
+func TestAdminSpaceImportService_RestoreEPUBPackageUsesEPUB2TOCTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
+		defaultCategory: &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
+	}
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+	svc.workspaceWriter = workspaceRepo
+	svc.spaceWriter = &stubAdminSpaceImportSpaceRepo{}
+	svc.attachmentWriter = &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	svc.localBlobRootDir = t.TempDir()
+
+	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB2(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub2 failed: %v", err)
+	}
+	if _, err := svc.restoreAdminSpaceImportEPUBPackage(ctx, AdminSpaceImportJob{
+		JobID:       "job-epub2",
+		ImportID:    result.ImportID,
+		ActorUserID: "member-user",
+		PackageType: AdminSpaceImportPackageTypeEPUB,
+	}); err != nil {
+		t.Fatalf("restore epub2 failed: %v", err)
+	}
+
+	folderNode := findAdminSpaceImportCreatedNode(t, workspaceRepo.nodes, models.NodeTypeFolder, "第一部分")
+	bodyNode := findAdminSpaceImportCreatedNode(t, workspaceRepo.nodes, models.NodeTypeDoc, "正文")
+	if bodyNode.Node.ParentNodeID == nil || *bodyNode.Node.ParentNodeID != folderNode.Node.NodeID {
+		t.Fatalf("expected toc parent body doc under folder, got %#v", bodyNode.Node.ParentNodeID)
+	}
+	childNode := findAdminSpaceImportCreatedNode(t, workspaceRepo.nodes, models.NodeTypeDoc, "第二章")
+	if childNode.Node.ParentNodeID == nil || *childNode.Node.ParentNodeID != folderNode.Node.NodeID {
+		t.Fatalf("expected toc child doc under folder, got %#v", childNode.Node.ParentNodeID)
+	}
+}
+
+func TestAdminSpaceImportService_RunEPUBJobPublishesProgressAndCompletedNewSpaceID(t *testing.T) {
+	t.Parallel()
+
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-admin-space-import-epub-progress?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	transferJobRepo := repository.NewGormAdminSpaceTransferJobRepository(database.ORM)
+	svc := NewAdminSpaceImportService(nil, WithAdminSpaceImportTransferJobRepository(transferJobRepo))
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+	commitResult, err := svc.Commit(ctx, CommitAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		ImportID:    result.ImportID,
+		SpaceName:   "进度 EPUB 空间",
+	})
+	if err != nil {
+		t.Fatalf("commit epub failed: %v", err)
+	}
+	token := tokenQueryValue(t, commitResult.StreamURL)
+	initial, events, unsubscribe, err := svc.Subscribe(ctx, commitResult.JobID, "member-user", token)
+	if err != nil {
+		t.Fatalf("subscribe epub import failed: %v", err)
+	}
+	defer unsubscribe()
+	if initial.Stage != "queued" {
+		t.Fatalf("expected queued initial event, got %#v", initial)
+	}
+
+	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
+		defaultCategory: &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
+	}
+	svc.workspaceWriter = workspaceRepo
+	svc.spaceWriter = &stubAdminSpaceImportSpaceRepo{}
+	svc.attachmentWriter = &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	svc.localBlobRootDir = t.TempDir()
+
+	svc.runAdminSpaceImportJob(ctx, commitResult.JobID)
+	received := collectAdminSpaceImportEventsUntilTerminal(t, events)
+	stages := make(map[string]bool, len(received))
+	var completed AdminSpaceTransferEvent
+	documentProgresses := make([]int, 0, 2)
+	for _, event := range received {
+		stages[event.Stage] = true
+		if event.Stage == "epub_documents" {
+			documentProgresses = append(documentProgresses, event.Progress)
+		}
+		if event.Type == AdminSpaceTransferEventTypeCompleted {
+			completed = event
+		}
+	}
+	for _, stage := range []string{"running", "epub_parse", "epub_space", "epub_convert", "epub_documents", "epub_done", "completed"} {
+		if !stages[stage] {
+			t.Fatalf("expected epub import progress stage %q, got events %#v", stage, received)
+		}
+	}
+	if len(documentProgresses) != 2 || documentProgresses[0] != 62 || documentProgresses[1] != 90 {
+		t.Fatalf("expected document progress to follow imported/total documents 62 -> 90, got %#v events=%#v", documentProgresses, received)
+	}
+	if completed.NewSpaceID == "" || completed.SpaceID != completed.NewSpaceID {
+		t.Fatalf("expected completed event to include spaceId and newSpaceId, got %#v", completed)
+	}
+	persistedJob, err := transferJobRepo.GetByKindAndJobID(ctx, models.AdminSpaceTransferJobKindImport, commitResult.JobID)
+	if err != nil {
+		t.Fatalf("get persisted transfer job failed: %v", err)
+	}
+	if persistedJob.Status != models.AdminSpaceTransferJobStatusCompleted || persistedJob.NewSpaceID != completed.NewSpaceID {
+		t.Fatalf("unexpected persisted transfer job: %#v completed=%#v", persistedJob, completed)
+	}
+}
+
+func TestAdminSpaceImportStore_PublishKeepsTerminalEventWhenSubscriberBufferIsFull(t *testing.T) {
+	t.Parallel()
+
+	store := NewAdminSpaceImportStore()
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	token := "stream-token"
+	if err := store.CreateJob(AdminSpaceImportJob{
+		JobID:                "job-buffer",
+		ImportID:             "import-buffer",
+		ActorUserID:          "actor-user",
+		Status:               AdminSpaceImportStatusRunning,
+		StreamTokenHash:      tokenHash(token),
+		StreamTokenExpiresAt: now.Add(time.Minute),
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}); err != nil {
+		t.Fatalf("create job failed: %v", err)
+	}
+	_, events, unsubscribe, err := store.Subscribe("job-buffer", "actor-user", token, now)
+	if err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+	defer unsubscribe()
+
+	for index := 0; index < adminSpaceTransferEventBufferSize+3; index++ {
+		store.Publish("job-buffer", AdminSpaceTransferEvent{
+			Type:     AdminSpaceTransferEventTypeProgress,
+			Stage:    "epub_convert",
+			Progress: index,
+			Message:  "章节进度",
+		}, now)
+	}
+	store.Complete("job-buffer", "new-space", now)
+
+	eventsSeen := make([]AdminSpaceTransferEvent, 0, adminSpaceTransferEventBufferSize+1)
+	for {
+		select {
+		case event := <-events:
+			eventsSeen = append(eventsSeen, event)
+			if event.Type == AdminSpaceTransferEventTypeCompleted {
+				if event.NewSpaceID != "new-space" {
+					t.Fatalf("expected completed newSpaceId, got %#v", event)
+				}
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("expected terminal event to survive full subscriber buffer, got %#v", eventsSeen)
+		}
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_RejectsEPUBWithoutCreateSpaceCapability(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.canImportSpace = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+	_, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "member-user",
+		FileName:    "book.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+
+	if !errors.Is(err, errcode.ErrAdminSpaceImportCommitForbidden) {
+		t.Fatalf("expected epub inspect to require create-space capability, got %v", err)
+	}
+}
+
 func TestAdminSpaceImportService_Inspect_RejectsMissingFile(t *testing.T) {
 	t.Parallel()
 
@@ -172,6 +671,313 @@ func TestAdminSpaceImportService_Inspect_RejectsEmptyAndUnsupportedUpload(t *tes
 				t.Fatalf("expected %v, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_AcceptsEPUBPreview(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "demo.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB3(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub failed: %v", err)
+	}
+
+	if result.PackageType != AdminSpaceImportPackageTypeEPUB {
+		t.Fatalf("expected epub package type, got %q", result.PackageType)
+	}
+	if result.ExportedAt != "" {
+		t.Fatalf("epub inspect must not expose exportedAt, got %q", result.ExportedAt)
+	}
+	if result.SourcePublishedAt != "2026-05-17" {
+		t.Fatalf("expected source published date, got %q", result.SourcePublishedAt)
+	}
+	if len(result.SourceAuthors) != 1 || result.SourceAuthors[0] != "作者甲" {
+		t.Fatalf("expected epub author, got %#v", result.SourceAuthors)
+	}
+	if result.Space.Name != "EPUB 示例书" {
+		t.Fatalf("expected epub title as preview space name, got %q", result.Space.Name)
+	}
+	if result.Summary.DocumentCount != 2 {
+		t.Fatalf("expected two spine documents, got %d", result.Summary.DocumentCount)
+	}
+	if result.Summary.ImageCount != 1 {
+		t.Fatalf("expected one image resource, got %d", result.Summary.ImageCount)
+	}
+	if result.Summary.MaxDepth != 2 {
+		t.Fatalf("expected max depth 2, got %d", result.Summary.MaxDepth)
+	}
+	if result.Warnings == nil {
+		t.Fatal("expected empty warnings slice instead of nil warnings")
+	}
+	if !result.Importable {
+		t.Fatal("expected epub preview to be importable")
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_RejectsInvalidEPUBPreview(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		epub []byte
+		want error
+	}{
+		{
+			name: "missing mimetype",
+			epub: buildAdminSpaceImportTestEPUB3WithOptions(t, false, true, true, true),
+			want: errcode.ErrAdminSpaceImportZipInvalid,
+		},
+		{
+			name: "missing container",
+			epub: buildAdminSpaceImportTestEPUB3WithOptions(t, true, false, true, true),
+			want: errcode.ErrAdminSpaceImportZipInvalid,
+		},
+		{
+			name: "missing opf",
+			epub: buildAdminSpaceImportTestEPUB3WithOptions(t, true, true, false, true),
+			want: errcode.ErrAdminSpaceImportZipInvalid,
+		},
+		{
+			name: "missing spine",
+			epub: buildAdminSpaceImportTestEPUB3WithOptions(t, true, true, true, false),
+			want: errcode.ErrAdminSpaceImportPackageNotImportable,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			svc := NewAdminSpaceImportService(nil)
+			svc.stagingDir = t.TempDir()
+			_, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+				ActorUserID: "actor-user",
+				FileName:    "demo.epub",
+				ContentType: "application/epub+zip",
+				Reader:      bytes.NewReader(tc.epub),
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("expected %v, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestCollectAdminSpaceEPUBEntries_RejectsUnsafeEntries(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		files []*zip.File
+	}{
+		{
+			name: "absolute path",
+			files: []*zip.File{
+				buildAdminSpaceEPUBZipFileForTest("/OPS/content.opf", 1),
+			},
+		},
+		{
+			name: "parent traversal",
+			files: []*zip.File{
+				buildAdminSpaceEPUBZipFileForTest("OPS/../content.opf", 1),
+			},
+		},
+		{
+			name: "duplicate entry",
+			files: []*zip.File{
+				buildAdminSpaceEPUBZipFileForTest("OPS/content.opf", 1),
+				buildAdminSpaceEPUBZipFileForTest("OPS/content.opf", 1),
+			},
+		},
+		{
+			name: "single entry too large",
+			files: []*zip.File{
+				buildAdminSpaceEPUBZipFileForTest("OPS/content.opf", uint64(maxAdminSpaceEPUBEntryBytes+1)),
+			},
+		},
+		{
+			name: "total uncompressed size too large",
+			files: []*zip.File{
+				buildAdminSpaceEPUBZipFileForTest("OPS/a.xhtml", uint64(maxAdminSpaceEPUBEntryBytes)),
+				buildAdminSpaceEPUBZipFileForTest("OPS/b.xhtml", uint64(maxAdminSpaceEPUBEntryBytes)),
+				buildAdminSpaceEPUBZipFileForTest("OPS/c.xhtml", uint64(maxAdminSpaceEPUBEntryBytes)),
+				buildAdminSpaceEPUBZipFileForTest("OPS/d.xhtml", uint64(maxAdminSpaceEPUBEntryBytes)),
+				buildAdminSpaceEPUBZipFileForTest("OPS/e.xhtml", 1),
+			},
+		},
+		{
+			name: "directory depth too large",
+			files: []*zip.File{
+				buildAdminSpaceEPUBZipFileForTest("OPS/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q.xhtml", 1),
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := collectAdminSpaceEPUBEntries(&zip.Reader{File: tc.files})
+			if !errors.Is(err, errcode.ErrAdminSpaceImportZipInvalid) {
+				t.Fatalf("expected invalid zip error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCollectAdminSpaceEPUBEntries_RejectsTooManyEntries(t *testing.T) {
+	t.Parallel()
+
+	files := make([]*zip.File, 0, maxAdminSpaceEPUBEntries+1)
+	for i := 0; i <= maxAdminSpaceEPUBEntries; i++ {
+		files = append(files, buildAdminSpaceEPUBZipFileForTest("OPS/chapter-"+strconv.Itoa(i)+".xhtml", 1))
+	}
+
+	_, err := collectAdminSpaceEPUBEntries(&zip.Reader{File: files})
+	if !errors.Is(err, errcode.ErrAdminSpaceImportZipInvalid) {
+		t.Fatalf("expected invalid zip error, got %v", err)
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_AcceptsEPUB2TOCPreview(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "epub2.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB2(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect epub2 failed: %v", err)
+	}
+	if result.Space.Name != "EPUB2 示例书" {
+		t.Fatalf("expected epub2 title, got %q", result.Space.Name)
+	}
+	if result.Summary.DocumentCount != 2 {
+		t.Fatalf("expected two spine documents, got %d", result.Summary.DocumentCount)
+	}
+	if result.Summary.MaxDepth != 2 {
+		t.Fatalf("expected toc depth 2, got %d", result.Summary.MaxDepth)
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_FallsBackToFlatSpineWithoutNavOrTOC(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "flat.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUBWithoutNavOrTOC(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect flat epub failed: %v", err)
+	}
+	if result.Summary.DocumentCount != 2 {
+		t.Fatalf("expected two spine documents, got %d", result.Summary.DocumentCount)
+	}
+	if result.Summary.MaxDepth != 1 {
+		t.Fatalf("expected flat depth 1, got %d", result.Summary.MaxDepth)
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_WarnsForNonStandardMediaTypeFallback(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "fallback.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUBWithNonStandardMediaTypes(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect fallback epub failed: %v", err)
+	}
+	if result.Summary.DocumentCount != 1 || result.Summary.ImageCount != 1 {
+		t.Fatalf("expected extension fallback counts, got summary %#v", result.Summary)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected warning for non-standard media type fallback")
+	}
+}
+
+func TestAdminSpaceImportService_Inspect_WarnsForNonUTF8XMLDeclaration(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "latin.epub",
+		ContentType: "application/epub+zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUBWithNonUTF8OPFDeclaration(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect non utf-8 epub failed: %v", err)
+	}
+	if result.Space.Name != "Latin EPUB" {
+		t.Fatalf("expected title from non utf-8 declared opf, got %q", result.Space.Name)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected warning for non utf-8 xml declaration")
+	}
+}
+
+func TestAdminSpaceImportService_LocalizeEPUBImagesUsesImportedBlobStorage(t *testing.T) {
+	t.Parallel()
+
+	attachmentRepo := &stubAdminSpaceImportAttachmentRepo{}
+	svc := NewAdminSpaceImportService(
+		nil,
+		WithAdminSpaceImportRepositories(nil, nil, nil, attachmentRepo),
+		WithAdminSpaceImportBlobStorage(t.TempDir()),
+	)
+	entries := collectAdminSpaceEPUBEntriesForImageTest(t, map[string][]byte{
+		"OPS/images/cover.png": []byte("png-payload"),
+	})
+
+	rewritten, warnings, createdBlobs, err := svc.localizeAdminSpaceEPUBChapterImages(
+		context.Background(),
+		adminSpaceEPUBImageLocalizeInput{
+			SourceKey:           "OPS/chapter.xhtml",
+			SourceCanonicalHref: "OPS/chapter.xhtml",
+			HTML:                []byte(`<body><img src="images/cover.png" alt="封面"></body>`),
+			Entries:             entries,
+		},
+		"space-1",
+		"doc-1",
+	)
+	if err != nil {
+		t.Fatalf("localizeAdminSpaceEPUBChapterImages returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+	if len(createdBlobs) != 1 {
+		t.Fatalf("expected one created blob, got %#v", createdBlobs)
+	}
+	if !strings.Contains(rewritten, createdBlobs[0].ObjectURL) || !strings.HasPrefix(createdBlobs[0].ObjectURL, "/uploads/") {
+		t.Fatalf("expected rewritten html to use local upload url, html=%q blobs=%#v", rewritten, createdBlobs)
+	}
+	if createdBlobs[0].MimeType != "image/png" {
+		t.Fatalf("expected image/png blob, got %#v", createdBlobs[0])
 	}
 }
 
@@ -499,7 +1305,7 @@ func TestAdminSpaceImportService_Inspect_RejectsMissingManifestAndTree(t *testin
 	}
 }
 
-func TestAdminSpaceImportService_Inspect_RejectsEPUBPackage(t *testing.T) {
+func TestAdminSpaceImportService_Inspect_RejectsEPUBPayloadWithPlaindocExtension(t *testing.T) {
 	t.Parallel()
 
 	svc := NewAdminSpaceImportService(nil)
@@ -507,8 +1313,8 @@ func TestAdminSpaceImportService_Inspect_RejectsEPUBPackage(t *testing.T) {
 
 	_, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
 		ActorUserID: "actor-user",
-		FileName:    "book.epub",
-		ContentType: "application/epub+zip",
+		FileName:    "book.plaindoc",
+		ContentType: "application/zip",
 		Reader:      bytes.NewReader(buildAdminSpaceImportTestEPUB(t)),
 	})
 
@@ -1515,6 +2321,30 @@ func markStagingImportableForTest(svc *AdminSpaceImportService, importID string,
 	}
 }
 
+func collectAdminSpaceImportEventsUntilTerminal(
+	t *testing.T,
+	events <-chan AdminSpaceTransferEvent,
+) []AdminSpaceTransferEvent {
+	t.Helper()
+	received := make([]AdminSpaceTransferEvent, 0)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return received
+			}
+			received = append(received, event)
+			if event.Type == AdminSpaceTransferEventTypeCompleted || event.Type == AdminSpaceTransferEventTypeFailed {
+				return received
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for terminal import event, got %#v", received)
+			return received
+		}
+	}
+}
+
 func buildAdminSpaceImportTestZip(t *testing.T, includeManifest bool, includeTree bool, includeDocument bool) []byte {
 	t.Helper()
 
@@ -1552,6 +2382,267 @@ func buildAdminSpaceImportTestZipWithOptions(
 	}
 	if err := zipWriter.Close(); err != nil {
 		t.Fatalf("close zip failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildAdminSpaceImportTestEPUB3(t *testing.T) []byte {
+	t.Helper()
+
+	return buildAdminSpaceImportTestEPUB3WithOptions(t, true, true, true, true)
+}
+
+func buildAdminSpaceImportTestEPUB3WithCoverAndDescription(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>带封面 EPUB</dc:title>
+    <dc:creator>作者甲</dc:creator>
+    <dc:description>这是 EPUB 简介</dc:description>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chapter-1" href="chapters/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter-1"/>
+  </spine>
+</package>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/nav.xhtml", []byte(`<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <nav epub:type="toc"><ol><li><a href="chapters/chapter1.xhtml">第一章</a></li></ol></nav>
+  </body>
+</html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapters/chapter1.xhtml", []byte(`<html><body><h1>第一章</h1><p>正文</p></body></html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/images/cover.png", buildValidAdminSpaceImportPNGPayload(t, 2, 3))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close epub failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func findAdminSpaceImportCreatedNode(
+	t *testing.T,
+	nodes []repository.WorkspaceCreateNodeParams,
+	nodeType models.NodeType,
+	title string,
+) repository.WorkspaceCreateNodeParams {
+	t.Helper()
+	for _, params := range nodes {
+		if params.Node == nil {
+			continue
+		}
+		if params.Node.Type == nodeType && params.Node.Title == title {
+			return params
+		}
+	}
+	t.Fatalf("created node %s/%s not found in %#v", nodeType, title, nodes)
+	return repository.WorkspaceCreateNodeParams{}
+}
+
+func buildAdminSpaceImportTestEPUB3WithOptions(
+	t *testing.T,
+	includeMimetype bool,
+	includeContainer bool,
+	includeOPF bool,
+	includeSpine bool,
+) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	if includeMimetype {
+		writeAdminSpaceImportTestFile(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	}
+	if includeContainer {
+		writeAdminSpaceImportTestFile(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	}
+	if includeOPF {
+		spine := ""
+		if includeSpine {
+			spine = `<spine>
+    <itemref idref="chapter-1"/>
+    <itemref idref="chapter-2"/>
+  </spine>`
+		}
+		writeAdminSpaceImportTestFile(t, zipWriter, "OPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>EPUB 示例书</dc:title>
+    <dc:creator>作者甲</dc:creator>
+    <dc:date>2026-05-17</dc:date>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chapter-1" href="chapters/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter-2" href="chapters/chapter2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="images/cover.png" media-type="image/png"/>
+  </manifest>
+  `+spine+`
+</package>`))
+	}
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/nav.xhtml", []byte(`<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <nav epub:type="toc">
+      <ol>
+        <li><a href="chapters/chapter1.xhtml">第一章</a></li>
+        <li><span>第二部分</span><ol><li><a href="chapters/chapter2.xhtml">第二章</a></li></ol></li>
+      </ol>
+    </nav>
+  </body>
+</html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapters/chapter1.xhtml", []byte(`<html><body><h1>第一章</h1><p>正文</p></body></html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapters/chapter2.xhtml", []byte(`<html><body><h1>第二章</h1><img src="../images/cover.png" alt="封面"/></body></html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/images/cover.png", []byte("png"))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close epub failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildAdminSpaceEPUBZipFileForTest(name string, uncompressedSize uint64) *zip.File {
+	return &zip.File{
+		FileHeader: zip.FileHeader{
+			Name:               name,
+			UncompressedSize64: uncompressedSize,
+		},
+	}
+}
+
+func buildAdminSpaceImportTestEPUB2(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles>
+</container>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OEBPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>EPUB2 示例书</dc:title>
+    <dc:creator>作者乙</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="chapter-1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter-2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="toc">
+    <itemref idref="chapter-1"/>
+    <itemref idref="chapter-2"/>
+  </spine>
+</package>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OEBPS/toc.ncx", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <navMap>
+    <navPoint><navLabel><text>第一部分</text></navLabel><content src="chapter1.xhtml"/>
+      <navPoint><navLabel><text>第二章</text></navLabel><content src="chapter2.xhtml"/></navPoint>
+    </navPoint>
+  </navMap>
+</ncx>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OEBPS/chapter1.xhtml", []byte(`<html><body><h1>第一章</h1></body></html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OEBPS/chapter2.xhtml", []byte(`<html><body><h1>第二章</h1></body></html>`))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close epub2 failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildAdminSpaceImportTestEPUBWithoutNavOrTOC(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles>
+</container>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>扁平 EPUB</dc:title></metadata>
+  <manifest>
+    <item id="chapter-1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter-2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="chapter-1"/><itemref idref="chapter-2"/></spine>
+</package>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapter1.xhtml", []byte(`<html><body><h1>第一章</h1></body></html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapter2.xhtml", []byte(`<html><body><h1>第二章</h1></body></html>`))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close flat epub failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildAdminSpaceImportTestEPUBWithNonStandardMediaTypes(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles>
+</container>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Fallback EPUB</dc:title></metadata>
+  <manifest>
+    <item id="chapter-1" href="chapter1.xhtml" media-type="application/octet-stream"/>
+    <item id="image-1" href="cover.jpg" media-type="application/octet-stream"/>
+  </manifest>
+  <spine><itemref idref="chapter-1"/></spine>
+</package>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapter1.xhtml", []byte(`<html><body><img src="cover.jpg"/></body></html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/cover.jpg", []byte("jpg"))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close fallback epub failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildAdminSpaceImportTestEPUBWithNonUTF8OPFDeclaration(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles>
+</container>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/content.opf", []byte(`<?xml version="1.0" encoding="ISO-8859-1"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Latin EPUB</dc:title></metadata>
+  <manifest><item id="chapter-1" href="chapter1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="chapter-1"/></spine>
+</package>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/chapter1.xhtml", []byte(`<html><body><h1>Latin</h1></body></html>`))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close non utf-8 epub failed: %v", err)
 	}
 	return buffer.Bytes()
 }
@@ -1609,6 +2700,16 @@ func buildValidAdminSpaceImportCoverPayload(t *testing.T) []byte {
 		t.Fatalf("encode test cover failed: %v", err)
 	}
 	return payload
+}
+
+func buildValidAdminSpaceImportPNGPayload(t *testing.T, width int, height int) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatalf("encode test png failed: %v", err)
+	}
+	return buffer.Bytes()
 }
 
 func buildAdminSpaceImportTestEPUB(t *testing.T) []byte {

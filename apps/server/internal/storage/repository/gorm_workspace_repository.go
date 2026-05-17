@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -1103,24 +1104,29 @@ func (r *gormWorkspaceRepository) ListRevisionsByDocumentID(
 		Version            int                   `gorm:"column:version"`
 		ContentMD          string                `gorm:"column:content_md"`
 		BaseVersion        int                   `gorm:"column:base_version"`
+		EditorUserID       *string               `gorm:"column:editor_user_id"`
+		EditorUserName     *string               `gorm:"column:editor_user_name"`
 		Source             models.RevisionSource `gorm:"column:source"`
 		CreatedAtRaw       string                `gorm:"column:created_at"`
 	}
 
 	var rows []revisionRow
 	if err := r.db.WithContext(ctx).
-		Model(&models.DocumentRevision{}).
+		Table(tableWithAlias(models.DocumentRevision{}, "dr")).
 		Select(selectColumns(
-			qualifiedColumn("", models.DocumentRevisionColumns.DocumentRevisionID),
-			qualifiedColumn("", models.DocumentRevisionColumns.DocumentID),
-			qualifiedColumn("", models.DocumentRevisionColumns.Version),
-			qualifiedColumn("", models.DocumentRevisionColumns.ContentMD),
-			qualifiedColumn("", models.DocumentRevisionColumns.BaseVersion),
-			qualifiedColumn("", models.DocumentRevisionColumns.Source),
-			qualifiedColumn("", models.DocumentRevisionColumns.CreatedAt),
+			qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentRevisionID)+" AS document_revision_id",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)+" AS document_id",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.Version)+" AS version",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.ContentMD)+" AS content_md",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.BaseVersion)+" AS base_version",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.EditorUserID)+" AS editor_user_id",
+			qualifiedColumn("u", models.UserColumns.Name)+" AS editor_user_name",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.Source)+" AS source",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.CreatedAt)+" AS created_at",
 		)).
-		Where(qualifiedColumn("", models.DocumentRevisionColumns.DocumentID)+" = ?", strings.TrimSpace(documentID)).
-		Order(qualifiedColumn("", models.DocumentRevisionColumns.Version) + " DESC, " + qualifiedColumn("", models.DocumentRevisionColumns.CreatedAt) + " DESC, " + qualifiedColumn("", models.DocumentRevisionColumns.ID) + " DESC").
+		Joins("LEFT JOIN "+tableWithAlias(models.User{}, "u")+" ON "+qualifiedColumn("u", models.UserColumns.UserID)+" = "+qualifiedColumn("dr", models.DocumentRevisionColumns.EditorUserID)).
+		Where(qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)+" = ?", strings.TrimSpace(documentID)).
+		Order(qualifiedColumn("dr", models.DocumentRevisionColumns.Version) + " DESC, " + qualifiedColumn("dr", models.DocumentRevisionColumns.CreatedAt) + " DESC, " + qualifiedColumn("dr", models.DocumentRevisionColumns.ID) + " DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -1133,12 +1139,302 @@ func (r *gormWorkspaceRepository) ListRevisionsByDocumentID(
 			Version:            row.Version,
 			ContentMD:          row.ContentMD,
 			BaseVersion:        row.BaseVersion,
+			EditorUserID:       trimOptionalString(row.EditorUserID),
+			EditorUserName:     trimOptionalString(row.EditorUserName),
 			Source:             row.Source,
 			CreatedAtRaw:       row.CreatedAtRaw,
 		})
 	}
 
 	return revisions, nil
+}
+
+func (r *gormWorkspaceRepository) ListRevisionSummariesByDocumentID(
+	ctx context.Context,
+	params WorkspaceListRevisionSummariesParams,
+) ([]WorkspaceRevisionSummaryRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	documentID := strings.TrimSpace(params.DocumentID)
+	if documentID == "" {
+		return []WorkspaceRevisionSummaryRecord{}, nil
+	}
+
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	limit := params.Limit
+	sourceLimit := 0
+	if limit > 0 {
+		// 两类 revision 来源各自只需要取到 offset+limit 的候选集；全局排序后分页仍然正确，
+		// 同时避免长历史文档每次翻页都把所有历史版本读入内存。
+		sourceLimit = offset + limit
+	}
+
+	rows, err := r.listMarkdownRevisionSummaries(ctx, documentID, sourceLimit)
+	if err != nil {
+		return nil, err
+	}
+	officeRows, err := r.listOfficeRevisionSummaries(ctx, documentID, sourceLimit)
+	if err != nil {
+		return nil, err
+	}
+	rows = append(rows, officeRows...)
+
+	// Markdown 与 Office 历史来源不同，合并后统一按版本倒序稳定排序，再做分页。
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Version != rows[j].Version {
+			return rows[i].Version > rows[j].Version
+		}
+		if rows[i].CreatedAtRaw != rows[j].CreatedAtRaw {
+			return rows[i].CreatedAtRaw > rows[j].CreatedAtRaw
+		}
+		return rows[i].RevisionID > rows[j].RevisionID
+	})
+
+	if offset >= len(rows) {
+		return []WorkspaceRevisionSummaryRecord{}, nil
+	}
+	if limit <= 0 || offset+limit > len(rows) {
+		limit = len(rows) - offset
+	}
+	return rows[offset : offset+limit], nil
+}
+
+func (r *gormWorkspaceRepository) GetRevisionDetailByID(
+	ctx context.Context,
+	documentID string,
+	revisionID string,
+) (*WorkspaceRevisionDetailRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("workspace repository db is nil")
+	}
+
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	normalizedRevisionID := strings.TrimSpace(revisionID)
+	if normalizedDocumentID == "" || normalizedRevisionID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	markdownDetail, err := r.getMarkdownRevisionDetail(ctx, normalizedDocumentID, normalizedRevisionID)
+	if err == nil {
+		return markdownDetail, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	officeDetail, err := r.getOfficeRevisionDetail(ctx, normalizedDocumentID, normalizedRevisionID)
+	if err != nil {
+		return nil, err
+	}
+	return officeDetail, nil
+}
+
+type workspaceRevisionSummaryRow struct {
+	RevisionID     string                `gorm:"column:revision_id"`
+	DocumentID     string                `gorm:"column:document_id"`
+	Version        int                   `gorm:"column:version"`
+	BaseVersion    int                   `gorm:"column:base_version"`
+	Format         models.DocumentFormat `gorm:"column:format"`
+	FileName       *string               `gorm:"column:file_name"`
+	MimeType       *string               `gorm:"column:mime_type"`
+	EditorUserID   *string               `gorm:"column:editor_user_id"`
+	EditorUserName *string               `gorm:"column:editor_user_name"`
+	Source         models.RevisionSource `gorm:"column:source"`
+	CreatedAtRaw   string                `gorm:"column:created_at"`
+}
+
+type workspaceRevisionDetailRow struct {
+	RevisionID     string                `gorm:"column:revision_id"`
+	DocumentID     string                `gorm:"column:document_id"`
+	Version        int                   `gorm:"column:version"`
+	BaseVersion    int                   `gorm:"column:base_version"`
+	Format         models.DocumentFormat `gorm:"column:format"`
+	FileName       *string               `gorm:"column:file_name"`
+	MimeType       *string               `gorm:"column:mime_type"`
+	EditorUserID   *string               `gorm:"column:editor_user_id"`
+	EditorUserName *string               `gorm:"column:editor_user_name"`
+	Source         models.RevisionSource `gorm:"column:source"`
+	CreatedAtRaw   string                `gorm:"column:created_at"`
+	ContentMD      *string               `gorm:"column:content_md"`
+	BlobID         *string               `gorm:"column:blob_id"`
+}
+
+func (r *gormWorkspaceRepository) listMarkdownRevisionSummaries(
+	ctx context.Context,
+	documentID string,
+	sourceLimit int,
+) ([]WorkspaceRevisionSummaryRecord, error) {
+	var rows []workspaceRevisionSummaryRow
+	query := r.db.WithContext(ctx).
+		Table(tableWithAlias(models.DocumentRevision{}, "dr")).
+		Select(selectColumns(
+			qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentRevisionID)+" AS revision_id",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)+" AS document_id",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.Version)+" AS version",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.BaseVersion)+" AS base_version",
+			qualifiedColumn("d", models.DocumentColumns.Format)+" AS format",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.EditorUserID)+" AS editor_user_id",
+			qualifiedColumn("u", models.UserColumns.Name)+" AS editor_user_name",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.Source)+" AS source",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.CreatedAt)+" AS created_at",
+		)).
+		Joins("JOIN "+tableWithAlias(models.Document{}, "d")+" ON "+qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = "+qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)).
+		Joins("LEFT JOIN "+tableWithAlias(models.User{}, "u")+" ON "+qualifiedColumn("u", models.UserColumns.UserID)+" = "+qualifiedColumn("dr", models.DocumentRevisionColumns.EditorUserID)).
+		Where(qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)+" = ?", documentID).
+		Order(qualifiedColumn("dr", models.DocumentRevisionColumns.Version) + " DESC, " + qualifiedColumn("dr", models.DocumentRevisionColumns.CreatedAt) + " DESC, " + qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentRevisionID) + " DESC")
+	if sourceLimit > 0 {
+		query = query.Limit(sourceLimit)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return mapWorkspaceRevisionSummaryRows(rows), nil
+}
+
+func (r *gormWorkspaceRepository) listOfficeRevisionSummaries(
+	ctx context.Context,
+	documentID string,
+	sourceLimit int,
+) ([]WorkspaceRevisionSummaryRecord, error) {
+	var rows []workspaceRevisionSummaryRow
+	query := r.db.WithContext(ctx).
+		Table(tableWithAlias(models.DocumentFileRevision{}, "dfr")).
+		Select(selectColumns(
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentFileRevisionID)+" AS revision_id",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentID)+" AS document_id",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.Version)+" AS version",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.BaseVersion)+" AS base_version",
+			qualifiedColumn("d", models.DocumentColumns.Format)+" AS format",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.FileName)+" AS file_name",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.MimeType)+" AS mime_type",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.EditorUserID)+" AS editor_user_id",
+			qualifiedColumn("u", models.UserColumns.Name)+" AS editor_user_name",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.Source)+" AS source",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.CreatedAt)+" AS created_at",
+		)).
+		Joins("JOIN "+tableWithAlias(models.Document{}, "d")+" ON "+qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = "+qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentID)).
+		Joins("LEFT JOIN "+tableWithAlias(models.User{}, "u")+" ON "+qualifiedColumn("u", models.UserColumns.UserID)+" = "+qualifiedColumn("dfr", models.DocumentFileRevisionColumns.EditorUserID)).
+		Where(qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentID)+" = ?", documentID).
+		Order(qualifiedColumn("dfr", models.DocumentFileRevisionColumns.Version) + " DESC, " + qualifiedColumn("dfr", models.DocumentFileRevisionColumns.CreatedAt) + " DESC, " + qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentFileRevisionID) + " DESC")
+	if sourceLimit > 0 {
+		query = query.Limit(sourceLimit)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return mapWorkspaceRevisionSummaryRows(rows), nil
+}
+
+func (r *gormWorkspaceRepository) getMarkdownRevisionDetail(
+	ctx context.Context,
+	documentID string,
+	revisionID string,
+) (*WorkspaceRevisionDetailRecord, error) {
+	var row workspaceRevisionDetailRow
+	if err := r.db.WithContext(ctx).
+		Table(tableWithAlias(models.DocumentRevision{}, "dr")).
+		Select(selectColumns(
+			qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentRevisionID)+" AS revision_id",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)+" AS document_id",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.Version)+" AS version",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.BaseVersion)+" AS base_version",
+			qualifiedColumn("d", models.DocumentColumns.Format)+" AS format",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.ContentMD)+" AS content_md",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.EditorUserID)+" AS editor_user_id",
+			qualifiedColumn("u", models.UserColumns.Name)+" AS editor_user_name",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.Source)+" AS source",
+			qualifiedColumn("dr", models.DocumentRevisionColumns.CreatedAt)+" AS created_at",
+		)).
+		Joins("JOIN "+tableWithAlias(models.Document{}, "d")+" ON "+qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = "+qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)).
+		Joins("LEFT JOIN "+tableWithAlias(models.User{}, "u")+" ON "+qualifiedColumn("u", models.UserColumns.UserID)+" = "+qualifiedColumn("dr", models.DocumentRevisionColumns.EditorUserID)).
+		Where(qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentID)+" = ?", documentID).
+		Where(qualifiedColumn("dr", models.DocumentRevisionColumns.DocumentRevisionID)+" = ?", revisionID).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+	return mapWorkspaceRevisionDetailRow(row), nil
+}
+
+func (r *gormWorkspaceRepository) getOfficeRevisionDetail(
+	ctx context.Context,
+	documentID string,
+	revisionID string,
+) (*WorkspaceRevisionDetailRecord, error) {
+	var row workspaceRevisionDetailRow
+	if err := r.db.WithContext(ctx).
+		Table(tableWithAlias(models.DocumentFileRevision{}, "dfr")).
+		Select(selectColumns(
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentFileRevisionID)+" AS revision_id",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentID)+" AS document_id",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.Version)+" AS version",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.BaseVersion)+" AS base_version",
+			qualifiedColumn("d", models.DocumentColumns.Format)+" AS format",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.BlobID)+" AS blob_id",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.FileName)+" AS file_name",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.MimeType)+" AS mime_type",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.EditorUserID)+" AS editor_user_id",
+			qualifiedColumn("u", models.UserColumns.Name)+" AS editor_user_name",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.Source)+" AS source",
+			qualifiedColumn("dfr", models.DocumentFileRevisionColumns.CreatedAt)+" AS created_at",
+		)).
+		Joins("JOIN "+tableWithAlias(models.Document{}, "d")+" ON "+qualifiedColumn("d", models.DocumentColumns.DocumentID)+" = "+qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentID)).
+		Joins("LEFT JOIN "+tableWithAlias(models.User{}, "u")+" ON "+qualifiedColumn("u", models.UserColumns.UserID)+" = "+qualifiedColumn("dfr", models.DocumentFileRevisionColumns.EditorUserID)).
+		Where(qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentID)+" = ?", documentID).
+		Where(qualifiedColumn("dfr", models.DocumentFileRevisionColumns.DocumentFileRevisionID)+" = ?", revisionID).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+	return mapWorkspaceRevisionDetailRow(row), nil
+}
+
+func mapWorkspaceRevisionSummaryRows(rows []workspaceRevisionSummaryRow) []WorkspaceRevisionSummaryRecord {
+	revisions := make([]WorkspaceRevisionSummaryRecord, 0, len(rows))
+	for _, row := range rows {
+		revisions = append(revisions, mapWorkspaceRevisionSummaryRow(row))
+	}
+	return revisions
+}
+
+func mapWorkspaceRevisionSummaryRow(row workspaceRevisionSummaryRow) WorkspaceRevisionSummaryRecord {
+	return WorkspaceRevisionSummaryRecord{
+		RevisionID:     strings.TrimSpace(row.RevisionID),
+		DocumentID:     strings.TrimSpace(row.DocumentID),
+		Version:        row.Version,
+		BaseVersion:    row.BaseVersion,
+		Format:         models.NormalizeDocumentFormat(row.Format),
+		FileName:       trimOptionalString(row.FileName),
+		MimeType:       trimOptionalString(row.MimeType),
+		EditorUserID:   trimOptionalString(row.EditorUserID),
+		EditorUserName: trimOptionalString(row.EditorUserName),
+		Source:         row.Source,
+		CreatedAtRaw:   row.CreatedAtRaw,
+	}
+}
+
+func mapWorkspaceRevisionDetailRow(row workspaceRevisionDetailRow) *WorkspaceRevisionDetailRecord {
+	summary := workspaceRevisionSummaryRow{
+		RevisionID:     row.RevisionID,
+		DocumentID:     row.DocumentID,
+		Version:        row.Version,
+		BaseVersion:    row.BaseVersion,
+		Format:         row.Format,
+		FileName:       row.FileName,
+		MimeType:       row.MimeType,
+		EditorUserID:   row.EditorUserID,
+		EditorUserName: row.EditorUserName,
+		Source:         row.Source,
+		CreatedAtRaw:   row.CreatedAtRaw,
+	}
+	return &WorkspaceRevisionDetailRecord{
+		WorkspaceRevisionSummaryRecord: mapWorkspaceRevisionSummaryRow(summary),
+		ContentMD:                      trimOptionalString(row.ContentMD),
+		BlobID:                         trimOptionalString(row.BlobID),
+	}
 }
 
 func pointerString(value string) *string {

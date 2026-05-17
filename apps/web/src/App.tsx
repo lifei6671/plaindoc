@@ -61,6 +61,10 @@ import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { TocMenu } from "./components/TocMenu";
 import { DocumentAttachmentPopover } from "./components/DocumentAttachmentPopover";
+import {
+  DocumentRevisionHistoryDialog,
+  DocumentRevisionHistoryTrigger
+} from "./components/DocumentRevisionHistoryDialog";
 import { useConfirmDialog } from "./components/ConfirmDialog";
 import { Toaster } from "./components/ui/sonner";
 import {
@@ -91,6 +95,7 @@ import {
   type DocumentTemplateDetail,
   type DocumentTemplateSummary,
   type OnlyOfficeClientConfig,
+  type RestoreDocumentRevisionResult,
   type UpdateDocumentShareInput,
 } from "./data-access";
 import {
@@ -126,6 +131,10 @@ import {
   formatSavedTime,
   resolveSaveIndicatorVariant
 } from "./editor/status-utils";
+import {
+  hasRevisionHistoryBlockingUnsavedChanges,
+  shouldReloadOnlyOfficeEditConfigAfterRevisionRestore
+} from "./editor/onlyoffice-edit-config";
 import type { PreviewLinkRenderMode, PreviewViewportMode, SaveStatus } from "./editor/types";
 import { useScrollSync } from "./editor/use-scroll-sync";
 import {
@@ -1055,6 +1064,7 @@ export default function App() {
   const [isAttachmentListLoading, setIsAttachmentListLoading] = useState(false);
   const [isAttachmentUploading, setIsAttachmentUploading] = useState(false);
   const [isAttachmentDialogOpen, setIsAttachmentDialogOpen] = useState(false);
+  const [isRevisionHistoryDialogOpen, setIsRevisionHistoryDialogOpen] = useState(false);
   const [pendingAttachmentAction, setPendingAttachmentAction] = useState<{
     attachmentId: string;
     action: "download" | "preview" | "delete";
@@ -1075,6 +1085,8 @@ export default function App() {
   const [onlyOfficeEditConfig, setOnlyOfficeEditConfig] = useState<OnlyOfficeEditConfig | null>(null);
   const [isOnlyOfficeEditConfigLoading, setIsOnlyOfficeEditConfigLoading] = useState(false);
   const [onlyOfficeEditConfigError, setOnlyOfficeEditConfigError] = useState<string | null>(null);
+  // Office 历史版本恢复后 documentId 不变，只能通过显式刷新信号触发编辑配置重载。
+  const [onlyOfficeEditConfigReloadSignal, setOnlyOfficeEditConfigReloadSignal] = useState(0);
   // 图床配置引用：供异步粘贴上传逻辑读取最新值，避免闭包拿到旧配置。
   const imageHostingConfigRef = useRef(imageHostingConfig);
   const isImageHostingConfigLoadingRef = useRef(isImageHostingConfigLoading);
@@ -1129,6 +1141,13 @@ export default function App() {
     }
     return documentAttachments;
   }, [activeDocId, attachmentListDocID, documentAttachments]);
+  const isRevisionHistoryAvailable = Boolean((activeDocId ?? "").trim());
+  const hasRevisionHistoryUnsavedChanges = hasRevisionHistoryBlockingUnsavedChanges({
+    content,
+    isOfficeDocument: isActiveOfficeDocument,
+    lastSavedContent,
+    saveStatus
+  });
   // 预览区主题类名：挂到正文 article 上参与主题变量匹配。
   const activePreviewThemeClassName = useMemo(
     () => getPreviewThemeClassName(activePreviewTheme.id),
@@ -2129,7 +2148,14 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeDocId, activeUser, dataGateway.document, isActiveOfficeDocument, isEditorRoute]);
+  }, [
+    activeDocId,
+    activeUser,
+    dataGateway.document,
+    isActiveOfficeDocument,
+    isEditorRoute,
+    onlyOfficeEditConfigReloadSignal
+  ]);
 
   const extensions = useMemo(
     () => [
@@ -3042,6 +3068,51 @@ export default function App() {
     setLastSavedAt
   ]);
 
+  const handleRevisionRestoreSuccess = useCallback((result: RestoreDocumentRevisionResult) => {
+    const restoredDocument = result.document;
+    const restoredContent = restoredDocument.contentMd ?? "";
+    const restoredThemeID = restoredDocument.themeId || DEFAULT_PREVIEW_THEME_ID;
+
+    // 历史版本恢复成功后，服务端返回的是新的当前文档快照；这里一次性同步编辑器和保存基线，
+    // 避免自动保存把刚恢复的内容误判为本地未保存修改。
+    setBaseVersion(restoredDocument.version);
+    setContent(restoredContent);
+    setLastSavedContent(restoredContent);
+    setLastSavedAt(restoredDocument.updatedAt);
+    setActiveDocumentFormat(restoredDocument.format ?? "markdown");
+    setActiveDocumentTitle(restoredDocument.title || "未命名文档");
+    setActiveDocumentThemeId(restoredThemeID);
+    setActivePreviewThemeId(restoredThemeID);
+    setActiveDocumentSourceFileName(restoredDocument.sourceFileName ?? null);
+    setActiveDocumentSourceMimeType(restoredDocument.sourceMimeType ?? null);
+    setActiveDocumentContentVersion(restoredDocument.contentVersion ?? restoredDocument.version);
+    if (shouldReloadOnlyOfficeEditConfigAfterRevisionRestore(result)) {
+      setOnlyOfficeEditConfigReloadSignal((current) => current + 1);
+      setOnlyOfficeEditConfig(null);
+      setIsOnlyOfficeEditConfigLoading(true);
+      setOnlyOfficeEditConfigError(null);
+    }
+    setSaveStatus("saved");
+    setStatusMessage(
+      `已恢复到历史版本 v${result.restoredFromRevision.version}，当前文档 v${restoredDocument.version}`
+    );
+  }, [
+    setActiveDocumentContentVersion,
+    setActiveDocumentFormat,
+    setActiveDocumentSourceFileName,
+    setActiveDocumentSourceMimeType,
+    setActiveDocumentThemeId,
+    setActiveDocumentTitle,
+    setBaseVersion,
+    setContent,
+    setIsOnlyOfficeEditConfigLoading,
+    setLastSavedAt,
+    setLastSavedContent,
+    setOnlyOfficeEditConfig,
+    setOnlyOfficeEditConfigError,
+    setOnlyOfficeEditConfigReloadSignal
+  ]);
+
   const handleOnlyOfficeEditorStateChange = useCallback(
     (state: OnlyOfficeEditorPaneState) => {
       switch (state.status) {
@@ -3633,9 +3704,25 @@ export default function App() {
                 />
               </>
             ) : null}
+            {/* 历史版本入口：仅打开受控弹窗，列表数据延后到弹窗内部加载。 */}
+            <DocumentRevisionHistoryTrigger
+              disabled={!isRevisionHistoryAvailable}
+              onOpen={() => setIsRevisionHistoryDialogOpen(true)}
+            />
           </div>
         </TooltipProvider>
       </header>
+      <DocumentRevisionHistoryDialog
+        open={isRevisionHistoryDialogOpen}
+        documentId={activeDocId}
+        documentTitle={activeDocumentTitle}
+        currentContent={content}
+        currentDocumentVersion={baseVersion}
+        hasUnsavedChanges={hasRevisionHistoryUnsavedChanges}
+        dataGateway={dataGateway}
+        onOpenChange={setIsRevisionHistoryDialogOpen}
+        onRestoreSuccess={handleRevisionRestoreSuccess}
+      />
       <input
         ref={imageFileInputRef}
         type="file"

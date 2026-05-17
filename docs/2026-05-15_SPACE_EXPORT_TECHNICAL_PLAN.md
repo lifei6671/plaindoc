@@ -5,6 +5,8 @@
 **适用范围**: `apps/server`、`apps/web`、`docs`  
 **目标**: 在管理后台空间管理中增加空间导出与导入能力。导出侧从空间操作菜单发起，后端异步生成可回灌的 `.plaindoc` 空间交换包，或生成用于离线阅读分发的 EPUB 文件；导入侧在空间管理上方提供“导入空间”按钮，选择 `.plaindoc` 后先解析元数据，再将导出包原样导入为一个新空间。导入和导出任务统一进入全局任务中心，只要任一任务处于进行中，后台右下角展示全局进度浮层；点击浮层可展开查看所有导入/导出任务。页面刷新后，只要用户仍保持登录态，前端应能恢复当前用户未结束任务并继续展示进度。
 
+> **修订说明（2026-05-17）**：EPUB 不再仅作为阅读导出产物。新的产品口径要求后台空间导入支持 `.epub`，并将 EPUB 作为一个新空间导入，目录映射为空间目录树，章节 HTML 转换为 Markdown。EPUB 导入细节以 `docs/2026-05-17_EPUB_SPACE_IMPORT_AND_DOCUMENT_HISTORY_TECHNICAL_PLAN.md` 为准；本文中“EPUB 不作为导入包”的旧表述仅保留为历史背景。
+
 ---
 
 ## 1. 方案结论
@@ -213,7 +215,7 @@ EPUB 不新建 Office 高保真渲染链路，只把现有阅读/分享页使用
 
 只有 `source_zip` 且同时包含附件与 Office 源文件时，manifest 才能标记 `importable=true`。服务端创建 `source_zip` 导出任务时会强制开启附件和 Office 源文件，避免前端绕过选项后生成不可回灌的 `.plaindoc`。
 
-EPUB 不参与上述原样导入约束。EPUB 是阅读产物，允许为了阅读器兼容性做语义级降级。
+EPUB 导出不参与 `.plaindoc` 原样回灌约束；导出的 EPUB 仍是阅读产物，允许为了阅读器兼容性做语义级降级。EPUB 作为外部文件导入新空间的能力属于后续补充范围，详见 `docs/2026-05-17_EPUB_SPACE_IMPORT_AND_DOCUMENT_HISTORY_TECHNICAL_PLAN.md`。
 
 ### 4.2 格式选项
 
@@ -257,7 +259,7 @@ EPUB 导出遵循“可读优先、语义降级、不做高保真”的原则。
 
 明确不做：
 
-1. EPUB 反向导入。
+1. `.epub` 导出产物的原样反向回灌；外部标准 EPUB 导入新空间以 2026-05-17 补充方案为准。
 2. Word 像素级版式还原。
 3. Excel 高保真布局还原。
 4. Office 宏、批注、修订记录、复杂图表还原。
@@ -618,7 +620,7 @@ Authorization: Bearer <access-token>
 4. 若 `manifest.importable=false`，保留预览并返回 warnings，但后续 commit 禁止提交。
 5. 若 `importable=true` 但缺少文档、附件或 Office source 引用文件，inspect 直接返回 package not importable。
 6. inspect 必须通过 `CanImportSpace(actorUserID)`，避免无创建空间能力的用户滥用 staging 存储或探测导入包结构。
-7. inspect 会拒绝 EPUB、重复 zip entry、不安全路径、超大上传、超大元数据 entry、过多 entry 和超出总解压大小上限的包。
+7. `.plaindoc` inspect 会拒绝重复 zip entry、不安全路径、超大上传、超大元数据 entry、过多 entry 和超出总解压大小上限的包；`.epub` inspect 属于后续补充能力，校验规则见 2026-05-17 EPUB 空间导入方案。
 
 ### 6.5 提交导入到新空间
 
@@ -1611,7 +1613,7 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 21. EPUB 导出包含合法 `mimetype`、`container.xml`、`content.opf` 和 `nav.xhtml`。
 22. EPUB 中 Markdown 文档生成 XHTML 章节。
 23. EPUB 中 `docx/xlsx` 复用现有 Office HTML 渲染链路生成 XHTML 章节。
-24. EPUB 不被导入 inspect 接口识别为空间交换包。
+24. EPUB 导出产物不被 `.plaindoc` inspect 识别为空间交换包；标准 `.epub` 文件作为新空间导入由 2026-05-17 补充方案覆盖。
 25. 创建导出任务后写入 `admin_space_transfer_jobs`。
 26. 创建导入任务后写入 `admin_space_transfer_jobs`。
 27. 任务列表只返回当前 actor 的任务。

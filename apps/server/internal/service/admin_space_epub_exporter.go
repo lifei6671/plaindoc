@@ -116,12 +116,17 @@ func (s *AdminSpaceExportService) exportAdminSpaceEPUBPackage(
 	}
 	defer os.RemoveAll(mediaTempDir)
 
-	book, err := s.buildAdminSpaceEPUB(ctx, *space, pkg, exportedAt, mediaTempDir)
+	renderedDocumentCount := 0
+	totalDocumentCount := len(pkg.Manifest.Documents)
+	book, err := s.buildAdminSpaceEPUB(ctx, *space, pkg, exportedAt, mediaTempDir, func(document AdminSpaceExportDocumentEntry) {
+		renderedDocumentCount++
+		s.publishAdminSpaceEPUBDocumentProgress(job.JobID, renderedDocumentCount, totalDocumentCount, document)
+	})
 	if err != nil {
 		return "", "", 0, err
 	}
 
-	fileName := buildAdminSpaceExportEPUBFileName(job.SpaceID, exportedAt)
+	fileName := buildAdminSpaceExportEPUBFileName(space.Name, job.SpaceID)
 	partPath := filepath.Join(exportDir, job.JobID+".part")
 	finalPath := filepath.Join(exportDir, job.JobID+".epub")
 	if err := writeAdminSpaceEPUBFile(partPath, book); err != nil {
@@ -145,6 +150,7 @@ func (s *AdminSpaceExportService) buildAdminSpaceEPUB(
 	pkg adminSpaceExportPackage,
 	exportedAt time.Time,
 	mediaTempDir string,
+	onDocumentRendered func(AdminSpaceExportDocumentEntry),
 ) (*epub.Epub, error) {
 	title := strings.TrimSpace(space.Name)
 	if title == "" {
@@ -166,6 +172,9 @@ func (s *AdminSpaceExportService) buildAdminSpaceEPUB(
 
 	cssPath, err := book.AddCSS(adminSpaceEPUBCSSDataURL(), "plaindoc.css")
 	if err != nil {
+		return nil, err
+	}
+	if err := addAdminSpaceEPUBCover(book, pkg, mediaTempDir); err != nil {
 		return nil, err
 	}
 	if _, err := book.AddSection(buildAdminSpaceEPUBTitlePage(space, exportedAt), title, "index.xhtml", cssPath); err != nil {
@@ -197,6 +206,9 @@ func (s *AdminSpaceExportService) buildAdminSpaceEPUB(
 				renderedBody, err := s.renderAdminSpaceEPUBDocument(ctx, book, imageSources, pkg, document, mediaTempDir)
 				if err != nil {
 					return err
+				}
+				if onDocumentRendered != nil {
+					onDocumentRendered(document)
 				}
 				body = renderedBody
 				renderedDocumentNodes[nodeID] = struct{}{}
@@ -232,6 +244,9 @@ func (s *AdminSpaceExportService) buildAdminSpaceEPUB(
 		if err != nil {
 			return nil, err
 		}
+		if onDocumentRendered != nil {
+			onDocumentRendered(document)
+		}
 		sectionTitle := strings.TrimSpace(document.Title)
 		if sectionTitle == "" {
 			sectionTitle = strings.TrimSpace(document.DocumentID)
@@ -247,6 +262,39 @@ func (s *AdminSpaceExportService) buildAdminSpaceEPUB(
 		}
 	}
 	return book, nil
+}
+
+func (s *AdminSpaceExportService) publishAdminSpaceEPUBDocumentProgress(
+	jobID string,
+	renderedDocumentCount int,
+	totalDocumentCount int,
+	document AdminSpaceExportDocumentEntry,
+) {
+	if totalDocumentCount <= 0 || renderedDocumentCount <= 0 {
+		return
+	}
+	if renderedDocumentCount > totalDocumentCount {
+		renderedDocumentCount = totalDocumentCount
+	}
+	// 55% 之前用于元数据、目录和导出包构建；55%-90% 按已渲染章节数推进，避免大 EPUB 长时间卡在固定进度。
+	progress := 55 + (renderedDocumentCount*35+totalDocumentCount-1)/totalDocumentCount
+	if progress > 90 {
+		progress = 90
+	}
+	title := strings.TrimSpace(document.Title)
+	if title == "" {
+		title = strings.TrimSpace(document.DocumentID)
+	}
+	message := fmt.Sprintf("正在渲染 EPUB 章节（%d/%d）", renderedDocumentCount, totalDocumentCount)
+	if title != "" {
+		message += "：" + title
+	}
+	s.PublishProgress(jobID, AdminSpaceTransferEvent{
+		Type:     AdminSpaceTransferEventTypeProgress,
+		Stage:    "epub_documents",
+		Progress: progress,
+		Message:  message,
+	})
 }
 
 func addAdminSpaceEPUBSection(
@@ -395,6 +443,66 @@ func parseAdminSpaceExportedAt(value string) time.Time {
 
 func adminSpaceEPUBCSSDataURL() string {
 	return "data:text/css;base64," + base64.StdEncoding.EncodeToString([]byte(adminSpaceEPUBBaseCSS))
+}
+
+func addAdminSpaceEPUBCover(book *epub.Epub, pkg adminSpaceExportPackage, mediaTempDir string) error {
+	if book == nil || pkg.Manifest.Space.Cover == nil {
+		return nil
+	}
+	cover := pkg.Manifest.Space.Cover
+	coverPath := strings.TrimSpace(cover.Path)
+	if coverPath == "" {
+		return nil
+	}
+	coverContent, ok := pkg.Files[coverPath]
+	if !ok {
+		return fmt.Errorf("EPUB 空间封面文件缺失: %s", coverPath)
+	}
+	if len(coverContent) == 0 {
+		return fmt.Errorf("EPUB 空间封面内容为空: %s", coverPath)
+	}
+	if err := validateAdminSpaceEPUBImageSize(int64(len(coverContent))); err != nil {
+		return fmt.Errorf("EPUB 空间封面过大: %w", err)
+	}
+	if err := os.MkdirAll(mediaTempDir, 0o700); err != nil {
+		return err
+	}
+	internalFileName := "cover" + adminSpaceEPUBCoverExtension(*cover)
+	tempCoverPath := filepath.Join(mediaTempDir, internalFileName)
+	// go-epub 的 SetCover 需要先通过 AddImage 得到内部图片路径；这里使用临时文件桥接
+	// 导出包内的 cover payload，避免读取公开 URL 或绕过本地对象存储边界。
+	if err := os.WriteFile(tempCoverPath, coverContent, 0o600); err != nil {
+		return err
+	}
+	internalImagePath, err := book.AddImage(tempCoverPath, internalFileName)
+	if err != nil {
+		return err
+	}
+	if err := book.SetCover(internalImagePath, ""); err != nil {
+		return err
+	}
+	return nil
+}
+
+func adminSpaceEPUBCoverExtension(cover AdminSpaceExportCoverEntry) string {
+	if ext := strings.ToLower(strings.TrimSpace(path.Ext(cover.FileName))); ext != "" && len(ext) <= 8 {
+		return ext
+	}
+	if ext := strings.ToLower(strings.TrimSpace(path.Ext(cover.Path))); ext != "" && len(ext) <= 8 {
+		return ext
+	}
+	switch strings.ToLower(strings.TrimSpace(cover.MimeType)) {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/svg+xml":
+		return ".svg"
+	default:
+		return ".png"
+	}
 }
 
 func localizeAdminSpaceEPUBImages(book *epub.Epub, imageSources map[string]string, body string, mediaTempDir string) (string, error) {
@@ -700,12 +808,10 @@ func writeAdminSpaceEPUBFile(partPath string, book *epub.Epub) error {
 	return nil
 }
 
-func buildAdminSpaceExportEPUBFileName(spaceID string, exportedAt time.Time) string {
-	return fmt.Sprintf(
-		"space-%s-%s.epub",
-		sanitizeAdminSpaceExportPathSegment(spaceID, "space"),
-		exportedAt.Format("20060102150405"),
-	)
+func buildAdminSpaceExportEPUBFileName(spaceName string, fallbackSpaceID string) string {
+	// EPUB 是面向最终阅读分发的文件，下载名优先使用空间名，便于用户在本地识别。
+	base := sanitizeAdminSpaceExportPathSegment(spaceName, strings.TrimSpace(fallbackSpaceID))
+	return base + ".epub"
 }
 
 func errorsIsRecordNotFound(err error) bool {

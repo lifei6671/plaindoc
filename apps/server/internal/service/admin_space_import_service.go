@@ -44,6 +44,10 @@ const MaxAdminSpaceImportUploadBytes int64 = 512 << 20
 const maxAdminSpaceImportUploadBytes = MaxAdminSpaceImportUploadBytes
 
 const (
+	AdminSpaceImportPackageTypeEPUB = "epub"
+)
+
+const (
 	adminSpaceImportMIMEDOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	adminSpaceImportMIMEXLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
@@ -59,14 +63,16 @@ type InspectAdminSpaceImportInput struct {
 
 // AdminSpaceImportInspectResult 后台空间导入包解析结果。
 type AdminSpaceImportInspectResult struct {
-	ImportID       string
-	PackageVersion int
-	PackageType    string
-	ExportedAt     string
-	Importable     bool
-	Space          AdminSpaceImportPreviewSpace
-	Summary        AdminSpaceExportManifestSummary
-	Warnings       []string
+	ImportID          string
+	PackageVersion    int
+	PackageType       string
+	ExportedAt        string
+	SourcePublishedAt string
+	SourceAuthors     []string
+	Importable        bool
+	Space             AdminSpaceImportPreviewSpace
+	Summary           AdminSpaceExportManifestSummary
+	Warnings          []string
 }
 
 // AdminSpaceImportPreviewSpace 展示导入包中的源空间信息。
@@ -96,20 +102,22 @@ type CommitAdminSpaceImportResult struct {
 
 // AdminSpaceImportStaging 记录导入包暂存信息。
 type AdminSpaceImportStaging struct {
-	ImportID       string
-	ActorUserID    string
-	FileName       string
-	ContentType    string
-	FilePath       string
-	PackageVersion int
-	PackageType    string
-	ExportedAt     string
-	Importable     bool
-	Space          AdminSpaceImportPreviewSpace
-	Summary        AdminSpaceExportManifestSummary
-	Warnings       []string
-	CreatedAt      time.Time
-	ExpiresAt      time.Time
+	ImportID          string
+	ActorUserID       string
+	FileName          string
+	ContentType       string
+	FilePath          string
+	PackageVersion    int
+	PackageType       string
+	ExportedAt        string
+	SourcePublishedAt string
+	SourceAuthors     []string
+	Importable        bool
+	Space             AdminSpaceImportPreviewSpace
+	Summary           AdminSpaceExportManifestSummary
+	Warnings          []string
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
 }
 
 // AdminSpaceImportStatus 定义后台空间导入任务状态。
@@ -127,6 +135,7 @@ type AdminSpaceImportJob struct {
 	JobID                string
 	ImportID             string
 	ActorUserID          string
+	PackageType          string
 	RequestedSpaceID     string
 	RequestedSpaceName   string
 	RequestedCategoryID  string
@@ -328,14 +337,68 @@ func (s *AdminSpaceImportService) Inspect(
 		return AdminSpaceImportInspectResult{}, errcode.ErrAdminSpaceImportZipInvalid
 	}
 
+	importID := strings.ToLower(ulid.Make().String())
+	if strings.EqualFold(filepath.Ext(fileName), ".epub") {
+		preview, warnings, err := inspectAdminSpaceImportEPUB(payload)
+		if err != nil {
+			slog.WarnContext(ctx, "EPUB 导入包预检失败",
+				"actorUserID", strings.TrimSpace(input.ActorUserID),
+				"fileName", fileName,
+				"error", err,
+			)
+			return AdminSpaceImportInspectResult{}, err
+		}
+		now := s.now()
+		preview.Space.SpaceID = "epub-" + importID
+		stagingPath, err := s.writeStagingFile(importID, fileName, payload)
+		if err != nil {
+			return AdminSpaceImportInspectResult{}, err
+		}
+		staging := AdminSpaceImportStaging{
+			ImportID:          importID,
+			ActorUserID:       strings.TrimSpace(input.ActorUserID),
+			FileName:          fileName,
+			ContentType:       contentType,
+			FilePath:          stagingPath,
+			PackageVersion:    AdminSpaceExportPackageVersion,
+			PackageType:       AdminSpaceImportPackageTypeEPUB,
+			SourcePublishedAt: strings.TrimSpace(preview.SourcePublishedAt),
+			SourceAuthors:     append([]string(nil), preview.SourceAuthors...),
+			Importable:        true,
+			Space:             preview.Space,
+			Summary:           preview.Summary,
+			Warnings:          cloneAdminSpaceImportWarnings(warnings),
+			CreatedAt:         now,
+			ExpiresAt:         now.Add(defaultAdminSpaceImportStagingTTL),
+		}
+		s.store.SaveStaging(staging)
+		slog.InfoContext(ctx, "EPUB 导入包预检完成",
+			"actorUserID", strings.TrimSpace(input.ActorUserID),
+			"importID", importID,
+			"title", staging.Space.Name,
+			"documentCount", staging.Summary.DocumentCount,
+			"imageCount", staging.Summary.ImageCount,
+		)
+		return AdminSpaceImportInspectResult{
+			ImportID:          importID,
+			PackageVersion:    staging.PackageVersion,
+			PackageType:       staging.PackageType,
+			SourcePublishedAt: staging.SourcePublishedAt,
+			SourceAuthors:     append([]string(nil), staging.SourceAuthors...),
+			Importable:        staging.Importable,
+			Space:             staging.Space,
+			Summary:           staging.Summary,
+			Warnings:          cloneAdminSpaceImportWarnings(staging.Warnings),
+		}, nil
+	}
+
 	manifest, _, warnings, err := inspectAdminSpaceImportZip(payload)
 	if err != nil {
 		return AdminSpaceImportInspectResult{}, err
 	}
 
-	importID := strings.ToLower(ulid.Make().String())
 	now := s.now()
-	stagingPath, err := s.writeStagingFile(importID, payload)
+	stagingPath, err := s.writeStagingFile(importID, fileName, payload)
 	if err != nil {
 		return AdminSpaceImportInspectResult{}, err
 	}
@@ -357,21 +420,30 @@ func (s *AdminSpaceImportService) Inspect(
 			HasCover:   manifest.Space.Cover != nil,
 		},
 		Summary:   manifest.Summary,
-		Warnings:  warnings,
+		Warnings:  cloneAdminSpaceImportWarnings(warnings),
 		CreatedAt: now,
 		ExpiresAt: now.Add(defaultAdminSpaceImportStagingTTL),
 	}
 	s.store.SaveStaging(staging)
 	return AdminSpaceImportInspectResult{
-		ImportID:       importID,
-		PackageVersion: staging.PackageVersion,
-		PackageType:    staging.PackageType,
-		ExportedAt:     staging.ExportedAt,
-		Importable:     staging.Importable,
-		Space:          staging.Space,
-		Summary:        staging.Summary,
-		Warnings:       staging.Warnings,
+		ImportID:          importID,
+		PackageVersion:    staging.PackageVersion,
+		PackageType:       staging.PackageType,
+		ExportedAt:        staging.ExportedAt,
+		SourcePublishedAt: staging.SourcePublishedAt,
+		SourceAuthors:     append([]string(nil), staging.SourceAuthors...),
+		Importable:        staging.Importable,
+		Space:             staging.Space,
+		Summary:           staging.Summary,
+		Warnings:          cloneAdminSpaceImportWarnings(staging.Warnings),
 	}, nil
+}
+
+// cloneAdminSpaceImportWarnings 保证 inspect 响应中的 warnings 始终编码为 JSON 数组。
+// Go 的 nil slice 会被编码成 null，前端按数组渲染时会触发运行时错误。
+func cloneAdminSpaceImportWarnings(warnings []string) []string {
+	normalized := make([]string, 0, len(warnings))
+	return append(normalized, warnings...)
 }
 
 func readAdminSpaceImportUpload(reader io.Reader, limitBytes int64) ([]byte, error) {
@@ -392,10 +464,11 @@ func readAdminSpaceImportUpload(reader io.Reader, limitBytes int64) ([]byte, err
 }
 
 func isSupportedAdminSpaceImportUploadType(fileName string, contentType string) bool {
-	return strings.EqualFold(filepath.Ext(strings.TrimSpace(fileName)), ".plaindoc")
+	extension := filepath.Ext(strings.TrimSpace(fileName))
+	return strings.EqualFold(extension, ".plaindoc") || strings.EqualFold(extension, ".epub")
 }
 
-func (s *AdminSpaceImportService) writeStagingFile(importID string, payload []byte) (string, error) {
+func (s *AdminSpaceImportService) writeStagingFile(importID string, sourceFileName string, payload []byte) (string, error) {
 	if len(payload) == 0 {
 		return "", errcode.ErrAdminSpaceImportZipInvalid
 	}
@@ -407,7 +480,11 @@ func (s *AdminSpaceImportService) writeStagingFile(importID string, payload []by
 	if err := os.MkdirAll(cleanDir, 0o700); err != nil {
 		return "", err
 	}
-	fileName := sanitizeAdminSpaceExportPathSegment(importID, "import") + ".plaindoc"
+	extension := strings.ToLower(filepath.Ext(strings.TrimSpace(sourceFileName)))
+	if extension != ".epub" {
+		extension = ".plaindoc"
+	}
+	fileName := sanitizeAdminSpaceExportPathSegment(importID, "import") + extension
 	filePath := filepath.Join(cleanDir, fileName)
 	if err := os.WriteFile(filePath, payload, 0o600); err != nil {
 		return "", err
@@ -1223,6 +1300,42 @@ func (s *AdminSpaceImportService) ensureImportedBlob(
 	return blob, true, nil
 }
 
+func (s *AdminSpaceImportService) localizeAdminSpaceEPUBChapterImages(
+	ctx context.Context,
+	input adminSpaceEPUBImageLocalizeInput,
+	spaceID string,
+	documentID string,
+) (string, []string, []models.DocumentAttachmentBlob, error) {
+	createdBlobs := make([]models.DocumentAttachmentBlob, 0)
+	input.Localize = func(asset adminSpaceEPUBImageAsset) (string, error) {
+		// EPUB 图片本地化统一复用导入侧 blob 写入能力，确保 URL、hash 去重和失败清理语义一致。
+		blob, created, err := s.ensureImportedBlob(
+			ctx,
+			asset.Payload,
+			asset.FileName,
+			asset.ContentType,
+			spaceID,
+			documentID,
+			s.now(),
+		)
+		if err != nil {
+			return "", err
+		}
+		if blob == nil {
+			return "", fmt.Errorf("图片 blob 为空")
+		}
+		if created {
+			createdBlobs = append(createdBlobs, *blob)
+		}
+		return strings.TrimSpace(blob.ObjectURL), nil
+	}
+	rewrittenHTML, warnings, err := localizeAdminSpaceEPUBChapterImages(input)
+	if err != nil {
+		return "", warnings, createdBlobs, err
+	}
+	return rewrittenHTML, warnings, createdBlobs, nil
+}
+
 func (s *AdminSpaceImportService) cleanupCreatedImportBlobs(ctx context.Context, blobs []models.DocumentAttachmentBlob) error {
 	if s == nil || s.attachmentWriter == nil {
 		return nil
@@ -1441,14 +1554,16 @@ func (s *AdminSpaceImportService) Commit(
 		return CommitAdminSpaceImportResult{}, tokenErr
 	}
 	now := s.now()
+	request := resolveAdminSpaceImportCommitRequest(staging, input)
 	job := AdminSpaceImportJob{
 		JobID:                jobID,
 		ImportID:             staging.ImportID,
 		ActorUserID:          strings.TrimSpace(input.ActorUserID),
-		RequestedSpaceID:     strings.TrimSpace(input.SpaceID),
-		RequestedSpaceName:   strings.TrimSpace(input.SpaceName),
-		RequestedCategoryID:  strings.TrimSpace(input.CategoryID),
-		RequestedVisibility:  strings.TrimSpace(input.Visibility),
+		PackageType:          request.packageType,
+		RequestedSpaceID:     request.spaceID,
+		RequestedSpaceName:   request.spaceName,
+		RequestedCategoryID:  request.categoryID,
+		RequestedVisibility:  request.visibility,
 		Status:               AdminSpaceImportStatusQueued,
 		StreamTokenHash:      streamTokenHash,
 		StreamTokenExpiresAt: now.Add(defaultAdminSpaceTransferTokenTTL),
@@ -1481,6 +1596,35 @@ func (s *AdminSpaceImportService) Commit(
 		JobID:     jobID,
 		StreamURL: "/api/admin/space-imports/" + jobID + "/events?token=" + streamToken,
 	}, nil
+}
+
+type adminSpaceImportCommitRequest struct {
+	packageType string
+	spaceID     string
+	spaceName   string
+	categoryID  string
+	visibility  string
+}
+
+func resolveAdminSpaceImportCommitRequest(
+	staging AdminSpaceImportStaging,
+	input CommitAdminSpaceImportInput,
+) adminSpaceImportCommitRequest {
+	request := adminSpaceImportCommitRequest{
+		packageType: strings.TrimSpace(staging.PackageType),
+		spaceID:     strings.TrimSpace(input.SpaceID),
+		spaceName:   strings.TrimSpace(input.SpaceName),
+		categoryID:  strings.TrimSpace(input.CategoryID),
+		visibility:  strings.TrimSpace(input.Visibility),
+	}
+	if request.packageType == AdminSpaceImportPackageTypeEPUB {
+		// EPUB 导入永远创建新空间，客户端传入的 spaceId 只能用于旧空间覆盖场景，这里必须忽略。
+		request.spaceID = ""
+		if request.spaceName == "" {
+			request.spaceName = strings.TrimSpace(staging.Space.Name)
+		}
+	}
+	return request
 }
 
 func (s *AdminSpaceImportService) canRestoreAdminSpaceImportPackage() bool {
@@ -1598,7 +1742,7 @@ func (s *AdminSpaceImportService) runAdminSpaceImportJob(ctx context.Context, jo
 		s.persistImportTransferJobFailed(ctx, jobID, "load", "导入任务不存在", failedAt)
 		return
 	}
-	newSpaceID, err := s.restoreAdminSpaceImportPackage(ctx, job)
+	newSpaceID, err := s.restoreAdminSpaceImportJob(ctx, job)
 	if err != nil {
 		failureMessage := err.Error()
 		failedAt := s.now()
@@ -1612,6 +1756,907 @@ func (s *AdminSpaceImportService) runAdminSpaceImportJob(ctx context.Context, jo
 	s.store.Complete(jobID, newSpaceID, completedAt)
 	s.persistImportTransferJobCompleted(ctx, strings.TrimSpace(jobID), newSpaceID, completedAt)
 	_ = s.recordImportAudit(ctx, job, "space", newSpaceID, adminSpaceImportAuditSuccess, "completed", "", newSpaceID)
+}
+
+func (s *AdminSpaceImportService) restoreAdminSpaceImportJob(ctx context.Context, job AdminSpaceImportJob) (string, error) {
+	switch strings.TrimSpace(job.PackageType) {
+	case AdminSpaceImportPackageTypeEPUB:
+		return s.restoreAdminSpaceImportEPUBPackage(ctx, job)
+	default:
+		return s.restoreAdminSpaceImportPackage(ctx, job)
+	}
+}
+
+func (s *AdminSpaceImportService) restoreAdminSpaceImportEPUBPackage(
+	ctx context.Context,
+	job AdminSpaceImportJob,
+) (string, error) {
+	if s == nil || s.workspaceWriter == nil {
+		return "", fmt.Errorf("导入服务依赖未配置")
+	}
+	if ok, err := s.CanImportSpace(ctx, job.ActorUserID); err != nil {
+		return "", err
+	} else if !ok {
+		return "", errcode.ErrAdminSpaceImportCommitForbidden
+	}
+	staging, err := s.store.GetStaging(job.ImportID, job.ActorUserID, s.now())
+	if err != nil {
+		return "", err
+	}
+	if !staging.Importable {
+		return "", errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+
+	s.publishImportProgress(ctx, job, "epub_parse", 10, "正在解析 EPUB 包")
+	epubPackage, err := readAdminSpaceEPUBImportPackage(staging.FilePath)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if closeErr := epubPackage.Close(); closeErr != nil {
+			slog.WarnContext(ctx, "关闭 EPUB 导入包失败", "importID", job.ImportID, "error", closeErr)
+		}
+	}()
+
+	plan, planWarnings := planAdminSpaceEPUBImportTree(adminSpaceEPUBPlanInput{
+		OPFRoot:                    epubPackage.OPFRoot,
+		Items:                      epubPackage.NavItems,
+		ChapterHTMLByCanonicalHref: epubPackage.ChapterHTMLByCanonicalHref,
+		NewNodeID: func() string {
+			return strings.ToLower(ulid.Make().String())
+		},
+		NewDocumentID: func() string {
+			return strings.ToLower(ulid.Make().String())
+		},
+	})
+	if len(plan.Root) == 0 {
+		return "", errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	for _, warning := range planWarnings {
+		slog.WarnContext(ctx, "EPUB 目录规划出现可恢复 warning",
+			"jobID", strings.TrimSpace(job.JobID),
+			"importID", strings.TrimSpace(job.ImportID),
+			"warning", warning,
+		)
+	}
+
+	s.publishImportProgress(ctx, job, "epub_space", 30, "正在创建 EPUB 导入空间")
+	newSpace, coverAsset, err := s.createImportedEPUBSpace(ctx, job, staging, epubPackage)
+	if err != nil {
+		return "", err
+	}
+	importer := adminSpaceEPUBPackageImporter{
+		service:        s,
+		job:            job,
+		pkg:            epubPackage,
+		newSpaceID:     newSpace.SpaceID,
+		plan:           plan,
+		converter:      NewHTMLMarkdownConverter(),
+		totalDocuments: max(1, countAdminSpaceEPUBPlannedDocuments(plan.Root)),
+		createdBlobs:   make([]models.DocumentAttachmentBlob, 0),
+	}
+	// 文档写入阶段使用“已导入文档数 / 总文档数”推进；这里先发布阶段起点，后续每写入一个文档再递增。
+	s.publishImportProgress(ctx, job, "epub_convert", importer.documentProgress(0), fmt.Sprintf("正在转换并导入 EPUB 文档（0/%d）", importer.totalDocuments))
+	if err := importer.restoreTree(ctx, plan.Root, nil); err != nil {
+		if cleanupErr := s.cleanupFailedImportSpace(ctx, newSpace.SpaceID, importer.createdBlobs, coverAsset); cleanupErr != nil {
+			return newSpace.SpaceID, fmt.Errorf("%v；EPUB 导入失败后清理已创建资源: %w", err, cleanupErr)
+		}
+		return newSpace.SpaceID, err
+	}
+	s.publishImportProgress(ctx, job, "epub_done", 95, "EPUB 导入写入完成")
+	s.store.SaveMappings(job.JobID, AdminSpaceImportIDMappings{
+		SpaceIDMappings: map[string]string{
+			strings.TrimSpace(staging.Space.SpaceID): newSpace.SpaceID,
+		},
+		NodeIDMappings:     collectAdminSpaceEPUBNodeIDMappings(plan.Root),
+		DocumentIDMappings: collectAdminSpaceEPUBDocumentIDMappings(plan.Root),
+	}, s.now())
+	s.removeCompletedImportStaging(ctx, staging)
+	slog.InfoContext(ctx, "EPUB 导入任务写库完成",
+		"jobID", strings.TrimSpace(job.JobID),
+		"importID", strings.TrimSpace(job.ImportID),
+		"spaceID", newSpace.SpaceID,
+		"sourceAuthors", epubPackage.Authors,
+		"sourcePublishedAt", epubPackage.PublishedAt,
+		"planWarningCount", len(planWarnings),
+	)
+	return newSpace.SpaceID, nil
+}
+
+func (s *AdminSpaceImportService) publishImportProgress(
+	ctx context.Context,
+	job AdminSpaceImportJob,
+	stage string,
+	progress int,
+	message string,
+) {
+	if s == nil {
+		return
+	}
+	normalizedJobID := strings.TrimSpace(job.JobID)
+	if normalizedJobID == "" {
+		return
+	}
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 99 {
+		progress = 99
+	}
+	normalizedStage := strings.TrimSpace(stage)
+	normalizedMessage := strings.TrimSpace(message)
+	s.PublishProgress(normalizedJobID, AdminSpaceTransferEvent{
+		Type:     AdminSpaceTransferEventTypeProgress,
+		Stage:    normalizedStage,
+		Progress: progress,
+		Message:  normalizedMessage,
+	})
+	slog.InfoContext(ctx, "空间导入任务进度",
+		"jobID", normalizedJobID,
+		"importID", strings.TrimSpace(job.ImportID),
+		"packageType", strings.TrimSpace(job.PackageType),
+		"stage", normalizedStage,
+		"progress", progress,
+		"message", normalizedMessage,
+	)
+}
+
+func readAdminSpaceEPUBImportPackage(filePath string) (adminSpaceEPUBImportPackage, error) {
+	reader, err := zip.OpenReader(strings.TrimSpace(filePath))
+	if err != nil {
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	closed := false
+	closeOnError := func() {
+		if !closed {
+			_ = reader.Close()
+			closed = true
+		}
+	}
+
+	entries, err := collectAdminSpaceEPUBEntries(&reader.Reader)
+	if err != nil {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, err
+	}
+	mimetypePayload, err := readAdminSpaceEPUBMetadataFile(entries["mimetype"])
+	if err != nil || strings.TrimSpace(string(mimetypePayload)) != adminSpaceEPUBMimetype {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	containerPayload, err := readAdminSpaceEPUBMetadataFile(entries["META-INF/container.xml"])
+	if err != nil {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	var container adminSpaceEPUBContainer
+	warnings := []string{}
+	if err := unmarshalAdminSpaceEPUBXML(containerPayload, &container, &warnings, "META-INF/container.xml"); err != nil {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	opfPath := firstAdminSpaceEPUBRootfilePath(container)
+	if opfPath == "" {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	opfPayload, err := readAdminSpaceEPUBMetadataFile(entries[opfPath])
+	if err != nil {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	var opf adminSpaceEPUBOPFPackage
+	if err := unmarshalAdminSpaceEPUBXML(opfPayload, &opf, &warnings, opfPath); err != nil {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
+	}
+
+	opfRoot := path.Dir(opfPath)
+	if opfRoot == "." {
+		opfRoot = ""
+	}
+	manifestByID := buildAdminSpaceEPUBManifestByID(opf.Manifest)
+	chapterHTMLByCanonicalHref, err := readAdminSpaceEPUBChapterHTML(entries, opfRoot, opf.Manifest)
+	if err != nil {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, err
+	}
+	navItems := readAdminSpaceEPUBNavItems(entries, opfRoot, opf, manifestByID)
+	if len(navItems) == 0 {
+		navItems = buildAdminSpaceEPUBSpineNavItems(opf, manifestByID)
+	}
+	if len(navItems) == 0 {
+		closeOnError()
+		return adminSpaceEPUBImportPackage{}, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	title := firstNonEmptyEPUBString(opf.Metadata.Titles)
+	if title == "" {
+		title = strings.TrimSuffix(path.Base(strings.TrimSpace(opfPath)), filepath.Ext(opfPath))
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "EPUB 导入空间"
+	}
+	return adminSpaceEPUBImportPackage{
+		closer:                     reader,
+		OPFPath:                    opfPath,
+		OPFRoot:                    opfRoot,
+		Title:                      title,
+		Authors:                    compactAdminSpaceEPUBStrings(opf.Metadata.Creators),
+		PublishedAt:                firstNonEmptyEPUBString(opf.Metadata.Dates),
+		Description:                firstNonEmptyEPUBString(opf.Metadata.Descriptions),
+		CoverPath:                  resolveAdminSpaceEPUBCoverPath(opfRoot, opf),
+		Entries:                    entries,
+		NavItems:                   navItems,
+		ChapterHTMLByCanonicalHref: chapterHTMLByCanonicalHref,
+	}, nil
+}
+
+func (pkg adminSpaceEPUBImportPackage) Close() error {
+	if pkg.closer == nil {
+		return nil
+	}
+	return pkg.closer.Close()
+}
+
+func buildAdminSpaceEPUBManifestByID(items []adminSpaceEPUBOPFItem) map[string]adminSpaceEPUBOPFItem {
+	result := make(map[string]adminSpaceEPUBOPFItem, len(items))
+	for _, item := range items {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			result[id] = item
+		}
+	}
+	return result
+}
+
+func readAdminSpaceEPUBChapterHTML(
+	entries map[string]*zip.File,
+	opfRoot string,
+	items []adminSpaceEPUBOPFItem,
+) (map[string][]byte, error) {
+	result := make(map[string][]byte)
+	for _, item := range items {
+		if !isAdminSpaceEPUBDocumentItem(item) {
+			continue
+		}
+		canonicalHref := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(item.Href)))
+		if canonicalHref == "" {
+			return nil, errcode.ErrAdminSpaceImportPackageNotImportable
+		}
+		payload, err := readAdminSpaceEPUBContentFile(entries[canonicalHref])
+		if err != nil {
+			return nil, err
+		}
+		result[canonicalHref] = payload
+	}
+	if len(result) == 0 {
+		return nil, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	return result, nil
+}
+
+func readAdminSpaceEPUBContentFile(file *zip.File) ([]byte, error) {
+	if file == nil {
+		return nil, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	if file.UncompressedSize64 > maxAdminSpaceEPUBEntryBytes {
+		return nil, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	reader, err := file.Open()
+	if err != nil {
+		return nil, fmt.Errorf("打开 EPUB 章节 entry: %w", err)
+	}
+	defer reader.Close()
+	payload, err := io.ReadAll(io.LimitReader(reader, maxAdminSpaceEPUBEntryBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取 EPUB 章节 entry: %w", err)
+	}
+	if len(payload) == 0 || len(payload) > maxAdminSpaceEPUBEntryBytes {
+		return nil, errcode.ErrAdminSpaceImportZipInvalid
+	}
+	return payload, nil
+}
+
+func readAdminSpaceEPUBNavItems(
+	entries map[string]*zip.File,
+	opfRoot string,
+	opf adminSpaceEPUBOPFPackage,
+	manifestByID map[string]adminSpaceEPUBOPFItem,
+) []adminSpaceEPUBNavItem {
+	var navItem adminSpaceEPUBOPFItem
+	var tocItem adminSpaceEPUBOPFItem
+	for _, item := range opf.Manifest {
+		if strings.Contains(" "+strings.TrimSpace(item.Properties)+" ", " nav ") {
+			navItem = item
+			break
+		}
+		if isAdminSpaceEPUBTOCItem(item) {
+			tocItem = item
+		}
+	}
+	if strings.TrimSpace(navItem.Href) != "" {
+		navPath := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(navItem.Href)))
+		if navPath != "" {
+			payload, err := readAdminSpaceEPUBMetadataFile(entries[navPath])
+			if err == nil {
+				items, parseErr := parseAdminSpaceEPUBNavDocument(payload)
+				if parseErr == nil && len(items) > 0 {
+					return items
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(tocItem.Href) != "" {
+		tocPath := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(tocItem.Href)))
+		if tocPath != "" {
+			payload, err := readAdminSpaceEPUBMetadataFile(entries[tocPath])
+			if err == nil {
+				items, parseErr := parseAdminSpaceEPUBTOCDocument(payload)
+				if parseErr == nil && len(items) > 0 {
+					return items
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func buildAdminSpaceEPUBSpineNavItems(
+	opf adminSpaceEPUBOPFPackage,
+	manifestByID map[string]adminSpaceEPUBOPFItem,
+) []adminSpaceEPUBNavItem {
+	items := make([]adminSpaceEPUBNavItem, 0, len(opf.Spine))
+	for _, itemRef := range opf.Spine {
+		item, ok := manifestByID[strings.TrimSpace(itemRef.IDRef)]
+		if !ok || !isAdminSpaceEPUBDocumentItem(item) {
+			continue
+		}
+		title := strings.TrimSuffix(path.Base(strings.TrimSpace(item.Href)), path.Ext(strings.TrimSpace(item.Href)))
+		items = append(items, adminSpaceEPUBNavItem{
+			Title: title,
+			Href:  strings.TrimSpace(item.Href),
+		})
+	}
+	return items
+}
+
+type adminSpaceEPUBPackageImporter struct {
+	service            *AdminSpaceImportService
+	job                AdminSpaceImportJob
+	pkg                adminSpaceEPUBImportPackage
+	newSpaceID         string
+	plan               adminSpaceEPUBPlan
+	converter          HTMLMarkdownConverter
+	totalDocuments     int
+	processedDocuments int
+	createdBlobs       []models.DocumentAttachmentBlob
+}
+
+func (i *adminSpaceEPUBPackageImporter) restoreTree(
+	ctx context.Context,
+	nodes []adminSpaceEPUBPlannedNode,
+	parentNodeID *string,
+) error {
+	for index, node := range nodes {
+		if err := i.restoreNode(ctx, node, parentNodeID, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (i *adminSpaceEPUBPackageImporter) restoreNode(
+	ctx context.Context,
+	planned adminSpaceEPUBPlannedNode,
+	parentNodeID *string,
+	sort int,
+) error {
+	if i == nil || i.service == nil || i.service.workspaceWriter == nil {
+		return fmt.Errorf("导入服务依赖未配置")
+	}
+	nodeID := strings.TrimSpace(planned.NodeID)
+	if nodeID == "" {
+		return errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	actorUserID := strings.TrimSpace(i.job.ActorUserID)
+	now := i.service.now()
+	node := &models.Node{
+		NodeID:          nodeID,
+		SpaceID:         i.newSpaceID,
+		ParentNodeID:    cloneStringPointer(parentNodeID),
+		Title:           strings.TrimSpace(planned.Title),
+		Sort:            sort,
+		CreatedByUserID: trimOptionalUserID(actorUserID),
+		UpdatedByUserID: trimOptionalUserID(actorUserID),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	switch planned.Type {
+	case adminSpaceEPUBPlannedNodeTypeFolder:
+		node.Type = models.NodeTypeFolder
+		if err := i.service.workspaceWriter.CreateNode(ctx, repository.WorkspaceCreateNodeParams{
+			Node:       node,
+			TouchSpace: i.newSpaceID,
+			TouchedAt:  now,
+		}); err != nil {
+			return err
+		}
+		return i.restoreTree(ctx, planned.Children, &nodeID)
+	case adminSpaceEPUBPlannedNodeTypeDoc:
+		node.Type = models.NodeTypeDoc
+		document, revision, createdBlobs, warnings, err := i.buildDocument(ctx, planned, nodeID, now)
+		if err != nil {
+			return err
+		}
+		i.createdBlobs = append(i.createdBlobs, createdBlobs...)
+		for _, warning := range warnings {
+			slog.WarnContext(ctx, "EPUB 章节导入出现可恢复 warning",
+				"jobID", strings.TrimSpace(i.job.JobID),
+				"importID", strings.TrimSpace(i.job.ImportID),
+				"spaceID", i.newSpaceID,
+				"documentID", document.DocumentID,
+				"title", planned.Title,
+				"warning", warning,
+			)
+		}
+		if err := i.service.workspaceWriter.CreateNode(ctx, repository.WorkspaceCreateNodeParams{
+			Node:       node,
+			Document:   document,
+			Revision:   revision,
+			TouchSpace: i.newSpaceID,
+			TouchedAt:  now,
+		}); err != nil {
+			return err
+		}
+		i.markDocumentImported(ctx, planned.Title)
+		return nil
+	default:
+		return errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+}
+
+func (i *adminSpaceEPUBPackageImporter) buildDocument(
+	ctx context.Context,
+	planned adminSpaceEPUBPlannedNode,
+	nodeID string,
+	now time.Time,
+) (*models.Document, *models.DocumentRevision, []models.DocumentAttachmentBlob, []string, error) {
+	documentID := strings.TrimSpace(planned.DocumentID)
+	if documentID == "" {
+		return nil, nil, nil, nil, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	contentMD, warnings, createdBlobs, err := i.buildDocumentMarkdown(ctx, planned, documentID)
+	if err != nil {
+		return nil, nil, createdBlobs, warnings, err
+	}
+	actorUserID := strings.TrimSpace(i.job.ActorUserID)
+	title := firstNonEmptyString(strings.TrimSpace(planned.Title), "未命名章节")
+	document := &models.Document{
+		DocumentID:      documentID,
+		NodeID:          nodeID,
+		ThemeID:         "default",
+		Visibility:      resolveAdminSpaceEPUBDocumentVisibility(i.job.RequestedVisibility),
+		Status:          models.EntityStatusActive,
+		Title:           title,
+		Format:          models.DocumentFormatMarkdown,
+		ContentMD:       contentMD,
+		Version:         1,
+		ContentVersion:  1,
+		CreatedByUserID: trimOptionalUserID(actorUserID),
+		UpdatedByUserID: trimOptionalUserID(actorUserID),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	revision := &models.DocumentRevision{
+		DocumentRevisionID: strings.ToLower(ulid.Make().String()),
+		DocumentID:         documentID,
+		Version:            1,
+		ContentMD:          contentMD,
+		BaseVersion:        0,
+		EditorUserID:       trimOptionalUserID(actorUserID),
+		Source:             models.RevisionSourceLocal,
+		CreatedAt:          now,
+	}
+	return document, revision, createdBlobs, warnings, nil
+}
+
+func (i *adminSpaceEPUBPackageImporter) buildDocumentMarkdown(
+	ctx context.Context,
+	planned adminSpaceEPUBPlannedNode,
+	documentID string,
+) (string, []string, []models.DocumentAttachmentBlob, error) {
+	if planned.Reference {
+		return strings.TrimSpace(planned.ContentMD), nil, nil, nil
+	}
+	sourceKey := strings.TrimSpace(planned.TargetKey)
+	if sourceKey == "" {
+		sourceKey = strings.TrimSpace(planned.CanonicalHref)
+	}
+	payload := i.pkg.ChapterHTMLByCanonicalHref[strings.TrimSpace(planned.CanonicalHref)]
+	if len(payload) == 0 {
+		return "", nil, nil, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	sanitizedHTML, sanitizeWarnings, err := sanitizeAdminSpaceEPUBChapterHTML(adminSpaceEPUBHTMLSanitizeInput{
+		SourceKey: sourceKey,
+		Title:     planned.Title,
+		HTML:      payload,
+	})
+	if err != nil {
+		return "", sanitizeWarnings, nil, err
+	}
+	rewrittenHTML, linkWarnings, err := rewriteAdminSpaceEPUBInternalLinks(adminSpaceEPUBLinkRewriteInput{
+		SourceKey:           sourceKey,
+		SourceCanonicalHref: planned.CanonicalHref,
+		HTML:                []byte(sanitizedHTML),
+		Plan:                i.plan,
+	})
+	if err != nil {
+		return "", append(sanitizeWarnings, linkWarnings...), nil, err
+	}
+	localizedHTML, imageWarnings, createdBlobs, err := i.service.localizeAdminSpaceEPUBChapterImages(ctx, adminSpaceEPUBImageLocalizeInput{
+		SourceKey:           sourceKey,
+		SourceCanonicalHref: planned.CanonicalHref,
+		HTML:                []byte(rewrittenHTML),
+		Entries:             i.pkg.Entries,
+	}, i.newSpaceID, documentID)
+	warnings := append(append(sanitizeWarnings, linkWarnings...), imageWarnings...)
+	if err != nil {
+		return "", warnings, createdBlobs, err
+	}
+	result, err := i.converter.Convert(ctx, ConvertHTMLMarkdownInput{
+		HTML:         localizedHTML,
+		SourceKey:    sourceKey,
+		PlainDocMode: true,
+	})
+	warnings = append(warnings, result.Warnings...)
+	if err != nil {
+		return "", warnings, createdBlobs, err
+	}
+	return result.Markdown, warnings, createdBlobs, nil
+}
+
+func (i *adminSpaceEPUBPackageImporter) markDocumentImported(ctx context.Context, title string) {
+	if i == nil || i.service == nil {
+		return
+	}
+	i.processedDocuments++
+	// 文档导入阶段按“已写入文档数 / 总文档数”推进，避免大 EPUB 在章节转换期间长时间停在固定进度。
+	i.service.publishImportProgress(ctx, i.job, "epub_documents", i.documentProgress(i.processedDocuments), i.importedDocumentProgressMessage(title))
+}
+
+func (i *adminSpaceEPUBPackageImporter) documentProgress(processedDocuments int) int {
+	total := i.totalDocuments
+	if total <= 0 {
+		total = 1
+	}
+	if processedDocuments < 0 {
+		processedDocuments = 0
+	}
+	if processedDocuments > total {
+		processedDocuments = total
+	}
+	const base = 35
+	const span = 55
+	return base + processedDocuments*span/total
+}
+
+func (i *adminSpaceEPUBPackageImporter) importedDocumentProgressMessage(title string) string {
+	total := i.totalDocuments
+	if total <= 0 {
+		total = 1
+	}
+	processed := i.processedDocuments
+	if processed < 0 {
+		processed = 0
+	}
+	if processed > total {
+		processed = total
+	}
+	message := fmt.Sprintf("已导入 EPUB 文档（%d/%d）", processed, total)
+	if trimmedTitle := strings.TrimSpace(title); trimmedTitle != "" {
+		message += "：" + trimmedTitle
+	}
+	return message
+}
+
+func resolveAdminSpaceEPUBDocumentVisibility(rawVisibility string) models.Visibility {
+	visibility := models.Visibility(strings.TrimSpace(rawVisibility))
+	if models.IsValidVisibility(visibility) {
+		return visibility
+	}
+	return models.VisibilityMember
+}
+
+func (s *AdminSpaceImportService) createImportedEPUBSpace(
+	ctx context.Context,
+	job AdminSpaceImportJob,
+	staging AdminSpaceImportStaging,
+	pkg adminSpaceEPUBImportPackage,
+) (*models.Space, *models.SpaceCoverAsset, error) {
+	if s == nil || s.workspaceWriter == nil {
+		return nil, nil, fmt.Errorf("导入服务依赖未配置")
+	}
+	name := firstNonEmptyString(
+		strings.TrimSpace(job.RequestedSpaceName),
+		strings.TrimSpace(staging.Space.Name),
+		strings.TrimSpace(pkg.Title),
+		"EPUB 导入空间",
+	)
+	if strings.TrimSpace(name) == "" {
+		return nil, nil, errcode.ErrAdminSpaceInvalidName
+	}
+	visibility := models.Visibility(strings.TrimSpace(job.RequestedVisibility))
+	if !models.IsValidVisibility(visibility) {
+		visibility = models.Visibility(strings.TrimSpace(staging.Space.Visibility))
+	}
+	if !models.IsValidVisibility(visibility) {
+		visibility = models.VisibilityMember
+	}
+	category, err := s.resolveImportCategory(ctx, job.RequestedCategoryID)
+	if err != nil {
+		return nil, nil, err
+	}
+	now := s.now()
+	coverAsset, err := s.createImportedEPUBSpaceCoverAsset(ctx, job, pkg, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	space := &models.Space{
+		SpaceID:     strings.ToLower(ulid.Make().String()),
+		Name:        name,
+		Description: buildAdminSpaceEPUBSpaceDescription(pkg),
+		CategoryID:  strings.TrimSpace(category.CategoryID),
+		Category:    strings.TrimSpace(category.Name),
+		OwnerUserID: strings.TrimSpace(job.ActorUserID),
+		Visibility:  visibility,
+		Status:      models.EntityStatusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if coverAsset != nil {
+		space.CoverAssetID = &coverAsset.AssetID
+		space.CoverKey = coverAsset.ObjectKey
+		space.CoverURL = coverAsset.ObjectURL
+		space.CoverWidth = coverAsset.Width
+		space.CoverHeight = coverAsset.Height
+		space.CoverSource = coverAsset.Source
+	}
+	if err := s.workspaceWriter.CreateSpace(ctx, space); err != nil {
+		if coverAsset != nil {
+			if cleanupErr := removeAdminSpaceCoverObject(coverAsset.ObjectKey); cleanupErr != nil {
+				return nil, nil, fmt.Errorf("创建 EPUB 导入空间失败后清理封面对象: %w", cleanupErr)
+			}
+			if cleanupErr := s.deleteImportedSpaceCoverAsset(ctx, coverAsset.AssetID); cleanupErr != nil {
+				return nil, nil, fmt.Errorf("创建 EPUB 导入空间失败后清理封面资产: %w", cleanupErr)
+			}
+		}
+		return nil, nil, err
+	}
+	return space, coverAsset, nil
+}
+
+func buildAdminSpaceEPUBSpaceDescription(pkg adminSpaceEPUBImportPackage) string {
+	if description := strings.TrimSpace(pkg.Description); description != "" {
+		return description
+	}
+	parts := make([]string, 0, 2)
+	if len(pkg.Authors) > 0 {
+		parts = append(parts, "作者："+strings.Join(pkg.Authors, "、"))
+	}
+	if strings.TrimSpace(pkg.PublishedAt) != "" {
+		parts = append(parts, "出版日期："+strings.TrimSpace(pkg.PublishedAt))
+	}
+	if len(parts) == 0 {
+		return "由 EPUB 导入创建。"
+	}
+	return "由 EPUB 导入创建。" + strings.Join(parts, "；")
+}
+
+func (s *AdminSpaceImportService) createImportedEPUBSpaceCoverAsset(
+	ctx context.Context,
+	job AdminSpaceImportJob,
+	pkg adminSpaceEPUBImportPackage,
+	now time.Time,
+) (*models.SpaceCoverAsset, error) {
+	coverPath := strings.TrimSpace(pkg.CoverPath)
+	if coverPath == "" {
+		return nil, nil
+	}
+	writer, ok := s.spaceWriter.(adminSpaceImportCoverWriter)
+	if !ok || writer == nil {
+		return nil, fmt.Errorf("空间封面导入依赖未配置")
+	}
+	entry := pkg.Entries[coverPath]
+	payload, err := readAdminSpaceEPUBImageEntry(entry)
+	if err != nil {
+		// EPUB 封面是空间装饰信息，源文件缺失或不可识别时跳过封面，不阻断正文导入。
+		slog.WarnContext(ctx, "EPUB 封面读取失败，已跳过空间封面导入",
+			"jobID", strings.TrimSpace(job.JobID),
+			"importID", strings.TrimSpace(job.ImportID),
+			"coverPath", coverPath,
+			"error", err,
+		)
+		return nil, nil
+	}
+	mimeType, coverWidth, coverHeight, err := validateAdminSpaceEPUBCoverPayload(coverPath, payload)
+	if err != nil {
+		slog.WarnContext(ctx, "EPUB 封面格式不支持，已跳过空间封面导入",
+			"jobID", strings.TrimSpace(job.JobID),
+			"importID", strings.TrimSpace(job.ImportID),
+			"coverPath", coverPath,
+			"error", err,
+		)
+		return nil, nil
+	}
+	objectKey, err := buildAdminSpaceEPUBCoverObjectKey(now, mimeType)
+	if err != nil {
+		return nil, err
+	}
+	if err := saveAdminSpaceCoverObject(objectKey, payload); err != nil {
+		return nil, err
+	}
+	asset := &models.SpaceCoverAsset{
+		AssetID:         strings.ToLower(ulid.Make().String()),
+		Source:          string(AdminSpaceCoverSourceUserUpload),
+		ObjectKey:       objectKey,
+		ObjectURL:       resolveAdminSpaceCoverPublicURL(objectKey),
+		MimeType:        mimeType,
+		Width:           coverWidth,
+		Height:          coverHeight,
+		SizeBytes:       int64(len(payload)),
+		Normalized:      false,
+		CreatedByUserID: strings.TrimSpace(job.ActorUserID),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := writer.CreateCoverAsset(ctx, asset); err != nil {
+		if cleanupErr := removeAdminSpaceCoverObject(objectKey); cleanupErr != nil {
+			return nil, fmt.Errorf("持久化 EPUB 封面资产失败后清理封面对象: %w", cleanupErr)
+		}
+		return nil, err
+	}
+	return asset, nil
+}
+
+func validateAdminSpaceEPUBCoverPayload(coverPath string, payload []byte) (string, int, int, error) {
+	if len(payload) == 0 {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	declaredMimeType := strings.TrimSpace(strings.ToLower(adminSpaceEPUBImageContentType(coverPath)))
+	detectedMimeType := strings.TrimSpace(strings.ToLower(detectAdminSpaceCoverContentType(payload, declaredMimeType)))
+	if detectedMimeType == "image/jpg" {
+		detectedMimeType = "image/jpeg"
+	}
+	if detectedMimeType == "" || !isSupportedAdminSpaceEPUBCoverContentType(detectedMimeType) {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(payload))
+	if err != nil {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	decodedMimeType := adminSpaceEPUBCoverContentTypeForImageFormat(format)
+	if decodedMimeType == "" || decodedMimeType != detectedMimeType {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	if config.Width <= 0 || config.Height <= 0 {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	if config.Width > adminSpaceCoverMaxImageDimension || config.Height > adminSpaceCoverMaxImageDimension {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	if int64(config.Width)*int64(config.Height) > adminSpaceCoverMaxPixelCount {
+		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
+	}
+	return decodedMimeType, config.Width, config.Height, nil
+}
+
+func isSupportedAdminSpaceEPUBCoverContentType(contentType string) bool {
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func adminSpaceEPUBCoverContentTypeForImageFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "png":
+		return "image/png"
+	case "jpeg":
+		return "image/jpeg"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	default:
+		return ""
+	}
+}
+
+func buildAdminSpaceEPUBCoverObjectKey(now time.Time, contentType string) (string, error) {
+	randomSuffix, err := randomAdminSpaceCoverHex(4)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"%s/%04d/%02d/%02d/%d-%s%s",
+		adminSpaceCoverObjectPrefix,
+		now.Year(),
+		int(now.Month()),
+		now.Day(),
+		now.UnixMilli(),
+		randomSuffix,
+		adminSpaceEPUBImageExtensionForContentType(contentType),
+	), nil
+}
+
+func collectAdminSpaceEPUBNodeIDMappings(nodes []adminSpaceEPUBPlannedNode) map[string]string {
+	result := make(map[string]string)
+	var walk func([]adminSpaceEPUBPlannedNode)
+	walk = func(items []adminSpaceEPUBPlannedNode) {
+		for _, item := range items {
+			if id := strings.TrimSpace(item.NodeID); id != "" {
+				result[id] = id
+			}
+			walk(item.Children)
+		}
+	}
+	walk(nodes)
+	return result
+}
+
+func collectAdminSpaceEPUBDocumentIDMappings(nodes []adminSpaceEPUBPlannedNode) map[string]string {
+	result := make(map[string]string)
+	var walk func([]adminSpaceEPUBPlannedNode)
+	walk = func(items []adminSpaceEPUBPlannedNode) {
+		for _, item := range items {
+			if id := strings.TrimSpace(item.DocumentID); id != "" {
+				result[id] = id
+			}
+			walk(item.Children)
+		}
+	}
+	walk(nodes)
+	return result
+}
+
+func countAdminSpaceEPUBPlannedDocuments(nodes []adminSpaceEPUBPlannedNode) int {
+	count := 0
+	var walk func([]adminSpaceEPUBPlannedNode)
+	walk = func(items []adminSpaceEPUBPlannedNode) {
+		for _, item := range items {
+			if item.Type == adminSpaceEPUBPlannedNodeTypeDoc {
+				count++
+			}
+			walk(item.Children)
+		}
+	}
+	walk(nodes)
+	return count
+}
+
+func (s *AdminSpaceImportService) removeCompletedImportStaging(ctx context.Context, staging AdminSpaceImportStaging) {
+	if s == nil {
+		return
+	}
+	if s.store != nil {
+		s.store.DeleteStaging(staging.ImportID, staging.ActorUserID)
+	}
+	deleted, err := removeAdminSpaceTransferFile(strings.TrimSpace(staging.FilePath), s.stagingDir)
+	if err != nil {
+		slog.WarnContext(ctx, "删除已完成导入 staging 文件失败",
+			"importID", strings.TrimSpace(staging.ImportID),
+			"filePath", strings.TrimSpace(staging.FilePath),
+			"error", err,
+		)
+		return
+	}
+	if deleted {
+		slog.InfoContext(ctx, "已删除完成导入的 staging 文件",
+			"importID", strings.TrimSpace(staging.ImportID),
+			"filePath", strings.TrimSpace(staging.FilePath),
+		)
+	}
 }
 
 const (
@@ -1648,6 +2693,7 @@ func (s *AdminSpaceImportService) recordImportAudit(
 	detail := map[string]any{
 		"jobId":               strings.TrimSpace(job.JobID),
 		"importId":            strings.TrimSpace(job.ImportID),
+		"packageType":         strings.TrimSpace(job.PackageType),
 		"requestedSpaceId":    strings.TrimSpace(job.RequestedSpaceID),
 		"requestedSpaceName":  strings.TrimSpace(job.RequestedSpaceName),
 		"requestedCategoryId": strings.TrimSpace(job.RequestedCategoryID),
@@ -2107,6 +3153,15 @@ func (s *AdminSpaceImportStore) SaveStaging(staging AdminSpaceImportStaging) {
 	s.stagings[importStagingKey(staging.ImportID, staging.ActorUserID)] = &copyValue
 }
 
+func (s *AdminSpaceImportStore) DeleteStaging(importID string, actorUserID string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.stagings, importStagingKey(importID, actorUserID))
+}
+
 func (s *AdminSpaceImportStore) GetStaging(importID string, actorUserID string, now time.Time) (AdminSpaceImportStaging, error) {
 	if s == nil || importID == "" || actorUserID == "" {
 		return AdminSpaceImportStaging{}, errcode.ErrAdminSpaceImportStagingNotFound
@@ -2282,11 +3337,32 @@ func (s *AdminSpaceImportStore) Publish(jobID string, event AdminSpaceTransferEv
 	job.LastEvent = event
 	job.UpdatedAt = now
 	for subscriber := range s.subscribers[jobID] {
-		select {
-		case subscriber <- event:
-		default:
-		}
+		publishAdminSpaceImportEventToSubscriber(subscriber, event)
 	}
+}
+
+func publishAdminSpaceImportEventToSubscriber(subscriber chan AdminSpaceTransferEvent, event AdminSpaceTransferEvent) {
+	select {
+	case subscriber <- event:
+		return
+	default:
+	}
+	if !isTerminalAdminSpaceImportEvent(event) {
+		return
+	}
+	// 终态事件必须优先送达；如果慢客户端塞满了进度缓冲，丢弃一条旧进度以保留 completed/failed。
+	select {
+	case <-subscriber:
+	default:
+	}
+	select {
+	case subscriber <- event:
+	default:
+	}
+}
+
+func isTerminalAdminSpaceImportEvent(event AdminSpaceTransferEvent) bool {
+	return event.Type == AdminSpaceTransferEventTypeCompleted || event.Type == AdminSpaceTransferEventTypeFailed
 }
 
 func (s *AdminSpaceImportStore) MarkRunning(jobID string, now time.Time) error {
@@ -2339,11 +3415,12 @@ func (s *AdminSpaceImportStore) Complete(jobID string, newSpaceID string, now ti
 	job.Status = AdminSpaceImportStatusCompleted
 	job.NewSpaceID = strings.TrimSpace(newSpaceID)
 	job.LastEvent = AdminSpaceTransferEvent{
-		Type:     AdminSpaceTransferEventTypeCompleted,
-		Stage:    "completed",
-		Progress: 100,
-		Message:  "导入完成",
-		SpaceID:  job.NewSpaceID,
+		Type:       AdminSpaceTransferEventTypeCompleted,
+		Stage:      "completed",
+		Progress:   100,
+		Message:    "导入完成",
+		SpaceID:    job.NewSpaceID,
+		NewSpaceID: job.NewSpaceID,
 	}
 	job.UpdatedAt = now
 	event := job.LastEvent

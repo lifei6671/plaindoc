@@ -28,14 +28,16 @@ type commitAdminSpaceImportRequest struct {
 }
 
 type adminSpaceImportInspectResponse struct {
-	ImportID       string                                  `json:"importId"`
-	PackageVersion int                                     `json:"packageVersion"`
-	PackageType    string                                  `json:"packageType"`
-	ExportedAt     string                                  `json:"exportedAt"`
-	Importable     bool                                    `json:"importable"`
-	Space          service.AdminSpaceImportPreviewSpace    `json:"space"`
-	Summary        service.AdminSpaceExportManifestSummary `json:"summary"`
-	Warnings       []string                                `json:"warnings"`
+	ImportID          string                                  `json:"importId"`
+	PackageVersion    int                                     `json:"packageVersion"`
+	PackageType       string                                  `json:"packageType"`
+	ExportedAt        string                                  `json:"exportedAt"`
+	SourcePublishedAt string                                  `json:"sourcePublishedAt,omitempty"`
+	SourceAuthors     []string                                `json:"sourceAuthors,omitempty"`
+	Importable        bool                                    `json:"importable"`
+	Space             service.AdminSpaceImportPreviewSpace    `json:"space"`
+	Summary           service.AdminSpaceExportManifestSummary `json:"summary"`
+	Warnings          []string                                `json:"warnings"`
 }
 
 type commitAdminSpaceImportResponse struct {
@@ -105,15 +107,24 @@ func (h *adminSpaceImportHandler) Inspect(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, adminSpaceImportInspectResponse{
-		ImportID:       result.ImportID,
-		PackageVersion: result.PackageVersion,
-		PackageType:    result.PackageType,
-		ExportedAt:     result.ExportedAt,
-		Importable:     result.Importable,
-		Space:          result.Space,
-		Summary:        result.Summary,
-		Warnings:       result.Warnings,
+		ImportID:          result.ImportID,
+		PackageVersion:    result.PackageVersion,
+		PackageType:       result.PackageType,
+		ExportedAt:        result.ExportedAt,
+		SourcePublishedAt: result.SourcePublishedAt,
+		SourceAuthors:     result.SourceAuthors,
+		Importable:        result.Importable,
+		Space:             result.Space,
+		Summary:           result.Summary,
+		Warnings:          normalizeAdminSpaceImportResponseWarnings(result.Warnings),
 	})
+}
+
+// normalizeAdminSpaceImportResponseWarnings 是 handler 层的兜底保护。
+// 即使 service 未来新增分支忘记初始化 warnings，也不能把 JSON null 暴露给前端数组字段。
+func normalizeAdminSpaceImportResponseWarnings(warnings []string) []string {
+	normalized := make([]string, 0, len(warnings))
+	return append(normalized, warnings...)
 }
 
 // Commit 创建空间导入任务。

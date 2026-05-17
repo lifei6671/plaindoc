@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -160,13 +161,18 @@ func writeAdminSpaceTransferSSE(c *gin.Context, initial service.AdminSpaceTransf
 		response.InternalError(c)
 		return
 	}
+	if err := clearAdminSpaceTransferSSEWriteDeadline(writer); err != nil {
+		// SSE 长连接如果无法解除写截止时间，仍允许客户端通过 EventSource 自动重连兜底；
+		// 这里必须打日志，便于定位代理或 ResponseWriter 不支持导致的周期性断连。
+		slog.WarnContext(c.Request.Context(), "清理空间传输 SSE 写截止时间失败", "error", err)
+	}
 
 	writeAdminSpaceTransferSSEEvent(writer, flusher, initial)
 	if isTerminalAdminSpaceTransferEvent(initial) {
 		return
 	}
 
-	heartbeat := time.NewTicker(15 * time.Second)
+	heartbeat := time.NewTicker(adminSpaceTransferSSEHeartbeatInterval)
 	defer heartbeat.Stop()
 	for {
 		select {
@@ -185,6 +191,22 @@ func writeAdminSpaceTransferSSE(c *gin.Context, initial service.AdminSpaceTransf
 			}
 		}
 	}
+}
+
+// adminSpaceTransferSSEHeartbeatInterval 必须低于常见 10s 代理 idle timeout，
+// 否则大文件导入/导出长时间无业务事件时，EventSource 会被代理切断并反复重连。
+const adminSpaceTransferSSEHeartbeatInterval = 5 * time.Second
+
+func clearAdminSpaceTransferSSEWriteDeadline(writer http.ResponseWriter) error {
+	if writer == nil {
+		return nil
+	}
+	// SSE 是长连接响应，不能继承 http.Server.WriteTimeout 的绝对写截止时间；
+	// 失败时交给调用方记录日志，由 heartbeat 和客户端重连兜底。
+	if err := http.NewResponseController(writer).SetWriteDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("清理 SSE 写截止时间: %w", err)
+	}
+	return nil
 }
 
 func writeAdminSpaceTransferSSEEvent(writer gin.ResponseWriter, flusher http.Flusher, event service.AdminSpaceTransferEvent) {

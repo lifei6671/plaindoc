@@ -175,12 +175,13 @@
 | `AUTH_DEFAULT_PROVIDER` | `local` | `config.Load()` | `AuthLoginOrchestrator` | local/ldap 入口路由默认 provider。 |
 | `AUTH_LDAP_*` | 见 `config.go` | `config.Load()` | LDAP provider 构建 | LDAP 主机、TLS、DN、过滤器、超时等。 |
 | `SSR_WORKER_ENABLED` | `false` | `config.Load()` | `main.go` | 是否启用阅读 SSR 子进程链路。 |
-| `SSR_WORKER_EXEC` | `node` | `config.Load()` | `validateSSRWorkerRuntime`/worker process | Node 可执行命令。 |
+| `SSR_WORKER_EXEC` | `node` | `config.Load()` | `validateSSRWorkerRuntime`/worker process | Node 可执行命令；当执行文件名为 `node` / `node.exe` 时，Worker 启动会自动注入 `--no-opt` 规避当前 Node/V8 优化器原生崩溃。 |
 | `SSR_WORKER_ENTRY` | 空字符串 | `config.Load()` | `validateSSRWorkerRuntime`/worker process | Worker 入口 JS 文件路径。 |
 | `SSR_WORKER_COUNT` | `2` | `config.Load()` | `pool.New().Start()` | 常驻 worker 数量。 |
 | `SSR_RENDER_TIMEOUT` | `1500ms` | `config.Load()` | `worker.Process.Render()` | 单次渲染超时。 |
 | `SSR_WORKER_START_TIMEOUT` | `5s` | `config.Load()` | `pool.Start` context | 启动与握手超时。 |
-| `SSR_WORKER_MAX_PAYLOAD_BYTES` | `1048576` | `config.Load()` | `stdioCodec`/`Render()` | 单次 payload 限制。 |
+| `SSR_WORKER_MAX_PAYLOAD_BYTES` | `1MB` | `config.Load()` | `worker.Process.Render()` | Go 发送给 Worker 的单次请求 payload 限制；支持纯字节数或 `KB/MB/GB`、`KiB/MiB/GiB`，单位按 1024 进制解析。 |
+| `SSR_WORKER_MAX_RESPONSE_BYTES` | `16MB` | `config.Load()` | `stdioCodec.ReadJSON()` | Worker 返回给 Go 的单次响应 payload 限制，避免大 EPUB 阅读页 SSR HTML 被 1MiB 请求上限误杀；支持同样的字节单位。 |
 | `SSR_PROTOCOL_VERSION` | `v1` | `config.Load()` | handshake/request version | Go 与 Worker 协议版本。 |
 
 ### 5.3 数据库系统配置（`system_configs`）键与消费点
@@ -296,13 +297,15 @@
 7. `DELETE /api/nodes/:nodeId`
 8. `GET/PUT /api/docs/:docId`
 9. `GET /api/docs/:docId/revisions`
-10. `PUT /api/spaces/:spaceId/visibility`
-11. `PUT /api/docs/:docId/visibility`
-12. `PUT /api/docs/:docId/theme`
-13. `POST /api/docs/:docId/remote-images/localize`
-14. `GET /api/docs/:docId/onlyoffice/edit-config`
-15. `GET /api/docs/:docId/onlyoffice/source`
-16. `POST /api/docs/:docId/onlyoffice/callback`
+10. `GET /api/docs/:docId/revisions/:revisionId`
+11. `POST /api/docs/:docId/revisions/:revisionId/restore`
+12. `PUT /api/spaces/:spaceId/visibility`
+13. `PUT /api/docs/:docId/visibility`
+14. `PUT /api/docs/:docId/theme`
+15. `POST /api/docs/:docId/remote-images/localize`
+16. `GET /api/docs/:docId/onlyoffice/edit-config`
+17. `GET /api/docs/:docId/onlyoffice/source`
+18. `POST /api/docs/:docId/onlyoffice/callback`
 
 ONLYOFFICE 一等文档规则：
 
@@ -311,6 +314,15 @@ ONLYOFFICE 一等文档规则：
 3. Office 正文落在 `file_blobs`，版本快照落在 `document_file_revisions`。
 4. `VisibilityService` 按“文档可读/可写”工作，Office 与 Markdown 共用同一套权限判断。
 5. callback 成功后会更新 `documents.version/content_version/source_blob_id`，并追加 `audit_logs` 记录。
+
+文档历史版本规则：
+
+1. `GET /api/docs/:docId/revisions` 只返回分页摘要，不返回 Markdown 正文，避免历史列表一次性拉取大正文。
+2. `GET /api/docs/:docId/revisions/:revisionId` 返回单版本详情；Markdown revision 返回 `contentMd`，Office revision 返回文件名、MIME、大小、blob 与 contentVersion 等元数据。
+3. `POST /api/docs/:docId/revisions/:revisionId/restore` 必须校验当前 `baseVersion`，版本冲突要返回明确错误码；恢复旧版本不是改写历史，而是新增当前版本和新的 revision/file revision。
+4. Markdown 恢复复用保存链路的版本递增、阅读缓存清理和图片引用同步；Office 恢复复用文件版本链路，不重复写入已有 `file_blobs`。
+5. revision 摘要分页必须把单来源查询限制在当前页必要候选集内；不要为了合并 Markdown / Office 两类历史而每次请求全量加载该文档全部 revision。
+6. 列表、详情和恢复都必须先走 `VisibilityService` 校验当前文档读/写权限，并阻断跨文档 revision 访问。
 
 ### 6.3 管理后台（`/api/admin/*`）
 
@@ -344,20 +356,24 @@ ONLYOFFICE 一等文档规则：
 空间导入导出接口补充约束：
 
 1. 导出入口：`POST /api/admin/spaces/:spaceId/exports` 创建任务，`GET /api/admin/spaces/:spaceId/exports/:jobId/events?token=...` 订阅 SSE，`GET /api/admin/space-exports/:jobId/download?token=...` 消费一次性下载 token。
-2. 导入入口：`POST /api/admin/space-imports/inspect` 上传并解析 `.plaindoc`，`POST /api/admin/space-imports/:importId/commit` 创建新空间导入任务，`GET /api/admin/space-imports/:jobId/events?token=...` 订阅 SSE。
+2. 导入入口：`POST /api/admin/space-imports/inspect` 上传并解析 `.plaindoc` 或 `.epub`，`POST /api/admin/space-imports/:importId/commit` 创建新空间导入任务，`GET /api/admin/space-imports/:jobId/events?token=...` 订阅 SSE。
 3. 全局任务入口：`GET /api/admin/space-transfer-tasks?status=active` 查询当前 actor 的导入/导出任务，`GET /api/admin/space-transfer-tasks/:kind/:jobId` 查询单个任务，`POST /api/admin/space-transfer-tasks/:kind/:jobId/stream-token` 重新签发 SSE 订阅链接，`POST /api/admin/space-transfer-tasks/:kind/:jobId/download-token` 仅用于 `space_export` completed 任务重新签发一次性下载链接。
 4. `admin_space_transfer_jobs` 是刷新恢复的持久化快照表，查询必须按当前 actor 过滤；列表查询走 `actor_user_id + status + updated_at` 索引，终态清理走 `status + expires_at`，单任务恢复走 `kind + job_id`，不要写跨 actor 的全表扫描。
 5. 服务启动时需要将遗留 `queued/running` 持久化任务标记为 `failed`，避免进程重启后前端误展示仍在运行；普通页面刷新则通过全局任务接口恢复 active 任务并重新签发 stream token。
 6. 导出临时文件位于服务端私有 `data/exports/admin-space`，导入 staging 位于 `data/imports/admin-space`；接口不能接受客户端传入的任意本地路径。
 7. SSE token 绑定 actor、空间或导入任务、job，默认短期有效；任务完成、失败或弹层关闭后前端应关闭订阅。
-8. 导出任务已 completed 后才订阅 SSE 时，服务端初始 `completed` 事件要重新签发一次性下载 token，不能重放旧明文 token，也不能只返回文件名。
-9. 导入/导出任务处于 `queued` 或 `running` 时不能因为 SSE stream token 过期而被清理；清理循环只处理终态任务和过期 staging，避免长任务完成事件、下载 token 或回滚状态丢失。
-10. 导入落地创建文档时必须显式使用默认主题 `default`；导入失败后如果回滚新空间也失败，任务仍保留 `restore` 主阶段和原始错误，并附带回滚错误供排查。
-11. 导入 Office 源文件时不能依赖内容嗅探决定 MIME；`docx` 固定写入 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`，`xlsx` 固定写入 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，避免 ZIP 容器被误存为 `application/zip`。
-12. 服务端必须兜底规范化导出选项：`source_zip` 强制包含附件和 Office 源文件，`epub` 强制包含 Office 源文件用于渲染但不导出普通附件。
-13. `.plaindoc` 交换包如果包含空间封面，导入时必须校验封面文件存在、`source` 只能是空值/`user_upload`/`system_generated`，恢复封面资产并绑定新空间；没有封面时由前端导入完成后复用创建空间的浏览器默认封面生成逻辑补齐。
-11. 导入封面对象写入本地 `uploads/space-covers` 后，如果封面资产持久化或新空间创建失败，必须清理已写入的封面对象；若封面资产已落库但新空间创建失败，还必须删除该封面资产记录，避免孤儿文件和孤儿元数据。
-12. `POST /api/admin/space-imports/inspect` 必须在 `FormFile` 或 `ParseMultipartForm` 前用 `http.MaxBytesReader` 限制请求体，避免超大 multipart 在进入 service 体积校验前消耗临时磁盘或 IO；handler 上限要与 `service.MaxAdminSpaceImportUploadBytes` 保持一致，并预留 multipart 元数据开销。
+8. 导入/导出 SSE 是长连接，只有带 `Accept: text/event-stream` 的真实 SSE 请求才能跳过全局 `REQUEST_TIMEOUT` 业务超时，普通 `/events` GET 仍必须保留 deadline；SSE handler 内必须清除 `HTTP_WRITE_TIMEOUT` 写截止时间，清理失败要记录 warning，同时定期发送注释型 heartbeat，心跳间隔需低于常见 10s 代理 idle timeout，当前统一使用 5s，避免大文件任务长时间无业务事件时 EventSource 被代理切断并反复重连。
+9. 导出任务已 completed 后才订阅 SSE 时，服务端初始 `completed` 事件要重新签发一次性下载 token，不能重放旧明文 token，也不能只返回文件名。
+10. 导入/导出任务处于 `queued` 或 `running` 时不能因为 SSE stream token 过期而被清理；清理循环只处理终态任务和过期 staging，避免长任务完成事件、下载 token 或回滚状态丢失。
+11. 导入落地创建文档时必须显式使用默认主题 `default`；导入失败后如果回滚新空间也失败，任务仍保留 `restore` 主阶段和原始错误，并附带回滚错误供排查。
+12. 导入 Office 源文件时不能依赖内容嗅探决定 MIME；`docx` 固定写入 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`，`xlsx` 固定写入 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，避免 ZIP 容器被误存为 `application/zip`。
+13. 服务端必须兜底规范化导出选项：`source_zip` 强制包含附件和 Office 源文件，`epub` 强制包含 Office 源文件用于渲染但不导出普通附件。
+14. `.plaindoc` 交换包如果包含空间封面，导入时必须校验封面文件存在、`source` 只能是空值/`user_upload`/`system_generated`，恢复封面资产并绑定新空间；没有封面时由前端导入完成后复用创建空间的浏览器默认封面生成逻辑补齐。
+15. 导入封面对象写入本地 `uploads/space-covers` 后，如果封面资产持久化或新空间创建失败，必须清理已写入的封面对象；若封面资产已落库但新空间创建失败，还必须删除该封面资产记录，避免孤儿文件和孤儿元数据。
+16. `POST /api/admin/space-imports/inspect` 必须在 `FormFile` 或 `ParseMultipartForm` 前用 `http.MaxBytesReader` 限制请求体，避免超大 multipart 在进入 service 体积校验前消耗临时磁盘或 IO；handler 上限要与 `service.MaxAdminSpaceImportUploadBytes` 保持一致，并预留 multipart 元数据开销。
+17. EPUB 导入永远创建新空间，权限按 `space_create` 能力校验，不要求用户已管理某个空间；inspect 结果需要返回 `packageType=epub`、作者、出版日期、章节数、目录层级、图片数和 warnings。
+18. EPUB 解析必须限制 entry 数、单 entry、总解压量和目录深度；OPF/spine/章节缺失才失败，单个图片本地化失败应降级为 warning 或 alt 文本，不中断整本导入。
+19. EPUB 章节处理顺序必须是 HTML 清洗、内部链接重写、图片本地化、HTML 转 Markdown，再写入 `documents.content_md` 和首版 `document_revisions.content_md`；导入失败必须回滚已创建空间、节点、文档和临时资源。
 
 后台壳页的能力摘要由 `/api/admin/me` 返回，前端据此区分：
 
@@ -396,12 +412,13 @@ ONLYOFFICE 一等文档规则：
 | 配置项 | 含义 | 生效代码 | 失败行为 |
 | --- | --- | --- | --- |
 | `SSR_WORKER_ENABLED` | 开关；关闭时不启动 worker 池 | `main.go` | 阅读页走无 worker 分支（降级页面）。 |
-| `SSR_WORKER_EXEC` | Node 可执行命令 | `validateSSRWorkerRuntime` + `exec.Command` | 启动前失败并退出。 |
+| `SSR_WORKER_EXEC` | Node 可执行命令；Node runtime 会以 `node --no-opt worker-entry.js` 形式启动 | `validateSSRWorkerRuntime` + `exec.Command` | 启动前失败并退出。 |
 | `SSR_WORKER_ENTRY` | worker 入口 JS 文件 | `validateSSRWorkerRuntime` + `exec.Command` | 文件不存在/是目录会启动失败。 |
 | `SSR_WORKER_COUNT` | 常驻子进程数 | `pool.Start` | 非法值在 `Validate()` 即拒绝。 |
 | `SSR_RENDER_TIMEOUT` | 单次渲染超时（也写入 `deadlineMs`） | `worker.Process.Render` | 超时杀进程并返回错误，页面降级。 |
 | `SSR_WORKER_START_TIMEOUT` | worker 启动+握手超时 | `context.WithTimeout` in `main.go` | 启动失败并退出。 |
-| `SSR_WORKER_MAX_PAYLOAD_BYTES` | payload 上限 | `stdioCodec` + `Render()` | 超限直接报错，不发请求。 |
+| `SSR_WORKER_MAX_PAYLOAD_BYTES` | 请求 payload 上限 | `Render()` | 超限直接报错，不发请求。 |
+| `SSR_WORKER_MAX_RESPONSE_BYTES` | 响应 payload 上限 | `stdioCodec.ReadJSON()` | 超限杀掉异常 worker 并让阅读页降级，防止单次 SSR 输出失控。 |
 | `SSR_PROTOCOL_VERSION` | 握手与请求版本号 | `performHandshakeLocked` + request version | 版本不匹配，worker 握手失败。 |
 
 ### 7.3 路径与产物要求
@@ -424,6 +441,9 @@ ONLYOFFICE 一等文档规则：
 4. EPUB 目录必须按空间 `tree` 递归生成，文档节点下的子文档也要导出，并通过 `go-epub.AddSubSection` 保留上下级目录。
 5. `router.go` 仅在 `readerSSRDispatcher` 可用时向 `AdminSpaceExportService` 注入 `AdminSpaceExportSSRReaderHTMLRenderer`。
 6. EPUB 图片资源只允许 `data:image/*` 与 `/uploads/*` 这类可信来源；写入 EPUB 前必须先落到服务端私有临时目录，再交给 `go-epub.AddImage`，任意远程 URL 或本机路径必须降级为 alt 文本。
+7. EPUB 下载文件名必须优先使用空间名，服务端需清理 `/\:*?"<>|` 和控制字符等路径非法字符；空间名为空时再回退到 `spaceID`。
+8. EPUB 导出渲染阶段必须按已完成章节数发布 `epub_documents` 进度事件，55%-90% 区间按“已渲染章节数 / 总章节数”推进，避免大文件导出长期停在固定进度。
+9. `.plaindoc` 交换包中的空间封面在 EPUB 导出时也必须写入 EPUB 标准封面：先从 manifest cover payload 生成本地临时图片，再通过 `go-epub.AddImage` + `SetCover` 生成 `cover.xhtml`、`meta name="cover"` 和 `properties="cover-image"`。
 
 ---
 
@@ -533,7 +553,7 @@ ONLYOFFICE 一等文档规则：
 2. SQLite 时间扫描异常：避免 `SELECT *` 直接扫 `time.Time`。
 3. JWT TTL 单位误用：`time.Duration(1)` 是 1ns。
 4. `.env` 未生效：检查启动 cwd 与“系统环境优先”规则。
-5. SSR worker 启动失败：先查 `SSR_WORKER_EXEC`、`SSR_WORKER_ENTRY`、`SSR_PROTOCOL_VERSION`。
+5. SSR worker 启动失败：先查 `SSR_WORKER_EXEC`、`SSR_WORKER_ENTRY`、`SSR_PROTOCOL_VERSION`；大空间导出若出现 Node/V8 `Fatal error`，确认启动日志中的 args 包含 `--no-opt`。
 6. `webp` 构建错误：后端构建需 `CGO_ENABLED=1`。
 7. operation token 校验失败：核对 actor/operation/target 是否一致，token 是否已消费。
 

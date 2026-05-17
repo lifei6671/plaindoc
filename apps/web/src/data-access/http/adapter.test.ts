@@ -6,10 +6,12 @@ class FakeEventSource {
   static instances: FakeEventSource[] = [];
 
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
+  onopen: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   readonly listeners = new Map<string, EventListener[]>();
   readonly url: string;
   readonly withCredentials: boolean;
+  readyState = 0;
 
   constructor(url: string | URL, init?: EventSourceInit) {
     this.url = String(url);
@@ -23,7 +25,19 @@ class FakeEventSource {
     this.listeners.set(type, listeners);
   }
 
-  close(): void {}
+  close(): void {
+    this.readyState = 2;
+  }
+
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.(new Event("open"));
+  }
+
+  fail(): void {
+    this.readyState = 0;
+    this.onerror?.(new Event("error"));
+  }
 
   emit(type: string, event: AdminSpaceTransferEvent): void {
     const message = new MessageEvent(type, { data: JSON.stringify(event) });
@@ -40,6 +54,7 @@ describe("createHttpAdapter transfer subscriptions", () => {
   const originalEventSource = globalThis.EventSource;
 
   afterEach(() => {
+    vi.useRealTimers();
     FakeEventSource.instances = [];
     globalThis.EventSource = originalEventSource;
     vi.restoreAllMocks();
@@ -130,6 +145,183 @@ describe("createHttpAdapter transfer subscriptions", () => {
       })).resolves.toEqual({
         downloadUrl: "https://api.example.test/api/admin/space-exports/job-a/download?token=download"
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("lets EventSource recover transient transfer stream errors before refreshing tokens", () => {
+    vi.useFakeTimers();
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    const gateway = createHttpAdapter({ baseUrl: "https://api.example.test/api" });
+    const onError = vi.fn();
+
+    gateway.admin.subscribeSpaceExport({
+      streamUrl: "/api/admin/spaces/space-a/exports/job-a/events?token=stream",
+      onEvent: vi.fn(),
+      onError
+    });
+
+    const source = FakeEventSource.instances[0];
+    source?.fail();
+    expect(onError).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(10_000);
+    source?.open();
+    vi.advanceTimersByTime(30_000);
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reports transfer stream errors after EventSource cannot reconnect", () => {
+    vi.useFakeTimers();
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    const gateway = createHttpAdapter({ baseUrl: "https://api.example.test/api" });
+    const onError = vi.fn();
+
+    gateway.admin.subscribeSpaceExport({
+      streamUrl: "/api/admin/spaces/space-a/exports/job-a/events?token=stream",
+      onEvent: vi.fn(),
+      onError
+    });
+
+    FakeEventSource.instances[0]?.fail();
+    vi.advanceTimersByTime(30_000);
+
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createHttpAdapter document revision APIs", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("requests revision summaries and details separately", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/docs/doc-a/revisions")) {
+        return new Response(JSON.stringify({
+          code: 0,
+          message: "success",
+          data: [
+            {
+              id: "revision-a",
+              documentId: "doc-a",
+              version: 2,
+              baseVersion: 1,
+              createdAt: "2026-05-17T00:00:00Z",
+              source: "remote",
+              format: "markdown",
+              editorUser: { userId: "user-a", displayName: "作者甲" }
+            }
+          ]
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/api/docs/doc-a/revisions?page=2&pageSize=30")) {
+        return new Response(JSON.stringify({
+          code: 0,
+          message: "success",
+          data: []
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/api/docs/doc-a/revisions/revision-a")) {
+        return new Response(JSON.stringify({
+          code: 0,
+          message: "success",
+          data: {
+            id: "revision-a",
+            documentId: "doc-a",
+            version: 2,
+            baseVersion: 1,
+            createdAt: "2026-05-17T00:00:00Z",
+            source: "remote",
+            format: "markdown",
+            editorUser: { userId: "user-a", displayName: "作者甲" },
+            contentMd: "# 历史正文"
+          }
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/api/docs/doc-a/revisions/revision-a/restore")) {
+        return new Response(JSON.stringify({
+          code: 0,
+          message: "success",
+          data: {
+            document: {
+              id: "doc-a",
+              nodeId: "node-a",
+              themeId: "default",
+              format: "markdown",
+              title: "文档 A",
+              contentMd: "# 历史正文",
+              version: 3,
+              updatedAt: "2026-05-17T00:01:00Z"
+            },
+            restoredFromRevision: {
+              id: "revision-a",
+              documentId: "doc-a",
+              version: 2,
+              baseVersion: 1,
+              createdAt: "2026-05-17T00:00:00Z",
+              source: "remote",
+              format: "markdown"
+            }
+          }
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      const gateway = createHttpAdapter({ baseUrl: "https://api.example.test/api" });
+
+      await expect(gateway.document.listRevisions("doc-a")).resolves.toEqual([
+        expect.objectContaining({
+          id: "revision-a",
+          format: "markdown",
+          editorUser: { userId: "user-a", displayName: "作者甲" }
+        })
+      ]);
+      await expect(gateway.document.getRevisionDetail("doc-a", "revision-a")).resolves.toEqual(
+        expect.objectContaining({
+          id: "revision-a",
+          contentMd: "# 历史正文"
+        })
+      );
+      await expect(gateway.document.restoreRevision({
+        docId: "doc-a",
+        revisionId: "revision-a",
+        baseVersion: 2
+      })).resolves.toEqual(expect.objectContaining({
+        document: expect.objectContaining({
+          id: "doc-a",
+          version: 3
+        }),
+        restoredFromRevision: expect.objectContaining({
+          id: "revision-a"
+        })
+      }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/docs/doc-a/revisions",
+        expect.anything()
+      );
+      await gateway.document.listRevisions("doc-a", { page: 2, pageSize: 30 });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/docs/doc-a/revisions?page=2&pageSize=30",
+        expect.anything()
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/docs/doc-a/revisions/revision-a",
+        expect.anything()
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/docs/doc-a/revisions/revision-a/restore",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ baseVersion: 2 })
+        })
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

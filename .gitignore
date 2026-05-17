@@ -151,6 +151,7 @@ bin/
 *.cache
 .DS_Store
 *.bolt
+*.epub
 uploads/
 
 .idea/

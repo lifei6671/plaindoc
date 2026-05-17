@@ -1111,10 +1111,40 @@ func TestAdminSpaceExportService_WritesEPUBPackageWithMarkdownAndOfficeHTML(t *t
 	markdownDocumentID := "doc-markdown"
 	officeDocumentID := "doc-office"
 	sourceBlobID := "blob-office"
+	coverAssetID := "cover-asset-epub"
+	coverContent, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatalf("decode cover fixture failed: %v", err)
+	}
 	svc := newAllowExportService()
 	svc.exportDir = t.TempDir()
 	svc.spaceReader = &fakeAdminSpaceExportSpaceReader{
-		space: &models.Space{SpaceID: "space-a", Name: "空间 A", Visibility: models.VisibilityMember, Status: models.EntityStatusActive},
+		space: &models.Space{
+			SpaceID:      "space-a",
+			Name:         "空间/A:非法*名",
+			Visibility:   models.VisibilityMember,
+			Status:       models.EntityStatusActive,
+			CoverAssetID: &coverAssetID,
+			CoverKey:     "space-covers/2026/05/17/epub-cover.png",
+			CoverURL:     "/uploads/space-covers/2026/05/17/epub-cover.png",
+			CoverWidth:   1600,
+			CoverHeight:  2560,
+			CoverSource:  string(AdminSpaceCoverSourceUserUpload),
+		},
+		coverAssets: map[string]*models.SpaceCoverAsset{
+			coverAssetID: {
+				AssetID:         coverAssetID,
+				Source:          string(AdminSpaceCoverSourceUserUpload),
+				ObjectKey:       "space-covers/2026/05/17/epub-cover.png",
+				ObjectURL:       "/uploads/space-covers/2026/05/17/epub-cover.png",
+				MimeType:        "image/png",
+				Width:           1600,
+				Height:          2560,
+				SizeBytes:       int64(len(coverContent)),
+				Normalized:      true,
+				CreatedByUserID: "actor-user",
+			},
+		},
 	}
 	svc.workspaceReader = &fakeAdminSpaceExportWorkspaceReader{
 		nodes: []repository.WorkspaceTreeNodeRecord{
@@ -1147,7 +1177,10 @@ func TestAdminSpaceExportService_WritesEPUBPackageWithMarkdownAndOfficeHTML(t *t
 		},
 	}
 	svc.blobReader = fakeAdminSpaceExportBlobReader{
-		contents: map[string][]byte{sourceBlobID: []byte("office-source")},
+		contents: map[string][]byte{
+			sourceBlobID: []byte("office-source"),
+			coverAssetID: coverContent,
+		},
 	}
 	officeRenderer := &fakeAdminSpaceExportOfficeHTMLRenderer{
 		html: `<article><h1>Office 标题</h1><p>Office 正文</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="红点" /></article>`,
@@ -1168,6 +1201,9 @@ func TestAdminSpaceExportService_WritesEPUBPackageWithMarkdownAndOfficeHTML(t *t
 	if !strings.HasSuffix(fileName, ".epub") || !strings.HasSuffix(filePath, ".epub") {
 		t.Fatalf("expected epub file, got name=%s path=%s", fileName, filePath)
 	}
+	if fileName != "空间-A-非法-名.epub" {
+		t.Fatalf("expected sanitized space name as epub file name, got %s", fileName)
+	}
 	if sizeBytes <= 0 {
 		t.Fatalf("expected non-empty epub, got %d", sizeBytes)
 	}
@@ -1185,7 +1221,7 @@ func TestAdminSpaceExportService_WritesEPUBPackageWithMarkdownAndOfficeHTML(t *t
 		t.Fatalf("unexpected markdown renderer input: %#v", markdownRenderer.lastInput)
 	}
 	assertZipEntryExists(t, filePath, "mimetype")
-	assertZipContainsText(t, filePath, "空间 A")
+	assertZipContainsText(t, filePath, "空间/A:非法*名")
 	assertZipContainsText(t, filePath, "SSR Markdown 标题")
 	assertZipContainsText(t, filePath, "const answer = 42;")
 	assertZipDoesNotContainText(t, filePath, "data-code-copy-button")
@@ -1193,6 +1229,10 @@ func TestAdminSpaceExportService_WritesEPUBPackageWithMarkdownAndOfficeHTML(t *t
 	assertZipDoesNotContainText(t, filePath, "# Markdown 标题")
 	assertZipDoesNotContainText(t, filePath, "![红点]")
 	assertZipContainsText(t, filePath, "Office 正文")
+	assertZipEntryExists(t, filePath, "EPUB/xhtml/cover.xhtml")
+	assertZipEntryMatches(t, filePath, "EPUB/package.opf", regexp.MustCompile(`(?s)<meta[^>]+name="cover"[^>]+content="[^"]+"`))
+	assertZipEntryMatches(t, filePath, "EPUB/package.opf", regexp.MustCompile(`(?s)<item[^>]+href="images/cover\.png"[^>]+media-type="image/png"[^>]+properties="cover-image"`))
+	assertZipEntryBytes(t, filePath, "EPUB/images/cover.png", coverContent)
 	assertZipContainsText(t, filePath, "images/image-")
 	assertZipDoesNotContainText(t, filePath, "data:image/png")
 }
@@ -1380,6 +1420,105 @@ func TestAdminSpaceExportService_WritesEPUBWithNestedDocumentTree(t *testing.T) 
 	assertZipContainsText(t, filePath, "父文档正文")
 	assertZipContainsText(t, filePath, "子文档正文")
 	assertZipEntryMatches(t, filePath, "EPUB/nav.xhtml", regexp.MustCompile(`(?s)>产品文档</a>\s*<ol>\s*<li>\s*<a [^>]*>父文档</a>\s*<ol>\s*<li>\s*<a [^>]*>子文档</a>`))
+}
+
+func TestAdminSpaceExportService_EPUBPublishProgressByRenderedDocuments(t *testing.T) {
+	t.Parallel()
+
+	markdownFormat := models.DocumentFormatMarkdown
+	firstDocumentID := "doc-first"
+	secondDocumentID := "doc-second"
+	svc := newAllowExportService()
+	svc.exportDir = t.TempDir()
+	svc.spaceReader = &fakeAdminSpaceExportSpaceReader{
+		space: &models.Space{SpaceID: "space-a", Name: "空间 A", Visibility: models.VisibilityMember, Status: models.EntityStatusActive},
+	}
+	svc.workspaceReader = &fakeAdminSpaceExportWorkspaceReader{
+		nodes: []repository.WorkspaceTreeNodeRecord{
+			{NodeID: "node-first", DocumentID: &firstDocumentID, SpaceID: "space-a", Type: models.NodeTypeDoc, Title: "第一章", Sort: 1, DocumentFormat: &markdownFormat},
+			{NodeID: "node-second", DocumentID: &secondDocumentID, SpaceID: "space-a", Type: models.NodeTypeDoc, Title: "第二章", Sort: 2, DocumentFormat: &markdownFormat},
+		},
+		documents: map[string]*repository.WorkspaceDocumentRecord{
+			firstDocumentID: {
+				DocumentID: firstDocumentID,
+				NodeID:     "node-first",
+				Format:     models.DocumentFormatMarkdown,
+				Title:      "第一章",
+				ContentMD:  "# 第一章",
+				SpaceID:    "space-a",
+			},
+			secondDocumentID: {
+				DocumentID: secondDocumentID,
+				NodeID:     "node-second",
+				Format:     models.DocumentFormatMarkdown,
+				Title:      "第二章",
+				ContentMD:  "# 第二章",
+				SpaceID:    "space-a",
+			},
+		},
+	}
+	svc.readerHTMLRenderer = &fakeAdminSpaceExportReaderHTMLRenderer{
+		htmlByDocumentID: map[string]string{
+			firstDocumentID:  `<html><body><article id="plaindoc-preview-body"><h1>第一章</h1></article></body></html>`,
+			secondDocumentID: `<html><body><article id="plaindoc-preview-body"><h1>第二章</h1></article></body></html>`,
+		},
+	}
+	const streamToken = "stream-token"
+	jobID := "job-epub-progress"
+	now := svc.now()
+	if err := svc.store.Create(&AdminSpaceExportJob{
+		JobID:                jobID,
+		ActorUserID:          "actor-user",
+		SpaceID:              "space-a",
+		Format:               AdminSpaceExportFormatEPUB,
+		Status:               AdminSpaceExportStatusRunning,
+		StreamTokenHash:      tokenHash(streamToken),
+		StreamTokenExpiresAt: now.Add(defaultAdminSpaceTransferTokenTTL),
+		LastEvent: AdminSpaceTransferEvent{
+			Type:     AdminSpaceTransferEventTypeProgress,
+			Stage:    "running",
+			Progress: 1,
+			Message:  "导出任务开始执行",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create export job failed: %v", err)
+	}
+	_, events, unsubscribe, err := svc.Subscribe(context.Background(), jobID, "actor-user", streamToken)
+	if err != nil {
+		t.Fatalf("subscribe export job failed: %v", err)
+	}
+	defer unsubscribe()
+
+	_, _, _, err = svc.exportAdminSpaceZipPackage(
+		context.Background(),
+		AdminSpaceExportJob{JobID: jobID, SpaceID: "space-a", Format: AdminSpaceExportFormatEPUB},
+	)
+	if err != nil {
+		t.Fatalf("export epub failed: %v", err)
+	}
+
+	progresses := make([]int, 0, 2)
+	for {
+		select {
+		case event := <-events:
+			if event.Stage == "epub_documents" {
+				progresses = append(progresses, event.Progress)
+				if !strings.Contains(event.Message, "/2") {
+					t.Fatalf("expected chapter count in progress message, got %q", event.Message)
+				}
+			}
+		default:
+			if len(progresses) != 2 {
+				t.Fatalf("expected progress events for 2 rendered chapters, got %#v", progresses)
+			}
+			if progresses[0] <= 55 || progresses[1] != 90 || progresses[0] >= progresses[1] {
+				t.Fatalf("expected chapter progress to advance from 55 to 90, got %#v", progresses)
+			}
+			return
+		}
+	}
 }
 
 func TestAdminSpaceExportService_MarksPackageNotImportableWithoutOfficeSourceExport(t *testing.T) {
@@ -1928,6 +2067,38 @@ func assertZipEntryMatches(t *testing.T, zipPath string, entryName string, patte
 		}
 		if !pattern.Match(payload) {
 			t.Fatalf("zip entry %s does not match %s:\n%s", entryName, pattern.String(), string(payload))
+		}
+		return
+	}
+	t.Fatalf("zip entry %q not found", entryName)
+}
+
+func assertZipEntryBytes(t *testing.T, zipPath string, entryName string, expected []byte) {
+	t.Helper()
+
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		t.Fatalf("open zip failed: %v", err)
+	}
+	defer reader.Close()
+	for _, file := range reader.File {
+		if file.Name != entryName {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatalf("open zip entry %s failed: %v", entryName, err)
+		}
+		payload, err := io.ReadAll(rc)
+		closeErr := rc.Close()
+		if err != nil {
+			t.Fatalf("read zip entry %s failed: %v", entryName, err)
+		}
+		if closeErr != nil {
+			t.Fatalf("close zip entry %s failed: %v", entryName, closeErr)
+		}
+		if !bytes.Equal(payload, expected) {
+			t.Fatalf("zip entry %s bytes mismatch: got %q want %q", entryName, string(payload), string(expected))
 		}
 		return
 	}

@@ -6,6 +6,7 @@ import {
   type AdminSpaceTransferEvent,
   type AdminSpaceTransferSubscribeInput,
   type AdminSpaceTransferSubscription,
+  type AdminSpaceTransferTask,
   type AdminSpaceTransferTaskKind,
   type DataGateway
 } from "../../data-access";
@@ -103,7 +104,35 @@ function mergeEventIntoTask(task: AdminSpaceTransferTaskView, event: AdminSpaceT
     sizeBytes: event.sizeBytes ?? task.sizeBytes,
     spaceId: event.spaceId ?? task.spaceId,
     spaceName: event.spaceName ?? task.spaceName,
-    newSpaceId: event.spaceId ?? task.newSpaceId,
+    newSpaceId: event.newSpaceId ?? event.spaceId ?? task.newSpaceId,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function eventFromTaskSnapshot(task: AdminSpaceTransferTask): AdminSpaceTransferEvent {
+  return {
+    type: task.status === "completed" || task.status === "failed" ? task.status : "progress",
+    stage: task.stage,
+    progress: task.progress,
+    message: task.message,
+    fileName: task.fileName,
+    sizeBytes: task.sizeBytes,
+    spaceId: task.spaceId,
+    spaceName: task.spaceName,
+    newSpaceId: task.newSpaceId
+  };
+}
+
+function markTaskStreamInterrupted(task: AdminSpaceTransferTaskView): AdminSpaceTransferTaskView {
+  if (isTerminalTransferTask(task)) {
+    return task;
+  }
+  return {
+    ...task,
+    status: task.status === "queued" ? "queued" : "running",
+    stage: "stream",
+    // SSE 只负责传递进度事件，连接断开不等于后端任务失败；保留已有进度，避免大文件导入被前端误判为失败。
+    message: "任务事件连接异常，后台仍在继续处理，请稍后刷新查看最新进度",
     updatedAt: new Date().toISOString()
   };
 }
@@ -136,6 +165,7 @@ export function AdminSpaceTransferTaskProvider({
 }: AdminSpaceTransferTaskProviderProps) {
   const [tasks, setTasks] = useState<AdminSpaceTransferTaskView[]>([]);
   const subscriptionsRef = useRef(new Map<string, AdminSpaceTransferSubscription>());
+  const subscribeTaskRef = useRef<(kind: AdminSpaceTransferTaskKind, jobID: string, streamUrl: string) => void>(() => undefined);
   const importTaskMetaRef = useRef(new Map<string, ImportTaskRuntimeMeta>());
   const handledImportCompletionsRef = useRef(new Set<string>());
   const dismissedTaskKeysRef = useRef(readDismissedTransferTaskKeys());
@@ -163,6 +193,18 @@ export function AdminSpaceTransferTaskProvider({
     );
   }, []);
 
+  const markStreamInterrupted = useCallback((kind: AdminSpaceTransferTaskKind, jobID: string) => {
+    const key = taskKey(kind, jobID);
+    setTasks((previousTasks) =>
+      previousTasks.map((task) => {
+        if (taskKey(task.kind, task.jobId) !== key) {
+          return task;
+        }
+        return markTaskStreamInterrupted(task);
+      })
+    );
+  }, []);
+
   const handleImportCompleted = useCallback(
     async (jobID: string, event: AdminSpaceTransferEvent) => {
       const key = taskKey("space_import", jobID);
@@ -172,7 +214,7 @@ export function AdminSpaceTransferTaskProvider({
       handledImportCompletionsRef.current.add(key);
 
       const meta = importTaskMetaRef.current.get(key);
-      const spaceID = event.spaceId?.trim() || "";
+      const spaceID = event.newSpaceId?.trim() || event.spaceId?.trim() || "";
       let needsDefaultCover = meta?.needsDefaultCover === true;
       if (!meta && spaceID) {
         try {
@@ -214,6 +256,42 @@ export function AdminSpaceTransferTaskProvider({
     [dataGateway.admin]
   );
 
+  const recoverInterruptedTask = useCallback(
+    async (kind: AdminSpaceTransferTaskKind, jobID: string) => {
+      const admin = dataGateway.admin as AdminGatewayRuntime;
+      if (!admin.getSpaceTransferTask) {
+        return;
+      }
+      try {
+        const result = await admin.getSpaceTransferTask({ kind, jobId: jobID });
+        const task = result?.task;
+        if (!task || dismissedTaskKeysRef.current.has(taskKey(kind, jobID))) {
+          return;
+        }
+        // SSE 长连接只负责推送事件，断线后必须主动刷新一次后端任务快照，
+        // 否则大 EPUB 后端已经完成时，前端会停留在最后一次进度。
+        upsertTask(task);
+        if (kind === "space_import" && task.status === "completed") {
+          await handleImportCompleted(jobID, eventFromTaskSnapshot(task));
+          return;
+        }
+        if (task.status !== "queued" && task.status !== "running") {
+          return;
+        }
+        if (!admin.issueSpaceTransferStreamToken) {
+          return;
+        }
+        const tokenResult = await admin.issueSpaceTransferStreamToken({ kind, jobId: jobID });
+        if (tokenResult?.streamUrl) {
+          subscribeTaskRef.current(kind, jobID, tokenResult.streamUrl);
+        }
+      } catch (error) {
+        showToast(`刷新任务状态失败：${formatError(error)}`);
+      }
+    },
+    [dataGateway.admin, handleImportCompleted, upsertTask]
+  );
+
   const subscribeTask = useCallback(
     (kind: AdminSpaceTransferTaskKind, jobID: string, streamUrl: string) => {
       const admin = dataGateway.admin as AdminGatewayRuntime;
@@ -231,13 +309,9 @@ export function AdminSpaceTransferTaskProvider({
           }
         },
         onError() {
-          updateTaskFromEvent(kind, jobID, {
-            type: "failed",
-            stage: "stream",
-            progress: 0,
-            message: "任务事件连接异常，请稍后刷新"
-          });
+          markStreamInterrupted(kind, jobID);
           closeSubscription(subscriptionsRef.current, key);
+          void recoverInterruptedTask(kind, jobID);
         }
       };
       const subscription =
@@ -248,8 +322,12 @@ export function AdminSpaceTransferTaskProvider({
         subscriptionsRef.current.set(key, subscription);
       }
     },
-    [dataGateway.admin, handleImportCompleted, updateTaskFromEvent]
+    [dataGateway.admin, handleImportCompleted, markStreamInterrupted, recoverInterruptedTask, updateTaskFromEvent]
   );
+
+  useEffect(() => {
+    subscribeTaskRef.current = subscribeTask;
+  }, [subscribeTask]);
 
   useEffect(() => {
     const admin = dataGateway.admin as AdminGatewayRuntime;

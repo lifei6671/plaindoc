@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -24,15 +25,16 @@ var (
 
 // Config 描述单个 SSR Worker 进程配置。
 type Config struct {
-	Name            string
-	Exec            string
-	Entry           string
-	Args            []string
-	Env             []string
-	ProtocolVersion string
-	RenderTimeout   time.Duration
-	MaxPayloadBytes int64
-	Logger          *slog.Logger
+	Name             string
+	Exec             string
+	Entry            string
+	Args             []string
+	Env              []string
+	ProtocolVersion  string
+	RenderTimeout    time.Duration
+	MaxPayloadBytes  int64
+	MaxResponseBytes int64
+	Logger           *slog.Logger
 }
 
 // Process 封装一个 Node SSR Worker 子进程。
@@ -78,10 +80,9 @@ func (process *Process) Start(ctx context.Context) error {
 		return errors.New("ssr worker entry is empty")
 	}
 
-	commandArgs := make([]string, 0, 1+len(process.config.Args))
-	commandArgs = append(commandArgs, process.config.Entry)
-	commandArgs = append(commandArgs, process.config.Args...)
+	commandArgs := buildSSRWorkerCommandArgs(process.config)
 
+	process.logInfo("ssr worker starting", "exec", process.config.Exec, "args", commandArgs)
 	command := exec.Command(process.config.Exec, commandArgs...)
 	command.Env = append(os.Environ(), process.config.Env...)
 
@@ -104,7 +105,13 @@ func (process *Process) Start(ctx context.Context) error {
 
 	process.command = command
 	process.stdin = stdinWriter
-	process.codec = newStdioCodec(stdoutReader, stdinWriter, process.config.MaxPayloadBytes)
+	// 请求 payload 与响应 HTML 的体积膨胀比例不同，stdout 读取使用独立上限，避免大 EPUB 阅读页 SSR 被 1MiB 请求上限误杀。
+	// 兼容直接构造 worker.Config 的旧测试或调用方：未显式设置响应上限时，仍回退到原来的请求上限语义。
+	maxResponseBytes := process.config.MaxResponseBytes
+	if maxResponseBytes <= 0 {
+		maxResponseBytes = process.config.MaxPayloadBytes
+	}
+	process.codec = newStdioCodec(stdoutReader, stdinWriter, maxResponseBytes)
 	process.waitDoneCh = make(chan error, 1)
 	process.exited = false
 	process.exitErr = nil
@@ -122,6 +129,23 @@ func (process *Process) Start(ctx context.Context) error {
 
 	process.logInfo("ssr worker started", "pid", command.Process.Pid)
 	return nil
+}
+
+func buildSSRWorkerCommandArgs(config Config) []string {
+	commandArgs := make([]string, 0, 2+len(config.Args))
+	if isNodeSSRWorkerExec(config.Exec) {
+		// 当前 Node/V8 版本在大空间导出触发复杂 SSR 渲染时可能出现原生优化器崩溃；
+		// 关闭 V8 优化比在 Worker 崩溃后重试更稳定，也和本仓库前端构建的既有规避方式一致。
+		commandArgs = append(commandArgs, "--no-opt")
+	}
+	commandArgs = append(commandArgs, config.Entry)
+	commandArgs = append(commandArgs, config.Args...)
+	return commandArgs
+}
+
+func isNodeSSRWorkerExec(execPath string) bool {
+	execName := strings.ToLower(strings.TrimSpace(filepath.Base(execPath)))
+	return execName == "node" || execName == "node.exe"
 }
 
 // Stop 停止 Worker 进程。

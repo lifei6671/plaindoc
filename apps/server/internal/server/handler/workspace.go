@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,9 @@ const (
 	defaultWorkspaceCategoryName         = "未分类"
 	maxWorkspaceSpaceNameLength          = 64
 	maxWorkspaceDocumentIdentifierLength = 80
+	defaultWorkspaceRevisionPage         = 1
+	defaultWorkspaceRevisionPageSize     = 30
+	maxWorkspaceRevisionPageSize         = 100
 )
 
 var (
@@ -99,14 +104,34 @@ type workspaceDocumentResponse struct {
 	UpdatedAt      string                `json:"updatedAt"`
 }
 
-type workspaceRevisionResponse struct {
-	ID          string `json:"id"`
-	DocumentID  string `json:"documentId"`
-	Version     int    `json:"version"`
-	ContentMD   string `json:"contentMd"`
-	BaseVersion int    `json:"baseVersion"`
-	CreatedAt   string `json:"createdAt"`
-	Source      string `json:"source"`
+type workspaceRevisionEditorUserResponse struct {
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+}
+
+type workspaceRevisionSummaryResponse struct {
+	ID          string                               `json:"id"`
+	DocumentID  string                               `json:"documentId"`
+	Version     int                                  `json:"version"`
+	BaseVersion int                                  `json:"baseVersion"`
+	CreatedAt   string                               `json:"createdAt"`
+	Source      string                               `json:"source"`
+	Format      models.DocumentFormat                `json:"format"`
+	FileName    *string                              `json:"fileName,omitempty"`
+	MimeType    *string                              `json:"mimeType,omitempty"`
+	EditorUser  *workspaceRevisionEditorUserResponse `json:"editorUser,omitempty"`
+}
+
+type workspaceRevisionFileResponse struct {
+	BlobID   string `json:"blobId,omitempty"`
+	FileName string `json:"fileName,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+}
+
+type workspaceRevisionDetailResponse struct {
+	workspaceRevisionSummaryResponse
+	ContentMD *string                        `json:"contentMd,omitempty"`
+	File      *workspaceRevisionFileResponse `json:"file,omitempty"`
 }
 
 type workspaceDocumentRow struct {
@@ -161,6 +186,15 @@ type saveWorkspaceDocumentRequest struct {
 
 type saveWorkspaceDocumentResponse struct {
 	Document workspaceDocumentResponse `json:"document"`
+}
+
+type restoreWorkspaceDocumentRevisionRequest struct {
+	BaseVersion int `json:"baseVersion" binding:"required"`
+}
+
+type restoreWorkspaceDocumentRevisionResponse struct {
+	Document             workspaceDocumentResponse        `json:"document"`
+	RestoredFromRevision workspaceRevisionSummaryResponse `json:"restoredFromRevision"`
 }
 
 type updateWorkspaceDocumentIdentifierRequest struct {
@@ -1289,8 +1323,21 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 		response.WorkspaceErrDocumentIDRequired.Write(c)
 		return
 	}
+	page, err := parseWorkspaceRevisionPositiveQueryInt(c.Query("page"), defaultWorkspaceRevisionPage)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidPage, "page 参数不合法")
+		return
+	}
+	pageSize, err := parseWorkspaceRevisionPositiveQueryInt(c.Query("pageSize"), defaultWorkspaceRevisionPageSize)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeInvalidPageSize, "pageSize 参数不合法")
+		return
+	}
+	if pageSize > maxWorkspaceRevisionPageSize {
+		pageSize = maxWorkspaceRevisionPageSize
+	}
 
-	_, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, actorUserID)
+	document, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, actorUserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrDocumentNotFound):
@@ -1305,30 +1352,466 @@ func (h *workspaceHandler) ListRevisions(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.workspaceRepo.ListRevisionsByDocumentID(c.Request.Context(), documentID)
+	offset := (page - 1) * pageSize
+	rows, err := h.workspaceRepo.ListRevisionSummariesByDocumentID(c.Request.Context(), repository.WorkspaceListRevisionSummariesParams{
+		DocumentID: documentID,
+		Limit:      pageSize,
+		Offset:     offset,
+	})
 	if err != nil {
 		response.InternalError(c)
 		return
 	}
 
-	revisions := make([]workspaceRevisionResponse, 0, len(rows))
+	revisions := make([]workspaceRevisionSummaryResponse, 0, len(rows))
 	for _, row := range rows {
-		source := strings.TrimSpace(string(row.Source))
-		if source != string(models.RevisionSourceLocal) && source != string(models.RevisionSourceRemote) {
-			source = string(models.RevisionSourceRemote)
-		}
-		revisions = append(revisions, workspaceRevisionResponse{
-			ID:          strings.TrimSpace(row.DocumentRevisionID),
-			DocumentID:  strings.TrimSpace(row.DocumentID),
-			Version:     row.Version,
-			ContentMD:   row.ContentMD,
-			BaseVersion: row.BaseVersion,
-			CreatedAt:   formatWorkspaceTime(row.CreatedAtRaw),
-			Source:      source,
-		})
+		revisions = append(revisions, workspaceRevisionSummaryResponseFromRecord(row))
 	}
 
+	slog.InfoContext(c.Request.Context(), "查询文档历史版本列表成功",
+		"documentID", documentID,
+		"actorUserID", actorUserID,
+		"format", models.NormalizeDocumentFormat(document.Format),
+		"page", page,
+		"pageSize", pageSize,
+		"count", len(revisions),
+	)
 	response.JSON(c, http.StatusOK, revisions)
+}
+
+// GetRevisionDetail 返回单个历史版本详情。
+func (h *workspaceHandler) GetRevisionDetail(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil || h.visibilityService == nil {
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+	revisionID := strings.TrimSpace(c.Param("revisionId"))
+	if revisionID == "" {
+		response.WorkspaceErrDocumentNotFound.Write(c)
+		return
+	}
+
+	document, err := h.visibilityService.GetDocument(c.Request.Context(), documentID, actorUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDocumentNotFound):
+			response.WorkspaceErrDocumentNotFound.Write(c)
+		case errors.Is(err, service.ErrViewerLoginRequired):
+			response.WorkspaceErrLoginRequired.Write(c)
+		case errors.Is(err, service.ErrDocumentAccessDenied):
+			response.WorkspaceErrInsufficientDocumentPermission.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	record, err := h.workspaceRepo.GetRevisionDetailByID(c.Request.Context(), documentID, revisionID)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			response.WorkspaceErrDocumentNotFound.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	detail := workspaceRevisionDetailResponseFromRecord(*record)
+	slog.InfoContext(c.Request.Context(), "查询文档历史版本详情成功",
+		"documentID", documentID,
+		"revisionID", revisionID,
+		"actorUserID", actorUserID,
+		"documentFormat", models.NormalizeDocumentFormat(document.Format),
+		"revisionFormat", detail.Format,
+	)
+	response.JSON(c, http.StatusOK, detail)
+}
+
+// RestoreRevision 将当前文档恢复到指定历史版本。
+func (h *workspaceHandler) RestoreRevision(c *gin.Context) {
+	actorUserID, ok := h.requireActorUserID(c)
+	if !ok {
+		return
+	}
+	if h == nil || h.workspaceRepo == nil {
+		response.InternalError(c)
+		return
+	}
+
+	documentID := strings.TrimSpace(c.Param("docId"))
+	if documentID == "" {
+		response.WorkspaceErrDocumentIDRequired.Write(c)
+		return
+	}
+	revisionID := strings.TrimSpace(c.Param("revisionId"))
+	if revisionID == "" {
+		response.WorkspaceErrDocumentNotFound.Write(c)
+		return
+	}
+
+	var req restoreWorkspaceDocumentRevisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.BaseVersion <= 0 {
+		response.WorkspaceErrBaseversionRequired.Write(c)
+		return
+	}
+
+	currentRecord, err := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrDocumentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	current := workspaceDocumentRow{
+		DocumentID:     currentRecord.DocumentID,
+		NodeID:         currentRecord.NodeID,
+		ThemeID:        currentRecord.ThemeID,
+		Format:         currentRecord.Format,
+		Title:          currentRecord.Title,
+		ContentMD:      currentRecord.ContentMD,
+		Version:        currentRecord.Version,
+		SourceBlobID:   currentRecord.SourceBlobID,
+		SourceFileName: currentRecord.SourceFileName,
+		SourceMimeType: currentRecord.SourceMimeType,
+		ContentVersion: currentRecord.ContentVersion,
+		SpaceID:        currentRecord.SpaceID,
+		UpdatedAtRaw:   currentRecord.UpdatedAtRaw,
+	}
+
+	spaceID := strings.TrimSpace(current.SpaceID)
+	if _, err := h.ensureSpaceWritable(c.Request.Context(), spaceID, actorUserID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSpaceNotFound):
+			response.WorkspaceErrSpaceNotFound.Write(c)
+		case errors.Is(err, service.ErrSpaceAccessDenied):
+			response.WorkspaceErrInsufficientSpacePermission.Write(c)
+		default:
+			response.InternalError(c)
+		}
+		return
+	}
+
+	targetRevision, err := h.workspaceRepo.GetRevisionDetailByID(c.Request.Context(), documentID, revisionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.WorkspaceErrDocumentNotFound.Write(c)
+			return
+		}
+		response.InternalError(c)
+		return
+	}
+	if current.Version != req.BaseVersion {
+		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(current))
+		return
+	}
+
+	currentFormat := models.NormalizeDocumentFormat(current.Format)
+	targetFormat := models.NormalizeDocumentFormat(targetRevision.Format)
+	if currentFormat == models.DocumentFormatMarkdown {
+		if targetFormat != models.DocumentFormatMarkdown || targetRevision.ContentMD == nil {
+			response.WorkspaceErrMarkdownOnlyOperation.Write(c)
+			return
+		}
+
+		restoredContent := *targetRevision.ContentMD
+		now := time.Now().UTC()
+		nextVersion := current.Version + 1
+		revision := &models.DocumentRevision{
+			DocumentRevisionID: strings.ToLower(ulid.Make().String()),
+			DocumentID:         documentID,
+			Version:            nextVersion,
+			ContentMD:          restoredContent,
+			BaseVersion:        req.BaseVersion,
+			EditorUserID:       &actorUserID,
+			Source:             models.RevisionSourceRemote,
+			CreatedAt:          now,
+		}
+		saved, err := h.workspaceRepo.SaveDocument(c.Request.Context(), repository.WorkspaceSaveDocumentParams{
+			DocumentID:  documentID,
+			BaseVersion: req.BaseVersion,
+			NextVersion: nextVersion,
+			ContentMD:   restoredContent,
+			ActorUserID: actorUserID,
+			NodeID:      current.NodeID,
+			SpaceID:     spaceID,
+			TouchedAt:   now,
+			Revision:    revision,
+		})
+		if err != nil {
+			response.InternalError(c)
+			return
+		}
+		if !saved {
+			latestRecord, latestErr := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+			if latestErr != nil {
+				response.InternalError(c)
+				return
+			}
+			h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(workspaceDocumentRow{
+				DocumentID:     latestRecord.DocumentID,
+				NodeID:         latestRecord.NodeID,
+				ThemeID:        latestRecord.ThemeID,
+				Format:         latestRecord.Format,
+				Title:          latestRecord.Title,
+				ContentMD:      latestRecord.ContentMD,
+				Version:        latestRecord.Version,
+				SourceBlobID:   latestRecord.SourceBlobID,
+				SourceFileName: latestRecord.SourceFileName,
+				SourceMimeType: latestRecord.SourceMimeType,
+				ContentVersion: latestRecord.ContentVersion,
+				SpaceID:        latestRecord.SpaceID,
+				UpdatedAtRaw:   latestRecord.UpdatedAtRaw,
+			}))
+			return
+		}
+
+		if h != nil && h.renderCache != nil {
+			// 恢复历史版本后失效阅读缓存，避免继续命中过期正文。
+			h.renderCache.PurgeDoc(documentID)
+		}
+		current.ContentMD = restoredContent
+		current.Version = nextVersion
+		current.ContentVersion = nextVersion
+		current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
+
+		if h != nil && h.documentImageAssetService != nil {
+			if syncErr := h.documentImageAssetService.SyncDocumentImageAssets(
+				c.Request.Context(),
+				service.SyncDocumentImageAssetsInput{
+					DocumentID:   documentID,
+					SpaceID:      spaceID,
+					ContentMD:    restoredContent,
+					ReferencedAt: now,
+				},
+			); syncErr != nil {
+				setRequestErrmsg(c, syncErr, "恢复历史版本后同步文档图片引用失败")
+			}
+		}
+
+		slog.InfoContext(c.Request.Context(), "恢复 Markdown 历史版本成功",
+			"documentID", documentID,
+			"revisionID", revisionID,
+			"actorUserID", actorUserID,
+			"baseVersion", req.BaseVersion,
+			"nextVersion", nextVersion,
+		)
+		response.JSON(c, http.StatusOK, restoreWorkspaceDocumentRevisionResponse{
+			Document:             mapWorkspaceDocumentResponse(current),
+			RestoredFromRevision: workspaceRevisionSummaryResponseFromRecord(targetRevision.WorkspaceRevisionSummaryRecord),
+		})
+		return
+	}
+
+	if !models.IsOfficeDocumentFormat(currentFormat) {
+		response.WorkspaceErrMarkdownOnlyOperation.Write(c)
+		return
+	}
+	if targetFormat != currentFormat || targetRevision.BlobID == nil {
+		response.WorkspaceErrDocumentFormatInvalid.Write(c)
+		return
+	}
+
+	currentContentVersion := normalizeWorkspaceContentVersion(current.ContentVersion, current.Version)
+	if currentContentVersion != req.BaseVersion {
+		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(current))
+		return
+	}
+
+	sourceBlobID := trimWorkspaceRevisionStringValue(targetRevision.BlobID)
+	if sourceBlobID == "" {
+		response.WorkspaceErrDocumentNotFound.Write(c)
+		return
+	}
+	sourceFileName := trimWorkspaceRevisionStringValue(targetRevision.FileName)
+	if sourceFileName == "" {
+		sourceFileName = resolveOfficeSourceFileName(current.Title, currentFormat)
+	}
+	sourceMimeType := trimWorkspaceRevisionStringValue(targetRevision.MimeType)
+	if sourceMimeType == "" {
+		sourceMimeType = resolveOnlyOfficeSourceMimeType(currentFormat, nil)
+	}
+
+	now := time.Now().UTC()
+	nextVersion := current.Version + 1
+	nextContentVersion := currentContentVersion + 1
+	fileRevision := &models.DocumentFileRevision{
+		DocumentFileRevisionID: strings.ToLower(ulid.Make().String()),
+		DocumentID:             documentID,
+		BlobID:                 sourceBlobID,
+		FileName:               sourceFileName,
+		MimeType:               sourceMimeType,
+		Version:                nextContentVersion,
+		BaseVersion:            currentContentVersion,
+		EditorUserID:           &actorUserID,
+		Source:                 models.RevisionSourceRemote,
+		CreatedAt:              now,
+	}
+	saved, err := h.workspaceRepo.SaveOfficeDocument(c.Request.Context(), repository.WorkspaceSaveOfficeDocumentParams{
+		DocumentID:         documentID,
+		BaseContentVersion: currentContentVersion,
+		NextVersion:        nextVersion,
+		NextContentVersion: nextContentVersion,
+		SourceBlobID:       sourceBlobID,
+		SourceFileName:     sourceFileName,
+		SourceMimeType:     sourceMimeType,
+		ActorUserID:        actorUserID,
+		NodeID:             current.NodeID,
+		SpaceID:            spaceID,
+		TouchedAt:          now,
+		FileRevision:       fileRevision,
+	})
+	if err != nil {
+		response.InternalError(c)
+		return
+	}
+	if !saved {
+		latestRecord, latestErr := h.workspaceRepo.GetDocumentByDocumentID(c.Request.Context(), documentID)
+		if latestErr != nil {
+			response.InternalError(c)
+			return
+		}
+		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(workspaceDocumentRow{
+			DocumentID:     latestRecord.DocumentID,
+			NodeID:         latestRecord.NodeID,
+			ThemeID:        latestRecord.ThemeID,
+			Format:         latestRecord.Format,
+			Title:          latestRecord.Title,
+			ContentMD:      latestRecord.ContentMD,
+			Version:        latestRecord.Version,
+			SourceBlobID:   latestRecord.SourceBlobID,
+			SourceFileName: latestRecord.SourceFileName,
+			SourceMimeType: latestRecord.SourceMimeType,
+			ContentVersion: latestRecord.ContentVersion,
+			SpaceID:        latestRecord.SpaceID,
+			UpdatedAtRaw:   latestRecord.UpdatedAtRaw,
+		}))
+		return
+	}
+
+	if h != nil && h.renderCache != nil {
+		// Office 恢复切换了源文件版本，必须失效阅读缓存并等待 HTML 重新渲染。
+		h.renderCache.PurgeDoc(documentID)
+	}
+	current.Version = nextVersion
+	current.ContentVersion = nextContentVersion
+	current.SourceBlobID = &sourceBlobID
+	current.SourceFileName = &sourceFileName
+	current.SourceMimeType = &sourceMimeType
+	current.UpdatedAtRaw = now.Format(time.RFC3339Nano)
+
+	slog.InfoContext(c.Request.Context(), "恢复 Office 历史版本成功",
+		"documentID", documentID,
+		"revisionID", revisionID,
+		"actorUserID", actorUserID,
+		"baseVersion", req.BaseVersion,
+		"nextVersion", nextVersion,
+		"nextContentVersion", nextContentVersion,
+		"sourceBlobID", sourceBlobID,
+	)
+	response.JSON(c, http.StatusOK, restoreWorkspaceDocumentRevisionResponse{
+		Document:             mapWorkspaceDocumentResponse(current),
+		RestoredFromRevision: workspaceRevisionSummaryResponseFromRecord(targetRevision.WorkspaceRevisionSummaryRecord),
+	})
+}
+
+func parseWorkspaceRevisionPositiveQueryInt(rawValue string, defaultValue int) (int, error) {
+	trimmedValue := strings.TrimSpace(rawValue)
+	if trimmedValue == "" {
+		return defaultValue, nil
+	}
+	parsedValue, err := strconv.Atoi(trimmedValue)
+	if err != nil || parsedValue <= 0 {
+		return 0, errors.New("query parameter must be a positive integer")
+	}
+	return parsedValue, nil
+}
+
+func workspaceRevisionSummaryResponseFromRecord(
+	record repository.WorkspaceRevisionSummaryRecord,
+) workspaceRevisionSummaryResponse {
+	return workspaceRevisionSummaryResponse{
+		ID:          strings.TrimSpace(record.RevisionID),
+		DocumentID:  strings.TrimSpace(record.DocumentID),
+		Version:     record.Version,
+		BaseVersion: record.BaseVersion,
+		CreatedAt:   formatWorkspaceTime(record.CreatedAtRaw),
+		Source:      workspaceRevisionSourceString(record.Source),
+		Format:      models.NormalizeDocumentFormat(record.Format),
+		FileName:    trimWorkspaceRevisionOptionalString(record.FileName),
+		MimeType:    trimWorkspaceRevisionOptionalString(record.MimeType),
+		EditorUser:  workspaceRevisionEditorUserResponseFromRecord(record),
+	}
+}
+
+func workspaceRevisionDetailResponseFromRecord(
+	record repository.WorkspaceRevisionDetailRecord,
+) workspaceRevisionDetailResponse {
+	summary := workspaceRevisionSummaryResponseFromRecord(record.WorkspaceRevisionSummaryRecord)
+	detail := workspaceRevisionDetailResponse{
+		workspaceRevisionSummaryResponse: summary,
+		ContentMD:                        trimWorkspaceRevisionOptionalString(record.ContentMD),
+	}
+	if record.BlobID != nil || record.FileName != nil || record.MimeType != nil {
+		detail.File = &workspaceRevisionFileResponse{
+			BlobID:   trimWorkspaceRevisionStringValue(record.BlobID),
+			FileName: trimWorkspaceRevisionStringValue(record.FileName),
+			MimeType: trimWorkspaceRevisionStringValue(record.MimeType),
+		}
+	}
+	return detail
+}
+
+func workspaceRevisionSourceString(source models.RevisionSource) string {
+	normalizedSource := strings.TrimSpace(string(source))
+	if normalizedSource != string(models.RevisionSourceLocal) && normalizedSource != string(models.RevisionSourceRemote) {
+		return string(models.RevisionSourceRemote)
+	}
+	return normalizedSource
+}
+
+func workspaceRevisionEditorUserResponseFromRecord(
+	record repository.WorkspaceRevisionSummaryRecord,
+) *workspaceRevisionEditorUserResponse {
+	editorUserID := trimWorkspaceRevisionStringValue(record.EditorUserID)
+	if editorUserID == "" {
+		return nil
+	}
+	displayName := trimWorkspaceRevisionStringValue(record.EditorUserName)
+	if displayName == "" {
+		displayName = editorUserID
+	}
+	return &workspaceRevisionEditorUserResponse{
+		UserID:      editorUserID,
+		DisplayName: displayName,
+	}
+}
+
+func trimWorkspaceRevisionOptionalString(value *string) *string {
+	trimmedValue := trimWorkspaceRevisionStringValue(value)
+	if trimmedValue == "" {
+		return nil
+	}
+	return &trimmedValue
+}
+
+func trimWorkspaceRevisionStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 func (h *workspaceHandler) requireActorSession(c *gin.Context) (service.AuthSession, bool) {

@@ -91,6 +91,7 @@ type AdminSpaceTransferEvent struct {
 	SizeBytes   int64                       `json:"sizeBytes,omitempty"`
 	SpaceID     string                      `json:"spaceId,omitempty"`
 	SpaceName   string                      `json:"spaceName,omitempty"`
+	NewSpaceID  string                      `json:"newSpaceId,omitempty"`
 }
 
 // AdminSpaceExportJob 记录进程内导出任务状态。

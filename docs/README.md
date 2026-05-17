@@ -1,6 +1,6 @@
 # Docs 导航（精简版）
 
-**Last Updated**: 2026-03-08  
+**Last Updated**: 2026-05-17
 **目标**: 文档收敛到“前端一份 + 后端一份”，减少重复、冲突与维护成本。
 
 ---
@@ -39,6 +39,12 @@
    空间导入导出执行清单：按协议骨架、任务 SSE、zip 导出、附件与 Office source、EPUB、导入解析、导入落地、审计清理、测试文档同步、全局任务中心与刷新恢复拆分，可逐项回写进度。
 7. `2026-05-17_DATABASE_STARTUP_PROGRESS_TECHNICAL_PLAN.md`
    数据库初始化与迁移中间页方案：服务先启动 Bootstrap HTTP，迁移期间展示启动进度页，迁移完成后原子切换到正式 Router。
+8. `2026-05-17_EPUB_SPACE_IMPORT_AND_DOCUMENT_HISTORY_TECHNICAL_PLAN.md`
+   EPUB 空间导入与文档历史版本方案：后台空间导入支持 `.epub`，按 EPUB 目录创建新空间目录树，将章节 HTML 转 Markdown；编辑器新增历史版本弹窗，展示版本列表、Markdown 差异、Office 文件元数据和恢复入口。
+9. `2026-05-17_EPUB_SPACE_IMPORT_AND_DOCUMENT_HISTORY_TASK_CHECKLIST.md`
+   EPUB 空间导入与文档历史版本执行清单：按 EPUB inspect/commit、HTML 清洗、Markdown 转换、图片本地化、revision 摘要/详情/恢复、前端弹窗、测试矩阵和文档同步拆分，可继续追踪样本验证、race 门限和 lint 收尾任务。
+10. `epub-import-sample-validation.md`
+   EPUB 导入样本验证记录：记录手工样本矩阵、待补样本类型、每个样本需要采集的 inspect/导入/内容质量信息，以及当前样本缺口。
 
 ---
 

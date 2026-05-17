@@ -499,6 +499,10 @@ func newRouter(
 		api.POST("/docs/:docId/remote-images/localize", workspaceHandler.LocalizeDocumentRemoteImages)
 		// 获取文档历史修订列表。
 		api.GET("/docs/:docId/revisions", workspaceHandler.ListRevisions)
+		// 获取单个文档历史版本详情（Markdown 正文或 Office 文件版本元数据）。
+		api.GET("/docs/:docId/revisions/:revisionId", workspaceHandler.GetRevisionDetail)
+		// 恢复到指定文档历史版本。
+		api.POST("/docs/:docId/revisions/:revisionId/restore", workspaceHandler.RestoreRevision)
 		// 文档附件列表。
 		api.GET("/docs/:docId/attachments", workspaceHandler.ListDocumentAttachments)
 		// 上传文档附件（支持 local/cloudflare-r2/aliyun-oss provider）。

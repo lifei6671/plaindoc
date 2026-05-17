@@ -71,14 +71,15 @@ type LDAPConfig struct {
 
 // SSRWorkerConfig 描述 Go 进程内管理的 Node SSR 子进程配置。
 type SSRWorkerConfig struct {
-	Enabled         bool
-	Exec            string
-	Entry           string
-	Count           int
-	RenderTimeout   time.Duration
-	StartTimeout    time.Duration
-	MaxPayloadBytes int64
-	ProtocolVersion string
+	Enabled          bool
+	Exec             string
+	Entry            string
+	Count            int
+	RenderTimeout    time.Duration
+	StartTimeout     time.Duration
+	MaxPayloadBytes  int64
+	MaxResponseBytes int64
+	ProtocolVersion  string
 }
 
 // Load 解析并校验环境变量；配置非法时返回明确错误，避免服务带病启动。
@@ -112,13 +113,14 @@ func Load() (Config, error) {
 			},
 		},
 		SSRWorker: SSRWorkerConfig{
-			Exec:            getenv("SSR_WORKER_EXEC", "node"),
-			Entry:           getenv("SSR_WORKER_ENTRY", ""),
-			Count:           2,
-			RenderTimeout:   1500 * time.Millisecond,
-			StartTimeout:    5 * time.Second,
-			MaxPayloadBytes: 1024 * 1024,
-			ProtocolVersion: getenv("SSR_PROTOCOL_VERSION", "v1"),
+			Exec:             getenv("SSR_WORKER_EXEC", "node"),
+			Entry:            getenv("SSR_WORKER_ENTRY", ""),
+			Count:            2,
+			RenderTimeout:    1500 * time.Millisecond,
+			StartTimeout:     5 * time.Second,
+			MaxPayloadBytes:  1024 * 1024,
+			MaxResponseBytes: 16 * 1024 * 1024,
+			ProtocolVersion:  getenv("SSR_PROTOCOL_VERSION", "v1"),
 		},
 	}
 
@@ -247,11 +249,17 @@ func Load() (Config, error) {
 	}
 	cfg.SSRWorker.StartTimeout = ssrWorkerStartTimeout
 
-	ssrWorkerMaxPayloadBytes, err := parseInt64("SSR_WORKER_MAX_PAYLOAD_BYTES", "1048576")
+	ssrWorkerMaxPayloadBytes, err := parseByteSize("SSR_WORKER_MAX_PAYLOAD_BYTES", "1MB")
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.SSRWorker.MaxPayloadBytes = ssrWorkerMaxPayloadBytes
+
+	ssrWorkerMaxResponseBytes, err := parseByteSize("SSR_WORKER_MAX_RESPONSE_BYTES", "16MB")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.SSRWorker.MaxResponseBytes = ssrWorkerMaxResponseBytes
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -358,6 +366,9 @@ func (c Config) Validate() error {
 		if c.SSRWorker.MaxPayloadBytes <= 0 {
 			return errors.New("SSR_WORKER_MAX_PAYLOAD_BYTES must be greater than 0 when SSR_WORKER_ENABLED is true")
 		}
+		if c.SSRWorker.MaxResponseBytes <= 0 {
+			return errors.New("SSR_WORKER_MAX_RESPONSE_BYTES must be greater than 0 when SSR_WORKER_ENABLED is true")
+		}
 		if strings.TrimSpace(c.SSRWorker.ProtocolVersion) == "" {
 			return errors.New("SSR_PROTOCOL_VERSION must not be empty when SSR_WORKER_ENABLED is true")
 		}
@@ -411,13 +422,46 @@ func parseInt(key string, fallback string) (int, error) {
 	return value, nil
 }
 
-func parseInt64(key string, fallback string) (int64, error) {
+func parseByteSize(key string, fallback string) (int64, error) {
 	raw := strings.TrimSpace(getenv(key, fallback))
-	value, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("%s must be a valid int64 value, got %q", key, raw)
+	normalized := strings.ToUpper(strings.ReplaceAll(raw, " ", ""))
+	if normalized == "" {
+		normalized = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(fallback), " ", ""))
 	}
-	return value, nil
+
+	multiplier := int64(1)
+	numberPart := normalized
+	for _, unit := range []struct {
+		suffix     string
+		multiplier int64
+	}{
+		{suffix: "GIB", multiplier: 1024 * 1024 * 1024},
+		{suffix: "GB", multiplier: 1024 * 1024 * 1024},
+		{suffix: "G", multiplier: 1024 * 1024 * 1024},
+		{suffix: "MIB", multiplier: 1024 * 1024},
+		{suffix: "MB", multiplier: 1024 * 1024},
+		{suffix: "M", multiplier: 1024 * 1024},
+		{suffix: "KIB", multiplier: 1024},
+		{suffix: "KB", multiplier: 1024},
+		{suffix: "K", multiplier: 1024},
+		{suffix: "B", multiplier: 1},
+	} {
+		if strings.HasSuffix(normalized, unit.suffix) {
+			multiplier = unit.multiplier
+			numberPart = strings.TrimSuffix(normalized, unit.suffix)
+			break
+		}
+	}
+
+	value, err := strconv.ParseInt(numberPart, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid byte size, got %q", key, raw)
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if value > maxInt64/multiplier {
+		return 0, fmt.Errorf("%s byte size is too large, got %q", key, raw)
+	}
+	return value * multiplier, nil
 }
 
 func getenv(key string, fallback string) string {

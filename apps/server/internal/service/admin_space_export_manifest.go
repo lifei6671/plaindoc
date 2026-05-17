@@ -47,6 +47,8 @@ type AdminSpaceExportSummary struct {
 	DocumentCount     int `json:"documentCount"`
 	AttachmentCount   int `json:"attachmentCount"`
 	OfficeSourceCount int `json:"officeSourceCount"`
+	ImageCount        int `json:"imageCount,omitempty"`
+	MaxDepth          int `json:"maxDepth,omitempty"`
 }
 
 // AdminSpaceExportManifestSummary 保留给导入预览响应使用的兼容别名。

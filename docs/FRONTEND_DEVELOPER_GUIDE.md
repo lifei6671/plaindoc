@@ -134,7 +134,7 @@
 | --- | --- | --- |
 | `SSR_PROTOCOL_VERSION` | `apps/web/src/ssr/worker-entry.ts` | Worker 握手和 render 请求协议版本，默认 `v1`。 |
 | `SSR_WORKER_ENTRY` | 后端 `main.go` 校验与启动 | 必须指向已构建的 `worker-entry.js` 文件（不是目录）。 |
-| `SSR_WORKER_EXEC` | 后端 `main.go` 校验与启动 | Node 可执行命令（如 `node`）。 |
+| `SSR_WORKER_EXEC` | 后端 `main.go` 校验与启动 | Node 可执行命令（如 `node`）；后端用 Node 启动 Worker 时会自动加 `--no-opt`，降低大空间导出 SSR 渲染触发 Node/V8 原生崩溃的概率。 |
 
 注：`SSR_WORKER_ENTRY` 文件存在性、类型校验发生在后端启动阶段，见 `apps/server/cmd/server/main.go` 的 `validateSSRWorkerRuntime`。
 
@@ -272,6 +272,26 @@ ONLYOFFICE 相关字段约束：
 3. `code` 节点需保留 `math-inline` / `math-display`，否则公式渲染回归。
 4. 链接/资源协议白名单只放行安全协议（阻断 `javascript:` 等）。
 5. 编辑页预览与阅读页对外部 HTTP(S) 链接统一补 `target="_blank"` 与 `rel="noopener noreferrer nofollow"`；同源链接与页内锚点保持原行为。
+
+### 7.4 文档历史版本弹窗
+
+关键文件：
+
+1. `apps/web/src/components/DocumentRevisionHistoryDialog.tsx`
+2. `apps/web/src/components/DocumentRevisionHistoryDialog.test.tsx`
+3. `apps/web/src/data-access/types.ts`
+4. `apps/web/src/data-access/http/adapter.ts`
+5. `apps/web/src/App.tsx`
+
+约束要点：
+
+1. 历史版本列表、详情和恢复必须走 `dataGateway.document`，组件内不得直接 `fetch`。
+2. 列表接口只消费摘要；选中某个版本后再调用详情接口，避免一次性拉取大量正文。
+3. Markdown revision 使用 `@codemirror/merge` 做只读 diff；Office revision 只展示文件元数据和恢复入口，不做文本 diff 或二进制 diff。
+4. 当前编辑器存在未保存内容时必须禁用恢复，避免把本地草稿静默覆盖；Office 文档不能用 Markdown 正文差异判断，必须把 ONLYOFFICE dirty 状态映射后的 `saveStatus=ready` 视为未保存。
+5. 恢复前必须二次确认，确认文案包含版本号、创建时间和创建人；恢复请求必须携带当前 `baseVersion`。
+6. 恢复成功后必须同步编辑器当前内容、版本号、保存状态和最后保存内容，避免恢复完成后仍被误判为未保存。
+7. Office 文档恢复成功后必须重载 ONLYOFFICE 编辑配置；只更新 source 文件元数据不足以让当前编辑器实例切换到恢复后的 blob。
 
 ### 7.2 滚动同步依赖项
 
@@ -435,13 +455,15 @@ ONLYOFFICE 相关字段约束：
 4. 全局浮层的导出下载必须点击时调用 `issueSpaceTransferDownloadToken` 重新签发一次性 `downloadUrl`，不能复用历史 completed 事件中的旧 token；弹窗内遗留完成态也不能自动消耗一次性 token。
 5. 导入包没有封面时，Provider 在导入 completed 事件后统一生成默认封面、上传封面资产并更新空间元数据；刷新恢复的 completed 事件若缺失 inspect 运行时 meta，应先查询新空间是否无封面再补齐，并派发完成事件刷新空间列表；失败只提示“导入完成但封面生成失败”，不得阻断导入完成刷新。
 5. SSE 事件和 token 接口返回的 `streamUrl` / `downloadUrl` 必须通过 `data-access/http/adapter.ts` 按 `VITE_API_BASE_URL` 归一化，避免前后端不同 origin 时请求打到前端域名。
-6. EPUB 导出完成态必须使用 `.epub` 文件名；可回灌空间包使用 `.plaindoc`，Markdown 内容归档包使用 `.zip`。完成事件展示和手动下载文件名必须绑定任务启动时的格式，不能被完成后再次切换的选择框状态改写。
+6. EPUB 导出完成态必须使用 `.epub` 文件名，下载名由后端按空间名生成并清理路径非法字符；可回灌空间包使用 `.plaindoc`，Markdown 内容归档包使用 `.zip`。完成事件展示和手动下载文件名必须绑定任务启动时的格式，不能被完成后再次切换的选择框状态改写。
 7. 导出弹层右侧说明区必须跟随格式切换，说明用途、包含内容、适合场景和注意事项；PlainDoc 包是空间交换包，Markdown ZIP 是内容归档包，EPUB 是阅读产物。
 8. PlainDoc 包必须锁定“包含附件”和“包含 Office 源文件”为 true；EPUB 只锁定“包含 Office 源文件”，普通附件选项不得强制勾选，因为 EPUB 阅读包不会把普通附件作为空间交换内容导出；Markdown ZIP 允许按需关闭这些选项。
-9. 导入文件选择器只接受 `.plaindoc`；普通 `.zip` 不能作为空间导入包。
-10. 导入完成态必须展示新空间的编辑器与阅读页入口，并刷新空间列表；如果 inspect 返回 `hasCover=false`，前端必须复用创建空间的浏览器默认封面生成逻辑上传并绑定封面。普通导入用户只允许执行纯封面绑定，不能借此更新名称、分类、可见性等其它空间元数据。
-11. 导入或导出任务处于 running/progress 时禁止关闭弹层，避免丢失 completed 事件、下载入口或默认封面补齐；SSE 异常时必须转为 failed 状态并解锁弹层。
-12. 导入或导出弹层关闭、组件卸载、任务完成或失败时必须关闭 SSE subscription，避免事件泄露；Provider 的 subscription map 同样必须在任务终态、清除、卸载时关闭。
+9. 导入文件选择器只接受 `.plaindoc` 和 `.epub`；普通 `.zip` 不能作为空间导入包。
+10. EPUB 导入预览必须展示作者、出版日期、章节数、目录层级、图片数和 warnings；`.plaindoc` 预览不得回退展示 EPUB 专属统计。
+11. EPUB 与 `.plaindoc` 导入都只负责创建新空间，弹窗只提交 inspect/commit，后续进度统一交给全局任务 Provider。
+12. 导入完成态必须展示新空间的编辑器与阅读页入口，并刷新空间列表；如果 inspect 返回 `hasCover=false`，前端必须复用创建空间的浏览器默认封面生成逻辑上传并绑定封面。普通导入用户只允许执行纯封面绑定，不能借此更新名称、分类、可见性等其它空间元数据。
+13. 导入或导出任务处于 running/progress 时禁止关闭弹层，避免丢失 completed 事件、下载入口或默认封面补齐；SSE 异常时必须转为 failed 状态并解锁弹层。
+14. 导入或导出弹层关闭、组件卸载、任务完成或失败时必须关闭 SSE subscription，避免事件泄露；Provider 的 subscription map 同样必须在任务终态、清除、卸载时关闭。
 
 ---
 
@@ -484,6 +506,7 @@ ONLYOFFICE 相关字段约束：
 1. `make server-dev-ssr` 报 `SSR_WORKER_ENTRY` 相关错误：
    - 先执行 `make web-build-ssr`
    - 确认 `apps/web/dist-ssr/worker-entry.js` 存在且是文件
+   - 若大空间导出时 SSR Worker 日志出现 Node/V8 `Fatal error`，确认后端启动日志里 Worker args 包含 `--no-opt`
 2. 开发态 `/r` 或 `/uploads` 404：
    - 检查 `VITE_DEV_PROXY_TARGET`
    - 检查 `vite.config.ts` 代理配置是否被改动

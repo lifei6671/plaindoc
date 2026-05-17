@@ -105,12 +105,13 @@ func main() {
 		ssrWorkerPool = pool.New(pool.Config{
 			WorkerCount: cfg.SSRWorker.Count,
 			Worker: worker.Config{
-				Exec:            cfg.SSRWorker.Exec,
-				Entry:           cfg.SSRWorker.Entry,
-				ProtocolVersion: cfg.SSRWorker.ProtocolVersion,
-				RenderTimeout:   cfg.SSRWorker.RenderTimeout,
-				MaxPayloadBytes: cfg.SSRWorker.MaxPayloadBytes,
-				Logger:          logger,
+				Exec:             cfg.SSRWorker.Exec,
+				Entry:            cfg.SSRWorker.Entry,
+				ProtocolVersion:  cfg.SSRWorker.ProtocolVersion,
+				RenderTimeout:    cfg.SSRWorker.RenderTimeout,
+				MaxPayloadBytes:  cfg.SSRWorker.MaxPayloadBytes,
+				MaxResponseBytes: cfg.SSRWorker.MaxResponseBytes,
+				Logger:           logger,
 			},
 			Logger: logger,
 		})
@@ -209,6 +210,8 @@ func main() {
 		"ssr_worker_enabled", cfg.SSRWorker.Enabled,
 		"ssr_worker_count", cfg.SSRWorker.Count,
 		"ssr_render_timeout", cfg.SSRWorker.RenderTimeout.String(),
+		"ssr_worker_max_payload_bytes", cfg.SSRWorker.MaxPayloadBytes,
+		"ssr_worker_max_response_bytes", cfg.SSRWorker.MaxResponseBytes,
 	)
 	if err := waitForHTTPServerExit(serverErrCh); err != nil {
 		logger.Error("server exited unexpectedly", "error", err.Error())

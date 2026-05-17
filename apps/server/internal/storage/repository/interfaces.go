@@ -628,8 +628,39 @@ type WorkspaceRevisionRecord struct {
 	Version            int
 	ContentMD          string
 	BaseVersion        int
+	EditorUserID       *string
+	EditorUserName     *string
 	Source             models.RevisionSource
 	CreatedAtRaw       string
+}
+
+// WorkspaceListRevisionSummariesParams 工作区历史版本摘要分页参数。
+type WorkspaceListRevisionSummariesParams struct {
+	DocumentID string
+	Limit      int
+	Offset     int
+}
+
+// WorkspaceRevisionSummaryRecord 工作区历史版本摘要记录。
+type WorkspaceRevisionSummaryRecord struct {
+	RevisionID     string
+	DocumentID     string
+	Version        int
+	BaseVersion    int
+	Format         models.DocumentFormat
+	FileName       *string
+	MimeType       *string
+	EditorUserID   *string
+	EditorUserName *string
+	Source         models.RevisionSource
+	CreatedAtRaw   string
+}
+
+// WorkspaceRevisionDetailRecord 工作区单个历史版本详情记录。
+type WorkspaceRevisionDetailRecord struct {
+	WorkspaceRevisionSummaryRecord
+	ContentMD *string
+	BlobID    *string
 }
 
 // WorkspaceCreateNodeParams 工作区创建节点参数。
@@ -722,6 +753,15 @@ type WorkspaceRepository interface {
 	SaveDocument(ctx context.Context, params WorkspaceSaveDocumentParams) (bool, error)
 	SaveOfficeDocument(ctx context.Context, params WorkspaceSaveOfficeDocumentParams) (bool, error)
 	ListRevisionsByDocumentID(ctx context.Context, documentID string) ([]WorkspaceRevisionRecord, error)
+	ListRevisionSummariesByDocumentID(
+		ctx context.Context,
+		params WorkspaceListRevisionSummariesParams,
+	) ([]WorkspaceRevisionSummaryRecord, error)
+	GetRevisionDetailByID(
+		ctx context.Context,
+		documentID string,
+		revisionID string,
+	) (*WorkspaceRevisionDetailRecord, error)
 }
 
 // ListVisibleHomepageSpacesParams 首页/分类页可见空间查询参数。

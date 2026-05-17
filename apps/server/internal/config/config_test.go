@@ -27,6 +27,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Database.LogSQL {
 		t.Fatal("expected gorm sql logging to be disabled by default")
 	}
+	if cfg.SSRWorker.MaxPayloadBytes != 1024*1024 {
+		t.Fatalf("expected default SSR request payload limit 1MiB, got %d", cfg.SSRWorker.MaxPayloadBytes)
+	}
+	if cfg.SSRWorker.MaxResponseBytes != 16*1024*1024 {
+		t.Fatalf("expected default SSR response payload limit 16MiB, got %d", cfg.SSRWorker.MaxResponseBytes)
+	}
 }
 
 func TestLoad_EnablesGormSQLLoggingExplicitly(t *testing.T) {
@@ -103,6 +109,42 @@ func TestLoad_InvalidAutoMigrateBool(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for invalid DB_AUTO_MIGRATE value")
+	}
+}
+
+func TestLoad_InvalidSSRWorkerMaxResponseBytes(t *testing.T) {
+	t.Setenv("SSR_WORKER_ENABLED", "true")
+	t.Setenv("SSR_WORKER_ENTRY", "worker-entry.js")
+	t.Setenv("SSR_WORKER_MAX_RESPONSE_BYTES", "0")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid SSR_WORKER_MAX_RESPONSE_BYTES value")
+	}
+}
+
+func TestLoad_ParsesSSRWorkerByteSizeUnits(t *testing.T) {
+	t.Setenv("SSR_WORKER_MAX_PAYLOAD_BYTES", "1MB")
+	t.Setenv("SSR_WORKER_MAX_RESPONSE_BYTES", "16 MiB")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.SSRWorker.MaxPayloadBytes != 1024*1024 {
+		t.Fatalf("expected 1MB to be parsed as 1048576 bytes, got %d", cfg.SSRWorker.MaxPayloadBytes)
+	}
+	if cfg.SSRWorker.MaxResponseBytes != 16*1024*1024 {
+		t.Fatalf("expected 16 MiB to be parsed as 16777216 bytes, got %d", cfg.SSRWorker.MaxResponseBytes)
+	}
+}
+
+func TestLoad_RejectsInvalidSSRWorkerByteSizeUnit(t *testing.T) {
+	t.Setenv("SSR_WORKER_MAX_PAYLOAD_BYTES", "1TB")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for unsupported SSR_WORKER_MAX_PAYLOAD_BYTES unit")
 	}
 }
 

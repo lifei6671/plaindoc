@@ -205,6 +205,560 @@ input[type="reset"]:not(:disabled) {
   cursor: not-allowed;
 }
 
+/* 历史版本入口：与附件、目录、预览和主题入口保持一致的 34px 图标按钮。 */
+.revision-history-trigger {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.revision-history-trigger:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.revision-history-trigger:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.revision-history-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.revision-history-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.revision-history-dialog-layer__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.revision-history-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(960px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.revision-history-dialog__header {
+  min-height: 68px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.revision-history-dialog__title-group {
+  min-width: 0;
+}
+
+.revision-history-dialog__eyebrow {
+  margin: 0 0 3px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.revision-history-dialog__title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.revision-history-dialog__meta {
+  margin: 4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.revision-history-dialog__close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.revision-history-dialog__close:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.revision-history-dialog__close:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.revision-history-dialog__body {
+  min-height: 360px;
+  flex: 1;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
+}
+
+.revision-history-dialog__list-panel {
+  min-height: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.revision-history-dialog__list-header {
+  min-height: 42px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.revision-history-dialog__list-header strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.revision-history-dialog__list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+}
+
+.revision-history-dialog__item {
+  width: 100%;
+  min-height: 74px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #334155;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.revision-history-dialog__item + .revision-history-dialog__item {
+  margin-top: 6px;
+}
+
+.revision-history-dialog__item:hover {
+  border-color: #cbd5e1;
+  background: #ffffff;
+}
+
+.revision-history-dialog__item:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.revision-history-dialog__item--active {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.revision-history-dialog__item-version {
+  grid-row: span 2;
+  align-self: start;
+  min-width: 34px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.revision-history-dialog__item-time,
+.revision-history-dialog__item-user {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.revision-history-dialog__item-user {
+  color: #64748b;
+}
+
+.revision-history-dialog__state {
+  min-height: 160px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.revision-history-dialog__state--error {
+  color: #b91c1c;
+  flex-direction: column;
+}
+
+.revision-history-dialog__state button,
+.revision-history-dialog__inline-error button,
+.revision-history-dialog__load-more {
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 7px 11px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.revision-history-dialog__state button:hover,
+.revision-history-dialog__inline-error button:hover,
+.revision-history-dialog__load-more:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.revision-history-dialog__inline-error {
+  border-top: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.revision-history-dialog__load-more {
+  margin: 8px;
+  flex-shrink: 0;
+}
+
+.revision-history-dialog__load-more:disabled {
+  opacity: 0.64;
+  cursor: wait;
+}
+
+.revision-history-dialog__detail-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.revision-history-dialog__detail-card {
+  max-width: 680px;
+}
+
+.revision-history-dialog__detail-eyebrow {
+  margin: 0 0 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.revision-history-dialog__detail-card h3 {
+  margin: 0 0 14px;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.revision-history-dialog__detail-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.revision-history-dialog__detail-card dl div {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.revision-history-dialog__detail-card dt {
+  margin: 0 0 5px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.revision-history-dialog__detail-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.revision-history-dialog__detail-placeholder {
+  margin: 18px 0 0;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  color: #64748b;
+  padding: 18px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.revision-history-dialog__detail-error {
+  margin-top: 18px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  padding: 14px;
+  font-size: 13px;
+}
+
+.revision-history-dialog__diff {
+  margin-top: 18px;
+  min-height: 360px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.revision-history-dialog__diff-header {
+  min-height: 38px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.revision-history-dialog__diff-header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 10px 12px;
+}
+
+.revision-history-dialog__diff-header span + span {
+  border-left: 1px solid #e2e8f0;
+}
+
+.revision-history-dialog__merge-view {
+  height: min(52vh, 520px);
+  min-height: 320px;
+}
+
+.revision-history-dialog__merge-view .cm-mergeView {
+  height: 100%;
+  overflow: auto;
+}
+
+.revision-history-dialog__merge-view .cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+
+.revision-history-dialog__office {
+  margin-top: 18px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.revision-history-dialog__office-note {
+  margin: 0 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.revision-history-dialog__office-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.revision-history-dialog__office-grid div {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.revision-history-dialog__office-grid dt {
+  margin: 0 0 5px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.revision-history-dialog__office-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.revision-history-dialog__restore-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.revision-history-dialog__restore-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.revision-history-dialog__restore-row button {
+  flex-shrink: 0;
+  border: 1px solid #0f172a;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.revision-history-dialog__restore-row button:disabled {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.revision-history-dialog__restore-success {
+  margin: 12px 0 0;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.revision-history-dialog__restore-confirm {
+  margin-top: 12px;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  background: #fefce8;
+  padding: 12px;
+}
+
+.revision-history-dialog__restore-confirm p {
+  margin: 0;
+  color: #713f12;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.revision-history-dialog__restore-error {
+  margin-top: 10px !important;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c !important;
+  padding: 9px 10px;
+}
+
+.revision-history-dialog__restore-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.revision-history-dialog__restore-actions button {
+  border: 1px solid #0f172a;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.revision-history-dialog__restore-actions button:disabled {
+  opacity: 0.66;
+  cursor: wait;
+}
+
+.revision-history-dialog__restore-actions .revision-history-dialog__restore-secondary {
+  border-color: #dbe2ea;
+  background: #ffffff;
+  color: #334155;
+}
+
+.revision-history-dialog__placeholder {
+  min-height: 320px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
 /* 附件弹窗层：替代原先 popover，提供更稳定的列表交互空间。 */
 .attachment-modal-layer {
   position: fixed;
@@ -3265,6 +3819,39 @@ input[type="reset"]:not(:disabled) {
   .toc-menu__dropdown {
     width: min(280px, calc(100vw - 24px));
     right: 0;
+  }
+
+  .revision-history-dialog-layer {
+    padding: 12px;
+  }
+
+  .revision-history-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .revision-history-dialog__body {
+    padding: 12px;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(220px, 40vh) minmax(240px, 1fr);
+  }
+
+  .revision-history-dialog__detail-card dl {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-history-dialog__office-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-history-dialog__restore-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .revision-history-dialog__restore-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
   }
 
   .style-drawer {

@@ -80,7 +80,9 @@ import {
   type DocumentTemplateDetail,
   type DocumentTemplateGateway,
   type DocumentTemplateListResult,
-  type DocumentRevision,
+  type DocumentRevisionDetail,
+  type DocumentRevisionSummary,
+  type ListDocumentRevisionsOptions,
   type IssueImageObjectKeyResult,
   type ImageHostingGateway,
   type ImportWorkspaceDocumentsInput,
@@ -91,6 +93,8 @@ import {
   type OnlyOfficeClientConfig,
   type OnlyOfficeEditConfig,
   type OnlyOfficeGateway,
+  type RestoreDocumentRevisionInput,
+  type RestoreDocumentRevisionResult,
   type SaveDocumentInput,
   type SaveDocumentResult,
   type Space,
@@ -402,26 +406,52 @@ function subscribeAdminSpaceTransferEvents(
   onEvent: (event: AdminSpaceTransferEvent) => void,
   onError?: (error: Event) => void
 ): AdminSpaceTransferSubscription {
+  const eventSourceOpenState = 1;
+  const recoveryGraceMs = 30_000;
   const url = resolveBackendPublicUrl(streamUrl, apiBaseUrl);
   const source = new EventSource(url, { withCredentials: true });
+  let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingError: Event | null = null;
+  const clearRecoveryTimer = () => {
+    if (recoveryTimer !== null) {
+      clearTimeout(recoveryTimer);
+      recoveryTimer = null;
+    }
+    pendingError = null;
+  };
   const handleMessage = (message: MessageEvent<string>) => {
     if (!message.data) {
       return;
     }
+    clearRecoveryTimer();
     const payload = JSON.parse(message.data) as AdminSpaceTransferEvent;
     onEvent(normalizeAdminSpaceTransferEvent(payload, apiBaseUrl));
   };
 
+  source.onopen = clearRecoveryTimer;
   source.onmessage = handleMessage;
   source.addEventListener("progress", handleMessage as EventListener);
   source.addEventListener("completed", handleMessage as EventListener);
   source.addEventListener("failed", handleMessage as EventListener);
   source.onerror = (event) => {
-    onError?.(event);
+    pendingError = event;
+    if (recoveryTimer !== null) {
+      return;
+    }
+    // EventSource 自带自动重连。先给浏览器一个恢复窗口，避免短暂网络抖动、
+    // 代理 idle 断开或服务端热更新时立即关闭连接并重复续签 stream token。
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = null;
+      if (source.readyState !== eventSourceOpenState) {
+        onError?.(pendingError ?? event);
+      }
+      pendingError = null;
+    }, recoveryGraceMs);
   };
 
   return {
     close() {
+      clearRecoveryTimer();
       source.close();
     }
   };
@@ -1018,8 +1048,54 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
       }
       return { localizedUrls: normalizedLocalizedURLs };
     },
-    async listRevisions(docId: string) {
-      return request<DocumentRevision[]>(`/docs/${docId}/revisions`);
+    async listRevisions(docId: string, revisionsOptions?: ListDocumentRevisionsOptions) {
+      const documentID = docId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      const searchParams = new URLSearchParams();
+      if (typeof revisionsOptions?.page === "number") {
+        searchParams.set("page", String(revisionsOptions.page));
+      }
+      if (typeof revisionsOptions?.pageSize === "number") {
+        searchParams.set("pageSize", String(revisionsOptions.pageSize));
+      }
+      const queryString = searchParams.toString();
+      return request<DocumentRevisionSummary[]>(
+        `/docs/${encodeURIComponent(documentID)}/revisions${queryString ? `?${queryString}` : ""}`
+      );
+    },
+    async getRevisionDetail(docId: string, revisionId: string) {
+      const documentID = docId.trim();
+      const revisionID = revisionId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      if (!revisionID) {
+        throw new Error("历史版本 ID 不能为空");
+      }
+      return request<DocumentRevisionDetail>(
+        `/docs/${encodeURIComponent(documentID)}/revisions/${encodeURIComponent(revisionID)}`
+      );
+    },
+    async restoreRevision(input: RestoreDocumentRevisionInput) {
+      const documentID = input.docId.trim();
+      const revisionID = input.revisionId.trim();
+      if (!documentID) {
+        throw new Error("文档 ID 不能为空");
+      }
+      if (!revisionID) {
+        throw new Error("历史版本 ID 不能为空");
+      }
+      return request<RestoreDocumentRevisionResult>(
+        `/docs/${encodeURIComponent(documentID)}/revisions/${encodeURIComponent(revisionID)}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            baseVersion: input.baseVersion
+          })
+        }
+      );
     },
     async listAttachments(docId: string) {
       const documentID = docId.trim();
