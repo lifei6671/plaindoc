@@ -49,6 +49,7 @@ import { AdminAuditsPage } from "./pages/AdminAuditsPage";
 import { AdminProfilePage } from "./pages/AdminProfilePage";
 import { AdminSearchAnalyzersPage } from "./pages/AdminSearchAnalyzersPage";
 import { AdminDocumentSharesPage } from "./pages/AdminDocumentSharesPage";
+import { AdminSpaceTransferTaskProvider } from "./space-transfer/AdminSpaceTransferTaskProvider";
 
 type AdminMenuKey =
   | "dashboard"
@@ -807,6 +808,7 @@ export function AdminApp({
 
   return (
     <div className="h-dvh overflow-hidden text-slate-900" style={{ backgroundColor: ADMIN_PAGE_BACKGROUND }}>
+      <AdminSpaceTransferTaskProvider dataGateway={dataGateway}>
       <div className="flex h-full">
         <aside
           className={`hidden shrink-0 flex-col bg-transparent transition-[width,padding,opacity] duration-200 lg:flex ${
@@ -983,6 +985,7 @@ export function AdminApp({
           </div>
         </section>
       </div>
+      </AdminSpaceTransferTaskProvider>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 )
@@ -48,6 +49,51 @@ func TestAdminSpaceExportService_StartExport_RequiresSpaceID(t *testing.T) {
 
 	if !errors.Is(err, errcode.ErrAdminSpaceExportSpaceIDRequired) {
 		t.Fatalf("expected space id required error, got %v", err)
+	}
+}
+
+func TestAdminSpaceExportService_StartExport_PersistsSpaceName(t *testing.T) {
+	t.Parallel()
+
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-admin-space-export-start-persists-name?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+	if err := storage.MigrateUp(context.Background(), database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	repo := repository.NewGormAdminSpaceTransferJobRepository(database.ORM)
+	svc := newAllowExportService()
+	svc.transferJobRepo = repo
+	svc.spaceReader = &fakeAdminSpaceExportSpaceReader{
+		space: &models.Space{
+			SpaceID: "space-a",
+			Name:    "知识库",
+		},
+	}
+
+	result, err := svc.StartExport(context.Background(), StartAdminSpaceExportInput{
+		ActorUserID: "actor-user",
+		SpaceID:     "space-a",
+		Format:      AdminSpaceExportFormatSourceZip,
+	})
+	if err != nil {
+		t.Fatalf("start export failed: %v", err)
+	}
+
+	job, err := repo.GetByKindAndJobID(context.Background(), models.AdminSpaceTransferJobKindExport, result.JobID)
+	if err != nil {
+		t.Fatalf("get transfer job failed: %v", err)
+	}
+	if job.SpaceName != "知识库" {
+		t.Fatalf("expected persisted space name, got %q", job.SpaceName)
 	}
 }
 
@@ -440,6 +486,40 @@ func TestAdminSpaceExportService_StreamToken_BindsToJobAndActor(t *testing.T) {
 	}
 }
 
+func TestAdminSpaceExportService_IssueStreamURL_ReplacesExpiredToken(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	svc := newAllowExportService()
+	svc.nowFn = func() time.Time { return now }
+
+	result, err := svc.StartExport(context.Background(), StartAdminSpaceExportInput{
+		ActorUserID: "actor-user",
+		SpaceID:     "space-a",
+		Format:      AdminSpaceExportFormatMarkdownZip,
+	})
+	if err != nil {
+		t.Fatalf("start export failed: %v", err)
+	}
+	oldToken := tokenQueryValue(t, result.StreamURL)
+
+	svc.nowFn = func() time.Time { return now.Add(defaultAdminSpaceTransferTokenTTL + time.Second) }
+	streamURL, err := svc.IssueStreamURL(context.Background(), "actor-user", result.JobID)
+	if err != nil {
+		t.Fatalf("issue stream url failed: %v", err)
+	}
+	newToken := tokenQueryValue(t, streamURL)
+	if newToken == "" || newToken == oldToken {
+		t.Fatalf("expected a fresh stream token, got %q", newToken)
+	}
+	if _, _, _, err := svc.Subscribe(context.Background(), result.JobID, "actor-user", oldToken); !errors.Is(err, errcode.ErrAdminSpaceExportJobTokenInvalid) {
+		t.Fatalf("expected old token invalid, got %v", err)
+	}
+	if _, _, _, err := svc.Subscribe(context.Background(), result.JobID, "actor-user", newToken); err != nil {
+		t.Fatalf("subscribe with fresh token failed: %v", err)
+	}
+}
+
 func TestAdminSpaceExportService_ReissuesDownloadTokenForLateSubscriber(t *testing.T) {
 	t.Parallel()
 
@@ -526,6 +606,119 @@ func TestAdminSpaceExportService_ConsumeDownloadToken_EnforcesOneTimeDownload(t 
 
 	if _, err := svc.ConsumeDownloadToken(result.JobID, "actor-user", downloadToken); !errors.Is(err, errcode.ErrAdminSpaceExportDownloadForbidden) {
 		t.Fatalf("expected replay to be forbidden, got %v", err)
+	}
+}
+
+func TestAdminSpaceExportService_IssueDownloadURL_ReissuesOneTimeToken(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	svc := newAllowExportService()
+	svc.nowFn = func() time.Time { return now }
+
+	result, err := svc.StartExport(context.Background(), StartAdminSpaceExportInput{
+		ActorUserID: "actor-user",
+		SpaceID:     "space-a",
+		Format:      AdminSpaceExportFormatMarkdownZip,
+	})
+	if err != nil {
+		t.Fatalf("start export failed: %v", err)
+	}
+	exportDir := t.TempDir()
+	svc.exportDir = exportDir
+	filePath := filepath.Join(exportDir, "space-a.zip")
+	if err := os.WriteFile(filePath, []byte("zip-content"), 0o644); err != nil {
+		t.Fatalf("write export file failed: %v", err)
+	}
+	if _, err := svc.store.Complete(result.JobID, "space-a.zip", filePath, 11, "download-token", tokenHash("download-token"), now); err != nil {
+		t.Fatalf("complete export failed: %v", err)
+	}
+
+	downloadURL, err := svc.IssueDownloadURL(context.Background(), "actor-user", result.JobID)
+	if err != nil {
+		t.Fatalf("issue download url failed: %v", err)
+	}
+	downloadToken := tokenQueryValue(t, downloadURL)
+	download, err := svc.ConsumeDownloadToken(result.JobID, "actor-user", downloadToken)
+	if err != nil {
+		t.Fatalf("consume reissued download token failed: %v", err)
+	}
+	if download.FileName != "space-a.zip" || download.FilePath != filePath || download.SizeBytes != 11 {
+		t.Fatalf("unexpected download payload: %#v", download)
+	}
+	if _, err := svc.ConsumeDownloadToken(result.JobID, "other-user", downloadToken); !errors.Is(err, errcode.ErrAdminSpaceExportDownloadForbidden) {
+		t.Fatalf("expected other actor forbidden, got %v", err)
+	}
+}
+
+func TestAdminSpaceExportService_IssueDownloadURL_RestoresCompletedJobFromRepository(t *testing.T) {
+	t.Parallel()
+
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-admin-space-export-download-restore?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	exportDir := t.TempDir()
+	filePath := filepath.Join(exportDir, "space-a.plaindoc")
+	content := []byte("zip-content")
+	if err := os.WriteFile(filePath, content, 0o644); err != nil {
+		t.Fatalf("write export file failed: %v", err)
+	}
+
+	repo := repository.NewGormAdminSpaceTransferJobRepository(database.ORM)
+	job := models.AdminSpaceTransferJob{
+		JobID:       "01exportrestoredownload001",
+		Kind:        models.AdminSpaceTransferJobKindExport,
+		ActorUserID: "actor-user",
+		SpaceID:     "space-a",
+		Format:      string(AdminSpaceExportFormatSourceZip),
+		Status:      models.AdminSpaceTransferJobStatusCompleted,
+		Stage:       "done",
+		Progress:    100,
+		Message:     "导出完成",
+		FilePath:    filePath,
+		FileName:    "space-a.plaindoc",
+		SizeBytes:   int64(len(content)),
+		CreatedAt:   now.Add(-time.Minute),
+		UpdatedAt:   now,
+		ExpiresAt:   now.Add(10 * time.Minute),
+	}
+	if err := repo.Create(ctx, &job); err != nil {
+		t.Fatalf("create transfer job failed: %v", err)
+	}
+
+	svc := newAllowExportService()
+	svc.nowFn = func() time.Time { return now }
+	svc.exportDir = exportDir
+	svc.transferJobRepo = repo
+
+	downloadURL, err := svc.IssueDownloadURL(ctx, "actor-user", job.JobID)
+	if err != nil {
+		t.Fatalf("issue restored download url failed: %v", err)
+	}
+	downloadToken := tokenQueryValue(t, downloadURL)
+	download, err := svc.ConsumeDownloadToken(job.JobID, "actor-user", downloadToken)
+	if err != nil {
+		t.Fatalf("consume restored download token failed: %v", err)
+	}
+	if download.FileName != "space-a.plaindoc" || download.FilePath != filePath || download.SizeBytes != int64(len(content)) {
+		t.Fatalf("unexpected restored download payload: %#v", download)
+	}
+	if _, err := svc.ConsumeDownloadToken(job.JobID, "actor-user", downloadToken); !errors.Is(err, errcode.ErrAdminSpaceExportDownloadForbidden) {
+		t.Fatalf("expected restored token replay forbidden, got %v", err)
 	}
 }
 

@@ -98,6 +98,7 @@ type AdminSpaceExportJob struct {
 	JobID                  string
 	ActorUserID            string
 	SpaceID                string
+	SpaceName              string
 	Format                 AdminSpaceExportFormat
 	IncludeAttachments     bool
 	IncludeOfficeSources   bool
@@ -269,6 +270,15 @@ func WithAdminSpaceExportDir(exportDir string) AdminSpaceExportServiceOption {
 	}
 }
 
+// WithAdminSpaceExportTransferJobRepository 注入全局任务持久化仓储。
+func WithAdminSpaceExportTransferJobRepository(
+	transferJobRepo repository.AdminSpaceTransferJobRepository,
+) AdminSpaceExportServiceOption {
+	return func(s *AdminSpaceExportService) {
+		s.transferJobRepo = transferJobRepo
+	}
+}
+
 // AdminSpaceExportJobStore 是进程内导出任务表。
 type AdminSpaceExportJobStore struct {
 	mu          sync.Mutex
@@ -295,6 +305,7 @@ type AdminSpaceExportService struct {
 	officeHTMLRenderer adminSpaceExportOfficeHTMLRenderer
 	readerHTMLRenderer adminSpaceExportReaderHTMLRenderer
 	auditRecorder      adminAuditRecorder
+	transferJobRepo    repository.AdminSpaceTransferJobRepository
 	exportDir          string
 	nowFn              func() time.Time
 	canExportSpace     func(context.Context, string, string) (bool, error)
@@ -356,10 +367,12 @@ func (s *AdminSpaceExportService) StartExport(
 		input.IncludeAttachments,
 		input.IncludeOfficeSources,
 	)
+	spaceName := s.resolveExportSpaceName(ctx, spaceID)
 	job := &AdminSpaceExportJob{
 		JobID:                jobID,
 		ActorUserID:          strings.TrimSpace(input.ActorUserID),
 		SpaceID:              spaceID,
+		SpaceName:            spaceName,
 		Format:               input.Format,
 		IncludeAttachments:   includeAttachments,
 		IncludeOfficeSources: includeOfficeSources,
@@ -367,10 +380,12 @@ func (s *AdminSpaceExportService) StartExport(
 		StreamTokenHash:      streamTokenHash,
 		StreamTokenExpiresAt: now.Add(defaultAdminSpaceTransferTokenTTL),
 		LastEvent: AdminSpaceTransferEvent{
-			Type:     AdminSpaceTransferEventTypeProgress,
-			Stage:    "queued",
-			Progress: 0,
-			Message:  "导出任务已创建",
+			Type:      AdminSpaceTransferEventTypeProgress,
+			Stage:     "queued",
+			Progress:  0,
+			Message:   "导出任务已创建",
+			SpaceID:   spaceID,
+			SpaceName: spaceName,
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -378,8 +393,14 @@ func (s *AdminSpaceExportService) StartExport(
 	if err := s.store.Create(job); err != nil {
 		return StartAdminSpaceExportResult{}, err
 	}
+	if err := s.persistExportTransferJobCreated(ctx, job); err != nil {
+		s.store.Fail(jobID, "persist", "记录导出任务失败", s.now())
+		return StartAdminSpaceExportResult{}, err
+	}
 	if err := s.recordExportAudit(ctx, *job, adminSpaceExportAuditQueued, "queued", "", "", 0); err != nil {
-		s.store.Fail(jobID, "audit", "记录导出审计失败", s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "audit", "记录导出审计失败", failedAt)
+		s.persistExportTransferJobFailed(ctx, jobID, "audit", "记录导出审计失败", failedAt)
 		return StartAdminSpaceExportResult{}, err
 	}
 	if s.canGenerateAdminSpaceExportPackage() {
@@ -390,6 +411,17 @@ func (s *AdminSpaceExportService) StartExport(
 		JobID:     jobID,
 		StreamURL: "/api/admin/spaces/" + spaceID + "/exports/" + jobID + "/events?token=" + streamToken,
 	}, nil
+}
+
+func (s *AdminSpaceExportService) resolveExportSpaceName(ctx context.Context, spaceID string) string {
+	if s == nil || s.spaceReader == nil {
+		return ""
+	}
+	space, err := s.spaceReader.GetBySpaceID(ctx, strings.TrimSpace(spaceID))
+	if err != nil || space == nil {
+		return ""
+	}
+	return strings.TrimSpace(space.Name)
 }
 
 func normalizeAdminSpaceExportOptions(
@@ -465,12 +497,135 @@ func (s *AdminSpaceExportService) Subscribe(
 	return s.store.Subscribe(strings.TrimSpace(jobID), strings.TrimSpace(actorUserID), strings.TrimSpace(streamToken), s.now())
 }
 
+// IssueStreamURL 为当前 actor 的活跃导出任务重新签发 SSE 订阅 URL。
+func (s *AdminSpaceExportService) IssueStreamURL(
+	_ context.Context,
+	actorUserID string,
+	jobID string,
+) (string, error) {
+	if s == nil || s.store == nil {
+		return "", errcode.ErrAdminSpaceExportJobNotFound
+	}
+	streamToken, streamTokenHash, err := generateAdminSpaceTransferToken()
+	if err != nil {
+		return "", err
+	}
+	job, err := s.store.IssueStreamToken(
+		strings.TrimSpace(jobID),
+		strings.TrimSpace(actorUserID),
+		streamTokenHash,
+		s.now(),
+	)
+	if err != nil {
+		return "", err
+	}
+	return "/api/admin/spaces/" + job.SpaceID + "/exports/" + job.JobID + "/events?token=" + streamToken, nil
+}
+
+// IssueDownloadURL 为当前 actor 的已完成导出任务重新签发一次性下载 URL。
+func (s *AdminSpaceExportService) IssueDownloadURL(
+	ctx context.Context,
+	actorUserID string,
+	jobID string,
+) (string, error) {
+	if s == nil || s.store == nil {
+		return "", errcode.ErrAdminSpaceExportJobNotFound
+	}
+	downloadToken, downloadTokenHash, err := generateAdminSpaceTransferToken()
+	if err != nil {
+		return "", err
+	}
+	trimmedJobID := strings.TrimSpace(jobID)
+	trimmedActorUserID := strings.TrimSpace(actorUserID)
+	now := s.now()
+	if err := s.store.IssueDownloadToken(
+		trimmedJobID,
+		trimmedActorUserID,
+		downloadTokenHash,
+		now,
+	); err != nil {
+		if !errors.Is(err, errcode.ErrAdminSpaceExportJobNotFound) {
+			return "", err
+		}
+		if restoreErr := s.restoreCompletedExportTransferJob(ctx, trimmedActorUserID, trimmedJobID, now); restoreErr != nil {
+			return "", restoreErr
+		}
+		if err := s.store.IssueDownloadToken(trimmedJobID, trimmedActorUserID, downloadTokenHash, now); err != nil {
+			return "", err
+		}
+	}
+	return "/api/admin/space-exports/" + trimmedJobID + "/download?token=" + downloadToken, nil
+}
+
+func (s *AdminSpaceExportService) restoreCompletedExportTransferJob(
+	ctx context.Context,
+	actorUserID string,
+	jobID string,
+	now time.Time,
+) error {
+	if s == nil || s.store == nil || s.transferJobRepo == nil {
+		return errcode.ErrAdminSpaceExportJobNotFound
+	}
+	job, err := s.transferJobRepo.GetByKindAndJobID(ctx, models.AdminSpaceTransferJobKindExport, jobID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errcode.ErrAdminSpaceExportJobNotFound
+		}
+		return err
+	}
+	if strings.TrimSpace(job.ActorUserID) != actorUserID {
+		return errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	if strings.TrimSpace(job.Status) != models.AdminSpaceTransferJobStatusCompleted {
+		return errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	if !now.Before(job.ExpiresAt) {
+		return errcode.ErrAdminSpaceExportFileExpired
+	}
+	filePath := strings.TrimSpace(job.FilePath)
+	if filePath == "" {
+		return errcode.ErrAdminSpaceExportFileNotReady
+	}
+	fileName := strings.TrimSpace(job.FileName)
+	if fileName == "" {
+		fileName = filepath.Base(filePath)
+	}
+	return s.store.RestoreCompleted(AdminSpaceExportJob{
+		JobID:                  strings.TrimSpace(job.JobID),
+		ActorUserID:            strings.TrimSpace(job.ActorUserID),
+		SpaceID:                strings.TrimSpace(job.SpaceID),
+		Format:                 AdminSpaceExportFormat(strings.TrimSpace(job.Format)),
+		Status:                 AdminSpaceExportStatusCompleted,
+		FileName:               fileName,
+		FilePath:               filePath,
+		SizeBytes:              job.SizeBytes,
+		DownloadTokenExpiresAt: job.ExpiresAt,
+		CreatedAt:              job.CreatedAt,
+		UpdatedAt:              job.UpdatedAt,
+		LastEvent: AdminSpaceTransferEvent{
+			Type:      AdminSpaceTransferEventTypeCompleted,
+			Stage:     "done",
+			Progress:  100,
+			Message:   "导出完成",
+			FileName:  fileName,
+			SizeBytes: job.SizeBytes,
+			SpaceID:   strings.TrimSpace(job.SpaceID),
+			SpaceName: strings.TrimSpace(job.SpaceName),
+		},
+	}, now)
+}
+
 // PublishProgress 广播导出任务进度。
 func (s *AdminSpaceExportService) PublishProgress(jobID string, event AdminSpaceTransferEvent) {
 	if s == nil || s.store == nil {
 		return
 	}
-	s.store.Publish(strings.TrimSpace(jobID), event, s.now())
+	now := s.now()
+	trimmedJobID := strings.TrimSpace(jobID)
+	s.store.Publish(trimmedJobID, event, now)
+	if event.Type == AdminSpaceTransferEventTypeProgress {
+		s.persistExportTransferJobProgress(context.Background(), trimmedJobID, event, now)
+	}
 }
 
 // BeginExportJob 将导出任务切到 running；真实 worker 在后续阶段调用。
@@ -485,10 +640,21 @@ func (s *AdminSpaceExportService) BeginExportJob(ctx context.Context, jobID stri
 	if ok, err := s.CanExportSpace(ctx, job.ActorUserID, job.SpaceID); err != nil {
 		return err
 	} else if !ok {
-		s.store.Fail(job.JobID, "permission", "导出权限已失效", s.now())
+		failedAt := s.now()
+		s.store.Fail(job.JobID, "permission", "导出权限已失效", failedAt)
+		s.persistExportTransferJobFailed(ctx, job.JobID, "permission", "导出权限已失效", failedAt)
 		return errcode.ErrAdminForbidden
 	}
-	return s.store.MarkRunning(job.JobID, s.now())
+	now := s.now()
+	if err := s.store.MarkRunning(job.JobID, now); err != nil {
+		return err
+	}
+	s.persistExportTransferJobProgress(ctx, job.JobID, AdminSpaceTransferEvent{
+		Stage:    "running",
+		Progress: 0,
+		Message:  "导出任务开始执行",
+	}, now)
+	return nil
 }
 
 // CompleteExportJob 标记导出任务完成并一次性生成下载 token。
@@ -500,10 +666,12 @@ func (s *AdminSpaceExportService) CompleteExportJob(jobID string, fileName strin
 	if err != nil {
 		return AdminSpaceTransferEvent{}, err
 	}
-	event, err := s.store.Complete(strings.TrimSpace(jobID), strings.TrimSpace(fileName), "", sizeBytes, downloadToken, downloadTokenHash, s.now())
+	completedAt := s.now()
+	event, err := s.store.Complete(strings.TrimSpace(jobID), strings.TrimSpace(fileName), "", sizeBytes, downloadToken, downloadTokenHash, completedAt)
 	if err != nil {
 		return AdminSpaceTransferEvent{}, err
 	}
+	s.persistExportTransferJobCompleted(context.Background(), strings.TrimSpace(jobID), "done", "导出完成", "", strings.TrimSpace(fileName), sizeBytes, completedAt)
 	if job, getErr := s.store.Get(strings.TrimSpace(jobID)); getErr == nil {
 		_ = s.recordExportAudit(context.Background(), job, adminSpaceExportAuditSuccess, "completed", "", strings.TrimSpace(fileName), sizeBytes)
 	}
@@ -568,22 +736,29 @@ func (s *AdminSpaceExportService) runAdminSpaceExportJob(ctx context.Context, jo
 
 	job, err := s.store.Get(strings.TrimSpace(jobID))
 	if err != nil {
-		s.store.Fail(jobID, "load", "导出任务不存在", s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "load", "导出任务不存在", failedAt)
+		s.persistExportTransferJobFailed(ctx, jobID, "load", "导出任务不存在", failedAt)
 		return
 	}
 	fileName, filePath, sizeBytes, err := s.exportAdminSpaceZipPackage(ctx, job)
 	if err != nil {
-		s.store.Fail(jobID, "zip", err.Error(), s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "zip", err.Error(), failedAt)
+		s.persistExportTransferJobFailed(ctx, jobID, "zip", err.Error(), failedAt)
 		_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditFailed, "zip", err.Error(), "", 0)
 		return
 	}
 
 	downloadToken, downloadTokenHash, err := generateAdminSpaceTransferToken()
 	if err != nil {
-		s.store.Fail(jobID, "token", "生成下载令牌失败", s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "token", "生成下载令牌失败", failedAt)
+		s.persistExportTransferJobFailed(ctx, jobID, "token", "生成下载令牌失败", failedAt)
 		_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditFailed, "token", "生成下载令牌失败", "", 0)
 		return
 	}
+	completedAt := s.now()
 	_, _ = s.store.Complete(
 		strings.TrimSpace(jobID),
 		fileName,
@@ -591,8 +766,9 @@ func (s *AdminSpaceExportService) runAdminSpaceExportJob(ctx context.Context, jo
 		sizeBytes,
 		downloadToken,
 		downloadTokenHash,
-		s.now(),
+		completedAt,
 	)
+	s.persistExportTransferJobCompleted(ctx, strings.TrimSpace(jobID), "done", "导出完成", filePath, fileName, sizeBytes, completedAt)
 	_ = s.recordExportAudit(ctx, job, adminSpaceExportAuditSuccess, "completed", "", fileName, sizeBytes)
 }
 
@@ -645,6 +821,102 @@ func (s *AdminSpaceExportService) recordExportAudit(
 		TargetID:    targetID,
 		Summary:     "space export " + strings.TrimSpace(status) + ": " + targetID,
 		Detail:      detail,
+	})
+}
+
+func (s *AdminSpaceExportService) persistExportTransferJobCreated(
+	ctx context.Context,
+	job *AdminSpaceExportJob,
+) error {
+	if s == nil || s.transferJobRepo == nil || job == nil {
+		return nil
+	}
+	return s.transferJobRepo.Create(ctx, &models.AdminSpaceTransferJob{
+		JobID:       strings.TrimSpace(job.JobID),
+		Kind:        models.AdminSpaceTransferJobKindExport,
+		ActorUserID: strings.TrimSpace(job.ActorUserID),
+		SpaceID:     strings.TrimSpace(job.SpaceID),
+		SpaceName:   strings.TrimSpace(job.SpaceName),
+		Format:      string(job.Format),
+		Status:      models.AdminSpaceTransferJobStatusQueued,
+		Stage:       "queued",
+		Progress:    0,
+		Message:     "导出任务已创建",
+		CreatedAt:   job.CreatedAt,
+		UpdatedAt:   job.UpdatedAt,
+		ExpiresAt:   job.CreatedAt.Add(30 * time.Minute),
+	})
+}
+
+func (s *AdminSpaceExportService) persistExportTransferJobProgress(
+	ctx context.Context,
+	jobID string,
+	event AdminSpaceTransferEvent,
+	now time.Time,
+) {
+	if s == nil || s.transferJobRepo == nil {
+		return
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	_ = s.transferJobRepo.UpdateProgress(ctx, repository.UpdateAdminSpaceTransferJobProgressParams{
+		JobID:    strings.TrimSpace(jobID),
+		Stage:    strings.TrimSpace(event.Stage),
+		Progress: event.Progress,
+		Message:  strings.TrimSpace(event.Message),
+		Now:      now,
+	})
+}
+
+func (s *AdminSpaceExportService) persistExportTransferJobCompleted(
+	ctx context.Context,
+	jobID string,
+	stage string,
+	message string,
+	filePath string,
+	fileName string,
+	sizeBytes int64,
+	completedAt time.Time,
+) {
+	if s == nil || s.transferJobRepo == nil {
+		return
+	}
+	if completedAt.IsZero() {
+		completedAt = s.now()
+	}
+	_ = s.transferJobRepo.MarkCompleted(ctx, repository.MarkAdminSpaceTransferJobCompletedParams{
+		JobID:       strings.TrimSpace(jobID),
+		Stage:       strings.TrimSpace(stage),
+		Message:     strings.TrimSpace(message),
+		FilePath:    strings.TrimSpace(filePath),
+		FileName:    strings.TrimSpace(fileName),
+		SizeBytes:   sizeBytes,
+		CompletedAt: completedAt,
+		ExpiresAt:   completedAt.Add(defaultAdminSpaceTransferTokenTTL),
+	})
+}
+
+func (s *AdminSpaceExportService) persistExportTransferJobFailed(
+	ctx context.Context,
+	jobID string,
+	stage string,
+	message string,
+	failedAt time.Time,
+) {
+	if s == nil || s.transferJobRepo == nil {
+		return
+	}
+	if failedAt.IsZero() {
+		failedAt = s.now()
+	}
+	_ = s.transferJobRepo.MarkFailed(ctx, repository.MarkAdminSpaceTransferJobFailedParams{
+		JobID:        strings.TrimSpace(jobID),
+		Stage:        strings.TrimSpace(stage),
+		Message:      strings.TrimSpace(message),
+		ErrorMessage: strings.TrimSpace(message),
+		FailedAt:     failedAt,
+		ExpiresAt:    failedAt.Add(defaultAdminSpaceTransferTokenTTL),
 	})
 }
 
@@ -1703,6 +1975,31 @@ func (s *AdminSpaceExportJobStore) Subscribe(
 	return initialEvent, ch, unsubscribe, nil
 }
 
+func (s *AdminSpaceExportJobStore) IssueStreamToken(
+	jobID string,
+	actorUserID string,
+	tokenHashValue string,
+	now time.Time,
+) (AdminSpaceExportJob, error) {
+	if s == nil || jobID == "" {
+		return AdminSpaceExportJob{}, errcode.ErrAdminSpaceExportJobNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok || job == nil {
+		return AdminSpaceExportJob{}, errcode.ErrAdminSpaceExportJobNotFound
+	}
+	if job.ActorUserID != actorUserID || !isActiveAdminSpaceExportStatus(job.Status) {
+		return AdminSpaceExportJob{}, errcode.ErrAdminSpaceExportJobTokenInvalid
+	}
+	job.StreamTokenHash = tokenHashValue
+	job.StreamTokenExpiresAt = now.Add(defaultAdminSpaceTransferTokenTTL)
+	job.UpdatedAt = now
+	return *job, nil
+}
+
 func (s *AdminSpaceExportJobStore) Publish(jobID string, event AdminSpaceTransferEvent, now time.Time) {
 	if s == nil || jobID == "" {
 		return
@@ -1811,6 +2108,59 @@ func (s *AdminSpaceExportJobStore) Complete(
 	return event, nil
 }
 
+func (s *AdminSpaceExportJobStore) RestoreCompleted(job AdminSpaceExportJob, now time.Time) error {
+	if s == nil || strings.TrimSpace(job.JobID) == "" {
+		return errcode.ErrAdminSpaceExportJobNotFound
+	}
+	trimmedJobID := strings.TrimSpace(job.JobID)
+	trimmedActorUserID := strings.TrimSpace(job.ActorUserID)
+	if trimmedActorUserID == "" {
+		return errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	if strings.TrimSpace(job.FilePath) == "" {
+		return errcode.ErrAdminSpaceExportFileNotReady
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existingJob := s.jobs[trimmedJobID]; existingJob != nil {
+		return nil
+	}
+	expiresAt := job.DownloadTokenExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(defaultAdminSpaceTransferTokenTTL)
+	}
+	restored := job
+	restored.JobID = trimmedJobID
+	restored.ActorUserID = trimmedActorUserID
+	restored.SpaceID = strings.TrimSpace(restored.SpaceID)
+	restored.FileName = strings.TrimSpace(restored.FileName)
+	restored.FilePath = strings.TrimSpace(restored.FilePath)
+	restored.Status = AdminSpaceExportStatusCompleted
+	restored.DownloadTokenExpiresAt = expiresAt
+	restored.DownloadTokenHash = ""
+	restored.DownloadTokenUsed = false
+	restored.downloadTokens = make(map[string]adminSpaceExportDownloadToken)
+	if restored.CreatedAt.IsZero() {
+		restored.CreatedAt = now
+	}
+	if restored.UpdatedAt.IsZero() {
+		restored.UpdatedAt = now
+	}
+	if restored.LastEvent.Type == "" {
+		restored.LastEvent = AdminSpaceTransferEvent{
+			Type:      AdminSpaceTransferEventTypeCompleted,
+			Stage:     "done",
+			Progress:  100,
+			Message:   "导出完成",
+			FileName:  restored.FileName,
+			SizeBytes: restored.SizeBytes,
+			SpaceID:   restored.SpaceID,
+		}
+	}
+	s.jobs[trimmedJobID] = &restored
+	return nil
+}
+
 func (s *AdminSpaceExportJobStore) ConsumeDownloadToken(
 	jobID string,
 	actorUserID string,
@@ -1870,6 +2220,46 @@ func (s *AdminSpaceExportJobStore) ConsumeDownloadToken(
 		FilePath:  strings.TrimSpace(job.FilePath),
 		SizeBytes: info.Size(),
 	}, nil
+}
+
+func (s *AdminSpaceExportJobStore) IssueDownloadToken(
+	jobID string,
+	actorUserID string,
+	tokenHashValue string,
+	now time.Time,
+) error {
+	if s == nil || jobID == "" {
+		return errcode.ErrAdminSpaceExportJobNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok || job == nil {
+		return errcode.ErrAdminSpaceExportJobNotFound
+	}
+	if job.ActorUserID != actorUserID || job.Status != AdminSpaceExportStatusCompleted {
+		return errcode.ErrAdminSpaceExportDownloadForbidden
+	}
+	if strings.TrimSpace(job.FilePath) == "" {
+		return errcode.ErrAdminSpaceExportFileNotReady
+	}
+	if !job.DownloadTokenExpiresAt.IsZero() && !now.Before(job.DownloadTokenExpiresAt) {
+		return errcode.ErrAdminSpaceExportFileExpired
+	}
+	if job.downloadTokens == nil {
+		job.downloadTokens = make(map[string]adminSpaceExportDownloadToken)
+	}
+	expiresAt := job.DownloadTokenExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(defaultAdminSpaceTransferTokenTTL)
+	}
+	job.downloadTokens[tokenHashValue] = adminSpaceExportDownloadToken{ExpiresAt: expiresAt}
+	job.DownloadTokenHash = tokenHashValue
+	job.DownloadTokenExpiresAt = expiresAt
+	job.DownloadTokenUsed = false
+	job.UpdatedAt = now
+	return nil
 }
 
 func (s *AdminSpaceExportJobStore) DeleteExpired(now time.Time) []AdminSpaceExportJob {

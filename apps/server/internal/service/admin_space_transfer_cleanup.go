@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 )
 
 const defaultAdminSpaceTransferCleanupInterval = 5 * time.Minute
@@ -40,6 +42,17 @@ func (s *AdminSpaceExportService) CleanupExpiredTransfers(
 	}
 	expiredJobs := s.store.DeleteExpired(now.UTC())
 	result := AdminSpaceExportCleanupResult{DeletedJobs: len(expiredJobs)}
+	if s.transferJobRepo != nil {
+		persistedExpiredJobs, err := s.transferJobRepo.ListExpiredByKind(ctx, models.AdminSpaceTransferJobKindExport, now.UTC(), 100)
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+		} else {
+			cleanupResult := s.cleanupExpiredPersistedExportJobs(ctx, persistedExpiredJobs)
+			result.DeletedJobs += cleanupResult.DeletedJobs
+			result.DeletedFiles += cleanupResult.DeletedFiles
+			result.Errors = append(result.Errors, cleanupResult.Errors...)
+		}
+	}
 	for _, job := range expiredJobs {
 		if err := ctx.Err(); err != nil {
 			result.Errors = append(result.Errors, err)
@@ -77,6 +90,17 @@ func (s *AdminSpaceImportService) CleanupExpiredTransfers(
 		DeletedStagings: len(deletedStagings),
 		DeletedJobs:     len(deletedJobs),
 	}
+	if s.transferJobRepo != nil {
+		persistedExpiredJobs, err := s.transferJobRepo.ListExpiredByKind(ctx, models.AdminSpaceTransferJobKindImport, now.UTC(), 100)
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+		} else {
+			cleanupResult := s.cleanupExpiredPersistedImportJobs(ctx, persistedExpiredJobs)
+			result.DeletedJobs += cleanupResult.DeletedJobs
+			result.DeletedStagingFiles += cleanupResult.DeletedStagingFiles
+			result.Errors = append(result.Errors, cleanupResult.Errors...)
+		}
+	}
 	for _, staging := range deletedStagings {
 		if err := ctx.Err(); err != nil {
 			result.Errors = append(result.Errors, err)
@@ -95,6 +119,82 @@ func (s *AdminSpaceImportService) CleanupExpiredTransfers(
 			result.DeletedStagingFiles++
 		}
 	}
+	return result
+}
+
+func (s *AdminSpaceExportService) cleanupExpiredPersistedExportJobs(
+	ctx context.Context,
+	jobs []models.AdminSpaceTransferJob,
+) AdminSpaceExportCleanupResult {
+	result := AdminSpaceExportCleanupResult{}
+	if len(jobs) == 0 || s == nil || s.transferJobRepo == nil {
+		return result
+	}
+	deletableIDs := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		if err := ctx.Err(); err != nil {
+			result.Errors = append(result.Errors, err)
+			return result
+		}
+		if strings.TrimSpace(job.Kind) != models.AdminSpaceTransferJobKindExport {
+			continue
+		}
+		deleted, err := removeAdminSpaceTransferFile(strings.TrimSpace(job.FilePath), s.exportDir)
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+			continue
+		}
+		if deleted {
+			result.DeletedFiles++
+		}
+		if job.ID > 0 {
+			deletableIDs = append(deletableIDs, job.ID)
+		}
+	}
+	deletedJobs, err := s.transferJobRepo.DeleteByIDs(ctx, deletableIDs)
+	if err != nil {
+		result.Errors = append(result.Errors, err)
+		return result
+	}
+	result.DeletedJobs += int(deletedJobs)
+	return result
+}
+
+func (s *AdminSpaceImportService) cleanupExpiredPersistedImportJobs(
+	ctx context.Context,
+	jobs []models.AdminSpaceTransferJob,
+) AdminSpaceImportCleanupResult {
+	result := AdminSpaceImportCleanupResult{}
+	if len(jobs) == 0 || s == nil || s.transferJobRepo == nil {
+		return result
+	}
+	deletableIDs := make([]int64, 0, len(jobs))
+	for _, job := range jobs {
+		if err := ctx.Err(); err != nil {
+			result.Errors = append(result.Errors, err)
+			return result
+		}
+		if strings.TrimSpace(job.Kind) != models.AdminSpaceTransferJobKindImport {
+			continue
+		}
+		deleted, err := removeAdminSpaceTransferFile(strings.TrimSpace(job.FilePath), s.stagingDir)
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+			continue
+		}
+		if deleted {
+			result.DeletedStagingFiles++
+		}
+		if job.ID > 0 {
+			deletableIDs = append(deletableIDs, job.ID)
+		}
+	}
+	deletedJobs, err := s.transferJobRepo.DeleteByIDs(ctx, deletableIDs)
+	if err != nil {
+		result.Errors = append(result.Errors, err)
+		return result
+	}
+	result.DeletedJobs += int(deletedJobs)
 	return result
 }
 

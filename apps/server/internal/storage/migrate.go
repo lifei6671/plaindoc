@@ -28,7 +28,19 @@ type Migration struct {
 
 // MigrateOptions 描述迁移执行时的可选行为。
 type MigrateOptions struct {
-	Logger *slog.Logger
+	Logger     *slog.Logger
+	OnProgress func(MigrationProgress)
+}
+
+// MigrationProgress 描述迁移执行进度，供启动中间页展示。
+type MigrationProgress struct {
+	Phase          string
+	Driver         string
+	TotalCount     int
+	PendingCount   int
+	AppliedCount   int
+	CurrentVersion int
+	CurrentName    string
 }
 
 // MigrateUp 执行所有未应用的迁移。
@@ -61,17 +73,63 @@ func MigrateUpWithOptions(ctx context.Context, db *gorm.DB, driver string, optio
 		return err
 	}
 
+	totalCount := len(migrations)
+	appliedCount := len(appliedVersions)
+	emitMigrationProgress(options.OnProgress, MigrationProgress{
+		Phase:        "loaded",
+		Driver:       normalizedDriver,
+		TotalCount:   totalCount,
+		PendingCount: totalCount - appliedCount,
+		AppliedCount: appliedCount,
+	})
+
 	for _, migration := range migrations {
 		if appliedVersions[migration.Version] {
 			continue
 		}
+		emitMigrationProgress(options.OnProgress, MigrationProgress{
+			Phase:          "applying",
+			Driver:         normalizedDriver,
+			TotalCount:     totalCount,
+			PendingCount:   totalCount - appliedCount,
+			AppliedCount:   appliedCount,
+			CurrentVersion: migration.Version,
+			CurrentName:    migration.Name,
+		})
 		logMigrationEvent(ctx, options.Logger, "database migration applying", normalizedDriver, migration)
 		if err := applyMigrationUp(ctx, sqlDB, normalizedDriver, migration); err != nil {
+			emitMigrationProgress(options.OnProgress, MigrationProgress{
+				Phase:          "failed",
+				Driver:         normalizedDriver,
+				TotalCount:     totalCount,
+				PendingCount:   totalCount - appliedCount,
+				AppliedCount:   appliedCount,
+				CurrentVersion: migration.Version,
+				CurrentName:    migration.Name,
+			})
 			logMigrationFailure(ctx, options.Logger, normalizedDriver, migration, err)
 			return err
 		}
+		appliedCount++
+		emitMigrationProgress(options.OnProgress, MigrationProgress{
+			Phase:          "applied",
+			Driver:         normalizedDriver,
+			TotalCount:     totalCount,
+			PendingCount:   totalCount - appliedCount,
+			AppliedCount:   appliedCount,
+			CurrentVersion: migration.Version,
+			CurrentName:    migration.Name,
+		})
 		logMigrationEvent(ctx, options.Logger, "database migration applied", normalizedDriver, migration)
 	}
+
+	emitMigrationProgress(options.OnProgress, MigrationProgress{
+		Phase:        "complete",
+		Driver:       normalizedDriver,
+		TotalCount:   totalCount,
+		PendingCount: totalCount - appliedCount,
+		AppliedCount: appliedCount,
+	})
 
 	return nil
 }
@@ -404,6 +462,16 @@ func logMigrationFailure(ctx context.Context, logger *slog.Logger, driver string
 		slog.String("migration_name", migration.Name),
 		slog.Any("error", err),
 	)
+}
+
+func emitMigrationProgress(callback func(MigrationProgress), progress MigrationProgress) {
+	if callback == nil {
+		return
+	}
+	if progress.PendingCount < 0 {
+		progress.PendingCount = 0
+	}
+	callback(progress)
 }
 
 func executeSQLStatements(ctx context.Context, executor sqlStatementExecutor, sqlText string) error {

@@ -495,6 +495,66 @@ type SearchIndexJobRepository interface {
 	MarkRetry(ctx context.Context, params MarkSearchIndexJobRetryParams) error
 }
 
+// ListAdminSpaceTransferJobsParams 后台空间传输任务列表参数。
+type ListAdminSpaceTransferJobsParams struct {
+	ActorUserID string
+	Statuses    []string
+	Limit       int
+}
+
+// UpdateAdminSpaceTransferJobProgressParams 后台空间传输任务进度更新参数。
+type UpdateAdminSpaceTransferJobProgressParams struct {
+	JobID    string
+	Stage    string
+	Progress int
+	Message  string
+	Now      time.Time
+}
+
+// MarkAdminSpaceTransferJobCompletedParams 后台空间传输任务完成参数。
+type MarkAdminSpaceTransferJobCompletedParams struct {
+	JobID       string
+	Stage       string
+	Message     string
+	FilePath    string
+	FileName    string
+	SizeBytes   int64
+	NewSpaceID  string
+	CompletedAt time.Time
+	ExpiresAt   time.Time
+}
+
+// MarkAdminSpaceTransferJobFailedParams 后台空间传输任务失败参数。
+type MarkAdminSpaceTransferJobFailedParams struct {
+	JobID        string
+	Stage        string
+	Message      string
+	ErrorMessage string
+	FailedAt     time.Time
+	ExpiresAt    time.Time
+}
+
+// MarkActiveAdminSpaceTransferJobsFailedParams 批量标记遗留活跃任务失败参数。
+type MarkActiveAdminSpaceTransferJobsFailedParams struct {
+	Now          time.Time
+	Message      string
+	ExpiresAfter time.Duration
+}
+
+// AdminSpaceTransferJobRepository 后台空间导入导出任务仓储接口。
+type AdminSpaceTransferJobRepository interface {
+	Create(ctx context.Context, job *models.AdminSpaceTransferJob) error
+	UpdateProgress(ctx context.Context, params UpdateAdminSpaceTransferJobProgressParams) error
+	MarkCompleted(ctx context.Context, params MarkAdminSpaceTransferJobCompletedParams) error
+	MarkFailed(ctx context.Context, params MarkAdminSpaceTransferJobFailedParams) error
+	ListByActor(ctx context.Context, params ListAdminSpaceTransferJobsParams) ([]models.AdminSpaceTransferJob, error)
+	GetByKindAndJobID(ctx context.Context, kind string, jobID string) (models.AdminSpaceTransferJob, error)
+	MarkActiveJobsFailed(ctx context.Context, params MarkActiveAdminSpaceTransferJobsFailedParams) (int64, error)
+	ListExpired(ctx context.Context, now time.Time, limit int) ([]models.AdminSpaceTransferJob, error)
+	ListExpiredByKind(ctx context.Context, kind string, now time.Time, limit int) ([]models.AdminSpaceTransferJob, error)
+	DeleteByIDs(ctx context.Context, ids []int64) (int64, error)
+}
+
 // WorkspaceSpaceListRecord 编辑器工作区空间列表项。
 type WorkspaceSpaceListRecord struct {
 	SpaceID      string

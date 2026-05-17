@@ -1,15 +1,15 @@
 # 空间导入导出功能技术方案
 
-**文档状态**: Draft  
+**文档状态**: In Progress
 **创建日期**: 2026-05-15  
 **适用范围**: `apps/server`、`apps/web`、`docs`  
-**目标**: 在管理后台空间管理中增加空间导出与导入能力。导出侧从空间操作菜单发起，后端异步生成可回灌的 `.plaindoc` 空间交换包，或生成用于离线阅读分发的 EPUB 文件，并通过 SSE 推送导出进度与下载链接；导入侧在空间管理上方提供“导入空间”按钮，选择 `.plaindoc` 后先解析元数据，再将导出包原样导入为一个新空间。
+**目标**: 在管理后台空间管理中增加空间导出与导入能力。导出侧从空间操作菜单发起，后端异步生成可回灌的 `.plaindoc` 空间交换包，或生成用于离线阅读分发的 EPUB 文件；导入侧在空间管理上方提供“导入空间”按钮，选择 `.plaindoc` 后先解析元数据，再将导出包原样导入为一个新空间。导入和导出任务统一进入全局任务中心，只要任一任务处于进行中，后台右下角展示全局进度浮层；点击浮层可展开查看所有导入/导出任务。页面刷新后，只要用户仍保持登录态，前端应能恢复当前用户未结束任务并继续展示进度。
 
 ---
 
 ## 1. 方案结论
 
-采用“空间交换包 + 后台任务 + SSE 进度订阅 + 短期文件链接”的实现方式。
+采用“空间交换包 + 持久化后台任务 + 全局任务中心 + SSE 进度订阅 + 短期文件链接”的实现方式。
 
 导出核心流程如下：
 
@@ -20,10 +20,12 @@
   → 选择导出格式
   → 点击开始导出
   → POST 创建导出任务
-  → 前端订阅 SSE 进度
+  → 任务进入全局任务中心
+  → 右下角浮层展示导出进度
+  → 前端订阅 SSE 进度，刷新后可通过任务 API 恢复订阅
   → 后端异步生成 `.plaindoc` 或 EPUB
   → SSE 推送 completed + downloadUrl
-  → 前端自动触发下载
+  → 前端展示手动下载入口
 ```
 
 本方案默认不让 `POST` 请求直接返回文件，也不让导出动作占用一个长时间 HTTP 请求。导出任务由后端异步执行，前端只负责创建任务、展示进度和拉起下载。
@@ -38,12 +40,16 @@
   → 前端展示导入预览
   → 用户确认导入到新空间
   → POST 提交导入任务
-  → 前端订阅 SSE 进度
+  → 任务进入全局任务中心
+  → 右下角浮层展示导入进度
+  → 前端订阅 SSE 进度，刷新后可通过任务 API 恢复订阅
   → 后端创建新空间并恢复目录、文档、附件和 Office 源文件
   → SSE 推送 completed + 新空间信息
 ```
 
 本方案要求系统导出的 `.plaindoc` 包必须能被同版本或兼容版本的 PlainDoc 原样导入。导入时不复用原空间 ID、节点 ID、文档 ID、附件 ID，而是在新空间中生成新 ID，并通过导入过程中的 `oldID -> newID` 映射恢复引用关系。
+
+全局任务中心是导入导出的唯一进度归属。导入/导出弹窗只负责收集参数和发起任务，不再承载长生命周期进度状态。任务状态由后端持久化，前端在后台壳层统一恢复、订阅、展示和收尾。
 
 ---
 
@@ -65,21 +71,27 @@
 12. 导入前必须解析 `manifest.json` 和 `tree.json`，展示空间名称、文档数、附件数、Office 源文件数和导出版本。
 13. 用户确认后，系统将 `.plaindoc` 包导入为一个新空间，并原样恢复目录树、文档内容、附件、Office 源文件和空间封面。
 14. 导入过程同样通过 SSE 推送进度，完成后返回新空间 ID 和可跳转入口。
+15. 导入和导出任务统一展示在后台全局右下角浮层中。
+16. 页面刷新后，若用户仍处于登录态，前端必须通过后端任务列表恢复当前用户的 `queued/running` 任务。
+17. 导出完成后不自动消耗下载 token，用户点击下载时再获取一次性下载链接。
+18. 后端持久化导入/导出任务快照，支持刷新恢复、终态短期保留和后续排障。
 
 ### 2.2 非目标
 
 本期不做以下能力：
 
 1. 多空间批量导出。
-2. 导出任务历史页面。
+2. 独立导入导出历史页面。
 3. 导出任务手动取消。
-4. 跨进程持久队列和分布式任务调度。
+4. 分布式任务调度和多实例 worker 协调。
 5. PDF、HTML 站点包、Confluence、Notion 等额外格式。
 6. 导出后长期保存文件。
 7. 对 Office 文档做高保真格式转换。
 8. 覆盖导入到已有空间。
 9. 导入时复用原始空间 ID 或原始数据主键。
 10. 导入第三方系统生成的 zip 包。
+11. 服务进程重启后自动续跑已经中断的导入/导出 worker。
+12. 将全局任务中心扩展为通用后台任务平台；本方案只覆盖空间导入/导出。
 
 ---
 
@@ -670,6 +682,123 @@ Accept: text/event-stream
 }
 ```
 
+### 6.7 查询当前用户空间传输任务
+
+```http
+GET /api/admin/space-transfer-tasks?status=active
+Authorization: Bearer <access-token>
+```
+
+说明：
+
+1. 该接口是页面刷新恢复的入口。
+2. 只返回当前登录用户可见的任务，不允许通过参数查询他人任务。
+3. `status=active` 返回 `queued/running` 任务；不传时返回当前用户短期保留的最近任务。
+4. 返回结果按 `updatedAt desc` 排序。
+5. 终态任务默认短期保留，供用户下载或查看失败原因；超过 `expiresAt` 后由清理任务删除。
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "requestId": "req-demo",
+  "data": {
+    "items": [
+      {
+        "jobId": "01hspaceexportjob0000000001",
+        "kind": "space_export",
+        "status": "running",
+        "stage": "documents",
+        "progress": 45,
+        "message": "正在导出文档 9/20",
+        "spaceId": "space-demo",
+        "spaceName": "示例空间",
+        "format": "source_zip",
+        "fileName": "",
+        "sizeBytes": 0,
+        "newSpaceId": "",
+        "createdAt": "2026-05-17T10:00:00Z",
+        "updatedAt": "2026-05-17T10:01:30Z",
+        "expiresAt": "2026-05-17T10:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 6.8 重新签发任务订阅链接
+
+```http
+POST /api/admin/space-transfer-tasks/:kind/:jobId/stream-token
+Authorization: Bearer <access-token>
+```
+
+说明：
+
+1. 用于页面刷新后重新订阅任务进度。
+2. `kind` 只能是 `space_export` 或 `space_import`。
+3. 后端必须校验任务归属当前 actor。
+4. 只为未过期任务签发新的短期 `streamUrl`。
+5. 原 stream token 过期不影响任务本身，只影响旧 SSE 链接继续使用。
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "requestId": "req-demo",
+  "data": {
+    "jobId": "01hspaceexportjob0000000001",
+    "streamUrl": "/api/admin/spaces/space-demo/exports/01hspaceexportjob0000000001/events?token=***"
+  }
+}
+```
+
+### 6.9 获取任务快照
+
+```http
+GET /api/admin/space-transfer-tasks/:kind/:jobId
+Authorization: Bearer <access-token>
+```
+
+说明：
+
+1. 用于浮层展开时补齐单个任务快照，或 SSE 断开后的兜底查询。
+2. 返回字段和任务列表项一致。
+3. 如果任务是导出完成态，不直接返回可消费下载 token。
+
+### 6.10 重新签发导出下载链接
+
+```http
+POST /api/admin/space-transfer-tasks/space_export/:jobId/download-token
+Authorization: Bearer <access-token>
+```
+
+说明：
+
+1. 仅导出任务支持。
+2. 任务必须属于当前 actor，且状态为 `completed`。
+3. 后端每次请求签发一个短期一次性 `downloadUrl`。
+4. 全局任务列表和任务快照都不能返回可长期保存的下载链接。
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "requestId": "req-demo",
+  "data": {
+    "downloadUrl": "/api/admin/space-exports/01hspaceexportjob0000000001/download?token=***",
+    "fileName": "space-demo-20260517100000.plaindoc",
+    "sizeBytes": 1048576
+  }
+}
+```
+
 ---
 
 ## 7. SSE 协议
@@ -680,7 +809,8 @@ Accept: text/event-stream
 
 ```json
 {
-  "type": "running",
+  "type": "progress",
+  "status": "running",
   "stage": "documents",
   "progress": 45,
   "message": "正在导出文档 9/20",
@@ -695,16 +825,14 @@ Accept: text/event-stream
 
 事件类型：
 
-1. `queued`
-   - 任务已创建，等待执行。
-2. `running`
-   - 任务执行中。
-3. `completed`
-   - 任务完成，包含 `downloadUrl`。
-4. `failed`
+1. `progress`
+   - 任务处于 `queued` 或 `running`，通过 `stage/progress/message` 表示当前阶段。
+2. `completed`
+   - 任务完成。SSE 首次 completed 事件可以包含短期 `downloadUrl`；任务列表和快照接口不返回可消费下载 token。
+3. `failed`
    - 任务失败，包含失败阶段和错误信息。
 
-导出任务的 `completed` 事件包含 `downloadUrl`；若订阅建立时任务已经完成，初始 `completed` 快照也必须包含重新签发的可用 `downloadUrl`。导入任务的 `completed` 事件包含新空间的 `spaceId/editorUrl/readerUrl`。
+导出任务的 `completed` SSE 事件可以包含 `downloadUrl`；若订阅建立时任务已经完成，初始 `completed` 快照也必须包含重新签发的可用 `downloadUrl`。全局浮层中用户点击“下载”时，优先调用 `download-token` API 重新签发一次性链接。导入任务的 `completed` 事件包含新空间的 `spaceId/editorUrl/readerUrl`。
 
 ### 7.2 事件示例
 
@@ -770,10 +898,15 @@ EPUB 导出进度复用导出任务事件类型，阶段改为：
 
 1. `apps/server/internal/service/admin_space_export_service.go`
 2. `apps/server/internal/service/admin_space_import_service.go`
-3. `apps/server/internal/server/handler/admin_space_export.go`
-4. `apps/server/internal/server/handler/admin_space_import.go`
-5. `apps/server/internal/server/response/admin_space_export.go`
-6. `apps/server/internal/server/response/admin_space_import.go`
+3. `apps/server/internal/service/admin_space_transfer_task_service.go`
+4. `apps/server/internal/storage/models/admin_space_transfer_job.go`
+5. `apps/server/internal/storage/repository/gorm_admin_space_transfer_job_repository.go`
+6. `apps/server/internal/server/handler/admin_space_export.go`
+7. `apps/server/internal/server/handler/admin_space_import.go`
+8. `apps/server/internal/server/handler/admin_space_transfer_task.go`
+9. `apps/server/internal/server/response/admin_space_export.go`
+10. `apps/server/internal/server/response/admin_space_import.go`
+11. `apps/server/internal/server/response/admin_space_transfer_task.go`
 
 服务结构：
 
@@ -784,6 +917,7 @@ type AdminSpaceExportService struct {
     documentAttachmentRepo repository.DocumentAttachmentRepository
     adminAccessService     *AdminAccessService
     jobStore               *AdminSpaceExportJobStore
+    transferJobRepo        repository.AdminSpaceTransferJobRepository
     exportRootDir          string
 }
 ```
@@ -797,40 +931,87 @@ type AdminSpaceImportService struct {
     documentAttachmentRepo repository.DocumentAttachmentRepository
     adminAccessService     *AdminAccessService
     jobStore               *AdminSpaceImportJobStore
+    transferJobRepo        repository.AdminSpaceTransferJobRepository
     stagingRootDir         string
 }
 ```
 
+统一任务服务结构：
+
+```go
+type AdminSpaceTransferTaskService struct {
+    exportService  *AdminSpaceExportService
+    importService  *AdminSpaceImportService
+    transferJobRepo repository.AdminSpaceTransferJobRepository
+}
+```
+
+职责：
+
+1. 聚合导出和导入任务为统一 DTO。
+2. 查询当前 actor 可见任务。
+3. 为已有任务重新签发 SSE `streamUrl`。
+4. 为导出完成任务重新签发一次性 `downloadUrl`。
+5. 提供前端全局浮层使用的任务快照。
+
 ### 8.2 任务状态
 
-第一期导入导出任务都使用进程内任务表，不新增数据库表。
+导入导出任务最终版使用“数据库持久化快照 + 进程内订阅者表”：
 
-原因：
-
-1. 空间导入导出是短生命周期后台操作。
-2. 第一阶段不提供历史任务页面。
-3. 不引入跨进程任务恢复，能显著降低复杂度。
+1. 数据库存储任务身份、归属、状态、进度、文件结果和过期时间。
+2. 进程内 store 只保存当前进程的订阅者 channel、短期 token hash 和正在运行的 worker 引用。
+3. 页面刷新后，前端通过 `GET /api/admin/space-transfer-tasks` 查询当前用户任务，再通过 `stream-token` 重新建立 SSE。
+4. 服务进程重启后，已中断的 `queued/running` 任务不能自动续跑，应在启动恢复或查询时标记为 `failed`，错误信息为“服务重启，任务已中断，请重新发起”。
+5. 终态任务短期保留，超过 `expiresAt` 后清理任务记录和对应私有文件。
 
 任务状态结构：
 
 ```go
-type AdminSpaceExportJob struct {
+type AdminSpaceTransferJob struct {
+    ID            uint
     JobID         string
+    Kind          string // space_export | space_import
     ActorUserID   string
     SpaceID       string
-    Format        AdminSpaceExportFormat
-    Status        AdminSpaceExportStatus
-    Progress      int
+    SpaceName     string
+    Format        string
+    ImportID      string
+    Status        string // queued | running | completed | failed
     Stage         string
+    Progress      int
     Message       string
     FilePath      string
     FileName      string
     SizeBytes     int64
+    NewSpaceID    string
     ErrorMessage  string
     CreatedAt     time.Time
+    StartedAt     *time.Time
+    CompletedAt   *time.Time
+    UpdatedAt     time.Time
     ExpiresAt     time.Time
 }
 ```
+
+建议新增表名：
+
+```text
+admin_space_transfer_jobs
+```
+
+索引：
+
+1. `uk_admin_space_transfer_jobs_job_id`：唯一约束 `job_id`。
+2. `idx_admin_space_transfer_jobs_actor_status_updated`：`actor_user_id, status, updated_at`。
+3. `idx_admin_space_transfer_jobs_status_expires`：`status, expires_at`。
+4. `idx_admin_space_transfer_jobs_kind_job`：`kind, job_id`。
+
+迁移要求：
+
+1. 同步新增 SQLite/MySQL/PostgreSQL 三套 migration。
+2. PostgreSQL 可使用项目当前支持的 dollar-quoted block。
+3. 不手工编辑 `go.sum`。
+4. repository 查询优先使用 models 结构体或 `TableName()` 派生表名，避免硬编码长 SQL。
 
 导入 inspect 暂存记录：
 
@@ -873,9 +1054,10 @@ type AdminSpaceImportStaging struct {
 2. handler 解析请求体并校验 `format`。
 3. service 调用 `CanExportSpace(actorUserID, spaceID)` 确认当前用户可导出该空间。
 4. service 创建 `jobId`。
-5. service 注册任务并推送 `queued` 事件。
-6. service 启动受控后台任务。
-7. handler 返回 `jobId` 和 `streamUrl`。
+5. service 写入 `admin_space_transfer_jobs`，状态为 `queued`。
+6. service 注册进程内订阅状态并推送 `queued` 事件。
+7. service 启动受控后台任务。
+8. handler 返回 `jobId` 和 `streamUrl`。
 
 ### 9.2 执行任务
 
@@ -898,7 +1080,8 @@ data/exports/admin-space/{jobId}.part
 8. 若开启附件导出，按文档遍历附件并写入 `attachments/`。
 9. zip writer 正常关闭后，将 `.part` 原子重命名为 `.zip`。
 10. 生成下载 token 和 `downloadUrl`。
-11. 推送 `completed` 事件。
+11. 更新持久化任务为 `completed`，写入文件名、文件路径、大小和过期时间。
+12. 推送 `completed` 事件。
 
 EPUB 执行任务步骤：
 
@@ -914,7 +1097,8 @@ EPUB 执行任务步骤：
 8. 生成 `content.opf`、`styles.css`、`META-INF/container.xml`。
 9. 按 EPUB 要求打包，`mimetype` 必须作为 zip 第一个 entry 且不压缩。
 10. 生成下载 token 和 `downloadUrl`。
-11. 推送 `completed` 事件。
+11. 更新持久化任务为 `completed`，写入文件名、文件路径、大小和过期时间。
+12. 推送 `completed` 事件。
 
 ### 9.3 失败处理
 
@@ -922,13 +1106,17 @@ EPUB 执行任务步骤：
 
 1. 权限失败：任务不创建，直接返回错误。
 2. 数据读取失败：任务进入 `failed`，SSE 推送失败阶段。
+   - 同时更新 `admin_space_transfer_jobs.status=failed`、`stage`、`message`、`error_message` 和 `expires_at`。
 3. 单个附件缺失：
    - 第一期建议视为任务失败，避免导出包不完整。
    - 后续如需要“部分成功”，可在 manifest 中增加 `warnings`。
 4. zip 写入失败：删除 `.part` 文件，任务进入 `failed`。
 5. SSE 断开：
    - 不取消后端任务。
-   - 用户重新打开浮层时，第一期不恢复旧任务；后续可增加任务查询接口。
+   - 前端可通过任务查询接口恢复任务，并重新签发 `streamUrl`。
+6. 服务重启：
+   - 未完成任务无法自动续跑。
+   - 启动恢复或任务查询时将遗留 `queued/running` 任务标记为 `failed`，提示用户重新发起。
 
 ---
 
@@ -958,8 +1146,9 @@ data/imports/admin-space/{importId}.zip
 3. 再次调用 `CanImportSpace(actorUserID)`，确认当前用户仍具备创建新空间的能力。
 4. service 校验 `importable=true`。
 5. service 创建导入 job 并推送 `queued` 事件。
-6. service 启动受控后台任务。
-7. handler 返回 `jobId` 和 `streamUrl`。
+6. service 写入 `admin_space_transfer_jobs`，状态为 `queued`。
+7. service 启动受控后台任务。
+8. handler 返回 `jobId` 和 `streamUrl`。
 
 ### 10.3 执行导入任务
 
@@ -980,7 +1169,8 @@ data/imports/admin-space/{importId}.zip
    - 为新文档创建新附件和新 blob。
 9. 回写空间更新时间。
 10. 写审计日志。
-11. 推送 `completed` 事件，返回新空间入口。
+11. 更新持久化任务为 `completed`，写入新空间 ID 和过期时间。
+12. 推送 `completed` 事件，返回新空间入口。
 
 ### 10.4 导入失败处理
 
@@ -989,6 +1179,7 @@ data/imports/admin-space/{importId}.zip
 1. inspect 阶段发现 zip 结构非法：不创建 staging 记录，直接返回错误。
 2. commit 阶段发现 staging 过期：返回过期错误。
 3. 导入执行中失败：任务进入 `failed`，并通过空间仓储事务硬删除已创建的新空间，先移除文档、附件、file revision 等 blob 引用。
+   - 同时更新持久化任务失败快照，记录原始失败阶段和错误摘要。
 4. 如果无法完整回滚，任务仍保留原始失败阶段和原始错误，同时附带回滚错误，并写入审计日志。
 5. 导入完成后删除 staging zip。
 6. 导入失败后保留 staging zip 到过期时间，便于用户重试或排查。
@@ -1030,9 +1221,12 @@ data/imports/admin-space/{importId}.zip
 ```text
 apps/web/src/admin/components/AdminSpaceExportDialog.tsx
 apps/web/src/admin/components/AdminSpaceImportDialog.tsx
+apps/web/src/admin/components/AdminSpaceTransferFloatingPanel.tsx
+apps/web/src/admin/space-transfer/AdminSpaceTransferTaskProvider.tsx
+apps/web/src/admin/space-transfer/useAdminSpaceTransferTasks.ts
 ```
 
-组件 props：
+导出弹窗 props：
 
 ```ts
 interface AdminSpaceExportDialogProps {
@@ -1040,6 +1234,7 @@ interface AdminSpaceExportDialogProps {
   space: AdminSpace | null;
   dataGateway: DataGateway;
   onOpenChange: (open: boolean) => void;
+  onStartExport: (input: AdminSpaceExportStartInput & { spaceName?: string }) => Promise<void>;
 }
 ```
 
@@ -1050,19 +1245,22 @@ interface AdminSpaceImportDialogProps {
   open: boolean;
   dataGateway: DataGateway;
   onOpenChange: (open: boolean) => void;
-  onImported: (spaceId: string) => void;
+  onStartImport: (input: AdminSpaceImportCommitInput & {
+    importId: string;
+    sourceSpaceName?: string;
+    needsDefaultCover?: boolean;
+  }) => Promise<void>;
 }
 ```
 
-### 11.3 导出浮层状态
+### 11.3 导出弹窗状态
 
 状态机：
 
 ```text
 idle
   → starting
-  → running
-  → completed
+  → submitted
   → failed
 ```
 
@@ -1074,18 +1272,16 @@ idle
    - 点击 zip 图标开始导出。
 2. `starting`
    - 正在创建任务。
-3. `running`
-   - 展示进度条、阶段文案。
-4. `completed`
-   - 展示手动下载按钮。
-   - 下载链接使用一次性 token，前端不自动消耗。
-5. `failed`
+3. `submitted`
+   - 任务已交给全局任务中心。
+   - 弹窗可以关闭，右下角浮层继续展示进度。
+4. `failed`
    - 展示错误信息。
    - 允许重新导出。
 
 当导出格式为 `epub` 时，浮层文案需要把“zip 压缩包”切换为“EPUB 阅读包”。入口仍可复用同一导出浮层，但图标和确认按钮应根据格式变化。
 
-### 11.4 导入浮层状态
+### 11.4 导入弹窗状态
 
 状态机：
 
@@ -1094,8 +1290,6 @@ idle
   → inspecting
   → preview
   → starting
-  → running
-  → completed
   → failed
 ```
 
@@ -1111,32 +1305,114 @@ idle
    - 允许修改新空间名称、空间 ID、分类和可见性。
 4. `starting`
    - 正在提交导入任务。
-5. `running`
-   - 展示导入进度。
-   - 禁止关闭浮层，避免中断 SSE 和导入完成后的默认封面补齐。
-   - 如果 SSE 连接异常，前端关闭订阅并切到 `failed` 状态，恢复关闭/取消能力。
-6. `completed`
-   - 展示新空间入口。
-7. `failed`
+5. 提交成功
+   - 任务已交给全局任务中心。
+   - 弹窗可以关闭，右下角浮层继续展示进度。
+6. `failed`
    - 展示失败原因。
    - 允许重新选择 zip。
 
-### 11.5 手动下载
+### 11.5 全局任务中心
+
+全局任务中心挂载在 `AdminApp.tsx` 登录后的后台壳层中，覆盖所有后台页面。导入/导出弹窗只负责发起任务，不再保存长生命周期进度状态。
+
+职责：
+
+1. 初始化时调用 `listSpaceTransferTasks({ status: "active" })`。
+2. 对每个 `queued/running` 任务调用 `issueSpaceTransferStreamToken`，重新建立 SSE。
+3. 创建导出或提交导入后，将任务加入本地任务列表并立即订阅。
+4. 维护 `subscriptionRef` map，按 `kind + jobId` 去重。
+5. 收到 `progress/completed/failed` 事件后更新本地任务状态。
+6. 任务完成或失败后关闭对应 SSE。
+7. 页面卸载或退出登录时关闭全部 SSE。
+8. 导出完成后点击下载时调用 `issueSpaceTransferDownloadToken`，再触发浏览器下载。
+9. 导入完成后在浮层提供“打开编辑器”“打开阅读页”入口；如导入包无封面，由 Provider 统一执行默认封面生成和绑定。
+
+前端任务模型：
+
+```ts
+interface AdminSpaceTransferTask {
+  jobId: string;
+  kind: "space_export" | "space_import";
+  status: "queued" | "running" | "completed" | "failed";
+  stage?: string;
+  progress: number;
+  message?: string;
+  spaceId?: string;
+  spaceName?: string;
+  format?: AdminSpaceExportFormat;
+  fileName?: string;
+  sizeBytes?: number;
+  newSpaceId?: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+}
+```
+
+恢复流程：
+
+```text
+AdminApp 登录态确认
+  → Provider mount
+  → GET /api/admin/space-transfer-tasks?status=active
+  → 按任务重新签发 streamUrl
+  → 建立 SSE
+  → 右下角浮层展示 active 任务
+```
+
+如果恢复时某个任务已经被后端标记为 `failed`，浮层展示失败原因，不再重连 SSE。
+
+### 11.6 右下角浮层
+
+浮层显示规则：
+
+1. 没有任务时不显示。
+2. 存在 `queued/running` 任务时固定显示在后台右下角。
+3. 存在未清除的 `completed/failed` 任务时可继续显示，方便用户下载或查看失败原因。
+4. 点击折叠态浮层后展开任务列表。
+5. 支持清除单个终态任务；清除只影响前端展示，不删除后端审计或任务记录。
+
+折叠态内容：
+
+```text
+导入导出任务 · 2 个进行中
+```
+
+展开态每个任务展示：
+
+1. 类型：导出 / 导入。
+2. 空间名或空间 ID。
+3. 状态 badge。
+4. 进度条。
+5. 当前阶段文案。
+6. 失败原因。
+7. 导出完成后的“下载文件”。
+8. 导入完成后的“打开编辑器”“打开阅读页”。
+
+UI 约束：
+
+1. 使用固定尺寸和最大高度，任务多时内部滚动。
+2. 移动端贴底展示，避免遮挡后台主操作按钮。
+3. 不使用嵌套 card；浮层本身是一个工具面板，任务项可以是紧凑列表项。
+4. 图标优先使用 `lucide-react`。
+
+### 11.7 手动下载
 
 收到 `completed` 事件后：
 
 1. 展示“下载文件”按钮。
-2. 用户点击后，前端使用原 `streamUrl` 重新订阅 completed 快照，服务端为该次订阅重新签发短期一次性 `downloadUrl`。
+2. 用户点击后，前端调用 `issueSpaceTransferDownloadToken`，服务端为该次点击重新签发短期一次性 `downloadUrl`。
 3. 前端创建隐藏 `<a>`。
 4. 设置 `href = downloadUrl`。
 5. 设置 `download = fileName`。
 6. 调用 `click()`。
 
 `downloadToken` 为单次使用 token。前端不要在 `completed` 事件里自动点击下载链接，否则会提前消耗 token，导致用户后续点击手动下载按钮时失败。
-浏览器系统下载框弹出时，请求可能已经到达下载接口并消耗 token；即使用户随后取消保存，也不能复用旧链接。手动下载按钮每次点击都必须重新获取 completed 快照中的新链接。
+浏览器系统下载框弹出时，请求可能已经到达下载接口并消耗 token；即使用户随后取消保存，也不能复用旧链接。手动下载按钮每次点击都必须重新获取新的下载链接。
 如果 `VITE_API_BASE_URL` 是绝对地址，前端必须先把 SSE 事件里的相对 `downloadUrl` 补全到后端 origin，再设置到 `<a href>`。
 
-### 11.6 SSE 封装
+### 11.8 SSE 与任务 API 封装
 
 建议在 adapter 中新增：
 
@@ -1146,6 +1422,10 @@ subscribeSpaceExport(input): AdminSpaceExportSubscription
 inspectSpaceImport(input): Promise<AdminSpaceImportInspectResult>
 commitSpaceImport(input): Promise<AdminSpaceImportStartResult>
 subscribeSpaceImport(input): AdminSpaceImportSubscription
+listSpaceTransferTasks(input): Promise<AdminSpaceTransferTaskListResult>
+getSpaceTransferTask(input): Promise<AdminSpaceTransferTask>
+issueSpaceTransferStreamToken(input): Promise<AdminSpaceTransferStreamTokenResult>
+issueSpaceTransferDownloadToken(input): Promise<AdminSpaceTransferDownloadTokenResult>
 ```
 
 `subscribeSpaceExport` 可以返回一个轻量对象：
@@ -1156,7 +1436,7 @@ interface AdminSpaceExportSubscription {
 }
 ```
 
-页面组件只消费回调，不直接拼接 SSE URL。
+页面组件只消费回调，不直接拼接 SSE URL。全局 Provider 负责调用任务 API、恢复订阅和关闭订阅。
 
 ---
 
@@ -1173,10 +1453,12 @@ interface AdminSpaceExportSubscription {
 7. 导入任务只能消费当前 actor 自己上传的 staging zip。
 8. 普通用户如果具备创建空间能力，可以导入 zip 创建新空间；如果不具备创建空间能力，不能导入。
 9. 普通用户如果具备创建空间能力，也不能导出任意空间，只能导出自己拥有或明确可管理的空间。
+10. 任务列表、任务快照、stream token 重签和下载 token 重签都必须校验任务归属当前 actor。
+11. 全局任务中心不能展示其它用户任务，即使当前用户是管理员。
 
 ### 12.2 Token
 
-第一期新增三类短期 token：
+新增三类短期 token：
 
 1. `streamToken`
    - 用于 SSE 订阅。
@@ -1190,6 +1472,8 @@ interface AdminSpaceExportSubscription {
 
 token 内容不要包含明文敏感信息，使用服务端签名校验；如果服务端需要记录 token 状态，只保存哈希或不可逆摘要。日志、审计 metadata、错误消息中都不能打印 query token。`downloadToken` 必须单次使用，下载接口响应设置 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`，降低 query token 被缓存或被 Referer 带出的风险。
 
+页面刷新恢复不依赖旧 token。前端刷新后先通过登录态查询任务，再请求服务端重新签发新的 `streamToken`。旧 `streamToken` 过期不应导致任务被清理或任务失败。
+
 ### 12.3 文件安全
 
 1. zip 文件保存到私有目录，不进入公开上传目录。
@@ -1197,12 +1481,13 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 3. 下载时只能通过 `jobId` 查找任务文件，禁止用户传任意路径；消费 `downloadToken` 后仍需校验文件位于导出私有目录内，且扩展名只能是 `.zip`、`.plaindoc` 或 `.epub`。
 4. `.part` 临时文件在失败后删除。
 5. 过期终态任务和 zip 文件由清理逻辑删除；`queued` / `running` 任务不因 SSE stream token 过期被清理，避免长任务后续完成事件和下载 token 丢失。
-6. 导入 staging zip 保存到私有目录，不进入公开上传目录。
-7. inspect 阶段必须限制 zip 文件大小、entry 数量、单 entry 大小和总解压后大小。
-8. 导入时只读取 zip 内 entry，不允许按 manifest path 访问本机文件系统。
-9. 导入执行阶段按需读取 manifest 引用的 entry，避免 referenced payload 和未引用大文件同时驻留内存；未引用 entry 仍受 zip 总大小、entry 数量和路径清洗约束。
-10. EPUB 导出本地化图片时，`data:image/*` 与 `/uploads/*` 单图都必须限制在 20MiB 内，避免超大图片占用过多内存或临时磁盘。
-11. 审计错误信息只保留业务错误；若错误文本包含 token、私有目录或绝对路径，必须泛化为服务端日志可查。
+6. 持久化任务表中的 `file_path` 只能由服务端写入，下载前仍需校验路径位于导出私有目录。
+7. 导入 staging zip 保存到私有目录，不进入公开上传目录。
+8. inspect 阶段必须限制 zip 文件大小、entry 数量、单 entry 大小和总解压后大小。
+9. 导入时只读取 zip 内 entry，不允许按 manifest path 访问本机文件系统。
+10. 导入执行阶段按需读取 manifest 引用的 entry，避免 referenced payload 和未引用大文件同时驻留内存；未引用 entry 仍受 zip 总大小、entry 数量和路径清洗约束。
+11. EPUB 导出本地化图片时，`data:image/*` 与 `/uploads/*` 单图都必须限制在 20MiB 内，避免超大图片占用过多内存或临时磁盘。
+12. 审计错误信息只保留业务错误；若错误文本包含 token、私有目录或绝对路径，必须泛化为服务端日志可查。
 
 ### 12.4 敏感信息
 
@@ -1278,6 +1563,11 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 17. `AdminSpaceImportErrStagingExpired`
 18. `AdminSpaceImportErrJobRunningLimit`
 19. `AdminSpaceImportErrCommitForbidden`
+20. `AdminSpaceTransferTaskErrJobNotFound`
+21. `AdminSpaceTransferTaskErrKindUnsupported`
+22. `AdminSpaceTransferTaskErrStreamTokenIssueFailed`
+23. `AdminSpaceTransferTaskErrDownloadTokenIssueFailed`
+24. `AdminSpaceTransferTaskErrForbidden`
 
 错误响应仍使用现有 `JsonResult` 协议：
 
@@ -1322,6 +1612,13 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 22. EPUB 中 Markdown 文档生成 XHTML 章节。
 23. EPUB 中 `docx/xlsx` 复用现有 Office HTML 渲染链路生成 XHTML 章节。
 24. EPUB 不被导入 inspect 接口识别为空间交换包。
+25. 创建导出任务后写入 `admin_space_transfer_jobs`。
+26. 创建导入任务后写入 `admin_space_transfer_jobs`。
+27. 任务列表只返回当前 actor 的任务。
+28. 页面刷新后可为当前 actor 的 active 任务重新签发 `streamUrl`。
+29. 非任务 owner 不能重新签发 stream token 或 download token。
+30. 导出完成后通过 `download-token` 接口签发一次性下载链接。
+31. 服务启动恢复时，遗留 `queued/running` 任务被标记为 `failed`。
 
 ### 15.2 前端测试
 
@@ -1343,6 +1640,14 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 14. 收到导入 `completed` 事件后展示新空间入口。
 15. 选择 EPUB 导出格式时，浮层显示 EPUB 阅读包文案。
 16. EPUB completed 后展示 `.epub` 文件手动下载入口。
+17. 创建导出后弹窗关闭，右下角浮层仍展示进度。
+18. 创建导入后弹窗关闭，右下角浮层仍展示进度。
+19. Provider 初始化时调用任务列表并恢复 active 任务。
+20. 恢复 active 任务后重新签发 `streamUrl` 并订阅 SSE。
+21. 切换后台页面不丢失任务进度。
+22. 刷新页面后仍显示登录用户进行中的导入/导出任务。
+23. 导出完成后点击浮层下载按钮会调用 `issueSpaceTransferDownloadToken`。
+24. 任务失败后浮层展示失败原因，并允许清除终态任务。
 
 ### 15.3 回归命令
 
@@ -1454,6 +1759,27 @@ cd apps/server && go test -race -timeout 120s ./...
 - [x] 执行后端测试和前端构建。
 - [ ] 同步更新 `BACKEND_DEVELOPER_GUIDE.md` 和 `FRONTEND_DEVELOPER_GUIDE.md` 中的空间导入导出说明。
 
+### Phase 10：最终版全局任务中心与刷新恢复
+
+- [ ] 新增 `admin_space_transfer_jobs` 持久化表和三套迁移。
+- [ ] 新增 `AdminSpaceTransferJob` model、repository interface 和 GORM repository。
+- [ ] 导出任务创建、进度更新、完成、失败都同步写入持久化任务表。
+- [ ] 导入任务创建、进度更新、完成、失败都同步写入持久化任务表。
+- [ ] 新增 `AdminSpaceTransferTaskService` 聚合导入导出任务。
+- [ ] 新增 `GET /api/admin/space-transfer-tasks`。
+- [ ] 新增 `GET /api/admin/space-transfer-tasks/:kind/:jobId`。
+- [ ] 新增 `POST /api/admin/space-transfer-tasks/:kind/:jobId/stream-token`。
+- [ ] 新增 `POST /api/admin/space-transfer-tasks/space_export/:jobId/download-token`。
+- [ ] 服务启动恢复或任务查询时，将遗留 `queued/running` 任务标记为 `failed`。
+- [ ] 前端新增 `AdminSpaceTransferTaskProvider`。
+- [ ] 前端新增 `AdminSpaceTransferFloatingPanel`，挂载在 `AdminApp` 登录态后台壳层。
+- [ ] 导出弹窗只负责发起任务，进度和下载交给全局任务中心。
+- [ ] 导入弹窗只负责 inspect 和提交任务，进度、完成入口和默认封面补齐交给全局任务中心。
+- [ ] 页面刷新后，Provider 查询 active 任务并重新签发 `streamUrl` 恢复 SSE。
+- [ ] 补充后端任务列表、token 重签、下载重签、启动恢复测试。
+- [ ] 补充前端浮层、刷新恢复、页面切换不中断、下载重签测试。
+- [ ] 同步更新 `BACKEND_DEVELOPER_GUIDE.md` 和 `FRONTEND_DEVELOPER_GUIDE.md`。
+
 ---
 
 ## 17. 风险与后续演进
@@ -1462,7 +1788,7 @@ cd apps/server && go test -race -timeout 120s ./...
 
 1. 大空间导出耗时较长，占用磁盘和内存。
 2. 附件或 Office 源文件可能位于远端对象存储，读取失败需要清晰暴露。
-3. 进程内任务表不支持服务重启恢复。
+3. 持久化任务表支持刷新恢复，但不支持服务重启后自动续跑 worker；重启期间的 active 任务会失败，需要用户重新发起。
 4. 下载链接使用一次性 token，需要避免前端自动触发下载提前消耗 token。
 5. 大 zip 导入可能产生大量数据库写入和对象存储写入，需要限制文件大小与并发。
 6. 导入失败回滚需要小心处理，避免留下半成品空间。
@@ -1475,8 +1801,8 @@ cd apps/server && go test -race -timeout 120s ./...
 1. 导出任务历史页面。
 2. 任务取消能力。
 3. 部分成功导出和 warnings manifest。
-4. 数据库存储任务记录。
-5. 分布式队列。
-6. 覆盖导入到已有空间。
-7. 跨版本导入兼容策略。
-8. 导入前差异预览。
+4. 分布式队列。
+5. 覆盖导入到已有空间。
+6. 跨版本导入兼容策略。
+7. 导入前差异预览。
+8. 独立任务历史页面和任务取消能力。

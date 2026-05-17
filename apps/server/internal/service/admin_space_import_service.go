@@ -232,6 +232,15 @@ func WithAdminSpaceImportAuditRecorder(auditRecorder adminAuditRecorder) AdminSp
 	}
 }
 
+// WithAdminSpaceImportTransferJobRepository 注入全局任务持久化仓储。
+func WithAdminSpaceImportTransferJobRepository(
+	transferJobRepo repository.AdminSpaceTransferJobRepository,
+) AdminSpaceImportServiceOption {
+	return func(s *AdminSpaceImportService) {
+		s.transferJobRepo = transferJobRepo
+	}
+}
+
 // AdminSpaceImportStore 是进程内导入 staging 和任务表。
 type AdminSpaceImportStore struct {
 	mu          sync.Mutex
@@ -259,6 +268,7 @@ type AdminSpaceImportService struct {
 	attachmentWriter   adminSpaceImportAttachmentWriter
 	officeHTMLRenderer adminSpaceImportOfficeHTMLRenderer
 	auditRecorder      adminAuditRecorder
+	transferJobRepo    repository.AdminSpaceTransferJobRepository
 	stagingDir         string
 	localBlobRootDir   string
 	nowFn              func() time.Time
@@ -1454,8 +1464,14 @@ func (s *AdminSpaceImportService) Commit(
 	if err := s.store.CreateJob(job); err != nil {
 		return CommitAdminSpaceImportResult{}, err
 	}
+	if err := s.persistImportTransferJobCreated(ctx, job, staging.FilePath); err != nil {
+		s.store.Fail(jobID, "persist", "记录导入任务失败", s.now())
+		return CommitAdminSpaceImportResult{}, err
+	}
 	if err := s.recordImportAudit(ctx, job, "space_import", job.ImportID, adminSpaceImportAuditQueued, "queued", "", ""); err != nil {
-		s.store.Fail(jobID, "audit", "记录导入审计失败", s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "audit", "记录导入审计失败", failedAt)
+		s.persistImportTransferJobFailed(ctx, jobID, "audit", "记录导入审计失败", failedAt)
 		return CommitAdminSpaceImportResult{}, err
 	}
 	if s.canRestoreAdminSpaceImportPackage() {
@@ -1501,12 +1517,42 @@ func (s *AdminSpaceImportService) Subscribe(
 	return s.store.Subscribe(strings.TrimSpace(jobID), strings.TrimSpace(actorUserID), strings.TrimSpace(streamToken), s.now())
 }
 
+// IssueStreamURL 为当前 actor 的活跃导入任务重新签发 SSE 订阅 URL。
+func (s *AdminSpaceImportService) IssueStreamURL(
+	_ context.Context,
+	actorUserID string,
+	jobID string,
+) (string, error) {
+	if s == nil || s.store == nil {
+		return "", errcode.ErrAdminSpaceImportStagingNotFound
+	}
+	streamToken, streamTokenHash, err := generateAdminSpaceTransferToken()
+	if err != nil {
+		return "", err
+	}
+	job, err := s.store.IssueStreamToken(
+		strings.TrimSpace(jobID),
+		strings.TrimSpace(actorUserID),
+		streamTokenHash,
+		s.now(),
+	)
+	if err != nil {
+		return "", err
+	}
+	return "/api/admin/space-imports/" + job.JobID + "/events?token=" + streamToken, nil
+}
+
 // PublishProgress 广播导入任务进度。
 func (s *AdminSpaceImportService) PublishProgress(jobID string, event AdminSpaceTransferEvent) {
 	if s == nil || s.store == nil {
 		return
 	}
-	s.store.Publish(strings.TrimSpace(jobID), event, s.now())
+	now := s.now()
+	trimmedJobID := strings.TrimSpace(jobID)
+	s.store.Publish(trimmedJobID, event, now)
+	if event.Type == AdminSpaceTransferEventTypeProgress {
+		s.persistImportTransferJobProgress(context.Background(), trimmedJobID, event, now)
+	}
 }
 
 // BeginImportJob 将导入任务切到 running；真实 worker 在后续阶段调用。
@@ -1521,10 +1567,21 @@ func (s *AdminSpaceImportService) BeginImportJob(ctx context.Context, jobID stri
 	if ok, err := s.CanImportSpace(ctx, job.ActorUserID); err != nil {
 		return err
 	} else if !ok {
-		s.store.Fail(job.JobID, "permission", "导入权限已失效", s.now())
+		failedAt := s.now()
+		s.store.Fail(job.JobID, "permission", "导入权限已失效", failedAt)
+		s.persistImportTransferJobFailed(ctx, job.JobID, "permission", "导入权限已失效", failedAt)
 		return errcode.ErrAdminSpaceImportCommitForbidden
 	}
-	return s.store.MarkRunning(job.JobID, s.now())
+	now := s.now()
+	if err := s.store.MarkRunning(job.JobID, now); err != nil {
+		return err
+	}
+	s.persistImportTransferJobProgress(ctx, job.JobID, AdminSpaceTransferEvent{
+		Stage:    "running",
+		Progress: 0,
+		Message:  "导入任务开始执行",
+	}, now)
+	return nil
 }
 
 func (s *AdminSpaceImportService) runAdminSpaceImportJob(ctx context.Context, jobID string) {
@@ -1536,18 +1593,24 @@ func (s *AdminSpaceImportService) runAdminSpaceImportJob(ctx context.Context, jo
 	}
 	job, err := s.store.GetJob(strings.TrimSpace(jobID))
 	if err != nil {
-		s.store.Fail(jobID, "load", "导入任务不存在", s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "load", "导入任务不存在", failedAt)
+		s.persistImportTransferJobFailed(ctx, jobID, "load", "导入任务不存在", failedAt)
 		return
 	}
 	newSpaceID, err := s.restoreAdminSpaceImportPackage(ctx, job)
 	if err != nil {
 		failureMessage := err.Error()
-		s.store.Fail(jobID, "restore", failureMessage, s.now())
+		failedAt := s.now()
+		s.store.Fail(jobID, "restore", failureMessage, failedAt)
+		s.persistImportTransferJobFailed(ctx, jobID, "restore", failureMessage, failedAt)
 		targetType, targetID := adminSpaceImportAuditTarget(job, newSpaceID)
 		_ = s.recordImportAudit(ctx, job, targetType, targetID, adminSpaceImportAuditFailed, "restore", failureMessage, newSpaceID)
 		return
 	}
-	s.store.Complete(jobID, newSpaceID, s.now())
+	completedAt := s.now()
+	s.store.Complete(jobID, newSpaceID, completedAt)
+	s.persistImportTransferJobCompleted(ctx, strings.TrimSpace(jobID), newSpaceID, completedAt)
 	_ = s.recordImportAudit(ctx, job, "space", newSpaceID, adminSpaceImportAuditSuccess, "completed", "", newSpaceID)
 }
 
@@ -1607,6 +1670,98 @@ func (s *AdminSpaceImportService) recordImportAudit(
 		TargetID:    normalizedTargetID,
 		Summary:     "space import " + strings.TrimSpace(status) + ": " + normalizedTargetID,
 		Detail:      detail,
+	})
+}
+
+func (s *AdminSpaceImportService) persistImportTransferJobCreated(
+	ctx context.Context,
+	job AdminSpaceImportJob,
+	stagingFilePath string,
+) error {
+	if s == nil || s.transferJobRepo == nil {
+		return nil
+	}
+	return s.transferJobRepo.Create(ctx, &models.AdminSpaceTransferJob{
+		JobID:       strings.TrimSpace(job.JobID),
+		Kind:        models.AdminSpaceTransferJobKindImport,
+		ActorUserID: strings.TrimSpace(job.ActorUserID),
+		SpaceID:     strings.TrimSpace(job.RequestedSpaceID),
+		SpaceName:   strings.TrimSpace(job.RequestedSpaceName),
+		ImportID:    strings.TrimSpace(job.ImportID),
+		Status:      models.AdminSpaceTransferJobStatusQueued,
+		Stage:       "queued",
+		Progress:    0,
+		Message:     "导入任务已创建",
+		FilePath:    strings.TrimSpace(stagingFilePath),
+		CreatedAt:   job.CreatedAt,
+		UpdatedAt:   job.UpdatedAt,
+		ExpiresAt:   job.CreatedAt.Add(30 * time.Minute),
+	})
+}
+
+func (s *AdminSpaceImportService) persistImportTransferJobProgress(
+	ctx context.Context,
+	jobID string,
+	event AdminSpaceTransferEvent,
+	now time.Time,
+) {
+	if s == nil || s.transferJobRepo == nil {
+		return
+	}
+	if now.IsZero() {
+		now = s.now()
+	}
+	_ = s.transferJobRepo.UpdateProgress(ctx, repository.UpdateAdminSpaceTransferJobProgressParams{
+		JobID:    strings.TrimSpace(jobID),
+		Stage:    strings.TrimSpace(event.Stage),
+		Progress: event.Progress,
+		Message:  strings.TrimSpace(event.Message),
+		Now:      now,
+	})
+}
+
+func (s *AdminSpaceImportService) persistImportTransferJobCompleted(
+	ctx context.Context,
+	jobID string,
+	newSpaceID string,
+	completedAt time.Time,
+) {
+	if s == nil || s.transferJobRepo == nil {
+		return
+	}
+	if completedAt.IsZero() {
+		completedAt = s.now()
+	}
+	_ = s.transferJobRepo.MarkCompleted(ctx, repository.MarkAdminSpaceTransferJobCompletedParams{
+		JobID:       strings.TrimSpace(jobID),
+		Stage:       "done",
+		Message:     "导入完成",
+		NewSpaceID:  strings.TrimSpace(newSpaceID),
+		CompletedAt: completedAt,
+		ExpiresAt:   completedAt.Add(defaultAdminSpaceTransferTokenTTL),
+	})
+}
+
+func (s *AdminSpaceImportService) persistImportTransferJobFailed(
+	ctx context.Context,
+	jobID string,
+	stage string,
+	message string,
+	failedAt time.Time,
+) {
+	if s == nil || s.transferJobRepo == nil {
+		return
+	}
+	if failedAt.IsZero() {
+		failedAt = s.now()
+	}
+	_ = s.transferJobRepo.MarkFailed(ctx, repository.MarkAdminSpaceTransferJobFailedParams{
+		JobID:        strings.TrimSpace(jobID),
+		Stage:        strings.TrimSpace(stage),
+		Message:      strings.TrimSpace(message),
+		ErrorMessage: strings.TrimSpace(message),
+		FailedAt:     failedAt,
+		ExpiresAt:    failedAt.Add(defaultAdminSpaceTransferTokenTTL),
 	})
 }
 
@@ -2087,6 +2242,31 @@ func (s *AdminSpaceImportStore) Subscribe(
 		})
 	}
 	return job.LastEvent, ch, unsubscribe, nil
+}
+
+func (s *AdminSpaceImportStore) IssueStreamToken(
+	jobID string,
+	actorUserID string,
+	tokenHashValue string,
+	now time.Time,
+) (AdminSpaceImportJob, error) {
+	if s == nil || jobID == "" {
+		return AdminSpaceImportJob{}, errcode.ErrAdminSpaceImportStagingNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	job, ok := s.jobs[jobID]
+	if !ok || job == nil {
+		return AdminSpaceImportJob{}, errcode.ErrAdminSpaceImportStagingNotFound
+	}
+	if job.ActorUserID != actorUserID || !isActiveAdminSpaceImportStatus(job.Status) {
+		return AdminSpaceImportJob{}, errcode.ErrAdminSpaceImportJobTokenInvalid
+	}
+	job.StreamTokenHash = tokenHashValue
+	job.StreamTokenExpiresAt = now.Add(defaultAdminSpaceTransferTokenTTL)
+	job.UpdatedAt = now
+	return *job, nil
 }
 
 func (s *AdminSpaceImportStore) Publish(jobID string, event AdminSpaceTransferEvent, now time.Time) {

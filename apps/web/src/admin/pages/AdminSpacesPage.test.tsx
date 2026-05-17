@@ -2,6 +2,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminSpace, AdminSpaceTransferSubscribeInput, DataGateway } from "../../data-access";
+import { AdminSpaceTransferTaskProvider } from "../space-transfer/AdminSpaceTransferTaskProvider";
 import { AdminSpacesPage } from "./AdminSpacesPage";
 
 const { confirmMock, promptMock, showToastMock } = vi.hoisted(() => ({
@@ -49,8 +50,17 @@ function createAdminSpace(overrides: Partial<AdminSpace> = {}): AdminSpace {
   };
 }
 
+function renderAdminSpacesPage(dataGateway: DataGateway, mode: "admin" | "member") {
+  return render(
+    <AdminSpaceTransferTaskProvider dataGateway={dataGateway}>
+      <AdminSpacesPage dataGateway={dataGateway} mode={mode} />
+    </AdminSpaceTransferTaskProvider>
+  );
+}
+
 describe("AdminSpacesPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     confirmMock.mockReset();
     promptMock.mockReset();
     showToastMock.mockReset();
@@ -84,7 +94,7 @@ describe("AdminSpacesPage", () => {
       }
     } as unknown as DataGateway;
 
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="member" />);
+    renderAdminSpacesPage(dataGateway, "member");
 
     const rowTitle = await screen.findByText("成员空间");
     const row = rowTitle.closest("tr");
@@ -130,7 +140,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -177,7 +187,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -238,7 +248,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -291,6 +301,9 @@ describe("AdminSpacesPage", () => {
       exportSubscriptionInput = input;
       return { close: closeExport };
     });
+    const issueSpaceTransferDownloadToken = vi.fn().mockResolvedValue({
+      downloadUrl: "/api/admin/space-exports/export-job/download?token=two"
+    });
 
     const dataGateway = {
       admin: {
@@ -298,12 +311,13 @@ describe("AdminSpacesPage", () => {
         listSpaceCategories,
         listSystemConfigs,
         startSpaceExport,
-        subscribeSpaceExport
+        subscribeSpaceExport,
+        issueSpaceTransferDownloadToken
       }
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -336,38 +350,17 @@ describe("AdminSpacesPage", () => {
 
     expect(anchorClick).not.toHaveBeenCalled();
     expect(closeExport).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "下载文件" })).toBeInTheDocument();
-    expect(screen.getByText("管理空间.epub")).toBeInTheDocument();
-
-    await user.selectOptions(screen.getByDisplayValue("EPUB"), "source_zip");
-    expect(screen.getByText("管理空间.epub")).toBeInTheDocument();
-    expect(screen.queryByText("管理空间.plaindoc")).toBeNull();
-
-    act(() => {
-      exportSubscriptionInput?.onEvent({
-        type: "completed",
-        progress: 100,
-        message: "导出完成",
-        downloadUrl: "/api/admin/space-exports/export-job/download?token=one",
-        fileName: "管理空间.zip"
-      });
-    });
-
-    expect(anchorClick).not.toHaveBeenCalled();
-
+    expect(screen.queryByRole("button", { name: "开始导出" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
+    expect(screen.getByText("已完成")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "下载文件" }));
-    await waitFor(() => expect(subscribeSpaceExport).toHaveBeenCalledTimes(2));
-    act(() => {
-      exportSubscriptionInput?.onEvent({
-        type: "completed",
-        progress: 100,
-        message: "导出完成",
-        downloadUrl: "/api/admin/space-exports/export-job/download?token=two",
-        fileName: "管理空间.zip"
+    await waitFor(() => {
+      expect(issueSpaceTransferDownloadToken).toHaveBeenCalledWith({
+        kind: "space_export",
+        jobId: "export-job"
       });
     });
     await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
-    expect(closeExport).toHaveBeenCalledTimes(2);
     anchorClick.mockRestore();
   });
 
@@ -405,6 +398,13 @@ describe("AdminSpacesPage", () => {
       closeExports.push(closeExport);
       return { close: closeExport };
     });
+    const issueSpaceTransferDownloadToken = vi.fn()
+      .mockResolvedValueOnce({
+        downloadUrl: "/api/admin/space-exports/export-job/download?token=two"
+      })
+      .mockResolvedValueOnce({
+        downloadUrl: "/api/admin/space-exports/export-job/download?token=three"
+      });
 
     const dataGateway = {
       admin: {
@@ -412,12 +412,13 @@ describe("AdminSpacesPage", () => {
         listSpaceCategories,
         listSystemConfigs,
         startSpaceExport,
-        subscribeSpaceExport
+        subscribeSpaceExport,
+        issueSpaceTransferDownloadToken
       }
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -441,41 +442,20 @@ describe("AdminSpacesPage", () => {
       });
     });
 
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     await user.click(screen.getByRole("button", { name: "下载文件" }));
-    await waitFor(() => expect(subscribeSpaceExport).toHaveBeenCalledTimes(2));
-    act(() => {
-      exportSubscriptionInputs[1]?.onEvent({
-        type: "completed",
-        progress: 100,
-        message: "导出完成",
-        downloadUrl: "/api/admin/space-exports/export-job/download?token=two",
-        fileName: "管理空间.epub"
-      });
-    });
-
     await waitFor(() => expect(clickedHrefs).toHaveLength(1));
     expect(clickedHrefs[0]).toContain("token=two");
-    expect(closeExports[1]).toHaveBeenCalledTimes(1);
+    expect(closeExports[0]).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "下载文件" }));
-    await waitFor(() => expect(subscribeSpaceExport).toHaveBeenCalledTimes(3));
-    act(() => {
-      exportSubscriptionInputs[2]?.onEvent({
-        type: "completed",
-        progress: 100,
-        message: "导出完成",
-        downloadUrl: "/api/admin/space-exports/export-job/download?token=three",
-        fileName: "管理空间.epub"
-      });
-    });
-
     await waitFor(() => expect(clickedHrefs).toHaveLength(2));
     expect(clickedHrefs[1]).toContain("token=three");
-    expect(closeExports[2]).toHaveBeenCalledTimes(1);
+    expect(issueSpaceTransferDownloadToken).toHaveBeenCalledTimes(2);
     anchorClick.mockRestore();
   });
 
-  it("closes a pending export download refresh subscription when the dialog closes", async () => {
+  it("removes a completed export task from the floating panel", async () => {
     const exportSubscriptionInputs: AdminSpaceTransferSubscribeInput[] = [];
     const closeExports: Array<ReturnType<typeof vi.fn>> = [];
     const listSpaces = vi.fn().mockResolvedValue({
@@ -512,12 +492,15 @@ describe("AdminSpacesPage", () => {
         listSpaceCategories,
         listSystemConfigs,
         startSpaceExport,
-        subscribeSpaceExport
+        subscribeSpaceExport,
+        issueSpaceTransferDownloadToken: vi.fn().mockResolvedValue({
+          downloadUrl: "/api/admin/space-exports/export-job/download?token=two"
+        })
       }
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -540,12 +523,11 @@ describe("AdminSpacesPage", () => {
       });
     });
 
-    await user.click(screen.getByRole("button", { name: "下载文件" }));
-    await waitFor(() => expect(subscribeSpaceExport).toHaveBeenCalledTimes(2));
-
-    await user.click(screen.getByRole("button", { name: "关闭" }));
-
-    expect(closeExports[1]).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "清除" }));
+    expect(screen.queryByText("已完成")).toBeNull();
+    expect(closeExports[0]).toHaveBeenCalledTimes(1);
   });
 
   it("updates export progress and shows failed events", async () => {
@@ -588,7 +570,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -609,8 +591,8 @@ describe("AdminSpacesPage", () => {
         message: "正在导出文档"
       });
     });
-    expect(await screen.findByText("正在导出文档")).toBeInTheDocument();
-    expect(screen.getByText("documents")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
+    expect(screen.getByText("45%")).toBeInTheDocument();
 
     act(() => {
       exportSubscriptionInput?.onEvent({
@@ -621,11 +603,11 @@ describe("AdminSpacesPage", () => {
       });
     });
 
-    expect(await screen.findByText("导出失败")).toBeInTheDocument();
+    expect(await screen.findByText("失败")).toBeInTheDocument();
     expect(closeExport).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the export event stream while the task is running", async () => {
+  it("keeps the export event stream in the floating panel after the dialog closes", async () => {
     let exportSubscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
     const closeExport = vi.fn();
     const listSpaces = vi.fn().mockResolvedValue({
@@ -665,7 +647,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -677,6 +659,7 @@ describe("AdminSpacesPage", () => {
     await user.click(screen.getByText("导出空间"));
     await user.click(screen.getByRole("button", { name: "开始导出" }));
     await waitFor(() => expect(subscribeSpaceExport).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("button", { name: "开始导出" })).toBeNull();
 
     act(() => {
       exportSubscriptionInput?.onEvent({
@@ -687,16 +670,12 @@ describe("AdminSpacesPage", () => {
       });
     });
 
-    const closeButton = screen.getByRole("button", { name: "关闭" });
-    expect(closeButton).toBeDisabled();
-    await user.click(closeButton);
-
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     expect(closeExport).not.toHaveBeenCalled();
-    expect(screen.getByText("正在导出文档")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始导出" })).toBeInTheDocument();
+    expect(screen.getByText("45%")).toBeInTheDocument();
   });
 
-  it("unlocks the export dialog when the event stream errors", async () => {
+  it("marks an export task as failed when the event stream errors", async () => {
     let exportSubscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
     const closeExport = vi.fn();
     const listSpaces = vi.fn().mockResolvedValue({
@@ -736,7 +715,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     const rowTitle = await screen.findByText("管理空间");
     const row = rowTitle.closest("tr");
@@ -757,16 +736,14 @@ describe("AdminSpacesPage", () => {
         message: "正在导出文档"
       });
     });
-
-    expect(screen.getByRole("button", { name: "关闭" })).toBeDisabled();
 
     act(() => {
       exportSubscriptionInput?.onError?.(new Event("error"));
     });
 
-    expect(await screen.findByText("导出事件连接异常，请稍后重试")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     expect(closeExport).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "关闭" })).not.toBeDisabled();
+    expect(screen.getByText("失败")).toBeInTheDocument();
   });
 
   it("refreshes the list after import completion and exposes editor and reader shortcuts", async () => {
@@ -846,7 +823,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     await user.click(await screen.findByRole("button", { name: "导入空间" }));
     const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
@@ -870,6 +847,7 @@ describe("AdminSpacesPage", () => {
     expect(closeImport).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("导入完成空间")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     await user.click(screen.getByRole("button", { name: "打开编辑器" }));
     await user.click(screen.getByRole("button", { name: "打开阅读页" }));
     expect(openWindow).toHaveBeenNthCalledWith(1, "/editor/imported-space", "_blank", "noopener,noreferrer");
@@ -938,7 +916,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     await user.click(await screen.findByRole("button", { name: "导入空间" }));
     const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
@@ -955,16 +933,14 @@ describe("AdminSpacesPage", () => {
         message: "正在导入"
       });
     });
-    const cancelButton = screen.getByRole("button", { name: "取消" });
-    expect(cancelButton).toBeDisabled();
-    await user.click(cancelButton);
 
+    expect(screen.queryByRole("button", { name: "确认导入" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     expect(closeImport).not.toHaveBeenCalled();
-    expect(screen.getByText("正在导入")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "确认导入" })).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
   });
 
-  it("unlocks the import dialog when the event stream errors", async () => {
+  it("marks an import task as failed when the event stream errors", async () => {
     let importSubscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
     const closeImport = vi.fn();
     const listSpaces = vi.fn().mockResolvedValue({
@@ -1025,7 +1001,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     await user.click(await screen.findByRole("button", { name: "导入空间" }));
     const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
@@ -1042,16 +1018,14 @@ describe("AdminSpacesPage", () => {
         message: "正在导入"
       });
     });
-    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
 
     act(() => {
       importSubscriptionInput?.onError?.(new Event("error"));
     });
 
+    await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     expect(closeImport).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("导入事件连接异常，请稍后重试")).toBeInTheDocument();
-    expect(screen.getByText("failed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "取消" })).toBeEnabled();
+    expect(screen.getByText("失败")).toBeInTheDocument();
   });
 
   it("inspects a selected PlainDoc package and shows the import preview", async () => {
@@ -1103,7 +1077,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     await user.click(await screen.findByRole("button", { name: "导入空间" }));
     const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;
@@ -1174,7 +1148,7 @@ describe("AdminSpacesPage", () => {
     } as unknown as DataGateway;
 
     const user = userEvent.setup();
-    render(<AdminSpacesPage dataGateway={dataGateway} mode="admin" />);
+    renderAdminSpacesPage(dataGateway, "admin");
 
     await user.click(await screen.findByRole("button", { name: "导入空间" }));
     const fileInput = screen.getByLabelText("空间交换包") as HTMLInputElement;

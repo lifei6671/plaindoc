@@ -126,6 +126,7 @@ func newRouter(
 	authRiskStateRepo := repository.NewGormAuthRiskStateRepository(db)
 	authCaptchaChallengeRepo := repository.NewGormAuthCaptchaChallengeRepository(db)
 	searchIndexJobRepo := repository.NewGormSearchIndexJobRepository(db)
+	adminSpaceTransferJobRepo := repository.NewGormAdminSpaceTransferJobRepository(db)
 	searchVisibilityRepo := repository.NewGormSearchVisibilityRepository(db)
 	spaceRepo := repository.NewGormSpaceRepository(db, searchIndexJobRepo)
 	spaceCategoryRepo := repository.NewGormSpaceCategoryRepository(db)
@@ -576,6 +577,7 @@ func newRouter(
 			service.WithAdminSpaceExportImageHostingService(imageHostingService),
 			service.WithAdminSpaceExportOfficeHTMLRenderer(officeHTMLRenderService),
 			service.WithAdminSpaceExportAuditRecorder(adminAuditService),
+			service.WithAdminSpaceExportTransferJobRepository(adminSpaceTransferJobRepo),
 			service.WithAdminSpaceExportDir(filepath.Join("data", "exports", "admin-space")),
 		}
 		if readerSSRDispatcher != nil {
@@ -597,11 +599,24 @@ func newRouter(
 			service.WithAdminSpaceImportBlobStorage("uploads"),
 			service.WithAdminSpaceImportOfficeHTMLRenderer(officeHTMLRenderService),
 			service.WithAdminSpaceImportAuditRecorder(adminAuditService),
+			service.WithAdminSpaceImportTransferJobRepository(adminSpaceTransferJobRepo),
 		)
+		adminSpaceTransferTaskService := service.NewAdminSpaceTransferTaskService(
+			adminSpaceTransferJobRepo,
+			service.WithAdminSpaceTransferExportStreamIssuer(adminSpaceExportService),
+			service.WithAdminSpaceTransferImportStreamIssuer(adminSpaceImportService),
+			service.WithAdminSpaceTransferExportDownloadIssuer(adminSpaceExportService),
+		)
+		if affected, err := adminSpaceTransferTaskService.RecoverInterruptedActiveJobs(lifecycleCtx, time.Now().UTC()); err != nil {
+			logger.Error("admin space transfer task recovery failed", slog.String("error", err.Error()))
+		} else if affected > 0 {
+			logger.Info("admin space transfer interrupted tasks recovered", slog.Int64("affected", affected))
+		}
 		if startTransferCleanup {
 			service.StartAdminSpaceTransferCleanupLoop(lifecycleCtx, logger, adminSpaceExportService, adminSpaceImportService)
 		}
 		adminSpaceImportHandler := handler.NewAdminSpaceImportHandler(adminSpaceImportService)
+		adminSpaceTransferTaskHandler := handler.NewAdminSpaceTransferTaskHandler(adminSpaceTransferTaskService)
 		adminDocumentService := service.NewAdminDocumentService(
 			documentRepo,
 			userRepo,
@@ -837,6 +852,10 @@ func newRouter(
 			adminAPI.POST("/space-imports/inspect", adminSpaceImportHandler.Inspect)
 			adminAPI.POST("/space-imports/:importId/commit", adminSpaceImportHandler.Commit)
 			adminAPI.GET("/space-imports/:jobId/events", adminSpaceImportHandler.StreamEvents)
+			adminAPI.GET("/space-transfer-tasks", adminSpaceTransferTaskHandler.ListMyTasks)
+			adminAPI.GET("/space-transfer-tasks/:kind/:jobId", adminSpaceTransferTaskHandler.GetTask)
+			adminAPI.POST("/space-transfer-tasks/:kind/:jobId/stream-token", adminSpaceTransferTaskHandler.IssueStreamURL)
+			adminAPI.POST("/space-transfer-tasks/:kind/:jobId/download-token", adminSpaceTransferTaskHandler.IssueDownloadURL)
 
 			// ---- 文档治理 ----
 			adminAPI.GET("/documents", adminDocumentHandler.ListDocuments)
