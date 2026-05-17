@@ -32,12 +32,16 @@ const (
 	defaultAdminSpaceImportStagingTTL = 30 * time.Minute
 	maxRunningAdminSpaceImportJobs    = 1
 	defaultAdminSpaceImportStagingDir = "data/imports/admin-space"
-	maxAdminSpaceImportUploadBytes    = 512 << 20
 	maxAdminSpaceImportZipEntries     = 10000
 	maxAdminSpaceImportEntryBytes     = 512 << 20
 	maxAdminSpaceImportTotalBytes     = 2 << 30
 	maxAdminSpaceImportMetadataBytes  = 4 << 20
 )
+
+// MaxAdminSpaceImportUploadBytes 是后台空间导入包文件体积上限。
+const MaxAdminSpaceImportUploadBytes int64 = 512 << 20
+
+const maxAdminSpaceImportUploadBytes = MaxAdminSpaceImportUploadBytes
 
 const (
 	adminSpaceImportMIMEDOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -149,7 +153,7 @@ type AdminSpaceImportIDMappings struct {
 }
 
 type adminSpaceImportSpaceWriter interface {
-	SoftDelete(ctx context.Context, spaceID string, deletedAt time.Time) (bool, error)
+	HardDelete(ctx context.Context, spaceID string) (bool, error)
 }
 
 type adminSpaceImportCoverWriter interface {
@@ -593,6 +597,12 @@ func validateAdminSpaceImportManifestFiles(
 				return errcode.ErrAdminSpaceImportPackageNotImportable
 			}
 		}
+		for _, attachmentEntry := range document.AttachmentEntries {
+			attachmentPath := strings.TrimSpace(attachmentEntry.Path)
+			if attachmentPath != "" && !adminSpaceImportZipPathExists(entries, rootPrefix, attachmentPath) {
+				return errcode.ErrAdminSpaceImportPackageNotImportable
+			}
+		}
 		if document.Source != nil && document.Source.Included {
 			if strings.TrimSpace(document.Source.Path) == "" {
 				return errcode.ErrAdminSpaceImportPackageNotImportable
@@ -648,7 +658,15 @@ type adminSpaceImportPackage struct {
 	Manifest AdminSpaceExportManifest
 	Tree     AdminSpaceExportTree
 	Root     string
-	Files    map[string][]byte
+	Entries  map[string]*zip.File
+	closer   io.Closer
+}
+
+func (p adminSpaceImportPackage) Close() error {
+	if p.closer == nil {
+		return nil
+	}
+	return p.closer.Close()
 }
 
 func readAdminSpaceImportPackage(filePath string) (adminSpaceImportPackage, error) {
@@ -660,7 +678,12 @@ func readAdminSpaceImportPackage(filePath string) (adminSpaceImportPackage, erro
 	if err != nil {
 		return adminSpaceImportPackage{}, errcode.ErrAdminSpaceImportZipInvalid
 	}
-	defer reader.Close()
+	closeOnError := true
+	defer func() {
+		if closeOnError {
+			_ = reader.Close()
+		}
+	}()
 
 	if isAdminSpaceImportEPUB(&reader.Reader) {
 		return adminSpaceImportPackage{}, errcode.ErrAdminSpaceImportPackageUnsupported
@@ -702,23 +725,19 @@ func readAdminSpaceImportPackage(filePath string) (adminSpaceImportPackage, erro
 		return adminSpaceImportPackage{}, err
 	}
 	referencedEntries := collectAdminSpaceImportReferencedEntryNames(manifest, manifestRoot)
-	files := make(map[string][]byte, len(referencedEntries))
 	for entryName := range referencedEntries {
 		file := entries[entryName]
 		if file == nil {
 			return adminSpaceImportPackage{}, errcode.ErrAdminSpaceImportPackageNotImportable
 		}
-		payload, err := readAdminSpaceImportZipPayload(file)
-		if err != nil {
-			return adminSpaceImportPackage{}, err
-		}
-		files[entryName] = payload
 	}
+	closeOnError = false
 	return adminSpaceImportPackage{
 		Manifest: manifest,
 		Tree:     tree,
 		Root:     manifestRoot,
-		Files:    files,
+		Entries:  entries,
+		closer:   reader,
 	}, nil
 }
 
@@ -1095,15 +1114,7 @@ func normalizeAdminSpaceImportAttachmentEntries(
 }
 
 func (i *adminSpacePackageImporter) readPackageFile(packagePath string) ([]byte, error) {
-	entryName := cleanAdminSpaceImportZipEntry(path.Join(i.pkg.Root, packagePath))
-	if entryName == "" {
-		return nil, errcode.ErrAdminSpaceImportZipInvalid
-	}
-	payload, ok := i.pkg.Files[entryName]
-	if !ok {
-		return nil, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	return payload, nil
+	return readAdminSpaceImportPackageFile(i.pkg, packagePath)
 }
 
 func readAdminSpaceImportZipPayload(file *zip.File) ([]byte, error) {
@@ -1217,11 +1228,15 @@ func (s *AdminSpaceImportService) cleanupCreatedImportBlobs(ctx context.Context,
 			continue
 		}
 		seen[normalizedBlobID] = struct{}{}
-		if err := s.removeImportedLocalBlobObject(blob); err != nil && firstErr == nil {
+		deleted, err := s.attachmentWriter.HardDeleteBlobIfUnreferenced(ctx, normalizedBlobID)
+		if err != nil && firstErr == nil {
 			firstErr = err
+			continue
 		}
-		if _, err := s.attachmentWriter.HardDeleteBlobIfUnreferenced(ctx, normalizedBlobID); err != nil && firstErr == nil {
-			firstErr = err
+		if deleted {
+			if err := s.removeImportedLocalBlobObject(blob); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 	return firstErr
@@ -1527,18 +1542,6 @@ func (s *AdminSpaceImportService) runAdminSpaceImportJob(ctx context.Context, jo
 	newSpaceID, err := s.restoreAdminSpaceImportPackage(ctx, job)
 	if err != nil {
 		failureMessage := err.Error()
-		if newSpaceID != "" && s.spaceWriter != nil {
-			if _, rollbackErr := s.spaceWriter.SoftDelete(ctx, newSpaceID, s.now()); rollbackErr != nil {
-				slog.ErrorContext(ctx, "导入失败后回滚空间失败",
-					"jobID", jobID,
-					"importID", job.ImportID,
-					"spaceID", newSpaceID,
-					"restoreError", err,
-					"rollbackError", rollbackErr,
-				)
-				failureMessage = fmt.Sprintf("%s；回滚空间失败：%v", failureMessage, rollbackErr)
-			}
-		}
 		s.store.Fail(jobID, "restore", failureMessage, s.now())
 		targetType, targetID := adminSpaceImportAuditTarget(job, newSpaceID)
 		_ = s.recordImportAudit(ctx, job, targetType, targetID, adminSpaceImportAuditFailed, "restore", failureMessage, newSpaceID)
@@ -1631,6 +1634,11 @@ func (s *AdminSpaceImportService) restoreAdminSpaceImportPackage(
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		if closeErr := pkg.Close(); closeErr != nil {
+			slog.WarnContext(ctx, "关闭导入包失败", "importID", job.ImportID, "error", closeErr)
+		}
+	}()
 	newSpace, coverAsset, err := s.createImportedSpace(ctx, job, pkg)
 	if err != nil {
 		return "", err
@@ -1646,8 +1654,8 @@ func (s *AdminSpaceImportService) restoreAdminSpaceImportPackage(
 		createdCoverAsset:   coverAsset,
 	}
 	if err := importer.restoreTree(ctx, pkg.Tree.Root, nil); err != nil {
-		if cleanupErr := s.cleanupCreatedImportArtifacts(ctx, importer.createdBlobs, importer.createdCoverAsset); cleanupErr != nil {
-			return newSpace.SpaceID, fmt.Errorf("导入失败后清理已创建资源: %w", cleanupErr)
+		if cleanupErr := s.cleanupFailedImportSpace(ctx, newSpace.SpaceID, importer.createdBlobs, importer.createdCoverAsset); cleanupErr != nil {
+			return newSpace.SpaceID, fmt.Errorf("%v；导入失败后清理已创建资源: %w", err, cleanupErr)
 		}
 		return newSpace.SpaceID, err
 	}
@@ -1749,6 +1757,27 @@ func (s *AdminSpaceImportService) cleanupCreatedImportArtifacts(
 		}
 	}
 	if err := s.cleanupCreatedImportBlobs(ctx, blobs); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+func (s *AdminSpaceImportService) cleanupFailedImportSpace(
+	ctx context.Context,
+	spaceID string,
+	blobs []models.DocumentAttachmentBlob,
+	coverAsset *models.SpaceCoverAsset,
+) error {
+	var firstErr error
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	if normalizedSpaceID != "" {
+		if s == nil || s.spaceWriter == nil {
+			firstErr = fmt.Errorf("空间回滚依赖未配置")
+		} else if _, err := s.spaceWriter.HardDelete(ctx, normalizedSpaceID); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := s.cleanupCreatedImportArtifacts(ctx, blobs, coverAsset); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	return firstErr
@@ -1873,11 +1902,15 @@ func readAdminSpaceImportPackageFile(pkg adminSpaceImportPackage, packagePath st
 	if entryName == "" {
 		return nil, errcode.ErrAdminSpaceImportPackageNotImportable
 	}
-	payload, ok := pkg.Files[entryName]
-	if !ok {
+	file, ok := pkg.Entries[entryName]
+	if !ok || file == nil {
 		return nil, errcode.ErrAdminSpaceImportPackageNotImportable
 	}
-	return append([]byte(nil), payload...), nil
+	payload, err := readAdminSpaceImportZipPayload(file)
+	if err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (s *AdminSpaceImportService) resolveImportCategory(

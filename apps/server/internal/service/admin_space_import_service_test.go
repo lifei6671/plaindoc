@@ -433,6 +433,24 @@ func TestAdminSpaceImportService_Inspect_RejectsMissingReferencedFiles(t *testin
 	}
 }
 
+func TestAdminSpaceImportService_Inspect_RejectsMissingAttachmentEntryFile(t *testing.T) {
+	t.Parallel()
+
+	svc := NewAdminSpaceImportService(nil)
+	svc.stagingDir = t.TempDir()
+
+	_, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "space.plaindoc",
+		ContentType: "application/zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportMissingAttachmentEntryZip(t)),
+	})
+
+	if !errors.Is(err, errcode.ErrAdminSpaceImportPackageNotImportable) {
+		t.Fatalf("expected package not importable error, got %v", err)
+	}
+}
+
 func TestAdminSpaceImportService_Inspect_RejectsMismatchedManifestAndTreeRoots(t *testing.T) {
 	t.Parallel()
 
@@ -1205,11 +1223,116 @@ func TestReadAdminSpaceImportPackageDoesNotMaterializeUnreferencedEntries(t *tes
 	if err != nil {
 		t.Fatalf("read import package failed: %v", err)
 	}
-	if _, ok := pkg.Files["space-space-source/unreferenced/large.bin"]; ok {
-		t.Fatalf("expected unreferenced zip entry to stay out of materialized file map")
+	defer func() {
+		if err := pkg.Close(); err != nil {
+			t.Fatalf("close import package failed: %v", err)
+		}
+	}()
+	documentPayload, err := readAdminSpaceImportPackageFile(pkg, "documents/doc-a.md")
+	if err != nil {
+		t.Fatalf("read referenced document failed: %v", err)
 	}
-	if _, ok := pkg.Files["space-space-source/documents/doc-a.md"]; !ok {
-		t.Fatalf("expected referenced document entry to be materialized")
+	if string(documentPayload) != "# A" {
+		t.Fatalf("unexpected document payload: %q", string(documentPayload))
+	}
+	if _, ok := pkg.Entries["space-space-source/unreferenced/large.bin"]; !ok {
+		t.Fatalf("expected unreferenced zip entry to remain indexed for package-level validation")
+	}
+}
+
+func TestReadAdminSpaceImportPackageDefersReferencedPayloadReadErrors(t *testing.T) {
+	t.Parallel()
+
+	zipPath := filepath.Join(t.TempDir(), "space.plaindoc")
+	if err := os.WriteFile(zipPath, buildAdminSpaceImportCorruptStoredDocumentZip(t), 0o600); err != nil {
+		t.Fatalf("write zip failed: %v", err)
+	}
+
+	pkg, err := readAdminSpaceImportPackage(zipPath)
+	if err != nil {
+		t.Fatalf("read import package should only validate referenced entry existence, got %v", err)
+	}
+	defer func() {
+		if err := pkg.Close(); err != nil {
+			t.Fatalf("close import package failed: %v", err)
+		}
+	}()
+
+	if _, err := readAdminSpaceImportPackageFile(pkg, "documents/doc-a.md"); err == nil {
+		t.Fatalf("expected corrupt referenced payload to fail only when the entry is read")
+	}
+}
+
+func TestAdminSpaceImportService_Commit_RollbackHardDeletesSpaceBeforeBlobFiles(t *testing.T) {
+	t.Parallel()
+
+	blobRoot := t.TempDir()
+	var mu sync.Mutex
+	events := make([]string, 0, 4)
+	recordEvent := func(event string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, event)
+	}
+
+	spaceRepo := &stubAdminSpaceImportSpaceRepo{
+		onHardDelete: func(spaceID string) {
+			recordEvent("space-hard-delete:" + spaceID)
+		},
+	}
+	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
+		defaultCategory:             &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
+		createNodeErrOnFileRevision: errors.New("create office node failed"),
+	}
+	attachmentRepo := &stubAdminSpaceImportAttachmentRepo{
+		localRootDir: blobRoot,
+		onHardDeleteBlob: func(blob models.DocumentAttachmentBlob) {
+			targetPath := filepath.Join(blobRoot, filepath.FromSlash(strings.TrimLeft(blob.ObjectKey, "/")))
+			if _, err := os.Stat(targetPath); err != nil {
+				t.Fatalf("expected blob file to exist before DB hard delete, path=%s err=%v", targetPath, err)
+			}
+			recordEvent("blob-hard-delete:" + blob.BlobID)
+		},
+	}
+	svc := NewAdminSpaceImportService(
+		nil,
+		WithAdminSpaceImportRepositories(spaceRepo, workspaceRepo, nil, attachmentRepo),
+		WithAdminSpaceImportBlobStorage(blobRoot),
+	)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "space.plaindoc",
+		ContentType: "application/zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportOfficeZip(t)),
+	})
+	if err != nil {
+		t.Fatalf("inspect failed: %v", err)
+	}
+	commitResult, err := svc.Commit(context.Background(), CommitAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		ImportID:    result.ImportID,
+		SpaceName:   "导入空间",
+	})
+	if err != nil {
+		t.Fatalf("commit failed: %v", err)
+	}
+	eventually(t, time.Second, func() bool {
+		job, err := svc.store.GetJob(commitResult.JobID)
+		return err == nil && job.Status == AdminSpaceImportStatusFailed
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(spaceRepo.softDeletedSpaceIDs) != 0 {
+		t.Fatalf("expected failed import rollback to use hard delete, got soft deletes %#v", spaceRepo.softDeletedSpaceIDs)
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected hard delete and blob cleanup events, got %#v", events)
+	}
+	if !strings.HasPrefix(events[0], "space-hard-delete:") || !strings.HasPrefix(events[1], "blob-hard-delete:") {
+		t.Fatalf("expected space hard delete before blob DB cleanup, got %#v", events)
 	}
 }
 
@@ -1218,7 +1341,7 @@ func TestAdminSpaceImportService_Commit_PreservesRestoreFailureWhenRollbackFails
 
 	recorder := &recordingAdminAuditRecorder{}
 	spaceRepo := &stubAdminSpaceImportSpaceRepo{
-		softDeleteErr: errors.New("rollback unavailable"),
+		hardDeleteErr: errors.New("rollback unavailable"),
 	}
 	workspaceRepo := &stubAdminSpaceImportWorkspaceRepo{
 		defaultCategory: &models.SpaceCategory{CategoryID: "cat-default", Name: "默认分类", IsDefault: true},
@@ -1268,8 +1391,8 @@ func TestAdminSpaceImportService_Commit_PreservesRestoreFailureWhenRollbackFails
 		t.Fatalf("expected rollback error in job message, got %q", job.LastEvent.Message)
 	}
 
-	if len(spaceRepo.softDeletedSpaceIDs) != 1 || spaceRepo.softDeletedSpaceIDs[0] == "" {
-		t.Fatalf("expected rollback soft delete to be attempted, got %#v", spaceRepo.softDeletedSpaceIDs)
+	if len(spaceRepo.hardDeletedSpaceIDs) != 1 || spaceRepo.hardDeletedSpaceIDs[0] == "" {
+		t.Fatalf("expected rollback hard delete to be attempted, got %#v", spaceRepo.hardDeletedSpaceIDs)
 	}
 	_, detail := findAuditRecordByStatus(t, recorder.Records(), "failed")
 	errorMessage, _ := detail["error"].(string)
@@ -1421,6 +1544,41 @@ func writeAdminSpaceImportTestFile(t *testing.T, zipWriter *zip.Writer, name str
 	}
 }
 
+func buildAdminSpaceImportCorruptStoredDocumentZip(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestJSON(t, zipWriter, "space-space-source/manifest.json", buildAdminSpaceImportTestManifest(true))
+	writeAdminSpaceImportTestJSON(t, zipWriter, "space-space-source/tree.json", buildAdminSpaceImportTestTree())
+	writeAdminSpaceImportStoredTestFile(t, zipWriter, "space-space-source/documents/doc-a.md", []byte("# A"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "space-space-source/attachments/doc-a/image.png", []byte("image"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "space-space-source/sources/doc-a/source.docx", []byte("source"))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close zip failed: %v", err)
+	}
+	payload := buffer.Bytes()
+	documentOffset := bytes.Index(payload, []byte("# A"))
+	if documentOffset < 0 {
+		t.Fatalf("stored document payload not found in zip")
+	}
+	payload[documentOffset] = '!'
+	return payload
+}
+
+func writeAdminSpaceImportStoredTestFile(t *testing.T, zipWriter *zip.Writer, name string, payload []byte) {
+	t.Helper()
+
+	header := &zip.FileHeader{Name: name, Method: zip.Store}
+	writer, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		t.Fatalf("create stored zip entry %s failed: %v", name, err)
+	}
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatalf("write stored zip entry %s failed: %v", name, err)
+	}
+}
+
 func buildAdminSpaceImportMismatchedRootZip(t *testing.T) []byte {
 	t.Helper()
 
@@ -1504,6 +1662,26 @@ func buildAdminSpaceImportEmptySourcePathZip(t *testing.T) []byte {
 	writeAdminSpaceImportTestJSON(t, zipWriter, "space-space-source/tree.json", buildAdminSpaceImportTestTree())
 	writeAdminSpaceImportTestFile(t, zipWriter, "space-space-source/documents/doc-a.md", []byte("# A"))
 	writeAdminSpaceImportTestFile(t, zipWriter, "space-space-source/attachments/doc-a/image.png", []byte("image"))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close zip failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func buildAdminSpaceImportMissingAttachmentEntryZip(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	manifest := buildAdminSpaceImportTestManifest(true)
+	manifest.Documents[0].Attachments = nil
+	manifest.Documents[0].AttachmentEntries = []AdminSpaceExportAttachmentEntry{
+		{Path: "attachments/doc-a/missing.png", FileName: "missing.png"},
+	}
+	writeAdminSpaceImportTestJSON(t, zipWriter, "space-space-source/manifest.json", manifest)
+	writeAdminSpaceImportTestJSON(t, zipWriter, "space-space-source/tree.json", buildAdminSpaceImportTestTree())
+	writeAdminSpaceImportTestFile(t, zipWriter, "space-space-source/documents/doc-a.md", []byte("# A"))
+	writeAdminSpaceImportTestFile(t, zipWriter, "space-space-source/sources/doc-a/source.docx", []byte("source"))
 	if err := zipWriter.Close(); err != nil {
 		t.Fatalf("close zip failed: %v", err)
 	}
@@ -1629,10 +1807,13 @@ type stubAdminSpaceImportWorkspaceRepo struct {
 
 type stubAdminSpaceImportSpaceRepo struct {
 	softDeleteErr        error
+	hardDeleteErr        error
 	createCoverAssetErr  error
 	softDeletedSpaceIDs  []string
+	hardDeletedSpaceIDs  []string
 	coverAssets          []models.SpaceCoverAsset
 	deletedCoverAssetIDs []string
+	onHardDelete         func(spaceID string)
 }
 
 type stubAdminSpaceImportAttachmentRepo struct {
@@ -1640,6 +1821,8 @@ type stubAdminSpaceImportAttachmentRepo struct {
 	blobs              []models.DocumentAttachmentBlob
 	attachments        []models.DocumentAttachment
 	hardDeletedBlobIDs []string
+	localRootDir       string
+	onHardDeleteBlob   func(blob models.DocumentAttachmentBlob)
 }
 
 type stubAdminSpaceImportOfficeRenderer struct {
@@ -1658,6 +1841,15 @@ func (r *stubAdminSpaceImportOfficeRenderer) Enqueue(_ context.Context, task Off
 func (r *stubAdminSpaceImportSpaceRepo) SoftDelete(_ context.Context, spaceID string, _ time.Time) (bool, error) {
 	r.softDeletedSpaceIDs = append(r.softDeletedSpaceIDs, strings.TrimSpace(spaceID))
 	return true, r.softDeleteErr
+}
+
+func (r *stubAdminSpaceImportSpaceRepo) HardDelete(_ context.Context, spaceID string) (bool, error) {
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	r.hardDeletedSpaceIDs = append(r.hardDeletedSpaceIDs, normalizedSpaceID)
+	if r.onHardDelete != nil {
+		r.onHardDelete(normalizedSpaceID)
+	}
+	return true, r.hardDeleteErr
 }
 
 func (r *stubAdminSpaceImportSpaceRepo) CreateCoverAsset(_ context.Context, asset *models.SpaceCoverAsset) error {
@@ -1717,7 +1909,14 @@ func (r *stubAdminSpaceImportAttachmentRepo) Create(_ context.Context, attachmen
 func (r *stubAdminSpaceImportAttachmentRepo) HardDeleteBlobIfUnreferenced(_ context.Context, blobID string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.hardDeletedBlobIDs = append(r.hardDeletedBlobIDs, strings.TrimSpace(blobID))
+	normalizedBlobID := strings.TrimSpace(blobID)
+	for _, blob := range r.blobs {
+		if strings.TrimSpace(blob.BlobID) == normalizedBlobID && r.onHardDeleteBlob != nil {
+			r.onHardDeleteBlob(blob)
+			break
+		}
+	}
+	r.hardDeletedBlobIDs = append(r.hardDeletedBlobIDs, normalizedBlobID)
 	return true, nil
 }
 

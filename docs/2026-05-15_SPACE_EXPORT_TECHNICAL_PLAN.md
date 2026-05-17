@@ -948,7 +948,7 @@ data/imports/admin-space/{importId}.zip
 5. 校验 `packageType == "plaindoc-space"`。
 6. 校验 `version` 是否在兼容范围内。
 7. 校验 manifest 引用的文档、附件和 source 文件是否存在。
-8. staging 读取时只物化 manifest 引用的文档、附件、source 和封面 entry；未引用 entry 只参与 zip entry 数量、大小和路径安全校验，不读入内存。
+8. staging 读取时只保留 zip entry 索引；manifest 引用的文档、附件、source 和封面在恢复阶段按需打开 entry 读取，未引用 entry 只参与 zip entry 数量、大小和路径安全校验，不读入内存。
 9. 返回导入预览。
 
 ### 10.2 提交导入任务
@@ -988,11 +988,11 @@ data/imports/admin-space/{importId}.zip
 
 1. inspect 阶段发现 zip 结构非法：不创建 staging 记录，直接返回错误。
 2. commit 阶段发现 staging 过期：返回过期错误。
-3. 导入执行中失败：任务进入 `failed`，并尽量回滚已创建的新空间。
+3. 导入执行中失败：任务进入 `failed`，并通过空间仓储事务硬删除已创建的新空间，先移除文档、附件、file revision 等 blob 引用。
 4. 如果无法完整回滚，任务仍保留原始失败阶段和原始错误，同时附带回滚错误，并写入审计日志。
 5. 导入完成后删除 staging zip。
 6. 导入失败后保留 staging zip 到过期时间，便于用户重试或排查。
-7. 导入失败回滚必须清理本次导入新建的空间封面资产、本地封面对象、本地附件 blob 和 Office source blob；复用的既有 blob 只删除新建引用，不删除物理对象。
+7. 导入失败回滚必须清理本次导入新建的空间封面资产、本地封面对象、本地附件 blob 和 Office source blob；blob 必须先确认数据库记录可硬删除，再删除物理对象，复用的既有 blob 只删除新建引用，不删除物理对象。
 
 ---
 
@@ -1200,7 +1200,7 @@ token 内容不要包含明文敏感信息，使用服务端签名校验；如�
 6. 导入 staging zip 保存到私有目录，不进入公开上传目录。
 7. inspect 阶段必须限制 zip 文件大小、entry 数量、单 entry 大小和总解压后大小。
 8. 导入时只读取 zip 内 entry，不允许按 manifest path 访问本机文件系统。
-9. 导入执行阶段只物化 manifest 引用的 entry，避免未引用大文件造成额外内存占用；但未引用 entry 仍受 zip 总大小、entry 数量和路径清洗约束。
+9. 导入执行阶段按需读取 manifest 引用的 entry，避免 referenced payload 和未引用大文件同时驻留内存；未引用 entry 仍受 zip 总大小、entry 数量和路径清洗约束。
 10. EPUB 导出本地化图片时，`data:image/*` 与 `/uploads/*` 单图都必须限制在 20MiB 内，避免超大图片占用过多内存或临时磁盘。
 11. 审计错误信息只保留业务错误；若错误文本包含 token、私有目录或绝对路径，必须泛化为服务端日志可查。
 

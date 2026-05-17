@@ -1,7 +1,4 @@
 {
     "chatgpt.runCodexInWindowsSubsystemForLinux": true,
-    "makefile.configureOnOpen": false,
-    "http.proxy": "http://192.168.31.58:4067",
-    "http.proxyStrictSSL": false,
-    "http.proxySupport": "override"
+    "makefile.configureOnOpen": false
 }

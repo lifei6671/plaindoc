@@ -1037,11 +1037,11 @@ cd apps/server && go test ./... -count=1
 
 **步骤**
 
-- [x] 导入失败时尝试删除或软删除新空间。
+- [x] 导入失败时通过空间仓储事务硬删除新空间，先移除文档、附件、file revision 等 blob 引用。
 - [x] 清理已创建但未引用的临时 blob。
-- [x] 导入失败时同时删除本地已写入的 blob 对象文件，避免只删数据库记录导致文件泄漏。
+- [x] 导入失败时在确认 blob 记录可被硬删除后，再删除本地已写入的 blob 对象文件，避免留下指向缺失文件的 blob。
 - [x] 导入失败时清理已创建的空间封面资产和本地封面对象。
-- [x] 如果无法完整回滚，将新空间标记 deleted。
+- [x] 如果无法完整回滚，failed 事件保留原始 restore 错误并附带回滚错误，等待人工介入处理残留空间。
 - [x] failed 事件包含失败 stage。
 - [x] 回滚失败时保留原始 restore 错误，并附带回滚错误，避免只显示“导入失败且回滚空间失败”。
 - [x] 写 warn 日志。
@@ -1361,8 +1361,10 @@ cd apps/server && go test -race -timeout 120s ./...
 - [x] `npm run test:run -- src/admin/pages/AdminSpacesPage.test.tsx`
 - [x] `npm run build`
 - [x] bugfix：导入 SSE 连接异常时关闭订阅并进入 failed 状态，取消按钮恢复可用。
-- [x] bugfix：导入失败回滚会清理已创建封面资产、本地封面对象以及本地附件/source blob 文件。
-- [x] bugfix：读取 `.plaindoc` staging 时只物化 manifest 引用的文档、附件、source 和封面 entry，不再把未引用 zip entry 全部读入内存。
+- [x] bugfix：导入失败回滚先通过空间仓储事务硬删除新空间及其文档/附件/source 引用，再删除无引用 blob 记录和本地文件，避免 DB 指向缺失对象。
+- [x] bugfix：读取 `.plaindoc` staging 时只保留 zip entry 索引，文档、附件、source 和封面在恢复时按需打开读取，不再把 referenced payload 全部读入内存。
+- [x] `go test -timeout 60s ./internal/service -run 'Test(ReadAdminSpaceImportPackageDoesNotMaterializeUnreferencedEntries|AdminSpaceImportService_Commit_RollbackHardDeletesSpaceBeforeBlobFiles|AdminSpaceImportService_Commit_PreservesRestoreFailureWhenRollbackFails)' -count=1`
+- [x] `go test -timeout 60s ./...`
 - [x] `go test -timeout 60s ./internal/service -run 'TestAdminSpaceImportService_Commit_Cleans(CreatedBlobs|Cover)WhenRestoreFails|TestReadAdminSpaceImportPackageDoesNotMaterializeUnreferencedEntries' -count=1`
 - [x] `go test -timeout 60s ./internal/service -count=1`
 - [x] `go test -timeout 60s ./... -count=1`

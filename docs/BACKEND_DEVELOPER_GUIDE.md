@@ -351,6 +351,7 @@ ONLYOFFICE 一等文档规则：
 9. 服务端必须兜底规范化导出选项：`source_zip` 强制包含附件和 Office 源文件，`epub` 强制包含 Office 源文件用于渲染但不导出普通附件。
 10. `.plaindoc` 交换包如果包含空间封面，导入时必须校验封面文件存在、`source` 只能是空值/`user_upload`/`system_generated`，恢复封面资产并绑定新空间；没有封面时由前端导入完成后复用创建空间的浏览器默认封面生成逻辑补齐。
 11. 导入封面对象写入本地 `uploads/space-covers` 后，如果封面资产持久化或新空间创建失败，必须清理已写入的封面对象；若封面资产已落库但新空间创建失败，还必须删除该封面资产记录，避免孤儿文件和孤儿元数据。
+12. `POST /api/admin/space-imports/inspect` 必须在 `FormFile` 或 `ParseMultipartForm` 前用 `http.MaxBytesReader` 限制请求体，避免超大 multipart 在进入 service 体积校验前消耗临时磁盘或 IO；handler 上限要与 `service.MaxAdminSpaceImportUploadBytes` 保持一致，并预留 multipart 元数据开销。
 
 后台壳页的能力摘要由 `/api/admin/me` 返回，前端据此区分：
 

@@ -15,6 +15,11 @@ type adminSpaceImportHandler struct {
 	importService *service.AdminSpaceImportService
 }
 
+var (
+	adminSpaceImportMultipartMemory int64 = 32 << 20
+	adminSpaceImportMaxRequestBytes       = service.MaxAdminSpaceImportUploadBytes + adminSpaceImportMultipartMemory
+)
+
 type commitAdminSpaceImportRequest struct {
 	SpaceName  string `json:"spaceName"`
 	SpaceID    string `json:"spaceId"`
@@ -52,6 +57,21 @@ func (h *adminSpaceImportHandler) Inspect(c *gin.Context) {
 
 	actorUserID, ok := adminActorUserID(c, response.AdminSpaceErrAdminActorMissing)
 	if !ok {
+		return
+	}
+
+	multipartMemory := adminSpaceImportMultipartMemory
+	if multipartMemory <= 0 {
+		multipartMemory = 32 << 20
+	}
+	maxRequestBytes := adminSpaceImportMaxRequestBytes
+	if maxRequestBytes <= 0 {
+		maxRequestBytes = service.MaxAdminSpaceImportUploadBytes + multipartMemory
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBytes)
+	if err := c.Request.ParseMultipartForm(multipartMemory); err != nil {
+		logit.SetRequestAttrs(c.Request.Context(), logit.Any("errmsg", err))
+		writeAdminSpaceImportError(c, errcode.ErrAdminSpaceImportZipInvalid)
 		return
 	}
 
