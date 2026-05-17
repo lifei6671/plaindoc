@@ -44,8 +44,14 @@ import {
   type AdminSpaceListInput,
   type AdminSpaceListResult,
   type AdminSpaceMember,
+  type AdminSpaceTransferDownloadTokenResult,
   type AdminSpaceTransferEvent,
+  type AdminSpaceTransferStreamTokenResult,
   type AdminSpaceTransferSubscribeInput,
+  type AdminSpaceTransferTaskListInput,
+  type AdminSpaceTransferTaskListResult,
+  type AdminSpaceTransferTaskResult,
+  type AdminSpaceTransferTokenInput,
   type AdminSpaceTransferSubscription,
   type AdminSystemConfig,
   type AdminTheme,
@@ -1522,6 +1528,58 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
     },
     subscribeSpaceExport(input: AdminSpaceTransferSubscribeInput) {
       return subscribeAdminSpaceTransferEvents(input.streamUrl, options.baseUrl, input.onEvent, input.onError);
+    },
+    async listSpaceTransferTasks(input: AdminSpaceTransferTaskListInput = {}) {
+      const query = new URLSearchParams();
+      if (typeof input.status === "string" && input.status.trim()) {
+        query.set("status", input.status.trim());
+      }
+      if (typeof input.limit === "number" && Number.isFinite(input.limit) && input.limit > 0) {
+        query.set("limit", String(Math.trunc(input.limit)));
+      }
+      const queryText = query.toString();
+      const path = queryText ? `/admin/space-transfer-tasks?${queryText}` : "/admin/space-transfer-tasks";
+      return request<AdminSpaceTransferTaskListResult>(path);
+    },
+    async getSpaceTransferTask(input: AdminSpaceTransferTokenInput) {
+      const kind = input.kind.trim();
+      const jobID = input.jobId.trim();
+      if (!kind || !jobID) {
+        throw new Error("任务类型和任务 ID 不能为空");
+      }
+      return request<AdminSpaceTransferTaskResult>(
+        `/admin/space-transfer-tasks/${encodeURIComponent(kind)}/${encodeURIComponent(jobID)}`
+      );
+    },
+    async issueSpaceTransferStreamToken(input: AdminSpaceTransferTokenInput) {
+      const kind = input.kind.trim();
+      const jobID = input.jobId.trim();
+      if (!kind || !jobID) {
+        throw new Error("任务类型和任务 ID 不能为空");
+      }
+      const result = await request<AdminSpaceTransferStreamTokenResult>(
+        `/admin/space-transfer-tasks/${encodeURIComponent(kind)}/${encodeURIComponent(jobID)}/stream-token`,
+        { method: "POST" }
+      );
+      return {
+        ...result,
+        streamUrl: resolveBackendPublicUrl(result.streamUrl, options.baseUrl)
+      };
+    },
+    async issueSpaceTransferDownloadToken(input: AdminSpaceTransferTokenInput) {
+      const kind = input.kind.trim();
+      const jobID = input.jobId.trim();
+      if (!kind || !jobID) {
+        throw new Error("任务类型和任务 ID 不能为空");
+      }
+      const result = await request<AdminSpaceTransferDownloadTokenResult>(
+        `/admin/space-transfer-tasks/${encodeURIComponent(kind)}/${encodeURIComponent(jobID)}/download-token`,
+        { method: "POST" }
+      );
+      return {
+        ...result,
+        downloadUrl: resolveBackendPublicUrl(result.downloadUrl, options.baseUrl)
+      };
     },
     async inspectSpaceImport(input: { file: File }): Promise<AdminSpaceImportInspectResult> {
       if (!input.file) {

@@ -4,7 +4,7 @@
 **创建日期**: 2026-05-15  
 **关联方案**: `docs/2026-05-15_SPACE_EXPORT_TECHNICAL_PLAN.md`  
 **适用范围**: `apps/server`、`apps/web`、`docs`  
-**目标**: 将空间导入导出技术方案拆成可执行、可回写进度、可分阶段 code review 的任务清单。完成后支持可回灌 `.plaindoc` 空间交换包导出、`.plaindoc` 导入新空间、EPUB 阅读包导出、SSE 进度推送、短期下载链接和后台审计。
+**目标**: 将空间导入导出技术方案拆成可执行、可回写进度、可分阶段 code review 的任务清单。完成后支持可回灌 `.plaindoc` 空间交换包导出、`.plaindoc` 导入新空间、EPUB 阅读包导出、全局右下角导入/导出任务浮层、页面刷新恢复进行中任务、SSE 进度推送、短期下载链接和后台审计。
 
 ---
 
@@ -16,7 +16,7 @@
 4. `go.sum` 禁止手工编辑，只能由 Go 工具链生成。
 5. 后端接口返回继续遵守 `JsonResult`：`{ code, message, requestId, data }`。
 6. 前端页面层禁止直接散写业务 `fetch`，统一走 `apps/web/src/data-access/*`。
-7. 数据库结构第一期不新增表；导入导出任务使用进程内任务表和私有临时文件目录。
+7. 最终版新增 `admin_space_transfer_jobs` 持久化任务表；进程内任务表只负责当前进程订阅者、短期 token hash 和运行中 worker 状态。
 8. `.plaindoc` 空间交换包是唯一可导入格式；底层仍为 zip 容器，但 UI 与上传校验只接受 `.plaindoc` 后缀，且导出 PlainDoc 包时必须强制包含附件和 Office 源文件，避免生成不可导入的 `.plaindoc`。
 9. 空间交换包必须携带已有空间封面；若源空间没有封面，导入完成后由浏览器复用“创建空间”的默认封面生成逻辑生成并绑定封面。
 
@@ -35,6 +35,7 @@ Phase 1 协议与骨架
   → Phase 7 导入落地
   → Phase 8 下载、审计、清理
   → Phase 9 测试与文档同步
+  → Phase 10 全局任务中心与刷新恢复
 ```
 
 ### 1.2 可并行的工作
@@ -1376,3 +1377,200 @@ cd apps/server && go test -race -timeout 120s ./...
 - [ ] 最终 code review。
 - [ ] 文档状态可从 Draft 更新为 In Progress 或 Completed。
 - [ ] 准备提交或继续下一轮实现。
+
+---
+
+## 12. Phase 10：全局任务中心与刷新恢复
+
+**目标**: 将空间导入/导出进度从单个弹层提升为后台全局任务中心。只要当前用户存在 `queued/running` 的导入或导出任务，后台右下角显示浮层；页面刷新后，只要用户仍是登录态，前端可恢复当前用户进行中任务并继续展示进度。
+
+### Task 10.1 持久化任务表
+
+**文件**
+
+- 创建：`apps/server/internal/storage/models/admin_space_transfer_job.go`
+- 创建：`apps/server/internal/storage/migrations/sqlite/00xx_admin_space_transfer_jobs.up.sql`
+- 创建：`apps/server/internal/storage/migrations/sqlite/00xx_admin_space_transfer_jobs.down.sql`
+- 创建：`apps/server/internal/storage/migrations/mysql/00xx_admin_space_transfer_jobs.up.sql`
+- 创建：`apps/server/internal/storage/migrations/mysql/00xx_admin_space_transfer_jobs.down.sql`
+- 创建：`apps/server/internal/storage/migrations/postgres/00xx_admin_space_transfer_jobs.up.sql`
+- 创建：`apps/server/internal/storage/migrations/postgres/00xx_admin_space_transfer_jobs.down.sql`
+
+**步骤**
+
+- [x] 新增 `admin_space_transfer_jobs` 表。
+- [x] 字段包含 `job_id`、`kind`、`actor_user_id`、`space_id`、`space_name`、`format`、`import_id`、`status`、`stage`、`progress`、`message`、`file_path`、`file_name`、`size_bytes`、`new_space_id`、`error_message`、`started_at`、`completed_at`、`created_at`、`updated_at`、`expires_at`。
+- [x] 增加 `job_id` 唯一约束。
+- [x] 增加 `actor_user_id + status + updated_at` 查询索引。
+- [x] 增加 `status + expires_at` 清理索引。
+- [x] 增加 `kind + job_id` 快照查询索引。
+
+**验收**
+
+- [x] SQLite/MySQL/PostgreSQL 三套迁移语义一致。
+- [x] 迁移测试覆盖新增表。
+- [x] 不手工编辑 `go.sum`。
+
+### Task 10.2 Repository 与统一任务服务
+
+**文件**
+
+- 修改：`apps/server/internal/storage/repository/interfaces.go`
+- 创建：`apps/server/internal/storage/repository/gorm_admin_space_transfer_job_repository.go`
+- 创建：`apps/server/internal/service/admin_space_transfer_task_service.go`
+
+**步骤**
+
+- [x] 定义 `AdminSpaceTransferJobRepository`。
+- [x] 实现创建任务、更新进度、标记完成、标记失败、按 actor 查询、按 kind/job 查询、清理过期任务。
+- [x] 查询构造优先使用 model 或 `TableName()`，避免硬编码长 SQL。
+- [x] 新增 `AdminSpaceTransferTaskService` 聚合导入/导出任务。
+- [x] 支持重新签发 `streamUrl`。
+- [x] 支持导出完成后重新签发一次性 `downloadUrl`。
+- [x] 服务启动恢复或查询时，将遗留 `queued/running` 任务标记为 `failed`。
+
+**验收**
+
+- [x] 当前 actor 只能看到自己的任务。
+- [x] 非 owner 不能重签 stream/download token。
+- [x] 服务重启遗留 active 任务不会被误展示为仍在运行。
+
+### Task 10.3 后端 API
+
+**文件**
+
+- 创建：`apps/server/internal/server/handler/admin_space_transfer_task.go`
+- 创建：`apps/server/internal/server/response/error_admin_space_transfer_task.go`
+- 修改：`apps/server/internal/server/router.go`
+
+**步骤**
+
+- [x] 注册 `GET /api/admin/space-transfer-tasks`。
+- [x] 注册 `GET /api/admin/space-transfer-tasks/:kind/:jobId`。
+- [x] 注册 `POST /api/admin/space-transfer-tasks/:kind/:jobId/stream-token`。
+- [x] 注册 `POST /api/admin/space-transfer-tasks/space_export/:jobId/download-token`。
+- [x] 所有接口使用后台登录态取得 actor。
+- [x] 错误响应继续遵守 `JsonResult`。
+
+**验收**
+
+- [x] 页面刷新后可通过任务列表发现当前用户 active 任务。
+- [x] active 任务可重新签发 `streamUrl`。
+- [x] 导出 completed 可按点击重新签发一次性 `downloadUrl`。
+
+### Task 10.4 导入导出服务接入持久化任务
+
+**文件**
+
+- 修改：`apps/server/internal/service/admin_space_export_service.go`
+- 修改：`apps/server/internal/service/admin_space_import_service.go`
+- 修改：`apps/server/internal/service/admin_space_transfer_cleanup.go`
+
+**步骤**
+
+- [x] 导出任务创建时写入持久化任务表。
+- [x] 导出进度、完成、失败同步更新持久化任务。
+- [x] 导入任务创建时写入持久化任务表。
+- [x] 导入进度、完成、失败同步更新持久化任务。
+- [x] 清理任务删除过期终态任务记录和对应私有文件。
+- [x] `queued/running` 不因 stream token 过期被清理。
+
+**验收**
+
+- [x] SSE 事件和任务快照字段一致。
+- [x] 任务完成后刷新页面仍能短期看到终态。
+- [x] 过期任务和私有文件能被清理。
+
+### Task 10.5 前端全局任务 Provider
+
+**文件**
+
+- 创建：`apps/web/src/admin/space-transfer/AdminSpaceTransferTaskProvider.tsx`
+- 创建：`apps/web/src/admin/space-transfer/useAdminSpaceTransferTasks.ts`
+- 修改：`apps/web/src/admin/AdminApp.tsx`
+- 修改：`apps/web/src/data-access/types.ts`
+- 修改：`apps/web/src/data-access/http/adapter.ts`
+
+**步骤**
+
+- [x] 新增 `AdminSpaceTransferTask`、列表结果、stream token 结果、download token 结果类型。
+- [x] 扩展 `AdminGateway`：`listSpaceTransferTasks`、`getSpaceTransferTask`、`issueSpaceTransferStreamToken`、`issueSpaceTransferDownloadToken`。
+- [x] Provider 挂载在 `AdminApp` 登录态后台壳层。
+- [x] Provider 初始化时查询 active 任务并恢复 SSE。
+- [x] Provider 统一管理 `subscriptionRef` map。
+- [x] 退出登录或卸载时关闭全部 SSE。
+
+**验收**
+
+- [x] 切换后台页面不丢失任务进度。
+- [x] 页面刷新后能恢复 active 任务。
+- [x] SSE error 不会造成内存泄漏。
+
+### Task 10.6 右下角浮层与弹窗改造
+
+**文件**
+
+- 创建：`apps/web/src/admin/components/AdminSpaceTransferFloatingPanel.tsx`
+- 修改：`apps/web/src/admin/components/AdminSpaceExportDialog.tsx`
+- 修改：`apps/web/src/admin/components/AdminSpaceImportDialog.tsx`
+- 修改：`apps/web/src/admin/pages/AdminSpacesPage.tsx`
+
+**步骤**
+
+- [x] 新增右下角全局任务浮层。
+- [x] 折叠态采用浏览器下载面板样式，显示“剩余 N 个”，顶部仅保留最小化/展开入口。
+- [x] 展开态以单列表显示空间名标题、进度和中文彩色状态，不提供标题下状态说明、顶部分类标签与底部批量操作栏；终态操作在任务行 hover/focus 时切换为无边框图标按钮。
+- [x] 导出完成显示“下载文件”，点击时调用 `issueSpaceTransferDownloadToken`。
+- [x] 导入完成显示“打开编辑器”和“打开阅读页”。
+- [x] 导入包无封面时，由 Provider 在导入完成后统一补默认封面。
+- [x] 导出弹窗只收集参数并发起任务。
+- [x] 导入弹窗只负责 inspect、预览和提交任务。
+
+**验收**
+
+- [x] 任一导入或导出任务进行中时，右下角出现浮层。
+- [x] 点击浮层可展开查看所有导入/导出任务。
+- [x] 弹窗关闭后任务继续在浮层显示。
+- [x] 终态任务可从前端展示中清除。
+- [x] 已清除的终态任务写入浏览器本地隐藏记录，刷新页面后不再从持久化任务恢复出来。
+
+### Task 10.7 测试与文档同步
+
+**文件**
+
+- 修改或创建：后端 transfer task service / handler / repository 测试。
+- 修改或创建：前端 Provider / FloatingPanel / AdminSpacesPage 测试。
+- 修改：`docs/BACKEND_DEVELOPER_GUIDE.md`
+- 修改：`docs/FRONTEND_DEVELOPER_GUIDE.md`
+- 修改：`docs/2026-05-15_SPACE_EXPORT_TECHNICAL_PLAN.md`
+- 修改：`docs/2026-05-15_SPACE_IMPORT_EXPORT_TASK_CHECKLIST.md`
+
+**测试清单**
+
+- [x] 后端：任务列表只返回当前 actor 任务。
+- [x] 后端：stream token 重签校验 actor 归属。
+- [x] 后端：download token 重签校验 actor 归属和 completed 状态。
+- [x] 后端：服务重启遗留 active 任务标记 failed。
+- [x] 后端：服务重启后，completed 导出任务仍可通过持久化 `file_path/file_name/expires_at` 恢复短期下载链接。
+- [x] 后端：首次进度更新写入持久化任务表 `started_at`，后续进度更新不覆盖开始时间。
+- [x] 前端：创建导出后关闭弹窗，浮层仍显示进度。
+- [x] 前端：创建导入后关闭弹窗，浮层仍显示进度。
+- [x] 前端：刷新后恢复 active 任务。
+- [x] 前端：切换后台页面任务不中断。
+- [x] 前端：导出完成点击下载时重新签发下载链接。
+- [x] 前端：刷新恢复导入任务后，completed 事件缺失运行时 meta 时仍补默认封面并刷新空间列表。
+
+**验证命令**
+
+```bash
+cd apps/server && go test -timeout 60s ./...
+npm run web:build
+npm run check:dropdown-menu -w @plaindoc/web
+```
+
+**验收**
+
+- [x] 后端测试通过。
+- [x] 前端构建通过。
+- [x] dropdown-menu 规则通过。
+- [x] 技术方案、执行清单、前后端主文档同步。

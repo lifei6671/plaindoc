@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 )
 
 func TestAdminSpaceExportService_CleanupExpiredTransfersDeletesExpiredJobAndFile(t *testing.T) {
@@ -91,6 +94,64 @@ func TestAdminSpaceExportService_CleanupExpiredTransfersKeepsRunningJobPastStrea
 	}
 	if _, err := os.Stat(runningFilePath); err != nil {
 		t.Fatalf("expected running export file to remain: %v", err)
+	}
+}
+
+func TestAdminSpaceExportService_CleanupExpiredTransfersKeepsPersistedJobWhenFileDeleteFails(t *testing.T) {
+	t.Parallel()
+
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-admin-space-export-cleanup-keeps-persisted-job-on-file-delete-failure?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	exportDir := t.TempDir()
+	nonEmptyDir := path.Join(exportDir, "stuck-export")
+	if err := os.Mkdir(nonEmptyDir, 0o700); err != nil {
+		t.Fatalf("create non-empty export dir failed: %v", err)
+	}
+	if err := os.WriteFile(path.Join(nonEmptyDir, "part"), []byte("stuck"), 0o600); err != nil {
+		t.Fatalf("write nested export file failed: %v", err)
+	}
+
+	transferJobRepo := repository.NewGormAdminSpaceTransferJobRepository(database.ORM)
+	job := models.AdminSpaceTransferJob{
+		JobID:       "01cleanupkeepjob00000001",
+		Kind:        models.AdminSpaceTransferJobKindExport,
+		ActorUserID: "actor-user",
+		Status:      models.AdminSpaceTransferJobStatusCompleted,
+		Stage:       "done",
+		Progress:    100,
+		FilePath:    nonEmptyDir,
+		CreatedAt:   now.Add(-time.Hour),
+		UpdatedAt:   now.Add(-time.Hour),
+		ExpiresAt:   now.Add(-time.Minute),
+	}
+	if err := transferJobRepo.Create(ctx, &job); err != nil {
+		t.Fatalf("create persisted transfer job failed: %v", err)
+	}
+
+	svc := newAllowExportService()
+	svc.exportDir = exportDir
+	svc.transferJobRepo = transferJobRepo
+
+	result := svc.CleanupExpiredTransfers(ctx, now)
+	if result.DeletedJobs != 0 || result.DeletedFiles != 0 || len(result.Errors) != 1 {
+		t.Fatalf("unexpected cleanup result: %#v", result)
+	}
+	if _, err := transferJobRepo.GetByKindAndJobID(ctx, models.AdminSpaceTransferJobKindExport, job.JobID); err != nil {
+		t.Fatalf("expected persisted job to remain for retry, got %v", err)
 	}
 }
 

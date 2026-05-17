@@ -585,6 +585,56 @@ export interface AdminSpaceTransferSubscribeInput {
   onError?(error: Event): void;
 }
 
+export type AdminSpaceTransferTaskKind = "space_export" | "space_import";
+export type AdminSpaceTransferTaskStatus = "queued" | "running" | "completed" | "failed";
+export type AdminSpaceTransferTaskStatusFilter = "active" | AdminSpaceTransferTaskStatus;
+
+export interface AdminSpaceTransferTask {
+  jobId: string;
+  kind: AdminSpaceTransferTaskKind;
+  status: AdminSpaceTransferTaskStatus;
+  stage?: string;
+  progress: number;
+  message?: string;
+  spaceId?: string;
+  spaceName?: string;
+  format?: AdminSpaceExportFormat | string;
+  importId?: string;
+  fileName?: string;
+  sizeBytes?: number;
+  newSpaceId?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+}
+
+export interface AdminSpaceTransferTaskListInput {
+  status?: AdminSpaceTransferTaskStatusFilter;
+  limit?: number;
+}
+
+export interface AdminSpaceTransferTaskListResult {
+  tasks: AdminSpaceTransferTask[];
+}
+
+export interface AdminSpaceTransferTaskResult {
+  task: AdminSpaceTransferTask;
+}
+
+export interface AdminSpaceTransferTokenInput {
+  kind: AdminSpaceTransferTaskKind;
+  jobId: string;
+}
+
+export interface AdminSpaceTransferStreamTokenResult {
+  streamUrl: string;
+}
+
+export interface AdminSpaceTransferDownloadTokenResult {
+  downloadUrl: string;
+}
+
 export interface AdminSpaceImportInspectResult {
   importId: string;
   packageVersion: number;
@@ -1142,6 +1192,10 @@ export interface AdminGateway {
   listSpaces(input?: AdminSpaceListInput): Promise<AdminSpaceListResult>;
   startSpaceExport(input: AdminSpaceExportStartInput): Promise<AdminSpaceExportStartResult>;
   subscribeSpaceExport(input: AdminSpaceTransferSubscribeInput): AdminSpaceTransferSubscription;
+  listSpaceTransferTasks(input?: AdminSpaceTransferTaskListInput): Promise<AdminSpaceTransferTaskListResult>;
+  getSpaceTransferTask(input: AdminSpaceTransferTokenInput): Promise<AdminSpaceTransferTaskResult>;
+  issueSpaceTransferStreamToken(input: AdminSpaceTransferTokenInput): Promise<AdminSpaceTransferStreamTokenResult>;
+  issueSpaceTransferDownloadToken(input: AdminSpaceTransferTokenInput): Promise<AdminSpaceTransferDownloadTokenResult>;
   inspectSpaceImport(input: { file: File }): Promise<AdminSpaceImportInspectResult>;
   commitSpaceImport(input: AdminSpaceImportCommitInput): Promise<AdminSpaceImportStartResult>;
   subscribeSpaceImport(input: AdminSpaceTransferSubscribeInput): AdminSpaceTransferSubscription;

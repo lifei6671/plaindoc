@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -55,11 +56,48 @@ func main() {
 
 	logger := logit.NewLoggerWithWriter(cfg.LogLevel, logWriter)
 
-	if err := validateSSRWorkerRuntime(cfg); err != nil {
-		logger.Error("ssr worker runtime validation failed", logit.Error("error", err))
-		log.Fatalf("ssr worker runtime validation failed: %v", err)
-	}
 	slog.SetDefault(logger)
+
+	startupState := server.NewStartupState()
+	switchHandler := server.NewSwitchHandler(server.NewStartupHandler(startupState))
+	listener, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		logger.Error("listen failed", logit.Error("error", err), "addr", cfg.Addr)
+		log.Fatalf("listen failed: %v", err)
+	}
+	httpServer := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           switchHandler,
+		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		ReadHeaderTimeout: cfg.ReadTimeout,
+	}
+	serverErrCh := make(chan error, 1)
+	go func() {
+		if serveErr := httpServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			serverErrCh <- serveErr
+			return
+		}
+		serverErrCh <- nil
+	}()
+
+	logger.Info("bootstrap server starting",
+		"addr", cfg.Addr,
+		"env", cfg.Env,
+		"log_level", cfg.LogLevel.String(),
+		"log_output", cfg.LogOutput,
+	)
+
+	if err := validateSSRWorkerRuntime(cfg); err != nil {
+		startupState.MarkFailed("SSR Worker 初始化失败，请查看服务日志。", err)
+		logger.Error("ssr worker runtime validation failed", logit.Error("error", err))
+		if waitErr := waitForHTTPServerExit(serverErrCh); waitErr != nil {
+			logger.Error("server exited unexpectedly", "error", waitErr.Error())
+			log.Fatalf("server exited: %v", waitErr)
+		}
+		return
+	}
 
 	var ssrWorkerPool *pool.Pool
 	var ssrDispatcher *pool.Dispatcher
@@ -80,8 +118,13 @@ func main() {
 		workerPoolStartContext, cancelWorkerPoolStart := context.WithTimeout(context.Background(), cfg.SSRWorker.StartTimeout)
 		if err := ssrWorkerPool.Start(workerPoolStartContext); err != nil {
 			cancelWorkerPoolStart()
+			startupState.MarkFailed("SSR Worker 初始化失败，请查看服务日志。", err)
 			logger.Error("ssr worker pool start failed", logit.Error("error", err))
-			log.Fatalf("ssr worker pool start failed: %v", err)
+			if waitErr := waitForHTTPServerExit(serverErrCh); waitErr != nil {
+				logger.Error("server exited unexpectedly", "error", waitErr.Error())
+				log.Fatalf("server exited: %v", waitErr)
+			}
+			return
 		}
 		cancelWorkerPoolStart()
 		ssrDispatcher = pool.NewDispatcher(ssrWorkerPool)
@@ -95,14 +138,20 @@ func main() {
 		}()
 	}
 
+	startupState.SetPhase(server.StartupPhaseOpeningDatabase, "正在连接数据库")
 	database, err := storage.OpenDatabase(storage.OpenConfig{
 		Driver: cfg.Database.Driver,
 		DSN:    cfg.Database.DSN,
 		LogSQL: cfg.Database.LogSQL,
 	})
 	if err != nil {
+		startupState.MarkFailed("数据库连接失败，请检查服务日志和数据库配置。", err)
 		logger.Error("open database failed", logit.Error("error", err))
-		log.Fatalf("open database failed: %v", err)
+		if waitErr := waitForHTTPServerExit(serverErrCh); waitErr != nil {
+			logger.Error("server exited unexpectedly", "error", waitErr.Error())
+			log.Fatalf("server exited: %v", waitErr)
+		}
+		return
 	}
 	defer func() {
 		if closeErr := database.Close(); closeErr != nil {
@@ -112,18 +161,35 @@ func main() {
 	logger.Info("database connected", "db_driver", database.Driver)
 
 	if cfg.Database.AutoMigrate {
+		startupState.SetPhase(server.StartupPhaseMigrating, "正在迁移数据库")
 		logger.Info("database migrations starting", "timeout", startupDatabaseMigrationTimeout.String())
 		migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), startupDatabaseMigrationTimeout)
 		defer cancelMigrate()
 		if err := storage.MigrateUpWithOptions(migrateCtx, database.ORM, database.Driver, storage.MigrateOptions{
 			Logger: logger,
+			OnProgress: func(progress storage.MigrationProgress) {
+				startupState.SetMigrationProgress(server.MigrationStartupProgress{
+					Phase:          progress.Phase,
+					TotalCount:     progress.TotalCount,
+					PendingCount:   progress.PendingCount,
+					AppliedCount:   progress.AppliedCount,
+					CurrentVersion: progress.CurrentVersion,
+					CurrentName:    progress.CurrentName,
+				})
+			},
 		}); err != nil {
+			startupState.MarkFailed("数据库迁移失败，请查看服务日志。", err)
 			logger.Error("database migrate up failed", logit.Error("error", err))
-			log.Fatalf("database migrate up failed: %v", err)
+			if waitErr := waitForHTTPServerExit(serverErrCh); waitErr != nil {
+				logger.Error("server exited unexpectedly", "error", waitErr.Error())
+				log.Fatalf("server exited: %v", waitErr)
+			}
+			return
 		}
 		logger.Info("database migrations applied")
 	}
 
+	startupState.SetPhase(server.StartupPhaseBuildingRouter, "正在初始化服务")
 	systemConfigRepo := repository.NewGormSystemConfigRepository(database.ORM)
 	dataRetentionCleanupService := service.NewDataRetentionCleanupService(database.ORM, systemConfigRepo)
 	serviceLifecycleCtx, cancelServiceLifecycle := context.WithCancel(context.Background())
@@ -131,14 +197,8 @@ func main() {
 	go runDataRetentionCleanupLoop(serviceLifecycleCtx, logger, dataRetentionCleanupService)
 
 	router := server.NewRouterWithSSRAndLifecycle(serviceLifecycleCtx, cfg, logger, database.ORM, ssrDispatcher)
-	httpServer := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           router,
-		ReadTimeout:       cfg.ReadTimeout,
-		WriteTimeout:      cfg.WriteTimeout,
-		IdleTimeout:       cfg.IdleTimeout,
-		ReadHeaderTimeout: cfg.ReadTimeout,
-	}
+	startupState.MarkReady()
+	switchHandler.Set(router)
 
 	logger.Info("server starting",
 		"addr", cfg.Addr,
@@ -150,7 +210,7 @@ func main() {
 		"ssr_worker_count", cfg.SSRWorker.Count,
 		"ssr_render_timeout", cfg.SSRWorker.RenderTimeout.String(),
 	)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := waitForHTTPServerExit(serverErrCh); err != nil {
 		logger.Error("server exited unexpectedly", "error", err.Error())
 		log.Fatalf("server exited: %v", err)
 	}
@@ -181,6 +241,10 @@ func printBuildInfo(output io.Writer) {
 		currentBuildInfo.BuildTimeUTC,
 		currentBuildInfo.GoVersion,
 	)
+}
+
+func waitForHTTPServerExit(serverErrCh <-chan error) error {
+	return <-serverErrCh
 }
 
 func validateSSRWorkerRuntime(cfg config.Config) error {
@@ -339,13 +403,9 @@ func runDataRetentionCleanupLoop(
 		return
 	}
 
-	nextInterval := cleanupService.ResolveNextRunInterval(ctx)
-	if nextInterval <= 0 {
-		nextInterval = 60 * time.Minute
-	}
-
 	for {
 		result, err := cleanupService.RunOnce(ctx)
+		var nextInterval time.Duration
 		if err != nil {
 			nextInterval = service.ResolveCleanupRetryInterval()
 			if logger != nil {

@@ -30,6 +30,7 @@ import {
   AdminTableContainer,
   AdminToolbarActions
 } from "../components/AdminPageLayout";
+import { ADMIN_SPACE_IMPORT_COMPLETED_EVENT } from "../space-transfer/useAdminSpaceTransferTasks";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -248,6 +249,16 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
 
   useEffect(() => {
     void loadSpaces();
+  }, [loadSpaces]);
+
+  useEffect(() => {
+    const handleImportCompleted = () => {
+      void loadSpaces();
+    };
+    window.addEventListener(ADMIN_SPACE_IMPORT_COMPLETED_EVENT, handleImportCompleted);
+    return () => {
+      window.removeEventListener(ADMIN_SPACE_IMPORT_COMPLETED_EVENT, handleImportCompleted);
+    };
   }, [loadSpaces]);
 
   useEffect(() => {

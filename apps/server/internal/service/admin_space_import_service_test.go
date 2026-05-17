@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/pkg/errcode"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/models"
 	"github.com/lifei6671/plaindoc/apps/server/internal/storage/repository"
 	"gorm.io/gorm"
@@ -258,6 +259,107 @@ func TestAdminSpaceImportService_StreamToken_BindsToJobAndActor(t *testing.T) {
 	}
 	if _, _, _, err := svc.Subscribe(context.Background(), commitResult.JobID, "other-user", token); !errors.Is(err, errcode.ErrAdminSpaceImportJobTokenInvalid) {
 		t.Fatalf("expected token invalid for other actor, got %v", err)
+	}
+}
+
+func TestAdminSpaceImportService_Commit_PersistsStagingFilePathInTransferJob(t *testing.T) {
+	t.Parallel()
+
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-admin-space-import-transfer-file-path?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	transferJobRepo := repository.NewGormAdminSpaceTransferJobRepository(database.ORM)
+	svc := NewAdminSpaceImportService(
+		nil,
+		WithAdminSpaceImportTransferJobRepository(transferJobRepo),
+	)
+	svc.stagingDir = t.TempDir()
+
+	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "space.plaindoc",
+		ContentType: "application/zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestZip(t, true, true, true)),
+	})
+	if err != nil {
+		t.Fatalf("inspect failed: %v", err)
+	}
+	staging, err := svc.store.GetStaging(result.ImportID, "actor-user", svc.now())
+	if err != nil {
+		t.Fatalf("get staging failed: %v", err)
+	}
+	markStagingImportableForTest(svc, result.ImportID, "actor-user")
+
+	commitResult, err := svc.Commit(ctx, CommitAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		ImportID:    result.ImportID,
+		SpaceName:   "导入空间",
+	})
+	if err != nil {
+		t.Fatalf("commit failed: %v", err)
+	}
+
+	job, err := transferJobRepo.GetByKindAndJobID(ctx, models.AdminSpaceTransferJobKindImport, commitResult.JobID)
+	if err != nil {
+		t.Fatalf("get transfer job failed: %v", err)
+	}
+	if strings.TrimSpace(job.FilePath) != staging.FilePath {
+		t.Fatalf("expected transfer job file path %q, got %q", staging.FilePath, job.FilePath)
+	}
+}
+
+func TestAdminSpaceImportService_IssueStreamURL_ReplacesExpiredToken(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	svc := NewAdminSpaceImportService(nil)
+	svc.nowFn = func() time.Time { return now }
+	result, err := svc.Inspect(context.Background(), InspectAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		FileName:    "space.plaindoc",
+		ContentType: "application/zip",
+		Reader:      bytes.NewReader(buildAdminSpaceImportTestZip(t, true, true, true)),
+	})
+	if err != nil {
+		t.Fatalf("inspect failed: %v", err)
+	}
+	markStagingImportableForTest(svc, result.ImportID, "actor-user")
+	commitResult, err := svc.Commit(context.Background(), CommitAdminSpaceImportInput{
+		ActorUserID: "actor-user",
+		ImportID:    result.ImportID,
+		SpaceName:   "导入空间",
+	})
+	if err != nil {
+		t.Fatalf("commit failed: %v", err)
+	}
+	oldToken := tokenQueryValue(t, commitResult.StreamURL)
+
+	svc.nowFn = func() time.Time { return now.Add(defaultAdminSpaceTransferTokenTTL + time.Second) }
+	streamURL, err := svc.IssueStreamURL(context.Background(), "actor-user", commitResult.JobID)
+	if err != nil {
+		t.Fatalf("issue stream url failed: %v", err)
+	}
+	newToken := tokenQueryValue(t, streamURL)
+	if newToken == "" || newToken == oldToken {
+		t.Fatalf("expected a fresh stream token, got %q", newToken)
+	}
+	if _, _, _, err := svc.Subscribe(context.Background(), commitResult.JobID, "actor-user", oldToken); !errors.Is(err, errcode.ErrAdminSpaceImportJobTokenInvalid) {
+		t.Fatalf("expected old token invalid, got %v", err)
+	}
+	if _, _, _, err := svc.Subscribe(context.Background(), commitResult.JobID, "actor-user", newToken); err != nil {
+		t.Fatalf("subscribe with fresh token failed: %v", err)
 	}
 }
 

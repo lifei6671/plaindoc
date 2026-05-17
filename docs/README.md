@@ -34,9 +34,11 @@
 4. `READER_IMAGE_VIEWER_TECHNICAL_PLAN.md`
    阅读页图片浏览器方案：支持 `img`、正文 inline SVG 与 Mermaid SVG 的黑色遮罩浮层浏览、切图、缩放、原始尺寸与旋转工具条。
 5. `2026-05-15_SPACE_EXPORT_TECHNICAL_PLAN.md`
-   空间导入导出方案：管理后台支持导出可回灌 zip 空间交换包，也支持 EPUB 阅读包；空间管理上方可导入 zip 后解析元数据、创建新空间并恢复目录、文档、附件与 Office 源文件。
+   空间导入导出方案：管理后台支持导出可回灌 `.plaindoc` 空间交换包，也支持 EPUB 阅读包；空间管理上方可导入 `.plaindoc` 后解析元数据、创建新空间并恢复目录、文档、附件与 Office 源文件；导入/导出任务统一进入右下角全局任务浮层，并支持登录态刷新恢复进行中任务。
 6. `2026-05-15_SPACE_IMPORT_EXPORT_TASK_CHECKLIST.md`
-   空间导入导出执行清单：按协议骨架、任务 SSE、zip 导出、附件与 Office source、EPUB、导入解析、导入落地、审计清理和测试文档同步拆分，可逐项回写进度。
+   空间导入导出执行清单：按协议骨架、任务 SSE、zip 导出、附件与 Office source、EPUB、导入解析、导入落地、审计清理、测试文档同步、全局任务中心与刷新恢复拆分，可逐项回写进度。
+7. `2026-05-17_DATABASE_STARTUP_PROGRESS_TECHNICAL_PLAN.md`
+   数据库初始化与迁移中间页方案：服务先启动 Bootstrap HTTP，迁移期间展示启动进度页，迁移完成后原子切换到正式 Router。
 
 ---
 

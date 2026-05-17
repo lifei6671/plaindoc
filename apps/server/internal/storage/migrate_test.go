@@ -109,6 +109,87 @@ func TestMigrateUpWithOptions_LogsEachMigrationFile(t *testing.T) {
 	}
 }
 
+func TestMigrateUpWithOptions_ReportsProgress(t *testing.T) {
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-migrate-progress?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	migrations, err := LoadMigrations(DriverSQLite)
+	if err != nil {
+		t.Fatalf("LoadMigrations failed: %v", err)
+	}
+
+	var progressEvents []MigrationProgress
+	if err := MigrateUpWithOptions(context.Background(), database.ORM, DriverSQLite, MigrateOptions{
+		OnProgress: func(progress MigrationProgress) {
+			progressEvents = append(progressEvents, progress)
+		},
+	}); err != nil {
+		t.Fatalf("MigrateUpWithOptions failed: %v", err)
+	}
+
+	if len(progressEvents) < 3 {
+		t.Fatalf("expected progress events, got %d", len(progressEvents))
+	}
+	firstEvent := progressEvents[0]
+	if firstEvent.Phase != "loaded" || firstEvent.TotalCount != len(migrations) || firstEvent.PendingCount != len(migrations) {
+		t.Fatalf("unexpected first progress event: %+v", firstEvent)
+	}
+	lastEvent := progressEvents[len(progressEvents)-1]
+	if lastEvent.Phase != "complete" || lastEvent.AppliedCount != len(migrations) || lastEvent.TotalCount != len(migrations) {
+		t.Fatalf("unexpected complete progress event: %+v", lastEvent)
+	}
+	var applyingFound bool
+	for _, progressEvent := range progressEvents {
+		if progressEvent.Phase == "applying" && progressEvent.CurrentVersion > 0 && progressEvent.CurrentName != "" {
+			applyingFound = true
+			break
+		}
+	}
+	if !applyingFound {
+		t.Fatalf("expected applying event with current migration, got %+v", progressEvents)
+	}
+}
+
+func TestMigrateUpWithOptions_ReportsFailedProgress(t *testing.T) {
+	database, err := OpenDatabase(OpenConfig{
+		Driver: DriverSQLite,
+		DSN:    "file:test-migrate-progress-failed?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var progressEvents []MigrationProgress
+	err = MigrateUpWithOptions(ctx, database.ORM, DriverSQLite, MigrateOptions{
+		OnProgress: func(progress MigrationProgress) {
+			progressEvents = append(progressEvents, progress)
+			if progress.Phase == "applying" {
+				cancel()
+			}
+		},
+	})
+	if err == nil {
+		t.Fatal("expected migration failure after context cancellation")
+	}
+
+	lastEvent := progressEvents[len(progressEvents)-1]
+	if lastEvent.Phase != "failed" || lastEvent.CurrentVersion <= 0 || lastEvent.CurrentName == "" {
+		t.Fatalf("unexpected failed progress event: %+v", lastEvent)
+	}
+}
+
 func TestMigrateUpAndDown_SQLite(t *testing.T) {
 	database, err := OpenDatabase(OpenConfig{
 		Driver: DriverSQLite,
@@ -148,6 +229,7 @@ func TestMigrateUpAndDown_SQLite(t *testing.T) {
 		"documents",
 		"document_revisions",
 		"document_file_revisions",
+		"admin_space_transfer_jobs",
 		"node_permissions",
 		"document_permissions",
 	}
@@ -249,6 +331,7 @@ func TestMigrateUp_SQLiteTimeColumnsUseTimestamp(t *testing.T) {
 		"file_blobs":                   {"deleted_at", "created_at", "updated_at"},
 		"document_attachments":         {"deleted_at", "created_at", "updated_at"},
 		"document_image_assets":        {"pending_cleanup_at", "deleted_at", "last_referenced_at", "created_at", "updated_at"},
+		"admin_space_transfer_jobs":    {"started_at", "completed_at", "created_at", "updated_at", "expires_at"},
 		"search_analyzer_dict_entries": {"created_at", "updated_at"},
 		"search_index_jobs":            {"next_run_at", "started_at", "created_at", "updated_at"},
 		"password_reset_tokens":        {"expires_at", "consumed_at", "invalidated_at", "created_at", "updated_at"},
