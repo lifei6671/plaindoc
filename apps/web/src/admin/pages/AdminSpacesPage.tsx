@@ -1,4 +1,4 @@
-import { ArrowLeftRight, ChevronDown, Copy, FileText, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Copy, Download, FileText, LoaderCircle, Plus, RefreshCw, Search, Settings, ShieldBan, ShieldCheck, Tags, Trash2, UploadCloud, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEventHandler } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -18,6 +18,8 @@ import { type AdminSpace, type AdminSpaceCategory, type AdminSpaceListResult, ty
 import { formatError } from "../../editor/status-utils";
 import { AdminSpaceCategoriesDialog } from "../components/AdminSpaceCategoriesDialog";
 import { AdminCreateSpaceDialog } from "../components/AdminCreateSpaceDialog";
+import { AdminSpaceExportDialog } from "../components/AdminSpaceExportDialog";
+import { AdminSpaceImportDialog } from "../components/AdminSpaceImportDialog";
 import { AdminSpaceMembersDialog } from "../components/AdminSpaceMembersDialog";
 import { AdminSpaceSettingsDialog } from "../components/AdminSpaceSettingsDialog";
 import { useAdminDialogs } from "../components/AdminDialogs";
@@ -152,9 +154,12 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
   const isAdminMode = mode === "admin";
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [categoriesDialogOpen, setCategoriesDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [editingSpace, setEditingSpace] = useState<AdminSpace | null>(null);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportingSpace, setExportingSpace] = useState<AdminSpace | null>(null);
   const [membersDialogOpen, setMembersDialogOpen] = useState(false);
   const [managingMembersSpace, setManagingMembersSpace] = useState<AdminSpace | null>(null);
 
@@ -405,6 +410,11 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
     setMembersDialogOpen(true);
   }, []);
 
+  const handleOpenExport = useCallback((space: AdminSpace) => {
+    setExportingSpace(space);
+    setExportDialogOpen(true);
+  }, []);
+
   const handleSettingsOpenChange = useCallback((open: boolean) => {
     setSettingsDialogOpen(open);
     if (!open) {
@@ -416,6 +426,13 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
     setMembersDialogOpen(open);
     if (!open) {
       setManagingMembersSpace(null);
+    }
+  }, []);
+
+  const handleExportOpenChange = useCallback((open: boolean) => {
+    setExportDialogOpen(open);
+    if (!open) {
+      setExportingSpace(null);
     }
   }, []);
 
@@ -743,6 +760,20 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
             onOpenChange={setCreateDialogOpen}
             onCreated={handleSpaceCreated}
           />
+          <AdminSpaceImportDialog
+            open={importDialogOpen}
+            dataGateway={dataGateway}
+            categoryOptions={spaceCategories}
+            defaultVisibility={createDefaultVisibility}
+            onOpenChange={setImportDialogOpen}
+            onImportCompleted={handleSpaceCreated}
+          />
+          <AdminSpaceExportDialog
+            open={exportDialogOpen}
+            space={exportingSpace}
+            dataGateway={dataGateway}
+            onOpenChange={handleExportOpenChange}
+          />
           <AdminSpaceSettingsDialog
             open={settingsDialogOpen}
             space={editingSpace}
@@ -839,6 +870,10 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
                 <Button type="button" disabled={loading || batchActioning} onClick={() => setCreateDialogOpen(true)}>
                   <Plus size={14} />
                   <span>新建空间</span>
+                </Button>
+                <Button type="button" variant="outline" disabled={loading || batchActioning} onClick={() => setImportDialogOpen(true)}>
+                  <UploadCloud size={14} />
+                  <span>导入空间</span>
                 </Button>
               </>
             ) : null}
@@ -1075,6 +1110,13 @@ export function AdminSpacesPage({ dataGateway, mode }: AdminSpacesPageProps) {
                               >
                                 <Settings size={14} className="mr-2" />
                                 <span>空间设置</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={isActioning || isDeleted}
+                                onSelect={() => handleOpenExport(space)}
+                              >
+                                <Download size={14} className="mr-2" />
+                                <span>导出空间</span>
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               {space.status === "banned" ? (

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 )
 
@@ -107,9 +108,8 @@ func FromError(c *gin.Context, err error) {
 		return
 	}
 	slog.ErrorContext(c.Request.Context(), "服务端出现异常", logit.Error("errmsg", err))
-	
-	var mappedErr MappedError
-	if errors.As(err, &mappedErr) {
+
+	if mappedErr, ok := errors.AsType[MappedError](err); ok {
 		Error(c, mappedErr.HTTPStatus(), mappedErr.ErrorCode(), mappedErr.ErrorMessage())
 		return
 	}

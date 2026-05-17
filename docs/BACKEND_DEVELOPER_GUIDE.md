@@ -165,6 +165,7 @@
 | `DB_DRIVER` | `sqlite` | `config.Load()` | `storage.OpenDatabase` | 支持 sqlite/postgres/mysql。 |
 | `DB_DSN` | sqlite 本地 DSN | `config.Load()` | `storage.OpenDatabase` | 数据源连接串。 |
 | `DB_AUTO_MIGRATE` | `true` | `config.Load()` | `main.go` | 启动时是否执行迁移。 |
+| `GORM_LOG_SQL` | `false` | `config.Load()` | `storage.OpenDatabase` | 是否输出 GORM SQL 执行日志；默认关闭，排查数据库问题时显式开启。 |
 | `JWT_SECRET` | `plaindoc-dev-secret` | `config.Load()` | AuthService/JWT | 生产必须替换。 |
 | `JWT_ACCESS_TOKEN_TTL` | `15m` | `config.Load()` | `authHandler`/AuthService | access token TTL。 |
 | `JWT_REFRESH_TOKEN_TTL` | `168h` | `config.Load()` | `authHandler`/AuthService | refresh token TTL。 |
@@ -332,7 +333,25 @@ ONLYOFFICE 一等文档规则：
 
 1. `/api/admin/profile` 的查询、修改昵称、头像上传、修改密码都只要求登录态。
 2. 普通登录用户的个人资料自助更新会继续写入 `audit_logs`，但审计写入对 `profile` / `profile_password` 这类自助场景放行，不再强制操作者必须是管理员。
-3. 除个人资料自助场景外，后台审计仍按管理员身份收口，不能把这个例外扩散到其他管理接口。
+3. 空间导入由业务服务先校验 `space_create` 能力；空间导出先校验 `space_manage`，普通登录用户仅可导出自己拥有的空间或明确可管理的空间。导入导出都会写 `space.import` / `space.export` 审计；审计 metadata 只记录 job、阶段、能力类型和文件名/大小等非敏感信息，禁止写入 token、本地私有路径或敏感配置值，失败错误若包含 token、私有目录或绝对路径必须泛化。
+4. 空间导出下载只能消费一次性 `downloadToken`，并且服务端返回文件前必须校验文件仍位于导出私有目录内，扩展名只能是 `.zip`、`.plaindoc` 或 `.epub`；可导入空间交换包必须使用 `.plaindoc` 后缀。
+5. 普通登录用户在创建空间或导入完成补默认封面时，可以先创建 `space_cover_asset`；真正绑定到空间仍必须通过空间元数据更新校验，且只有纯封面绑定允许空间 owner 自助执行，审计 targetType 使用 `space_cover_binding`。
+6. 除个人资料自助、空间导入/导出、封面资产创建和纯封面绑定场景外，后台审计仍按管理员身份收口，不能把这些例外扩散到其他管理接口。
+
+空间导入导出接口补充约束：
+
+1. 导出入口：`POST /api/admin/spaces/:spaceId/exports` 创建任务，`GET /api/admin/spaces/:spaceId/exports/:jobId/events?token=...` 订阅 SSE，`GET /api/admin/space-exports/:jobId/download?token=...` 消费一次性下载 token。
+2. 导入入口：`POST /api/admin/space-imports/inspect` 上传并解析 `.plaindoc`，`POST /api/admin/space-imports/:importId/commit` 创建新空间导入任务，`GET /api/admin/space-imports/:jobId/events?token=...` 订阅 SSE。
+3. 导出临时文件位于服务端私有 `data/exports/admin-space`，导入 staging 位于 `data/imports/admin-space`；接口不能接受客户端传入的任意本地路径。
+4. SSE token 绑定 actor、空间或导入任务、job，默认短期有效；任务完成、失败或弹层关闭后前端应关闭订阅。
+5. 导出任务已 completed 后才订阅 SSE 时，服务端初始 `completed` 事件要重新签发一次性下载 token，不能重放旧明文 token，也不能只返回文件名。
+6. 导入/导出任务处于 `queued` 或 `running` 时不能因为 SSE stream token 过期而被清理；清理循环只处理终态任务和过期 staging，避免长任务完成事件、下载 token 或回滚状态丢失。
+7. 导入落地创建文档时必须显式使用默认主题 `default`；导入失败后如果回滚新空间也失败，任务仍保留 `restore` 主阶段和原始错误，并附带回滚错误供排查。
+8. 导入 Office 源文件时不能依赖内容嗅探决定 MIME；`docx` 固定写入 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`，`xlsx` 固定写入 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，避免 ZIP 容器被误存为 `application/zip`。
+9. 服务端必须兜底规范化导出选项：`source_zip` 强制包含附件和 Office 源文件，`epub` 强制包含 Office 源文件用于渲染但不导出普通附件。
+10. `.plaindoc` 交换包如果包含空间封面，导入时必须校验封面文件存在、`source` 只能是空值/`user_upload`/`system_generated`，恢复封面资产并绑定新空间；没有封面时由前端导入完成后复用创建空间的浏览器默认封面生成逻辑补齐。
+11. 导入封面对象写入本地 `uploads/space-covers` 后，如果封面资产持久化或新空间创建失败，必须清理已写入的封面对象；若封面资产已落库但新空间创建失败，还必须删除该封面资产记录，避免孤儿文件和孤儿元数据。
+12. `POST /api/admin/space-imports/inspect` 必须在 `FormFile` 或 `ParseMultipartForm` 前用 `http.MaxBytesReader` 限制请求体，避免超大 multipart 在进入 service 体积校验前消耗临时磁盘或 IO；handler 上限要与 `service.MaxAdminSpaceImportUploadBytes` 保持一致，并预留 multipart 元数据开销。
 
 后台壳页的能力摘要由 `/api/admin/me` 返回，前端据此区分：
 
@@ -390,6 +409,15 @@ ONLYOFFICE 一等文档规则：
 1. 阅读渲染缓存实现：`apps/server/internal/pkg/rendercache/rendercache.go`。
 2. 失败策略：`pool.Render` 对“worker 不可用错误”先尝试一次重启再重试。
 3. `reader_page_handler` 里有 fallback HTML，避免读页面完全不可用。
+
+### 7.5 EPUB 导出复用 SSR 的边界
+
+1. EPUB Markdown 章节必须通过阅读页 SSR Worker 渲染，后端提取 `#plaindoc-preview-body` 写入 EPUB。
+2. SSR renderer 未注入或单次渲染失败时，EPUB 导出任务应失败；禁止使用 Go Markdown fallback 静默生成与阅读页不一致的章节。
+3. EPUB 章节应尽量保持阅读页/分享页正文效果一致，但必须移除代码块复制按钮等浏览器交互控件，保留 `<pre><code>` 内容本身。
+4. EPUB 目录必须按空间 `tree` 递归生成，文档节点下的子文档也要导出，并通过 `go-epub.AddSubSection` 保留上下级目录。
+5. `router.go` 仅在 `readerSSRDispatcher` 可用时向 `AdminSpaceExportService` 注入 `AdminSpaceExportSSRReaderHTMLRenderer`。
+6. EPUB 图片资源只允许 `data:image/*` 与 `/uploads/*` 这类可信来源；写入 EPUB 前必须先落到服务端私有临时目录，再交给 `go-epub.AddImage`，任意远程 URL 或本机路径必须降级为 alt 文本。
 
 ---
 

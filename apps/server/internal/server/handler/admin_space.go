@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/logit"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
@@ -657,8 +658,7 @@ func (h *adminSpaceHandler) UpdateMetadata(c *gin.Context) {
 
 	var visibility *models.Visibility
 	if req.Visibility != nil {
-		normalizedVisibility := models.Visibility(strings.ToLower(strings.TrimSpace(*req.Visibility)))
-		visibility = &normalizedVisibility
+		visibility = new(models.Visibility(strings.ToLower(strings.TrimSpace(*req.Visibility))))
 	}
 
 	payload, err := h.adminSpaceService.UpdateMetadata(c.Request.Context(), service.UpdateAdminSpaceMetadataInput{
@@ -852,8 +852,7 @@ func mapAdminSpaceCoverDTOFromPointer(value *service.AdminSpaceCoverAsset) *admi
 	if value == nil {
 		return nil
 	}
-	payload := mapAdminSpaceCoverDTO(*value)
-	return &payload
+	return new(mapAdminSpaceCoverDTO(*value))
 }
 
 func mapAdminSpaceMemberResponse(value service.AdminSpaceMemberRecord) adminSpaceMemberResponse {

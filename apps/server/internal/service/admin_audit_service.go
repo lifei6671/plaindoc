@@ -37,6 +37,8 @@ const (
 	AdminAuditActionCreate AdminAuditAction = "create"
 	AdminAuditActionUpdate AdminAuditAction = "update"
 	AdminAuditActionDelete AdminAuditAction = "delete"
+	AdminAuditActionExport AdminAuditAction = "export"
+	AdminAuditActionImport AdminAuditAction = "import"
 )
 
 var validAdminAuditModules = map[string]struct{}{
@@ -53,6 +55,8 @@ var validAdminAuditActions = map[string]struct{}{
 	string(AdminAuditActionCreate): {},
 	string(AdminAuditActionUpdate): {},
 	string(AdminAuditActionDelete): {},
+	string(AdminAuditActionExport): {},
+	string(AdminAuditActionImport): {},
 }
 
 // RecordAdminAuditInput 写入后台审计日志参数。
@@ -148,7 +152,11 @@ func (s *AdminAuditService) Record(
 	if err != nil {
 		return err
 	}
-	if !isAdmin && !isSelfServiceProfileAudit(actorUserID, input) {
+	if !isAdmin &&
+		!isSelfServiceProfileAudit(actorUserID, input) &&
+		!isSpaceTransferAudit(input) &&
+		!isSpaceCoverAssetAudit(input) &&
+		!isSpaceMetadataAudit(input) {
 		return errcode.ErrAdminForbidden
 	}
 
@@ -220,6 +228,49 @@ func isSelfServiceProfileAudit(actorUserID string, input RecordAdminAuditInput) 
 	default:
 		return false
 	}
+}
+
+// 空间导入/导出可由普通登录用户在具备业务权限时触发，审计落库不再重复要求管理员身份。
+func isSpaceTransferAudit(input RecordAdminAuditInput) bool {
+	if input.Module != AdminAuditModuleSpace {
+		return false
+	}
+	switch AdminAuditAction(strings.ToLower(strings.TrimSpace(string(input.Action)))) {
+	case AdminAuditActionExport, AdminAuditActionImport:
+	default:
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(input.TargetType)) {
+	case "space", "space_import":
+	default:
+		return false
+	}
+	return strings.TrimSpace(input.TargetID) != ""
+}
+
+// 空间封面资产可在创建空间或导入补默认封面前先由普通登录用户生成；
+// 真正绑定到空间仍由空间元数据接口校验空间管理权限。
+func isSpaceCoverAssetAudit(input RecordAdminAuditInput) bool {
+	if input.Module != AdminAuditModuleSpace {
+		return false
+	}
+	if AdminAuditAction(strings.ToLower(strings.TrimSpace(string(input.Action)))) != AdminAuditActionCreate {
+		return false
+	}
+	return strings.ToLower(strings.TrimSpace(input.TargetType)) == "space_cover_asset" &&
+		strings.TrimSpace(input.TargetID) != ""
+}
+
+// 空间 owner 的纯封面绑定会复用 metadata 更新流程，审计使用独立 targetType 收口。
+func isSpaceMetadataAudit(input RecordAdminAuditInput) bool {
+	if input.Module != AdminAuditModuleSpace {
+		return false
+	}
+	if AdminAuditAction(strings.ToLower(strings.TrimSpace(string(input.Action)))) != AdminAuditActionUpdate {
+		return false
+	}
+	return strings.ToLower(strings.TrimSpace(input.TargetType)) == "space_cover_binding" &&
+		strings.TrimSpace(input.TargetID) != ""
 }
 
 // ListAudits 查询后台审计日志。

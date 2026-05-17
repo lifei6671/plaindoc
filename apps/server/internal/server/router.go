@@ -43,7 +43,7 @@ const (
 // 这样做的目的是把“请求处理入口”和“依赖关系拓扑”固定在一个文件，避免路由分散导致权限边界不清、
 // 审计链路遗漏或中间件顺序回归。
 func NewRouter(cfg config.Config, logger *slog.Logger, db *gorm.DB) *gin.Engine {
-	return newRouter(cfg, logger, db, nil)
+	return newRouter(context.Background(), false, cfg, logger, db, nil)
 }
 
 // NewRouterWithSSR 构建并返回启用 SSR 分发器的 HTTP 路由入口。
@@ -53,10 +53,26 @@ func NewRouterWithSSR(
 	db *gorm.DB,
 	readerSSRDispatcher *ssrpool.Dispatcher,
 ) *gin.Engine {
-	return newRouter(cfg, logger, db, readerSSRDispatcher)
+	return newRouter(context.Background(), false, cfg, logger, db, readerSSRDispatcher)
+}
+
+// NewRouterWithSSRAndLifecycle 构建路由，并将后台清理循环绑定到 lifecycleCtx。
+func NewRouterWithSSRAndLifecycle(
+	lifecycleCtx context.Context,
+	cfg config.Config,
+	logger *slog.Logger,
+	db *gorm.DB,
+	readerSSRDispatcher *ssrpool.Dispatcher,
+) *gin.Engine {
+	if lifecycleCtx == nil {
+		lifecycleCtx = context.Background()
+	}
+	return newRouter(lifecycleCtx, true, cfg, logger, db, readerSSRDispatcher)
 }
 
 func newRouter(
+	lifecycleCtx context.Context,
+	startTransferCleanup bool,
 	cfg config.Config,
 	logger *slog.Logger,
 	db *gorm.DB,
@@ -554,6 +570,38 @@ func newRouter(
 			adminAuditService,
 		)
 		adminSpaceHandler := handler.NewAdminSpaceHandler(adminSpaceService, searchIndexService)
+		adminSpaceExportOptions := []service.AdminSpaceExportServiceOption{
+			service.WithAdminSpaceExportRepositories(spaceRepo, workspaceRepo),
+			service.WithAdminSpaceExportAttachmentReader(documentAttachmentRepo),
+			service.WithAdminSpaceExportImageHostingService(imageHostingService),
+			service.WithAdminSpaceExportOfficeHTMLRenderer(officeHTMLRenderService),
+			service.WithAdminSpaceExportAuditRecorder(adminAuditService),
+			service.WithAdminSpaceExportDir(filepath.Join("data", "exports", "admin-space")),
+		}
+		if readerSSRDispatcher != nil {
+			adminSpaceExportOptions = append(
+				adminSpaceExportOptions,
+				service.WithAdminSpaceExportReaderHTMLRenderer(
+					service.NewAdminSpaceExportSSRReaderHTMLRenderer(readerSSRDispatcher, cfg.WebOrigin),
+				),
+			)
+		}
+		adminSpaceExportService := service.NewAdminSpaceExportService(
+			adminAccessService,
+			adminSpaceExportOptions...,
+		)
+		adminSpaceExportHandler := handler.NewAdminSpaceExportHandler(adminSpaceExportService)
+		adminSpaceImportService := service.NewAdminSpaceImportService(
+			adminAccessService,
+			service.WithAdminSpaceImportRepositories(spaceRepo, workspaceRepo, spaceCategoryRepo, documentAttachmentRepo),
+			service.WithAdminSpaceImportBlobStorage("uploads"),
+			service.WithAdminSpaceImportOfficeHTMLRenderer(officeHTMLRenderService),
+			service.WithAdminSpaceImportAuditRecorder(adminAuditService),
+		)
+		if startTransferCleanup {
+			service.StartAdminSpaceTransferCleanupLoop(lifecycleCtx, logger, adminSpaceExportService, adminSpaceImportService)
+		}
+		adminSpaceImportHandler := handler.NewAdminSpaceImportHandler(adminSpaceImportService)
 		adminDocumentService := service.NewAdminDocumentService(
 			documentRepo,
 			userRepo,
@@ -753,7 +801,6 @@ func newRouter(
 			// 空间元数据更新（名称、描述、可见性、分类等）。
 			adminAPI.PATCH(
 				"/spaces/:spaceId/metadata",
-				middleware.RequireSpaceManagement(adminAccessService, "spaceId"),
 				adminSpaceHandler.UpdateMetadata,
 			)
 			// 空间所有权转移属于高风险治理动作，要求 operation token。
@@ -783,6 +830,13 @@ func newRouter(
 				),
 				adminSpaceHandler.DeleteSpace,
 			)
+			// 空间导入导出：权限统一在 service 层按能力判定。
+			adminAPI.POST("/spaces/:spaceId/exports", adminSpaceExportHandler.StartExport)
+			adminAPI.GET("/spaces/:spaceId/exports/:jobId/events", adminSpaceExportHandler.StreamEvents)
+			adminAPI.GET("/space-exports/:jobId/download", adminSpaceExportHandler.Download)
+			adminAPI.POST("/space-imports/inspect", adminSpaceImportHandler.Inspect)
+			adminAPI.POST("/space-imports/:importId/commit", adminSpaceImportHandler.Commit)
+			adminAPI.GET("/space-imports/:jobId/events", adminSpaceImportHandler.StreamEvents)
 
 			// ---- 文档治理 ----
 			adminAPI.GET("/documents", adminDocumentHandler.ListDocuments)

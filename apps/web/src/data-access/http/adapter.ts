@@ -36,9 +36,17 @@ import {
   type AdminSpace,
   type AdminSpaceCategory,
   type AdminSpaceCover,
+  type AdminSpaceExportStartInput,
+  type AdminSpaceExportStartResult,
+  type AdminSpaceImportCommitInput,
+  type AdminSpaceImportInspectResult,
+  type AdminSpaceImportStartResult,
   type AdminSpaceListInput,
   type AdminSpaceListResult,
   type AdminSpaceMember,
+  type AdminSpaceTransferEvent,
+  type AdminSpaceTransferSubscribeInput,
+  type AdminSpaceTransferSubscription,
   type AdminSystemConfig,
   type AdminTheme,
   type AdminUser,
@@ -379,6 +387,48 @@ function normalizeAdminSpaceCover(
   return {
     ...cover,
     url: normalizedUrl
+  };
+}
+
+function subscribeAdminSpaceTransferEvents(
+  streamUrl: string,
+  apiBaseUrl: string,
+  onEvent: (event: AdminSpaceTransferEvent) => void,
+  onError?: (error: Event) => void
+): AdminSpaceTransferSubscription {
+  const url = resolveBackendPublicUrl(streamUrl, apiBaseUrl);
+  const source = new EventSource(url, { withCredentials: true });
+  const handleMessage = (message: MessageEvent<string>) => {
+    if (!message.data) {
+      return;
+    }
+    const payload = JSON.parse(message.data) as AdminSpaceTransferEvent;
+    onEvent(normalizeAdminSpaceTransferEvent(payload, apiBaseUrl));
+  };
+
+  source.onmessage = handleMessage;
+  source.addEventListener("progress", handleMessage as EventListener);
+  source.addEventListener("completed", handleMessage as EventListener);
+  source.addEventListener("failed", handleMessage as EventListener);
+  source.onerror = (event) => {
+    onError?.(event);
+  };
+
+  return {
+    close() {
+      source.close();
+    }
+  };
+}
+
+function normalizeAdminSpaceTransferEvent(event: AdminSpaceTransferEvent, apiBaseUrl: string): AdminSpaceTransferEvent {
+  const downloadUrl = event.downloadUrl?.trim();
+  if (!downloadUrl) {
+    return event;
+  }
+  return {
+    ...event,
+    downloadUrl: resolveBackendPublicUrl(downloadUrl, apiBaseUrl)
   };
 }
 
@@ -1455,6 +1505,52 @@ export function createHttpAdapter(options: HttpAdapterOptions): DataGateway {
           cover: normalizeAdminSpaceCover(space.cover, options.baseUrl)
         }))
       };
+    },
+    async startSpaceExport(input: AdminSpaceExportStartInput): Promise<AdminSpaceExportStartResult> {
+      const targetSpaceID = input.spaceId.trim();
+      if (!targetSpaceID) {
+        throw new Error("空间 ID 不能为空");
+      }
+      return request<AdminSpaceExportStartResult>(`/admin/spaces/${encodeURIComponent(targetSpaceID)}/exports`, {
+        method: "POST",
+        body: JSON.stringify({
+          format: input.format,
+          includeAttachments: input.includeAttachments ?? true,
+          includeOfficeSources: input.includeOfficeSources ?? true
+        })
+      });
+    },
+    subscribeSpaceExport(input: AdminSpaceTransferSubscribeInput) {
+      return subscribeAdminSpaceTransferEvents(input.streamUrl, options.baseUrl, input.onEvent, input.onError);
+    },
+    async inspectSpaceImport(input: { file: File }): Promise<AdminSpaceImportInspectResult> {
+      if (!input.file) {
+        throw new Error("请选择导入 zip 文件");
+      }
+      const formData = new FormData();
+      formData.append("file", input.file);
+      return request<AdminSpaceImportInspectResult>("/admin/space-imports/inspect", {
+        method: "POST",
+        body: formData
+      });
+    },
+    async commitSpaceImport(input: AdminSpaceImportCommitInput): Promise<AdminSpaceImportStartResult> {
+      const importID = input.importId.trim();
+      if (!importID) {
+        throw new Error("导入任务 ID 不能为空");
+      }
+      return request<AdminSpaceImportStartResult>(`/admin/space-imports/${encodeURIComponent(importID)}/commit`, {
+        method: "POST",
+        body: JSON.stringify({
+          spaceName: input.spaceName,
+          spaceId: input.spaceId ?? "",
+          categoryId: input.categoryId ?? "",
+          visibility: input.visibility ?? "member"
+        })
+      });
+    },
+    subscribeSpaceImport(input: AdminSpaceTransferSubscribeInput) {
+      return subscribeAdminSpaceTransferEvents(input.streamUrl, options.baseUrl, input.onEvent, input.onError);
     },
     async updateSpaceStatus(input: { spaceId: string; status: "active" | "banned"; reason?: string }) {
       const targetSpaceID = input.spaceId.trim();

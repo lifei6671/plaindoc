@@ -61,11 +61,40 @@ func TestOfficeHTMLRenderServiceRenderDOCXHTMLUsesMammoth(t *testing.T) {
 	}
 }
 
+func TestOfficeHTMLRenderServiceMaterializesMammothImagesAsDataURLWithoutRepository(t *testing.T) {
+	t.Parallel()
+
+	service := &OfficeHTMLRenderService{}
+	renderedHTML, err := service.materializeMammothImageAssets(
+		context.Background(),
+		OfficeHTMLRenderTask{DocumentID: "doc-1", SpaceID: "space-1"},
+		`<p><img src="mammoth-image:asset-1" alt="图" /></p>`,
+		[]mammothRenderImage{
+			{
+				ID:          "asset-1",
+				ContentType: "image/png",
+				DataBase64:  base64.StdEncoding.EncodeToString([]byte("image-content")),
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("materialize mammoth image assets returned error: %v", err)
+	}
+	if !strings.Contains(renderedHTML, "data:image/png;base64,") {
+		t.Fatalf("expected data URL image, got %q", renderedHTML)
+	}
+	if strings.Contains(renderedHTML, "mammoth-image:asset-1") {
+		t.Fatalf("expected mammoth placeholder to be replaced, got %q", renderedHTML)
+	}
+}
+
 func TestRenderXLSXHTMLRendersTabsAndMergedCells(t *testing.T) {
 	t.Parallel()
 
 	workbook := excelize.NewFile()
-	workbook.SetSheetName("Sheet1", "Summary")
+	if err := workbook.SetSheetName("Sheet1", "Summary"); err != nil {
+		t.Fatalf("rename summary sheet failed: %v", err)
+	}
 	if err := workbook.SetCellValue("Summary", "A1", "Budget"); err != nil {
 		t.Fatalf("set summary A1 failed: %v", err)
 	}
@@ -168,7 +197,9 @@ func TestRenderXLSXHTMLRendersPicturesAndChartWarning(t *testing.T) {
 	t.Parallel()
 
 	workbook := excelize.NewFile()
-	workbook.SetSheetName("Sheet1", "Overview")
+	if err := workbook.SetSheetName("Sheet1", "Overview"); err != nil {
+		t.Fatalf("rename overview sheet failed: %v", err)
+	}
 	if err := workbook.SetCellValue("Overview", "A1", "Name"); err != nil {
 		t.Fatalf("set overview A1 failed: %v", err)
 	}
@@ -247,7 +278,9 @@ func TestRenderXLSXHTMLKeepsChartSheetWithWarning(t *testing.T) {
 	t.Parallel()
 
 	workbook := excelize.NewFile()
-	workbook.SetSheetName("Sheet1", "Data")
+	if err := workbook.SetSheetName("Sheet1", "Data"); err != nil {
+		t.Fatalf("rename data sheet failed: %v", err)
+	}
 	if err := workbook.SetCellValue("Data", "A1", "Month"); err != nil {
 		t.Fatalf("set data A1 failed: %v", err)
 	}

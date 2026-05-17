@@ -33,6 +33,10 @@
    ONLYOFFICE 阅读页本地 HTML 渲染方案：编辑继续走 iframe，阅读/分享按配置切换 ONLYOFFICE 或本地 HTML，并复用 `documents`、`document_image_assets`、`file_blobs` 实现轻量落地。
 4. `READER_IMAGE_VIEWER_TECHNICAL_PLAN.md`
    阅读页图片浏览器方案：支持 `img`、正文 inline SVG 与 Mermaid SVG 的黑色遮罩浮层浏览、切图、缩放、原始尺寸与旋转工具条。
+5. `2026-05-15_SPACE_EXPORT_TECHNICAL_PLAN.md`
+   空间导入导出方案：管理后台支持导出可回灌 zip 空间交换包，也支持 EPUB 阅读包；空间管理上方可导入 zip 后解析元数据、创建新空间并恢复目录、文档、附件与 Office 源文件。
+6. `2026-05-15_SPACE_IMPORT_EXPORT_TASK_CHECKLIST.md`
+   空间导入导出执行清单：按协议骨架、任务 SSE、zip 导出、附件与 Office source、EPUB、导入解析、导入落地、审计清理和测试文档同步拆分，可逐项回写进度。
 
 ---
 

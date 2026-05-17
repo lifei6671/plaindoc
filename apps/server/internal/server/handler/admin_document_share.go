@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/middleware"
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
 	"github.com/lifei6671/plaindoc/apps/server/internal/service"
@@ -235,15 +236,13 @@ func buildUpdateAdminDocumentShareInput(
 		if err := json.Unmarshal(rawMode, &modeText); err != nil {
 			return input, err
 		}
-		modeValue := models.DocumentShareMode(strings.ToLower(strings.TrimSpace(modeText)))
-		input.Mode = &modeValue
+		input.Mode = new(models.DocumentShareMode(strings.ToLower(strings.TrimSpace(modeText))))
 	}
 
 	if rawPassword, ok := rawPayload["password"]; ok {
 		var passwordText *string
 		if string(rawPassword) == "null" {
-			empty := ""
-			passwordText = &empty
+			passwordText = new("")
 		} else {
 			var value string
 			if err := json.Unmarshal(rawPassword, &value); err != nil {

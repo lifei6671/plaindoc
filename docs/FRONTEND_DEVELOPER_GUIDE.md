@@ -415,6 +415,29 @@ ONLYOFFICE 相关字段约束：
 4. 左下角用户徽章也必须跟随 `roles` 动态展示：`platform_admin` 显示平台管理员，`space_admin` 显示空间管理员，普通登录用户显示普通用户。
 5. `AdminProfilePage` 对所有已登录用户可编辑，保存昵称、头像、密码都必须走 `dataGateway.admin`；不要再按管理员角色禁用表单按钮，角色只影响左侧菜单、空间管理页和分享中心行内动作能力。
 
+### 9.1 空间导入导出前端约束
+
+关键文件：
+
+1. `apps/web/src/admin/pages/AdminSpacesPage.tsx`
+2. `apps/web/src/admin/components/AdminSpaceExportDialog.tsx`
+3. `apps/web/src/admin/components/AdminSpaceImportDialog.tsx`
+4. `apps/web/src/data-access/types.ts`
+5. `apps/web/src/data-access/http/adapter.ts`
+
+规则：
+
+1. 空间导入导出只能通过 `dataGateway.admin` 方法访问接口，页面层不得直接 `fetch`。
+2. 导出任务创建后必须订阅 SSE；`completed` 后只展示手动下载按钮，不自动消耗一次性 `downloadToken`。每次点击“下载文件”前都必须用原 `streamUrl` 重新订阅 completed 快照，获取新的短期一次性下载链接后再触发浏览器下载，避免用户在系统下载框取消后复用已消费 token。
+3. SSE 事件中的 `downloadUrl` 必须通过 `data-access/http/adapter.ts` 按 `VITE_API_BASE_URL` 归一化，避免前后端不同 origin 时下载打到前端域名。
+4. EPUB 导出完成态必须使用 `.epub` 文件名；可回灌空间包使用 `.plaindoc`，Markdown 内容归档包使用 `.zip`。完成事件展示和手动下载文件名必须绑定任务启动时的格式，不能被完成后再次切换的选择框状态改写。
+5. 导出弹层右侧说明区必须跟随格式切换，说明用途、包含内容、适合场景和注意事项；PlainDoc 包是空间交换包，Markdown ZIP 是内容归档包，EPUB 是阅读产物。
+6. PlainDoc 包必须锁定“包含附件”和“包含 Office 源文件”为 true；EPUB 只锁定“包含 Office 源文件”，普通附件选项不得强制勾选，因为 EPUB 阅读包不会把普通附件作为空间交换内容导出；Markdown ZIP 允许按需关闭这些选项。
+7. 导入文件选择器只接受 `.plaindoc`；普通 `.zip` 不能作为空间导入包。
+8. 导入完成态必须展示新空间的编辑器与阅读页入口，并刷新空间列表；如果 inspect 返回 `hasCover=false`，前端必须复用创建空间的浏览器默认封面生成逻辑上传并绑定封面。普通导入用户只允许执行纯封面绑定，不能借此更新名称、分类、可见性等其它空间元数据。
+9. 导入或导出任务处于 running/progress 时禁止关闭弹层，避免丢失 completed 事件、下载入口或默认封面补齐；SSE 异常时必须转为 failed 状态并解锁弹层。
+10. 导入或导出弹层关闭、组件卸载、任务完成或失败时必须关闭 SSE subscription，避免事件泄露。
+
 ---
 
 ## 10. 开发、构建、发布（推荐命令）

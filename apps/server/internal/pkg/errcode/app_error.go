@@ -98,8 +98,7 @@ func AsAppError(err error) (*AppError, bool) {
 	if err == nil {
 		return nil, false
 	}
-	var appErr *AppError
-	if errors.As(err, &appErr) {
+	if appErr, ok := errors.AsType[*AppError](err); ok {
 		return appErr, true
 	}
 	return nil, false

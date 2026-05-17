@@ -1,10 +1,16 @@
 package server
 
 import (
+	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -932,6 +938,182 @@ func TestRouter_AdminSpaceListRespectsScope(t *testing.T) {
 	}
 	if !strings.Contains(platformRec.Body.String(), spaceIDA) || !strings.Contains(platformRec.Body.String(), spaceIDB) {
 		t.Fatalf("expected platform_admin list to contain both spaces, body=%s", platformRec.Body.String())
+	}
+}
+
+func TestRouter_AdminSpaceExportStartUsesServicePermission(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+	t.Cleanup(func() {
+		_ = os.RemoveAll("data")
+	})
+
+	ownerUserID, _, ownerToken := registerAccessUser(t, serve, "space-export-owner@example.com")
+	_, _, otherToken := registerAccessUser(t, serve, "space-export-other@example.com")
+	spaceAdminUserID, _, spaceAdminToken := registerAccessUser(t, serve, "space-export-space-admin@example.com")
+	platformAdminUserID, _, platformAdminToken := registerAccessUser(t, serve, "space-export-platform-admin@example.com")
+	grantAdminRole(t, database, spaceAdminUserID, "space_admin")
+	grantAdminRole(t, database, platformAdminUserID, "platform_admin")
+
+	spaceID := "01h1adminspaceexport0000000001"
+	insertAdminTestSpace(t, database, spaceID, "Export Space", ownerUserID, "member")
+
+	cases := []struct {
+		name       string
+		token      string
+		wantStatus int
+	}{
+		{name: "owner", token: ownerToken, wantStatus: http.StatusOK},
+		{name: "other user", token: otherToken, wantStatus: http.StatusForbidden},
+		{name: "space admin without scope", token: spaceAdminToken, wantStatus: http.StatusForbidden},
+		{name: "platform admin", token: platformAdminToken, wantStatus: http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/api/admin/spaces/"+spaceID+"/exports",
+				bytes.NewReader([]byte(`{"format":"source_zip","includeAttachments":true,"includeOfficeSources":true}`)),
+			)
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			req.Header.Set("Content-Type", "application/json")
+			rec := serve(req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d body=%s", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+			if tc.wantStatus == http.StatusOK {
+				payload := decodeJSONResultData[struct {
+					JobID     string `json:"jobId"`
+					StreamURL string `json:"streamUrl"`
+				}](t, rec.Body.Bytes())
+				if strings.TrimSpace(payload.JobID) == "" || !strings.Contains(payload.StreamURL, payload.JobID) {
+					t.Fatalf("expected export job response, got %#v", payload)
+				}
+			}
+		})
+	}
+}
+
+func TestRouter_AdminSpaceImportInspectCommitAllowsLoggedInUser(t *testing.T) {
+	database, serve := setupAuthTestRouter(t)
+	defer func() {
+		_ = database.Close()
+	}()
+	t.Cleanup(func() {
+		_ = os.RemoveAll("data")
+	})
+
+	userID, _, userToken := registerAccessUser(t, serve, "space-import-user@example.com")
+	zipPayload := buildAdminSpaceTransferTestZip(t)
+	body, contentType := buildAdminSpaceTransferMultipart(t, "file", "space.plaindoc", zipPayload)
+
+	inspectReq := httptest.NewRequest(http.MethodPost, "/api/admin/space-imports/inspect", body)
+	inspectReq.Header.Set("Authorization", "Bearer "+userToken)
+	inspectReq.Header.Set("Content-Type", contentType)
+	inspectRec := serve(inspectReq)
+	if inspectRec.Code != http.StatusOK {
+		t.Fatalf("expected inspect status 200, got %d body=%s", inspectRec.Code, inspectRec.Body.String())
+	}
+	inspectPayload := decodeJSONResultData[struct {
+		ImportID   string `json:"importId"`
+		Importable bool   `json:"importable"`
+	}](t, inspectRec.Body.Bytes())
+	if strings.TrimSpace(inspectPayload.ImportID) == "" || !inspectPayload.Importable {
+		t.Fatalf("expected importable inspect payload, got %#v", inspectPayload)
+	}
+
+	commitReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/space-imports/"+inspectPayload.ImportID+"/commit",
+		bytes.NewReader([]byte(`{"spaceName":"导入空间","visibility":"member"}`)),
+	)
+	commitReq.Header.Set("Authorization", "Bearer "+userToken)
+	commitReq.Header.Set("Content-Type", "application/json")
+	commitRec := serve(commitReq)
+	if commitRec.Code != http.StatusOK {
+		t.Fatalf("expected commit status 200, got %d body=%s", commitRec.Code, commitRec.Body.String())
+	}
+	commitPayload := decodeJSONResultData[struct {
+		JobID     string `json:"jobId"`
+		StreamURL string `json:"streamUrl"`
+	}](t, commitRec.Body.Bytes())
+	if strings.TrimSpace(commitPayload.JobID) == "" || !strings.Contains(commitPayload.StreamURL, commitPayload.JobID) {
+		t.Fatalf("expected import job response, got %#v", commitPayload)
+	}
+
+	importedDocumentRestored := false
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var count int64
+		if err := database.ORM.Table("documents").
+			Joins("JOIN nodes ON nodes.node_id = documents.node_id").
+			Joins("JOIN spaces ON spaces.space_id = nodes.space_id").
+			Where("spaces.name = ? AND documents.title = ? AND documents.theme_id = ?", "导入空间", "A", "default").
+			Count(&count).Error; err != nil {
+			t.Fatalf("count imported document failed: %v", err)
+		}
+		if count == 1 {
+			importedDocumentRestored = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !importedDocumentRestored {
+		t.Fatalf("expected imported document to be restored")
+	}
+
+	var importedSpace struct {
+		SpaceID      string  `gorm:"column:space_id"`
+		CoverAssetID *string `gorm:"column:cover_asset_id"`
+	}
+	if err := database.ORM.Table("spaces").
+		Select("space_id, cover_asset_id").
+		Where("name = ? AND owner_user_id = ?", "导入空间", userID).
+		Take(&importedSpace).Error; err != nil {
+		t.Fatalf("read imported space failed: %v", err)
+	}
+	if importedSpace.CoverAssetID != nil && strings.TrimSpace(*importedSpace.CoverAssetID) != "" {
+		t.Fatalf("expected imported test package to start without cover, got %q", *importedSpace.CoverAssetID)
+	}
+
+	coverBody, coverContentType := buildAdminSpaceCoverMultipart(
+		t,
+		map[string]string{
+			"source":          "user_upload",
+			"clientWidth":     "1600",
+			"clientHeight":    "2560",
+			"clientMimeType":  "image/webp",
+			"clientProcessed": "true",
+		},
+		"space-cover.webp",
+		decodeAdminHandlerTestBase64(t, "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEAAQAcJaQAA3AA/vuUAAA="),
+	)
+	coverReq := httptest.NewRequest(http.MethodPost, "/api/admin/spaces/cover-assets", coverBody)
+	coverReq.Header.Set("Authorization", "Bearer "+userToken)
+	coverReq.Header.Set("Content-Type", coverContentType)
+	coverRec := serve(coverReq)
+	if coverRec.Code != http.StatusOK {
+		t.Fatalf("expected normal import user to create cover asset, got %d body=%s", coverRec.Code, coverRec.Body.String())
+	}
+	coverPayload := decodeJSONResultData[struct {
+		AssetID string `json:"assetId"`
+	}](t, coverRec.Body.Bytes())
+	if strings.TrimSpace(coverPayload.AssetID) == "" {
+		t.Fatalf("expected cover asset id, got %#v", coverPayload)
+	}
+
+	updateReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/admin/spaces/"+importedSpace.SpaceID+"/metadata",
+		bytes.NewReader([]byte(`{"coverAssetId":"`+coverPayload.AssetID+`"}`)),
+	)
+	updateReq.Header.Set("Authorization", "Bearer "+userToken)
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := serve(updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected normal import owner to attach cover asset, got %d body=%s", updateRec.Code, updateRec.Body.String())
 	}
 }
 
@@ -4103,5 +4285,154 @@ func insertAdminTestDocument(
 		"updated_at":  now,
 	}).Error; err != nil {
 		t.Fatalf("insert admin test document failed: %v", err)
+	}
+}
+
+func buildAdminSpaceTransferMultipart(
+	t *testing.T,
+	fieldName string,
+	fileName string,
+	payload []byte,
+) (*bytes.Buffer, string) {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		t.Fatalf("create multipart file failed: %v", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		t.Fatalf("write multipart file failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+	return body, writer.FormDataContentType()
+}
+
+func buildAdminSpaceCoverMultipart(
+	t *testing.T,
+	fields map[string]string,
+	fileName string,
+	payload []byte,
+) (*bytes.Buffer, string) {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write multipart field %s failed: %v", key, err)
+		}
+	}
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		t.Fatalf("create multipart cover file failed: %v", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		t.Fatalf("write multipart cover file failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+	return body, writer.FormDataContentType()
+}
+
+func decodeAdminHandlerTestBase64(t *testing.T, value string) []byte {
+	t.Helper()
+
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		t.Fatalf("decode base64 test payload failed: %v", err)
+	}
+	return decoded
+}
+
+func buildAdminSpaceTransferTestZip(t *testing.T) []byte {
+	t.Helper()
+
+	const (
+		prefix     = "space-space-source"
+		documentID = "doc-a"
+		nodeID     = "node-a"
+		content    = "# A"
+	)
+	sum := sha256.Sum256([]byte(content))
+	manifest := map[string]any{
+		"version":     1,
+		"packageType": "plaindoc-space",
+		"exportedAt":  time.Now().UTC().Format(time.RFC3339),
+		"format":      "source_zip",
+		"importable":  true,
+		"space": map[string]any{
+			"spaceId":    "space-source",
+			"name":       "源空间",
+			"visibility": "member",
+		},
+		"summary": map[string]any{
+			"folderCount":       0,
+			"documentCount":     1,
+			"attachmentCount":   0,
+			"officeSourceCount": 0,
+		},
+		"documents": []map[string]any{
+			{
+				"documentId":    documentID,
+				"nodeId":        nodeID,
+				"title":         "A",
+				"format":        "markdown",
+				"sort":          1,
+				"visibility":    "member",
+				"path":          "documents/doc-a.md",
+				"contentSha256": hex.EncodeToString(sum[:]),
+				"attachments":   []string{},
+			},
+		},
+	}
+	tree := map[string]any{
+		"version": 1,
+		"root": []map[string]any{
+			{
+				"nodeId":     nodeID,
+				"documentId": documentID,
+				"type":       "doc",
+				"title":      "A",
+				"sort":       1,
+				"format":     "markdown",
+			},
+		},
+	}
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceTransferTestJSON(t, zipWriter, prefix+"/manifest.json", manifest)
+	writeAdminSpaceTransferTestJSON(t, zipWriter, prefix+"/tree.json", tree)
+	writeAdminSpaceTransferTestFile(t, zipWriter, prefix+"/documents/doc-a.md", []byte(content))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close zip failed: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func writeAdminSpaceTransferTestJSON(t *testing.T, zipWriter *zip.Writer, name string, value any) {
+	t.Helper()
+
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal zip json failed: %v", err)
+	}
+	writeAdminSpaceTransferTestFile(t, zipWriter, name, payload)
+}
+
+func writeAdminSpaceTransferTestFile(t *testing.T, zipWriter *zip.Writer, name string, payload []byte) {
+	t.Helper()
+
+	writer, err := zipWriter.Create(name)
+	if err != nil {
+		t.Fatalf("create zip entry failed: %v", err)
+	}
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatalf("write zip entry failed: %v", err)
 	}
 }

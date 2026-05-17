@@ -154,6 +154,7 @@ bin/
 uploads/
 
 .idea/
+.vscode/
 
 dist/
 dist-ssr/
@@ -162,6 +163,7 @@ dist-ssr/
 
 release/
 apps/server/data/
+apps/server/internal/service/data/
 *.bolt
 
 # Playwright E2E artifacts

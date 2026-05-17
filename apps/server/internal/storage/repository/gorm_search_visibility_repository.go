@@ -296,8 +296,10 @@ func (r *gormSearchVisibilityRepository) baseVisibleDocumentsQuery(
 		Where(qualifiedColumn("s", models.SpaceColumns.Status)+" = ?", models.EntityStatusActive).
 		Where(qualifiedColumn("s", models.SpaceColumns.DeletedAt)+" IS NULL").
 		Where(qualifiedColumn("d", models.DocumentColumns.Status)+" = ?", models.EntityStatusActive).
-		Where(qualifiedColumn("d", models.DocumentColumns.DeletedAt)+" IS NULL").
-		Where(qualifiedColumn("d", models.DocumentColumns.Format)+" = ?", models.DocumentFormatMarkdown)
+		Where(qualifiedColumn("d", models.DocumentColumns.DeletedAt) + " IS NULL")
+	if r.hasDocumentFormatColumn() {
+		query = query.Where(qualifiedColumn("d", models.DocumentColumns.Format)+" = ?", models.DocumentFormatMarkdown)
+	}
 
 	normalizedSpaceID := strings.TrimSpace(spaceID)
 	if normalizedSpaceID != "" {
@@ -309,6 +311,14 @@ func (r *gormSearchVisibilityRepository) baseVisibleDocumentsQuery(
 		}
 	}
 	return applySearchVisibilityMatrixFilter(query, actorUserID)
+}
+
+func (r *gormSearchVisibilityRepository) hasDocumentFormatColumn() bool {
+	if r == nil || r.db == nil {
+		return false
+	}
+	// 兼容旧测试库或迁移前数据：没有 format 列的 documents 只包含 Markdown 文档。
+	return r.db.Migrator().HasColumn(&models.Document{}, models.DocumentColumns.Format)
 }
 
 // applySearchVisibilityMatrixFilter 按检索权限矩阵追加过滤条件。
