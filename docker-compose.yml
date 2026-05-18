@@ -8,10 +8,15 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # 生产部署时建议保持 production，便于启用更严格的配置校验。
       APP_ENV: "production"
       APP_ADDR: ":8080"
+      # 必须改成真实对外访问地址；如果你通过域名、HTTPS 或反向代理访问，
+      # 这里不要保留 localhost，否则会影响 CORS、回调来源和分享/预览链路判断。
       WEB_ORIGIN: "http://localhost:8080"
       WEB_DIST_DIR: "/app/apps/web/dist"
+      # 当前默认使用 SQLite，适合单机/单容器部署。
+      # 如果后续需要多实例、高并发或共享数据库，建议切换到 PostgreSQL/MySQL。
       DB_DRIVER: "sqlite"
       DB_DSN: "file:/app/data/plaindoc.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
       DB_AUTO_MIGRATE: "true"
@@ -19,12 +24,18 @@ services:
       SSR_WORKER_EXEC: "node"
       SSR_WORKER_ENTRY: "/app/apps/web/dist-ssr/worker-entry.js"
       SSR_WORKER_COUNT: "2"
+      # EPUB 导出会复用阅读页 SSR 渲染 Markdown/Office 章节。
+      # 容器环境下 1500ms 对大文档偏紧，这里提高到 15s，避免误报渲染超时。
       SSR_RENDER_TIMEOUT: "15s"
       SSR_WORKER_START_TIMEOUT: "5s"
       SSR_WORKER_MAX_PAYLOAD_BYTES: "2MB"
       SSR_WORKER_MAX_RESPONSE_BYTES: "16MB"
       SSR_PROTOCOL_VERSION: "v1"
+      # 不要在正式环境里把 JWT_SECRET 明文写死在仓库中。
+      # 更推荐改成 JWT_SECRET: "${JWT_SECRET}"，再从部署环境或 .env 注入。
       JWT_SECRET: "01kj4zg1qajeecbj7ez8qn0npzl8m910"
+      # 只信任明确知道的反向代理/网关来源网段，不要为了省事写成 0.0.0.0/0。
+      # 如果前面挂了 Nginx / Traefik / Cloudflare Tunnel，需要按实际代理网段补充。
       GIN_TRUSTED_PROXIES: "172.18.0.0/16,127.0.0.1,::1"
     volumes:
       - plaindoc_data:/app/data

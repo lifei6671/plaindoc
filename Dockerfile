@@ -39,6 +39,9 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/plaindo
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 WORKDIR /app
 
+# 这些是镜像内置的兜底默认值，方便 `docker run` 直接启动。
+# 实际部署时更推荐通过 docker-compose / Kubernetes / 环境变量覆盖，
+# 尤其是 WEB_ORIGIN、数据库连接和 JWT_SECRET 这类环境相关配置。
 ENV APP_ENV=production \
     APP_ADDR=:8080 \
     WEB_ORIGIN=http://localhost:8080 \
