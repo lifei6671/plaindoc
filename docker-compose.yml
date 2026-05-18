@@ -19,11 +19,12 @@ services:
       SSR_WORKER_EXEC: "node"
       SSR_WORKER_ENTRY: "/app/apps/web/dist-ssr/worker-entry.js"
       SSR_WORKER_COUNT: "2"
-      SSR_RENDER_TIMEOUT: "1500ms"
+      SSR_RENDER_TIMEOUT: "15s"
       SSR_WORKER_START_TIMEOUT: "5s"
-      SSR_WORKER_MAX_PAYLOAD_BYTES: "1048576"
+      SSR_WORKER_MAX_PAYLOAD_BYTES: "2MB"
+      SSR_WORKER_MAX_RESPONSE_BYTES: "16MB"
       SSR_PROTOCOL_VERSION: "v1"
-      JWT_SECRET: "01kj4zg1qajeecbj7ez8qn0npzl8m9"
+      JWT_SECRET: "01kj4zg1qajeecbj7ez8qn0npzl8m910"
       GIN_TRUSTED_PROXIES: "172.18.0.0/16,127.0.0.1,::1"
     volumes:
       - plaindoc_data:/app/data
