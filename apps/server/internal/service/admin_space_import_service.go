@@ -200,6 +200,10 @@ type adminSpaceImportOfficeHTMLRenderer interface {
 	Enqueue(ctx context.Context, task OfficeHTMLRenderTask) error
 }
 
+type adminSpaceImportDocumentImageAssetSyncer interface {
+	SyncDocumentImageAssets(ctx context.Context, input SyncDocumentImageAssetsInput) error
+}
+
 // AdminSpaceImportServiceOption 用于按运行环境注入导入落地依赖。
 type AdminSpaceImportServiceOption func(*AdminSpaceImportService)
 
@@ -231,6 +235,15 @@ func WithAdminSpaceImportBlobStorage(localRootDir string) AdminSpaceImportServic
 func WithAdminSpaceImportOfficeHTMLRenderer(renderer adminSpaceImportOfficeHTMLRenderer) AdminSpaceImportServiceOption {
 	return func(s *AdminSpaceImportService) {
 		s.officeHTMLRenderer = renderer
+	}
+}
+
+// WithAdminSpaceImportDocumentImageAssetSyncer 注入 EPUB Markdown 图片引用同步能力。
+func WithAdminSpaceImportDocumentImageAssetSyncer(
+	syncer adminSpaceImportDocumentImageAssetSyncer,
+) AdminSpaceImportServiceOption {
+	return func(s *AdminSpaceImportService) {
+		s.documentImageAssetSyncer = syncer
 	}
 }
 
@@ -269,19 +282,20 @@ func NewAdminSpaceImportStore() *AdminSpaceImportStore {
 
 // AdminSpaceImportService 封装空间导入任务入口。
 type AdminSpaceImportService struct {
-	adminAccessService *AdminAccessService
-	store              *AdminSpaceImportStore
-	spaceWriter        adminSpaceImportSpaceWriter
-	workspaceWriter    adminSpaceImportWorkspaceWriter
-	categoryReader     adminSpaceImportCategoryReader
-	attachmentWriter   adminSpaceImportAttachmentWriter
-	officeHTMLRenderer adminSpaceImportOfficeHTMLRenderer
-	auditRecorder      adminAuditRecorder
-	transferJobRepo    repository.AdminSpaceTransferJobRepository
-	stagingDir         string
-	localBlobRootDir   string
-	nowFn              func() time.Time
-	canImportSpace     func(context.Context, string) (bool, error)
+	adminAccessService       *AdminAccessService
+	store                    *AdminSpaceImportStore
+	spaceWriter              adminSpaceImportSpaceWriter
+	workspaceWriter          adminSpaceImportWorkspaceWriter
+	categoryReader           adminSpaceImportCategoryReader
+	attachmentWriter         adminSpaceImportAttachmentWriter
+	officeHTMLRenderer       adminSpaceImportOfficeHTMLRenderer
+	documentImageAssetSyncer adminSpaceImportDocumentImageAssetSyncer
+	auditRecorder            adminAuditRecorder
+	transferJobRepo          repository.AdminSpaceTransferJobRepository
+	stagingDir               string
+	localBlobRootDir         string
+	nowFn                    func() time.Time
+	canImportSpace           func(context.Context, string) (bool, error)
 }
 
 // NewAdminSpaceImportService 创建空间导入服务。
@@ -1336,6 +1350,23 @@ func (s *AdminSpaceImportService) localizeAdminSpaceEPUBChapterImages(
 	return rewrittenHTML, warnings, createdBlobs, nil
 }
 
+func (s *AdminSpaceImportService) syncImportedEPUBDocumentImageAssets(
+	ctx context.Context,
+	spaceID string,
+	document *models.Document,
+	referencedAt time.Time,
+) error {
+	if s == nil || s.documentImageAssetSyncer == nil || document == nil {
+		return nil
+	}
+	return s.documentImageAssetSyncer.SyncDocumentImageAssets(ctx, SyncDocumentImageAssetsInput{
+		DocumentID:   strings.TrimSpace(document.DocumentID),
+		SpaceID:      strings.TrimSpace(spaceID),
+		ContentMD:    document.ContentMD,
+		ReferencedAt: referencedAt,
+	})
+}
+
 func (s *AdminSpaceImportService) cleanupCreatedImportBlobs(ctx context.Context, blobs []models.DocumentAttachmentBlob) error {
 	if s == nil || s.attachmentWriter == nil {
 		return nil
@@ -2185,6 +2216,7 @@ func (i *adminSpaceEPUBPackageImporter) restoreNode(
 		node.Type = models.NodeTypeDoc
 		document, revision, createdBlobs, warnings, err := i.buildDocument(ctx, planned, nodeID, now)
 		if err != nil {
+			i.createdBlobs = append(i.createdBlobs, createdBlobs...)
 			return err
 		}
 		i.createdBlobs = append(i.createdBlobs, createdBlobs...)
@@ -2205,6 +2237,9 @@ func (i *adminSpaceEPUBPackageImporter) restoreNode(
 			TouchSpace: i.newSpaceID,
 			TouchedAt:  now,
 		}); err != nil {
+			return err
+		}
+		if err := i.service.syncImportedEPUBDocumentImageAssets(ctx, i.newSpaceID, document, now); err != nil {
 			return err
 		}
 		i.markDocumentImported(ctx, planned.Title)

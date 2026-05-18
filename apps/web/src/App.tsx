@@ -46,6 +46,7 @@ import {
   useState,
   type CSSProperties,
   type ChangeEvent,
+  type ComponentProps,
   type ReactNode,
   type PointerEvent as ReactPointerEvent
 } from "react";
@@ -188,6 +189,9 @@ const DEFAULT_ONLY_OFFICE_CLIENT_CONFIG: OnlyOfficeClientConfig = {
   enabled: false
 };
 const MERMAID_PREVIEW_DEFER_THRESHOLD = 1;
+
+type CodeMirrorCreateEditorHandler = NonNullable<ComponentProps<typeof CodeMirror>["onCreateEditor"]>;
+type CodeMirrorCreatedEditorView = Parameters<CodeMirrorCreateEditorHandler>[0];
 
 function isOfficeDocumentFormat(format: DocumentFormat): boolean {
   return format === "docx" || format === "xlsx";
@@ -1178,9 +1182,10 @@ export default function App() {
     });
 
   const handleEditorCreate = useCallback(
-    (view: EditorView) => {
-      editorViewRef.current = view;
-      handleScrollSyncEditorCreate(view);
+    (view: CodeMirrorCreatedEditorView) => {
+      const editorView = view as unknown as EditorView;
+      editorViewRef.current = editorView;
+      handleScrollSyncEditorCreate(editorView);
     },
     [handleScrollSyncEditorCreate]
   );

@@ -242,7 +242,7 @@ input[type="reset"]:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 20px;
 }
 
 .revision-history-dialog-layer__backdrop {
@@ -255,8 +255,11 @@ input[type="reset"]:not(:disabled) {
 .revision-history-dialog {
   position: relative;
   z-index: 1;
-  width: min(960px, calc(100vw - 48px));
-  max-height: min(720px, calc(100vh - 48px));
+  width: min(1320px, calc(100vw - 40px));
+  height: min(880px, calc(100vh - 40px));
+  max-height: calc(100vh - 40px);
+  height: min(880px, calc(100dvh - 40px));
+  max-height: calc(100dvh - 40px);
   border: 1px solid #dbe2ea;
   border-radius: 10px;
   background: #ffffff;
@@ -330,11 +333,11 @@ input[type="reset"]:not(:disabled) {
 }
 
 .revision-history-dialog__body {
-  min-height: 360px;
+  min-height: 0;
   flex: 1;
   padding: 16px;
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
   gap: 16px;
   overflow: hidden;
 }
@@ -497,7 +500,8 @@ input[type="reset"]:not(:disabled) {
 }
 
 .revision-history-dialog__detail-card {
-  max-width: 680px;
+  width: 100%;
+  min-width: 0;
 }
 
 .revision-history-dialog__detail-eyebrow {
@@ -593,8 +597,8 @@ input[type="reset"]:not(:disabled) {
 }
 
 .revision-history-dialog__merge-view {
-  height: min(52vh, 520px);
-  min-height: 320px;
+  height: min(62dvh, 640px);
+  min-height: 360px;
 }
 
 .revision-history-dialog__merge-view .cm-mergeView {
@@ -3822,22 +3826,40 @@ input[type="reset"]:not(:disabled) {
   }
 
   .revision-history-dialog-layer {
-    padding: 12px;
+    padding: 8px;
   }
 
   .revision-history-dialog {
-    width: calc(100vw - 24px);
-    max-height: calc(100vh - 24px);
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
   }
 
   .revision-history-dialog__body {
-    padding: 12px;
+    padding: 10px;
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(220px, 40vh) minmax(240px, 1fr);
+    grid-template-rows: minmax(140px, 28dvh) minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .revision-history-dialog__header {
+    min-height: 58px;
+    padding: 10px 12px;
   }
 
   .revision-history-dialog__detail-card dl {
     grid-template-columns: 1fr;
+  }
+
+  .revision-history-dialog__diff {
+    min-height: 300px;
+  }
+
+  .revision-history-dialog__merge-view {
+    height: 52dvh;
+    min-height: 260px;
   }
 
   .revision-history-dialog__office-grid {

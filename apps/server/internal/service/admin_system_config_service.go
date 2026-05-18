@@ -43,18 +43,20 @@ const (
 	authConfigSecretMask         = "********"
 	emailConfigSecretMask        = "********"
 
-	minDataRetentionScheduleMinutes = 5
-	maxDataRetentionScheduleMinutes = 24 * 60
-	minDataRetentionBatchSize       = 100
-	maxDataRetentionBatchSize       = 20_000
-	minAuditLogRetentionDays        = 1
-	maxAuditLogRetentionDays        = 3650
-	minAuthCaptchaRetentionHours    = 1
-	maxAuthCaptchaRetentionHours    = 24 * 365
-	minAuthRiskStateRetentionDays   = 1
-	maxAuthRiskStateRetentionDays   = 3650
-	minUserSessionRetentionDays     = 1
-	maxUserSessionRetentionDays     = 3650
+	minDataRetentionScheduleMinutes   = 5
+	maxDataRetentionScheduleMinutes   = 24 * 60
+	minDataRetentionBatchSize         = 100
+	maxDataRetentionBatchSize         = 20_000
+	minAuditLogRetentionDays          = 1
+	maxAuditLogRetentionDays          = 3650
+	minAuthCaptchaRetentionHours      = 1
+	maxAuthCaptchaRetentionHours      = 24 * 365
+	minAuthRiskStateRetentionDays     = 1
+	maxAuthRiskStateRetentionDays     = 3650
+	minUserSessionRetentionDays       = 1
+	maxUserSessionRetentionDays       = 3650
+	minDocumentRevisionRetentionCount = 1
+	maxDocumentRevisionRetentionCount = 10000
 )
 
 // AdminSystemConfigRecord 后台系统配置记录。
@@ -693,18 +695,20 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 		result.DeletedUserSessions +
 		result.DeletedDocumentAttachments +
 		result.DeletedAttachmentBlobs +
-		result.DeletedDocumentImageAssets
+		result.DeletedDocumentImageAssets +
+		result.DeletedDocumentRevisions
 
 	detail := map[string]any{
 		"policy": map[string]any{
-			"enabled":                    result.Policy.Enabled,
-			"scheduleMinutes":            result.Policy.ScheduleMinutes,
-			"cleanupBatchSize":           result.Policy.CleanupBatchSize,
-			"cleanupTables":              result.Policy.CleanupTables,
-			"auditLogRetentionDays":      result.Policy.AuditLogRetentionDays,
-			"authCaptchaRetentionHours":  result.Policy.AuthCaptchaRetentionHours,
-			"authRiskStateRetentionDays": result.Policy.AuthRiskStateRetentionDays,
-			"userSessionRetentionDays":   result.Policy.UserSessionRetentionDays,
+			"enabled":                        result.Policy.Enabled,
+			"scheduleMinutes":                result.Policy.ScheduleMinutes,
+			"cleanupBatchSize":               result.Policy.CleanupBatchSize,
+			"cleanupTables":                  result.Policy.CleanupTables,
+			"auditLogRetentionDays":          result.Policy.AuditLogRetentionDays,
+			"authCaptchaRetentionHours":      result.Policy.AuthCaptchaRetentionHours,
+			"authRiskStateRetentionDays":     result.Policy.AuthRiskStateRetentionDays,
+			"userSessionRetentionDays":       result.Policy.UserSessionRetentionDays,
+			"documentRevisionRetentionCount": result.Policy.DocumentRevisionRetentionCount,
 		},
 		"startedAt":                    result.StartedAt,
 		"finishedAt":                   result.FinishedAt,
@@ -715,6 +719,7 @@ func (s *AdminSystemConfigService) recordDataRetentionCleanupAudit(
 		"deletedDocumentAttachments":   result.DeletedDocumentAttachments,
 		"deletedAttachmentBlobs":       result.DeletedAttachmentBlobs,
 		"deletedDocumentImageAssets":   result.DeletedDocumentImageAssets,
+		"deletedDocumentRevisions":     result.DeletedDocumentRevisions,
 		"totalDeleted":                 totalDeleted,
 	}
 
@@ -915,14 +920,15 @@ func validateSecurityConfig(payload map[string]any) error {
 
 func validateDataRetentionConfig(payload map[string]any) error {
 	requiredKeys := map[string]struct{}{
-		"enabled":                    {},
-		"scheduleMinutes":            {},
-		"cleanupBatchSize":           {},
-		"cleanupTables":              {},
-		"auditLogRetentionDays":      {},
-		"authCaptchaRetentionHours":  {},
-		"authRiskStateRetentionDays": {},
-		"userSessionRetentionDays":   {},
+		"enabled":                        {},
+		"scheduleMinutes":                {},
+		"cleanupBatchSize":               {},
+		"cleanupTables":                  {},
+		"auditLogRetentionDays":          {},
+		"authCaptchaRetentionHours":      {},
+		"authRiskStateRetentionDays":     {},
+		"userSessionRetentionDays":       {},
+		"documentRevisionRetentionCount": {},
 	}
 	if err := validateNoUnknownKeys(payload, requiredKeys); err != nil {
 		return err
@@ -1024,6 +1030,19 @@ func validateDataRetentionConfig(payload map[string]any) error {
 			"userSessionRetentionDays must be between %d and %d",
 			minUserSessionRetentionDays,
 			maxUserSessionRetentionDays,
+		)
+	}
+
+	documentRevisionRetentionCount, err := getRequiredInt(payload, "documentRevisionRetentionCount")
+	if err != nil {
+		return err
+	}
+	if documentRevisionRetentionCount < minDocumentRevisionRetentionCount ||
+		documentRevisionRetentionCount > maxDocumentRevisionRetentionCount {
+		return fmt.Errorf(
+			"documentRevisionRetentionCount must be between %d and %d",
+			minDocumentRevisionRetentionCount,
+			maxDocumentRevisionRetentionCount,
 		)
 	}
 	return nil

@@ -65,7 +65,8 @@ type DataRetentionCleanupTable =
   | "auth_risk_states"
   | "user_sessions"
   | "document_attachments"
-  | "document_image_assets";
+  | "document_image_assets"
+  | "document_revisions";
 
 interface SiteSystemConfigValue {
   allowRegistration: boolean;
@@ -146,6 +147,7 @@ interface DataRetentionSystemConfigValue {
   authCaptchaRetentionHours: number;
   authRiskStateRetentionDays: number;
   userSessionRetentionDays: number;
+  documentRevisionRetentionCount: number;
 }
 
 interface AuthProviderLdapConfig {
@@ -566,12 +568,14 @@ const DATA_RETENTION_TEMPLATE: DataRetentionSystemConfigValue = {
     "auth_risk_states",
     "user_sessions",
     "document_attachments",
-    "document_image_assets"
+    "document_image_assets",
+    "document_revisions"
   ],
   auditLogRetentionDays: 180,
   authCaptchaRetentionHours: 72,
   authRiskStateRetentionDays: 30,
-  userSessionRetentionDays: 30
+  userSessionRetentionDays: 30,
+  documentRevisionRetentionCount: 30
 };
 
 const DATA_RETENTION_CLEANUP_TABLE_OPTIONS: Array<{
@@ -608,6 +612,11 @@ const DATA_RETENTION_CLEANUP_TABLE_OPTIONS: Array<{
       value: "document_image_assets",
       label: "document_image_assets",
       description: "文档图片资源（pending_cleanup）"
+    },
+    {
+      value: "document_revisions",
+      label: "document_revisions",
+      description: "文档历史版本，按每个文档保留最近 N 份"
     }
   ];
 
@@ -1051,7 +1060,8 @@ function parseDataRetentionConfig(value: unknown): DataRetentionSystemConfigValu
       item === "auth_risk_states" ||
       item === "user_sessions" ||
       item === "document_attachments" ||
-      item === "document_image_assets"
+      item === "document_image_assets" ||
+      item === "document_revisions"
     );
   const cleanupTables =
     parsedCleanupTables.length > 0
@@ -1084,6 +1094,16 @@ function parseDataRetentionConfig(value: unknown): DataRetentionSystemConfigValu
     userSessionRetentionDays: Math.min(
       3650,
       Math.max(1, parseInteger(payload.userSessionRetentionDays, DATA_RETENTION_TEMPLATE.userSessionRetentionDays))
+    ),
+    documentRevisionRetentionCount: Math.min(
+      10000,
+      Math.max(
+        1,
+        parseInteger(
+          payload.documentRevisionRetentionCount,
+          DATA_RETENTION_TEMPLATE.documentRevisionRetentionCount
+        )
+      )
     )
   };
 }
@@ -1625,7 +1645,8 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
           auditLogRetentionDays: dataRetentionDraft.auditLogRetentionDays,
           authCaptchaRetentionHours: dataRetentionDraft.authCaptchaRetentionHours,
           authRiskStateRetentionDays: dataRetentionDraft.authRiskStateRetentionDays,
-          userSessionRetentionDays: dataRetentionDraft.userSessionRetentionDays
+          userSessionRetentionDays: dataRetentionDraft.userSessionRetentionDays,
+          documentRevisionRetentionCount: dataRetentionDraft.documentRevisionRetentionCount
         };
       case "auth":
         return cloneAuthConfig(authDraft) as unknown as Record<string, unknown>;
@@ -1903,7 +1924,7 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
       const result = await dataGateway.admin.runDataRetentionCleanup();
       if (result.totalDeleted > 0) {
         openToast(
-          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、附件引用 ${result.deletedDocumentAttachments}、附件文件 ${result.deletedAttachmentBlobs}、图片 ${result.deletedDocumentImageAssets}）`,
+          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、附件引用 ${result.deletedDocumentAttachments}、附件文件 ${result.deletedAttachmentBlobs}、图片 ${result.deletedDocumentImageAssets}、历史版本 ${result.deletedDocumentRevisions}）`,
           "success"
         );
       } else {
@@ -3118,6 +3139,31 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                           }}
                           disabled={saving}
                         />
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-semibold tracking-wide text-slate-600">
+                          每文档历史版本保留份数
+                        </span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={10000}
+                          value={String(dataRetentionDraft.documentRevisionRetentionCount)}
+                          onChange={(event) => {
+                            setDataRetentionDraft((previous) => ({
+                              ...previous,
+                              documentRevisionRetentionCount: normalizeIntegerInput(
+                                event.target.value,
+                                previous.documentRevisionRetentionCount
+                              )
+                            }));
+                            markDirty("data-retention");
+                          }}
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-slate-500">
+                          仅在选择 `document_revisions` 时生效；默认每个文档保留最近 30 份历史记录。
+                        </p>
                       </label>
                     </div>
                     <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">

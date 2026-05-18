@@ -1,8 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { createCodeMirrorResolve } from "./vite.codemirror-dedupe";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: createCodeMirrorResolve(),
   define: {
     PACKAGE_VERSION: JSON.stringify("3.2.1")
   },

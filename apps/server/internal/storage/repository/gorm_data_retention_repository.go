@@ -128,6 +128,130 @@ func (r *gormDataRetentionRepository) DeleteUserSessionsBefore(
 	return deleted, nil
 }
 
+func (r *gormDataRetentionRepository) DeleteDocumentRevisionsExceedingKeepCount(
+	ctx context.Context,
+	keepCount int,
+	batchSize int,
+) (int64, error) {
+	if keepCount <= 0 {
+		keepCount = 1
+	}
+	markdownDeleted, err := r.deleteRevisionRowsExceedingKeepCount(
+		ctx,
+		dataRetentionRevisionTableMeta{
+			tableName:        (models.DocumentRevision{}).TableName(),
+			idColumn:         models.DocumentRevisionColumns.ID,
+			documentIDColumn: models.DocumentRevisionColumns.DocumentID,
+			versionColumn:    models.DocumentRevisionColumns.Version,
+			createdAtColumn:  models.DocumentRevisionColumns.CreatedAt,
+		},
+		keepCount,
+		batchSize,
+	)
+	if err != nil {
+		return markdownDeleted, fmt.Errorf("cleanup document_revisions failed: %w", err)
+	}
+	fileDeleted, err := r.deleteRevisionRowsExceedingKeepCount(
+		ctx,
+		dataRetentionRevisionTableMeta{
+			tableName:        (models.DocumentFileRevision{}).TableName(),
+			idColumn:         models.DocumentFileRevisionColumns.ID,
+			documentIDColumn: models.DocumentFileRevisionColumns.DocumentID,
+			versionColumn:    models.DocumentFileRevisionColumns.Version,
+			createdAtColumn:  models.DocumentFileRevisionColumns.CreatedAt,
+		},
+		keepCount,
+		batchSize,
+	)
+	if err != nil {
+		return markdownDeleted + fileDeleted, fmt.Errorf("cleanup document_file_revisions failed: %w", err)
+	}
+	return markdownDeleted + fileDeleted, nil
+}
+
+type dataRetentionRevisionTableMeta struct {
+	tableName        string
+	idColumn         string
+	documentIDColumn string
+	versionColumn    string
+	createdAtColumn  string
+}
+
+func (r *gormDataRetentionRepository) deleteRevisionRowsExceedingKeepCount(
+	ctx context.Context,
+	tableMeta dataRetentionRevisionTableMeta,
+	keepCount int,
+	batchSize int,
+) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("data retention repository db is nil")
+	}
+	if batchSize <= 0 {
+		batchSize = defaultDataRetentionDeleteBatchSize
+	}
+
+	var totalDeleted int64
+	for {
+		ids, err := r.listRevisionRowIDsExceedingKeepCount(ctx, tableMeta, keepCount, batchSize)
+		if err != nil {
+			return totalDeleted, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		deleteTx := r.db.WithContext(ctx).
+			Table(tableMeta.tableName).
+			Where(tableMeta.idColumn+" IN ?", ids).
+			Delete(nil)
+		if deleteTx.Error != nil {
+			return totalDeleted, deleteTx.Error
+		}
+		totalDeleted += deleteTx.RowsAffected
+		if len(ids) < batchSize {
+			break
+		}
+	}
+	return totalDeleted, nil
+}
+
+func (r *gormDataRetentionRepository) listRevisionRowIDsExceedingKeepCount(
+	ctx context.Context,
+	tableMeta dataRetentionRevisionTableMeta,
+	keepCount int,
+	batchSize int,
+) ([]int64, error) {
+	documentIDs := make([]string, 0)
+	if err := r.db.WithContext(ctx).
+		Table(tableMeta.tableName).
+		Distinct(tableMeta.documentIDColumn).
+		Order(tableMeta.documentIDColumn+" ASC").
+		Pluck(tableMeta.documentIDColumn, &documentIDs).Error; err != nil {
+		return nil, err
+	}
+
+	ids := make([]int64, 0, batchSize)
+	for _, documentID := range documentIDs {
+		remaining := batchSize - len(ids)
+		if remaining <= 0 {
+			break
+		}
+		var documentRevisionIDs []int64
+		if err := r.db.WithContext(ctx).
+			Table(tableMeta.tableName).
+			Select(tableMeta.idColumn).
+			Where(tableMeta.documentIDColumn+" = ?", documentID).
+			Order(tableMeta.versionColumn+" DESC, "+tableMeta.createdAtColumn+" DESC, "+tableMeta.idColumn+" DESC").
+			Offset(keepCount).
+			Limit(remaining).
+			Pluck(tableMeta.idColumn, &documentRevisionIDs).Error; err != nil {
+			return nil, err
+		}
+		ids = append(ids, documentRevisionIDs...)
+	}
+	return ids, nil
+}
+
 func (r *gormDataRetentionRepository) deleteRowsByID(
 	ctx context.Context,
 	tableMeta dataRetentionTableMeta,

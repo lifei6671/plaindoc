@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lifei6671/plaindoc/apps/server/internal/server/response"
+	"github.com/lifei6671/plaindoc/apps/server/internal/storage"
 )
 
 func TestRouter_ListDocumentRevisionsReturnsSummariesWithoutContent(t *testing.T) {
@@ -565,16 +566,25 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 	currentRevisionID := "01krestoreofficerev0000002"
 	targetBlobID := "01krestoreofficeblob000001"
 	currentBlobID := "01krestoreofficeblob000002"
+	targetObjectKey := "revisions/target-v1.docx"
+	currentObjectKey := "revisions/current-v2.docx"
 	officeMimeType := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	now := time.Now().UTC()
 
 	seedSpaceAndDocumentForAccess(t, database, ownerUserID, spaceID, nodeID, documentID, "member", "member")
+	remoteSourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", officeMimeType)
+		if _, writeErr := w.Write(buildOfficeTestDOCX(t, []string{"恢复版本正文"})); writeErr != nil {
+			t.Errorf("write remote office source failed: %v", writeErr)
+		}
+	}))
+	defer remoteSourceServer.Close()
 	if err := database.ORM.Table("file_blobs").Create([]map[string]any{
 		{
 			"blob_id":           targetBlobID,
-			"storage_provider":  "local",
-			"object_key":        "uploads/revisions/target-v1.docx",
-			"object_url":        "/uploads/revisions/target-v1.docx",
+			"storage_provider":  "cloudflare-r2",
+			"object_key":        targetObjectKey,
+			"object_url":        remoteSourceServer.URL + "/target-v1.docx",
 			"mime_type":         officeMimeType,
 			"size_bytes":        1024,
 			"content_hash_algo": "sha256",
@@ -585,7 +595,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 		{
 			"blob_id":           currentBlobID,
 			"storage_provider":  "local",
-			"object_key":        "uploads/revisions/current-v2.docx",
+			"object_key":        currentObjectKey,
 			"object_url":        "/uploads/revisions/current-v2.docx",
 			"mime_type":         officeMimeType,
 			"size_bytes":        2048,
@@ -710,11 +720,10 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 	if persistedDoc.Version != 3 || persistedDoc.ContentVersion != 3 ||
 		persistedDoc.SourceBlobID == nil || *persistedDoc.SourceBlobID != targetBlobID ||
 		persistedDoc.SourceFileName == nil || *persistedDoc.SourceFileName != "target-v1.docx" ||
-		persistedDoc.SourceMimeType == nil || *persistedDoc.SourceMimeType != officeMimeType ||
-		persistedDoc.RenderStatus != "pending" ||
-		persistedDoc.RenderedAt != nil {
+		persistedDoc.SourceMimeType == nil || *persistedDoc.SourceMimeType != officeMimeType {
 		t.Fatalf("unexpected restored office document row: %+v", persistedDoc)
 	}
+	waitForOfficeRenderStatus(t, database, documentID, "idle")
 
 	var latestRevision struct {
 		BlobID       string `gorm:"column:blob_id"`
@@ -765,6 +774,30 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 	}
 	if blobCount != 2 {
 		t.Fatalf("restore must reuse existing office blobs, got blob count %d", blobCount)
+	}
+}
+
+func waitForOfficeRenderStatus(t *testing.T, database *storage.Database, documentID string, expectedStatus string) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var documentState struct {
+			RenderStatus string `gorm:"column:render_status"`
+		}
+		if err := database.ORM.Table("documents").
+			Select("render_status").
+			Where("document_id = ?", documentID).
+			Take(&documentState).Error; err != nil {
+			t.Fatalf("query office render status failed: %v", err)
+		}
+		if documentState.RenderStatus == expectedStatus {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting office render status %q, last status=%q", expectedStatus, documentState.RenderStatus)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

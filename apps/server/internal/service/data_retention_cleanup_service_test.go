@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -168,13 +169,14 @@ func TestDataRetentionCleanupService_RunOnce(t *testing.T) {
 	}
 
 	retentionConfigJSON, err := json.Marshal(map[string]any{
-		"enabled":                    true,
-		"scheduleMinutes":            30,
-		"cleanupBatchSize":           200,
-		"auditLogRetentionDays":      30,
-		"authCaptchaRetentionHours":  72,
-		"authRiskStateRetentionDays": 30,
-		"userSessionRetentionDays":   30,
+		"enabled":                        true,
+		"scheduleMinutes":                30,
+		"cleanupBatchSize":               200,
+		"auditLogRetentionDays":          30,
+		"authCaptchaRetentionHours":      72,
+		"authRiskStateRetentionDays":     30,
+		"userSessionRetentionDays":       30,
+		"documentRevisionRetentionCount": 30,
 	})
 	if err != nil {
 		t.Fatalf("marshal retention config failed: %v", err)
@@ -269,6 +271,263 @@ func TestDataRetentionCleanupService_RunOnce(t *testing.T) {
 	}
 }
 
+func TestDataRetentionCleanupService_RunOnce_CleansDocumentRevisionsByKeepCount(t *testing.T) {
+	database, err := storage.OpenDatabase(storage.OpenConfig{
+		Driver: storage.DriverSQLite,
+		DSN:    "file:test-data-retention-cleanup-document-revisions?mode=memory&cache=shared",
+	})
+	if err != nil {
+		t.Fatalf("open database failed: %v", err)
+	}
+	defer func() {
+		_ = database.Close()
+	}()
+
+	ctx := context.Background()
+	if err := storage.MigrateUp(ctx, database.ORM, storage.DriverSQLite); err != nil {
+		t.Fatalf("migrate up failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	ownerUserID := "01hretentionrevisionuser000001"
+	if err := database.ORM.WithContext(ctx).Table("users").Create(map[string]any{
+		"user_id":       ownerUserID,
+		"email":         "retention-revision@example.com",
+		"password_hash": "hashed-password",
+		"name":          "Retention Revision User",
+		"created_at":    now,
+		"updated_at":    now,
+	}).Error; err != nil {
+		t.Fatalf("seed user failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("spaces").Create(map[string]any{
+		"space_id":      "01hretentionrevisionspace001",
+		"name":          "retention revision space",
+		"owner_user_id": ownerUserID,
+		"created_at":    now,
+		"updated_at":    now,
+	}).Error; err != nil {
+		t.Fatalf("seed space failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("nodes").Create([]map[string]any{
+		{
+			"node_id":    "01hretentionrevisionnode001",
+			"space_id":   "01hretentionrevisionspace001",
+			"type":       "doc",
+			"title":      "markdown history",
+			"sort":       1,
+			"created_at": now,
+			"updated_at": now,
+		},
+		{
+			"node_id":    "01hretentionrevisionnode002",
+			"space_id":   "01hretentionrevisionspace001",
+			"type":       "doc",
+			"title":      "short markdown history",
+			"sort":       2,
+			"created_at": now,
+			"updated_at": now,
+		},
+		{
+			"node_id":    "01hretentionrevisionnode003",
+			"space_id":   "01hretentionrevisionspace001",
+			"type":       "doc",
+			"title":      "office history",
+			"sort":       3,
+			"created_at": now,
+			"updated_at": now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed nodes failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("documents").Create([]map[string]any{
+		{
+			"document_id":        "01hretentionrevisiondoc001",
+			"node_id":            "01hretentionrevisionnode001",
+			"theme_id":           "default",
+			"title":              "markdown history",
+			"format":             "markdown",
+			"content_md":         "# current",
+			"version":            35,
+			"content_version":    35,
+			"updated_by_user_id": ownerUserID,
+			"created_at":         now,
+			"updated_at":         now,
+		},
+		{
+			"document_id":        "01hretentionrevisiondoc002",
+			"node_id":            "01hretentionrevisionnode002",
+			"theme_id":           "default",
+			"title":              "short markdown history",
+			"format":             "markdown",
+			"content_md":         "# current",
+			"version":            2,
+			"content_version":    2,
+			"updated_by_user_id": ownerUserID,
+			"created_at":         now,
+			"updated_at":         now,
+		},
+		{
+			"document_id":        "01hretentionrevisiondoc003",
+			"node_id":            "01hretentionrevisionnode003",
+			"theme_id":           "default",
+			"title":              "office history",
+			"format":             "docx",
+			"content_md":         "",
+			"version":            33,
+			"content_version":    33,
+			"updated_by_user_id": ownerUserID,
+			"created_at":         now,
+			"updated_at":         now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed documents failed: %v", err)
+	}
+
+	markdownRevisions := make([]map[string]any, 0, 37)
+	for version := 1; version <= 35; version++ {
+		markdownRevisions = append(markdownRevisions, map[string]any{
+			"document_revision_id": fmt.Sprintf("01hretentionrevisionm%03d", version),
+			"document_id":          "01hretentionrevisiondoc001",
+			"version":              version,
+			"content_md":           fmt.Sprintf("# version %d", version),
+			"base_version":         version - 1,
+			"editor_user_id":       ownerUserID,
+			"source":               "local",
+			"created_at":           now.Add(time.Duration(version) * time.Minute),
+		})
+	}
+	for version := 1; version <= 2; version++ {
+		markdownRevisions = append(markdownRevisions, map[string]any{
+			"document_revision_id": fmt.Sprintf("01hretentionrevisions%03d", version),
+			"document_id":          "01hretentionrevisiondoc002",
+			"version":              version,
+			"content_md":           fmt.Sprintf("# short version %d", version),
+			"base_version":         version - 1,
+			"editor_user_id":       ownerUserID,
+			"source":               "local",
+			"created_at":           now.Add(time.Duration(version) * time.Minute),
+		})
+	}
+	if err := database.ORM.WithContext(ctx).Table("document_revisions").Create(markdownRevisions).Error; err != nil {
+		t.Fatalf("seed markdown revisions failed: %v", err)
+	}
+
+	fileBlobs := make([]map[string]any, 0, 33)
+	fileRevisions := make([]map[string]any, 0, 33)
+	for version := 1; version <= 33; version++ {
+		blobID := fmt.Sprintf("01hretentionrevisionblob%03d", version)
+		fileBlobs = append(fileBlobs, map[string]any{
+			"blob_id":           blobID,
+			"storage_provider":  "local",
+			"object_key":        fmt.Sprintf("revisions/file-%03d.docx", version),
+			"object_url":        fmt.Sprintf("/uploads/revisions/file-%03d.docx", version),
+			"mime_type":         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"size_bytes":        int64(1024 + version),
+			"content_hash_algo": "sha256",
+			"content_hash":      fmt.Sprintf("retention-revision-hash-%03d", version),
+			"created_at":        now.Add(time.Duration(version) * time.Minute),
+			"updated_at":        now.Add(time.Duration(version) * time.Minute),
+		})
+		fileRevisions = append(fileRevisions, map[string]any{
+			"document_file_revision_id": fmt.Sprintf("01hretentionrevisionf%03d", version),
+			"document_id":               "01hretentionrevisiondoc003",
+			"blob_id":                   blobID,
+			"file_name":                 fmt.Sprintf("file-%03d.docx", version),
+			"mime_type":                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"version":                   version,
+			"base_version":              version - 1,
+			"editor_user_id":            ownerUserID,
+			"source":                    "local",
+			"created_at":                now.Add(time.Duration(version) * time.Minute),
+		})
+	}
+	if err := database.ORM.WithContext(ctx).Table("file_blobs").Create(fileBlobs).Error; err != nil {
+		t.Fatalf("seed file blobs failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("document_file_revisions").Create(fileRevisions).Error; err != nil {
+		t.Fatalf("seed office revisions failed: %v", err)
+	}
+
+	retentionConfigJSON, err := json.Marshal(map[string]any{
+		"enabled":                        true,
+		"scheduleMinutes":                30,
+		"cleanupBatchSize":               7,
+		"cleanupTables":                  []string{DataRetentionCleanupTableDocumentRevisions},
+		"auditLogRetentionDays":          30,
+		"authCaptchaRetentionHours":      72,
+		"authRiskStateRetentionDays":     30,
+		"userSessionRetentionDays":       30,
+		"documentRevisionRetentionCount": 30,
+	})
+	if err != nil {
+		t.Fatalf("marshal retention config failed: %v", err)
+	}
+	if err := database.ORM.WithContext(ctx).Table("system_configs").Create(map[string]any{
+		"config_key":         SystemConfigKeyDataRetention,
+		"config_value_json":  string(retentionConfigJSON),
+		"version":            1,
+		"updated_by_user_id": nil,
+		"created_at":         now,
+		"updated_at":         now,
+	}).Error; err != nil {
+		t.Fatalf("seed system config failed: %v", err)
+	}
+
+	cleanupService := NewDataRetentionCleanupService(database.ORM, repository.NewGormSystemConfigRepository(database.ORM))
+	result, err := cleanupService.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("run data retention cleanup failed: %v", err)
+	}
+	if result.DeletedDocumentRevisions != 8 {
+		t.Fatalf("expected deleted document revisions 8, got %d", result.DeletedDocumentRevisions)
+	}
+
+	assertRevisionCount := func(tableName string, documentID string, expectedCount int64) {
+		t.Helper()
+		var count int64
+		if err := database.ORM.WithContext(ctx).Table(tableName).
+			Where("document_id = ?", documentID).
+			Count(&count).Error; err != nil {
+			t.Fatalf("count %s for %s failed: %v", tableName, documentID, err)
+		}
+		if count != expectedCount {
+			t.Fatalf("expected %s for %s count %d, got %d", tableName, documentID, expectedCount, count)
+		}
+	}
+	assertRevisionCount("document_revisions", "01hretentionrevisiondoc001", 30)
+	assertRevisionCount("document_revisions", "01hretentionrevisiondoc002", 2)
+	assertRevisionCount("document_file_revisions", "01hretentionrevisiondoc003", 30)
+
+	var oldestMarkdownCount int64
+	if err := database.ORM.WithContext(ctx).Table("document_revisions").
+		Where("document_id = ? AND version = ?", "01hretentionrevisiondoc001", 1).
+		Count(&oldestMarkdownCount).Error; err != nil {
+		t.Fatalf("count oldest markdown revision failed: %v", err)
+	}
+	if oldestMarkdownCount != 0 {
+		t.Fatalf("expected oldest markdown revision deleted, got count=%d", oldestMarkdownCount)
+	}
+	var latestMarkdownCount int64
+	if err := database.ORM.WithContext(ctx).Table("document_revisions").
+		Where("document_id = ? AND version = ?", "01hretentionrevisiondoc001", 35).
+		Count(&latestMarkdownCount).Error; err != nil {
+		t.Fatalf("count latest markdown revision failed: %v", err)
+	}
+	if latestMarkdownCount != 1 {
+		t.Fatalf("expected latest markdown revision kept, got count=%d", latestMarkdownCount)
+	}
+	var oldestOfficeCount int64
+	if err := database.ORM.WithContext(ctx).Table("document_file_revisions").
+		Where("document_id = ? AND version = ?", "01hretentionrevisiondoc003", 1).
+		Count(&oldestOfficeCount).Error; err != nil {
+		t.Fatalf("count oldest office revision failed: %v", err)
+	}
+	if oldestOfficeCount != 0 {
+		t.Fatalf("expected oldest office revision deleted, got count=%d", oldestOfficeCount)
+	}
+}
+
 func TestDataRetentionCleanupService_RunOnceForced(t *testing.T) {
 	database, err := storage.OpenDatabase(storage.OpenConfig{
 		Driver: storage.DriverSQLite,
@@ -304,13 +563,14 @@ func TestDataRetentionCleanupService_RunOnceForced(t *testing.T) {
 	}
 
 	retentionConfigJSON, err := json.Marshal(map[string]any{
-		"enabled":                    false,
-		"scheduleMinutes":            30,
-		"cleanupBatchSize":           200,
-		"auditLogRetentionDays":      30,
-		"authCaptchaRetentionHours":  72,
-		"authRiskStateRetentionDays": 30,
-		"userSessionRetentionDays":   30,
+		"enabled":                        false,
+		"scheduleMinutes":                30,
+		"cleanupBatchSize":               200,
+		"auditLogRetentionDays":          30,
+		"authCaptchaRetentionHours":      72,
+		"authRiskStateRetentionDays":     30,
+		"userSessionRetentionDays":       30,
+		"documentRevisionRetentionCount": 30,
 	})
 	if err != nil {
 		t.Fatalf("marshal retention config failed: %v", err)
@@ -423,14 +683,15 @@ func TestDataRetentionCleanupService_RunOnce_RespectsCleanupTables(t *testing.T)
 	}
 
 	retentionConfigJSON, err := json.Marshal(map[string]any{
-		"enabled":                    true,
-		"scheduleMinutes":            30,
-		"cleanupBatchSize":           200,
-		"cleanupTables":              []string{DataRetentionCleanupTableAuditLogs},
-		"auditLogRetentionDays":      30,
-		"authCaptchaRetentionHours":  72,
-		"authRiskStateRetentionDays": 30,
-		"userSessionRetentionDays":   30,
+		"enabled":                        true,
+		"scheduleMinutes":                30,
+		"cleanupBatchSize":               200,
+		"cleanupTables":                  []string{DataRetentionCleanupTableAuditLogs},
+		"auditLogRetentionDays":          30,
+		"authCaptchaRetentionHours":      72,
+		"authRiskStateRetentionDays":     30,
+		"userSessionRetentionDays":       30,
+		"documentRevisionRetentionCount": 30,
 	})
 	if err != nil {
 		t.Fatalf("marshal retention config failed: %v", err)

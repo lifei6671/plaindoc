@@ -1643,6 +1643,12 @@ func (h *workspaceHandler) RestoreRevision(c *gin.Context) {
 	if sourceMimeType == "" {
 		sourceMimeType = resolveOnlyOfficeSourceMimeType(currentFormat, nil)
 	}
+	sourceContent, err := h.readOfficeRevisionRestoreSourceContent(c.Request.Context(), sourceBlobID)
+	if err != nil {
+		setRequestErrmsg(c, err, "恢复 Office 历史版本前读取源文件失败")
+		response.InternalError(c)
+		return
+	}
 
 	now := time.Now().UTC()
 	nextVersion := current.Version + 1
@@ -1704,6 +1710,18 @@ func (h *workspaceHandler) RestoreRevision(c *gin.Context) {
 	if h != nil && h.renderCache != nil {
 		// Office 恢复切换了源文件版本，必须失效阅读缓存并等待 HTML 重新渲染。
 		h.renderCache.PurgeDoc(documentID)
+	}
+	if renderErr := h.enqueueOfficeRevisionRestoreRender(c.Request.Context(), officeRevisionRestoreRenderInput{
+		DocumentID:     documentID,
+		SpaceID:        spaceID,
+		Format:         currentFormat,
+		ContentVersion: nextContentVersion,
+		SourceBlobID:   sourceBlobID,
+		SourceContent:  sourceContent,
+	}); renderErr != nil {
+		setRequestErrmsg(c, renderErr, "恢复 Office 历史版本后提交 HTML 渲染任务失败")
+		response.InternalError(c)
+		return
 	}
 	current.Version = nextVersion
 	current.ContentVersion = nextContentVersion

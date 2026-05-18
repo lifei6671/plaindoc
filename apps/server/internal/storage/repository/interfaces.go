@@ -461,6 +461,7 @@ type DataRetentionRepository interface {
 	DeleteAuthCaptchaChallengesBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
 	DeleteAuthRiskStatesBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
 	DeleteUserSessionsBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+	DeleteDocumentRevisionsExceedingKeepCount(ctx context.Context, keepCount int, batchSize int) (int64, error)
 }
 
 // EnqueueSearchIndexJobParams 新增/合并检索索引任务参数。

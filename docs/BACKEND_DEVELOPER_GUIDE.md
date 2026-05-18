@@ -194,6 +194,7 @@
 | `site` | `AuthRegistrationPolicyService` | `validateSiteConfig` | 站点级开关（如注册策略叠加）。 |
 | `image-hosting` | `ImageHostingService.GetConfig` | `validateImageHostingConfig` | 图床 provider 与参数。 |
 | `sitemap` | `SitemapService.GetConfig` | `validateSitemapConfig` | sitemap 生成策略。 |
+| `data-retention` | `DataRetentionCleanupService.ResolvePolicy` | `validateDataRetentionConfig` | 后台数据清理策略：审计/验证码/风控/会话/附件/图片资源，以及文档历史版本保留数量。 |
 | `onlyoffice` | `OnlyOfficeConfigService.GetConfig` | `validateOnlyOfficeConfig` | ONLYOFFICE Docs 开关、Document Server 地址、callback 外链地址、JWT 密钥。 |
 | `homepage.ssr.anonymous_cache` | `HomeService.resolveAnonymousCacheControl` | `validateHomepageAnonymousCacheConfig` | 首页匿名缓存头策略。 |
 | `editor`、`security` | 对应服务按需读取 | 对应 validator | 编辑器与安全策略配置项。 |
@@ -205,6 +206,15 @@
 1. 图片链路读取 `imageUploadPathTemplate`，附件链路读取 `attachmentUploadPathTemplate`。
 2. 历史字段 `uploadPathTemplate` 仅作为兼容输入；归一化时会继续喂给图片模板，并把附件模板自动迁移到 `attachments/` 前缀。
 3. Office 初始化、文档附件上传、Office HTML 渲染落盘都属于附件链路，不能再复用图片模板。
+4. Office 历史版本恢复会重新读取源文件 blob 并提交 HTML 渲染，读取路径必须按 `file_blobs.storage_provider` 分流，不能假设源文件一定在本地 `uploads`。
+
+`data-retention` 额外约束：
+
+1. 默认启用自动清理，默认每 60 分钟执行一次。
+2. `cleanupTables` 支持 `document_revisions`；启用后会清理 Markdown 历史表 `document_revisions` 和 Office 文件历史表 `document_file_revisions`。
+3. `documentRevisionRetentionCount` 默认 `30`，表示每个文档保留最近 30 份历史记录，超过部分按 `version DESC, created_at DESC, id DESC` 保留最新、删除更旧记录。
+4. 默认清理顺序会先裁剪文档历史，再执行 `document_attachments` 的无引用 `file_blobs` 补偿清理，避免 Office 旧历史版本源文件长期残留。
+5. 手动清理入口仍为 `POST /api/admin/system-configs/data-retention/cleanup/run`，必须使用 operation token。
 
 ---
 

@@ -2793,7 +2793,7 @@ func TestRouter_AdminSystemConfig_DataRetentionConfigValidation(t *testing.T) {
 	validReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/data-retention",
-		bytes.NewReader([]byte(`{"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":180,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30,"cleanupTables":["audit_logs","auth_captcha_challenges","auth_risk_states","user_sessions","document_image_assets"]}}`)),
+		bytes.NewReader([]byte(`{"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":180,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30,"documentRevisionRetentionCount":30,"cleanupTables":["audit_logs","auth_captcha_challenges","auth_risk_states","user_sessions","document_image_assets","document_revisions"]}}`)),
 	)
 	validReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	validReq.Header.Set("Content-Type", "application/json")
@@ -2821,7 +2821,7 @@ func TestRouter_AdminSystemConfig_DataRetentionConfigValidation(t *testing.T) {
 	invalidReq := httptest.NewRequest(
 		http.MethodPut,
 		"/api/admin/system-configs/data-retention",
-		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":0,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30,"cleanupTables":["audit_logs","auth_captcha_challenges","auth_risk_states","user_sessions","document_image_assets"]}}`)),
+		bytes.NewReader([]byte(`{"expectedVersion":1,"value":{"enabled":true,"scheduleMinutes":30,"cleanupBatchSize":500,"auditLogRetentionDays":0,"authCaptchaRetentionHours":72,"authRiskStateRetentionDays":30,"userSessionRetentionDays":30,"documentRevisionRetentionCount":30,"cleanupTables":["audit_logs","auth_captcha_challenges","auth_risk_states","user_sessions","document_image_assets","document_revisions"]}}`)),
 	)
 	invalidReq.Header.Set("Authorization", "Bearer "+platformAdminToken)
 	invalidReq.Header.Set("Content-Type", "application/json")
@@ -3000,13 +3000,14 @@ func TestRouter_AdminSystemConfig_RunDataRetentionCleanup(t *testing.T) {
 	}
 
 	retentionConfigJSON, err := json.Marshal(map[string]any{
-		"enabled":                    false,
-		"scheduleMinutes":            30,
-		"cleanupBatchSize":           500,
-		"auditLogRetentionDays":      30,
-		"authCaptchaRetentionHours":  72,
-		"authRiskStateRetentionDays": 30,
-		"userSessionRetentionDays":   30,
+		"enabled":                        false,
+		"scheduleMinutes":                30,
+		"cleanupBatchSize":               500,
+		"auditLogRetentionDays":          30,
+		"authCaptchaRetentionHours":      72,
+		"authRiskStateRetentionDays":     30,
+		"userSessionRetentionDays":       30,
+		"documentRevisionRetentionCount": 30,
 	})
 	if err != nil {
 		t.Fatalf("marshal retention config failed: %v", err)

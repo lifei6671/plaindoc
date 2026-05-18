@@ -194,11 +194,13 @@ func TestAdminSpaceImportService_RestoreEPUBPackageCreatesSpaceTreeDocumentsAndR
 	}
 	spaceRepo := &stubAdminSpaceImportSpaceRepo{}
 	attachmentRepo := &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	imageAssetSyncer := &stubAdminSpaceImportDocumentImageAssetSyncer{}
 	svc := NewAdminSpaceImportService(nil)
 	svc.stagingDir = t.TempDir()
 	svc.workspaceWriter = workspaceRepo
 	svc.spaceWriter = spaceRepo
 	svc.attachmentWriter = attachmentRepo
+	svc.documentImageAssetSyncer = imageAssetSyncer
 	svc.localBlobRootDir = attachmentRepo.localRootDir
 
 	result, err := svc.Inspect(ctx, InspectAdminSpaceImportInput{
@@ -273,6 +275,84 @@ func TestAdminSpaceImportService_RestoreEPUBPackageCreatesSpaceTreeDocumentsAndR
 	}
 	if len(attachmentRepo.blobs) != 1 {
 		t.Fatalf("expected one localized image blob, got %d", len(attachmentRepo.blobs))
+	}
+	imageAssetSyncer.mu.Lock()
+	syncInputs := append([]SyncDocumentImageAssetsInput(nil), imageAssetSyncer.inputs...)
+	imageAssetSyncer.mu.Unlock()
+	if len(syncInputs) != 2 {
+		t.Fatalf("expected image asset sync for both imported EPUB documents, got %#v", syncInputs)
+	}
+	if syncInputs[1].DocumentID != secondChapter.Document.DocumentID ||
+		syncInputs[1].SpaceID != newSpaceID ||
+		!strings.Contains(syncInputs[1].ContentMD, "/uploads/") {
+		t.Fatalf("unexpected image asset sync input for localized chapter: %#v", syncInputs[1])
+	}
+}
+
+func TestAdminSpaceImportService_RestoreEPUBPackageTracksLocalizedBlobsWhenMarkdownConversionFails(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	epubPath := filepath.Join(t.TempDir(), "book.epub")
+	if err := os.WriteFile(epubPath, buildAdminSpaceImportTestEPUB3(t), 0o644); err != nil {
+		t.Fatalf("write epub fixture failed: %v", err)
+	}
+	epubPackage, err := readAdminSpaceEPUBImportPackage(epubPath)
+	if err != nil {
+		t.Fatalf("read epub package failed: %v", err)
+	}
+	defer func() {
+		if closeErr := epubPackage.Close(); closeErr != nil {
+			t.Fatalf("close epub package failed: %v", closeErr)
+		}
+	}()
+	nodeSeq := 0
+	documentSeq := 0
+	plan, _ := planAdminSpaceEPUBImportTree(adminSpaceEPUBPlanInput{
+		OPFRoot:                    epubPackage.OPFRoot,
+		Items:                      epubPackage.NavItems,
+		ChapterHTMLByCanonicalHref: epubPackage.ChapterHTMLByCanonicalHref,
+		NewNodeID: func() string {
+			nodeSeq++
+			return "node-" + strconv.Itoa(nodeSeq)
+		},
+		NewDocumentID: func() string {
+			documentSeq++
+			return "doc-" + strconv.Itoa(documentSeq)
+		},
+	})
+	var imageChapter adminSpaceEPUBPlannedNode
+	parentNodeID := ""
+	if len(plan.Root) >= 2 && len(plan.Root[1].Children) >= 1 {
+		imageChapter = plan.Root[1].Children[0]
+		parentNodeID = plan.Root[1].NodeID
+	}
+	if imageChapter.DocumentID == "" {
+		t.Fatalf("expected EPUB fixture to contain image chapter, plan=%#v", plan.Root)
+	}
+
+	attachmentRepo := &stubAdminSpaceImportAttachmentRepo{localRootDir: t.TempDir()}
+	svc := NewAdminSpaceImportService(nil)
+	svc.workspaceWriter = &stubAdminSpaceImportWorkspaceRepo{}
+	svc.attachmentWriter = attachmentRepo
+	svc.localBlobRootDir = attachmentRepo.localRootDir
+	importer := adminSpaceEPUBPackageImporter{
+		service:        svc,
+		job:            AdminSpaceImportJob{JobID: "job-epub-convert-fail", ActorUserID: "member-user"},
+		pkg:            epubPackage,
+		newSpaceID:     "space-epub-convert-fail",
+		plan:           plan,
+		converter:      failingHTMLMarkdownConverter{err: errors.New("convert failed")},
+		totalDocuments: 1,
+		createdBlobs:   make([]models.DocumentAttachmentBlob, 0),
+	}
+
+	err = importer.restoreNode(ctx, imageChapter, &parentNodeID, 0)
+	if err == nil || !strings.Contains(err.Error(), "convert failed") {
+		t.Fatalf("expected markdown conversion failure, got %v", err)
+	}
+	if len(importer.createdBlobs) != 1 {
+		t.Fatalf("expected localized blob to be tracked for cleanup, got %#v", importer.createdBlobs)
 	}
 }
 
@@ -3039,6 +3119,33 @@ func (r *stubAdminSpaceImportOfficeRenderer) Enqueue(_ context.Context, task Off
 	defer r.mu.Unlock()
 	r.tasks = append(r.tasks, task)
 	return r.enqueueErr
+}
+
+type stubAdminSpaceImportDocumentImageAssetSyncer struct {
+	mu     sync.Mutex
+	inputs []SyncDocumentImageAssetsInput
+	err    error
+}
+
+func (s *stubAdminSpaceImportDocumentImageAssetSyncer) SyncDocumentImageAssets(
+	_ context.Context,
+	input SyncDocumentImageAssetsInput,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inputs = append(s.inputs, input)
+	return s.err
+}
+
+type failingHTMLMarkdownConverter struct {
+	err error
+}
+
+func (c failingHTMLMarkdownConverter) Convert(
+	_ context.Context,
+	_ ConvertHTMLMarkdownInput,
+) (ConvertHTMLMarkdownResult, error) {
+	return ConvertHTMLMarkdownResult{}, c.err
 }
 
 func (r *stubAdminSpaceImportSpaceRepo) SoftDelete(_ context.Context, spaceID string, _ time.Time) (bool, error) {

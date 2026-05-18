@@ -34,6 +34,97 @@ type builtinOfficeTemplate struct {
 	content  []byte
 }
 
+type officeRevisionRestoreRenderInput struct {
+	DocumentID     string
+	SpaceID        string
+	Format         models.DocumentFormat
+	ContentVersion int
+	SourceBlobID   string
+	SourceContent  []byte
+}
+
+func (h *workspaceHandler) readOfficeRevisionRestoreSourceContent(ctx context.Context, sourceBlobID string) ([]byte, error) {
+	if h == nil || h.officeHTMLRenderService == nil {
+		return nil, nil
+	}
+	if h.documentAttachmentRepo == nil {
+		return nil, errors.New("document attachment repository is nil")
+	}
+	blob, err := h.documentAttachmentRepo.GetBlobByBlobID(ctx, strings.TrimSpace(sourceBlobID))
+	if err != nil {
+		return nil, fmt.Errorf("读取 Office 源文件 blob: %w", err)
+	}
+	if blob == nil {
+		return nil, errors.New("Office 源文件 blob 不存在")
+	}
+	provider := service.ImageHostingProvider(strings.ToLower(strings.TrimSpace(blob.StorageProvider)))
+	if provider == "" {
+		provider = service.ImageHostingProviderLocal
+	}
+	switch provider {
+	case service.ImageHostingProviderLocal:
+		return h.readLocalOfficeSourceBlobContent(*blob)
+	case service.ImageHostingProviderCloudflareR2, service.ImageHostingProviderAliyunOSS:
+		return h.readRemoteOfficeSourceBlobContent(ctx, *blob)
+	default:
+		return nil, fmt.Errorf("Office 源文件 blob 存储类型 %q 暂不支持读取", blob.StorageProvider)
+	}
+}
+
+func (h *workspaceHandler) enqueueOfficeRevisionRestoreRender(
+	ctx context.Context,
+	input officeRevisionRestoreRenderInput,
+) error {
+	if h == nil || h.officeHTMLRenderService == nil {
+		return nil
+	}
+	return h.officeHTMLRenderService.Enqueue(ctx, service.OfficeHTMLRenderTask{
+		DocumentID:     input.DocumentID,
+		SpaceID:        input.SpaceID,
+		Format:         input.Format,
+		ContentVersion: input.ContentVersion,
+		SourceBlobID:   input.SourceBlobID,
+		SourceContent:  input.SourceContent,
+	})
+}
+
+func (h *workspaceHandler) readLocalOfficeSourceBlobContent(blob models.DocumentAttachmentBlob) ([]byte, error) {
+	if service.ImageHostingProvider(strings.TrimSpace(blob.StorageProvider)) != service.ImageHostingProviderLocal {
+		return nil, fmt.Errorf("Office 源文件 blob 存储类型 %q 暂不支持本地读取", blob.StorageProvider)
+	}
+	targetPath, err := h.resolveLocalAttachmentTargetPath(blob.ObjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("解析 Office 源文件路径: %w", err)
+	}
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 Office 源文件: %w", err)
+	}
+	if len(content) == 0 {
+		return nil, errors.New("Office 源文件为空")
+	}
+	return content, nil
+}
+
+func (h *workspaceHandler) readRemoteOfficeSourceBlobContent(
+	ctx context.Context,
+	blob models.DocumentAttachmentBlob,
+) ([]byte, error) {
+	fileName := filepath.Base(filepath.FromSlash(strings.TrimSpace(blob.ObjectKey)))
+	if fileName == "." || fileName == string(filepath.Separator) {
+		fileName = "office-source"
+	}
+	rawURL, err := h.resolveOnlyOfficeBlobDownloadURL(ctx, blob, fileName)
+	if err != nil {
+		return nil, fmt.Errorf("生成 Office 源文件远端读取链接: %w", err)
+	}
+	content, err := h.downloadOnlyOfficeCallbackFile(ctx, rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("读取 Office 源文件远端内容: %w", err)
+	}
+	return content, nil
+}
+
 func resolveCreateNodeDocumentFormat(rawFormat *models.DocumentFormat) (models.DocumentFormat, error) {
 	if rawFormat == nil {
 		return models.DocumentFormatMarkdown, nil

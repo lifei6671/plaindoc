@@ -1115,6 +1115,7 @@ export interface AdminDataRetentionCleanupPolicy {
   authCaptchaRetentionHours: number;
   authRiskStateRetentionDays: number;
   userSessionRetentionDays: number;
+  documentRevisionRetentionCount: number;
 }
 
 export interface AdminDataRetentionCleanupResult {
@@ -1128,6 +1129,7 @@ export interface AdminDataRetentionCleanupResult {
   deletedDocumentAttachments: number;
   deletedAttachmentBlobs: number;
   deletedDocumentImageAssets: number;
+  deletedDocumentRevisions: number;
   totalDeleted: number;
 }
 

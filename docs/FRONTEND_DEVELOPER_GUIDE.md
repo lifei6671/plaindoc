@@ -63,6 +63,10 @@
    - 阅读页 SSR 异步脚本内部的同源 HTML 抓取
    以上例外必须有注释说明原因与边界。
 7. 前端UI组件需要考虑复用性和可维护下。适当的对UI组件进行抽象。
+8. CodeMirror 6 依赖 `instanceof` 判断扩展类型，必须保持核心包单实例解析：
+   - 直接 import 的 `@codemirror/*` 包必须写入 `apps/web/package.json`。
+   - 新增核心扩展包时同步检查 `apps/web/vite.codemirror-dedupe.ts`。
+   - 调试编辑器扩展异常时先执行 `npm ls @codemirror/state @codemirror/view -w @plaindoc/web`，确认没有多版本或重复实例。
 
 ### 2.2 强制代码规范（预览与阅读 SSR）
 
@@ -87,13 +91,14 @@
 4. `apps/web/src/data-access/http/adapter.ts`（请求、鉴权、冲突、错误模型）
 5. `apps/web/vite.config.ts`（客户端构建与开发代理）
 6. `apps/web/vite.ssr.config.ts`（SSR Worker 构建配置）
-7. `apps/web/src/ssr/worker-entry.ts`（Worker 协议入口）
-8. `apps/web/src/ssr/render-space-reader.tsx`（阅读页 SSR HTML 生成）
-9. `apps/web/src/ssr/render-space-reader.async-script.ts`（阅读页异步增强脚本）
-10. `apps/web/src/ssr/reader-mermaid-runtime.js`（阅读页 Mermaid 浏览器端渲染）
-11. `apps/web/src/ssr/ReaderImageViewerShell.tsx`（阅读页图片浏览器壳层组件）
-12. `apps/web/src/ssr/reader-image-viewer-runtime.js`（阅读页图片浏览器独立运行时）
-13. `apps/web/scripts/check-dropdown-menu-modal.mjs`（DropdownMenu 规范门禁）
+7. `apps/web/vite.codemirror-dedupe.ts`（CodeMirror singleton 依赖收敛配置）
+8. `apps/web/src/ssr/worker-entry.ts`（Worker 协议入口）
+9. `apps/web/src/ssr/render-space-reader.tsx`（阅读页 SSR HTML 生成）
+10. `apps/web/src/ssr/render-space-reader.async-script.ts`（阅读页异步增强脚本）
+11. `apps/web/src/ssr/reader-mermaid-runtime.js`（阅读页 Mermaid 浏览器端渲染）
+12. `apps/web/src/ssr/ReaderImageViewerShell.tsx`（阅读页图片浏览器壳层组件）
+13. `apps/web/src/ssr/reader-image-viewer-runtime.js`（阅读页图片浏览器独立运行时）
+14. `apps/web/scripts/check-dropdown-menu-modal.mjs`（DropdownMenu 规范门禁）
 
 目录职责：
 
@@ -167,6 +172,12 @@
 2. 认证协议：`AuthLoginInput`、`AuthSession`、`AuthLoginOptions`。
 3. 后台协议：`AdminIdentity`、`AdminUser`、`AdminSpace`、`AdminDocument`、`AdminTheme`、`AdminSystemConfig`、`AdminAudit*`。
 4. 错误模型：`ConflictError`（文档/配置版本冲突）。
+
+后台系统配置页约定：
+
+1. `data-retention` 的前端草稿结构在 `AdminSystemConfigsPage.tsx` 中维护，保存字段必须与后端 `validateDataRetentionConfig` 保持一致。
+2. 文档历史版本清理使用 `cleanupTables` 中的 `document_revisions` 开关，以及 `documentRevisionRetentionCount` 数值；默认每个文档保留最近 30 份历史记录。
+3. 立即清理按钮调用 `DataGateway.admin.runDataRetentionCleanup()`，结果提示需展示 `deletedDocumentRevisions`，避免管理员误判历史版本清理未执行。
 
 后台壳页能力模型约定：
 

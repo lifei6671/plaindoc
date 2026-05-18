@@ -40,14 +40,15 @@ type testAdminEmailSendRequest struct {
 }
 
 type dataRetentionCleanupPolicyResponse struct {
-	Enabled                    bool     `json:"enabled"`
-	ScheduleMinutes            int      `json:"scheduleMinutes"`
-	CleanupBatchSize           int      `json:"cleanupBatchSize"`
-	CleanupTables              []string `json:"cleanupTables"`
-	AuditLogRetentionDays      int      `json:"auditLogRetentionDays"`
-	AuthCaptchaRetentionHours  int      `json:"authCaptchaRetentionHours"`
-	AuthRiskStateRetentionDays int      `json:"authRiskStateRetentionDays"`
-	UserSessionRetentionDays   int      `json:"userSessionRetentionDays"`
+	Enabled                        bool     `json:"enabled"`
+	ScheduleMinutes                int      `json:"scheduleMinutes"`
+	CleanupBatchSize               int      `json:"cleanupBatchSize"`
+	CleanupTables                  []string `json:"cleanupTables"`
+	AuditLogRetentionDays          int      `json:"auditLogRetentionDays"`
+	AuthCaptchaRetentionHours      int      `json:"authCaptchaRetentionHours"`
+	AuthRiskStateRetentionDays     int      `json:"authRiskStateRetentionDays"`
+	UserSessionRetentionDays       int      `json:"userSessionRetentionDays"`
+	DocumentRevisionRetentionCount int      `json:"documentRevisionRetentionCount"`
 }
 
 type runDataRetentionCleanupResponse struct {
@@ -61,6 +62,7 @@ type runDataRetentionCleanupResponse struct {
 	DeletedDocumentAttachments   int64                              `json:"deletedDocumentAttachments"`
 	DeletedAttachmentBlobs       int64                              `json:"deletedAttachmentBlobs"`
 	DeletedDocumentImageAssets   int64                              `json:"deletedDocumentImageAssets"`
+	DeletedDocumentRevisions     int64                              `json:"deletedDocumentRevisions"`
 	TotalDeleted                 int64                              `json:"totalDeleted"`
 }
 
@@ -370,18 +372,20 @@ func mapRunDataRetentionCleanupResponse(
 		value.DeletedUserSessions +
 		value.DeletedDocumentAttachments +
 		value.DeletedAttachmentBlobs +
-		value.DeletedDocumentImageAssets
+		value.DeletedDocumentImageAssets +
+		value.DeletedDocumentRevisions
 
 	return runDataRetentionCleanupResponse{
 		Policy: dataRetentionCleanupPolicyResponse{
-			Enabled:                    value.Policy.Enabled,
-			ScheduleMinutes:            value.Policy.ScheduleMinutes,
-			CleanupBatchSize:           value.Policy.CleanupBatchSize,
-			CleanupTables:              append([]string(nil), value.Policy.CleanupTables...),
-			AuditLogRetentionDays:      value.Policy.AuditLogRetentionDays,
-			AuthCaptchaRetentionHours:  value.Policy.AuthCaptchaRetentionHours,
-			AuthRiskStateRetentionDays: value.Policy.AuthRiskStateRetentionDays,
-			UserSessionRetentionDays:   value.Policy.UserSessionRetentionDays,
+			Enabled:                        value.Policy.Enabled,
+			ScheduleMinutes:                value.Policy.ScheduleMinutes,
+			CleanupBatchSize:               value.Policy.CleanupBatchSize,
+			CleanupTables:                  append([]string(nil), value.Policy.CleanupTables...),
+			AuditLogRetentionDays:          value.Policy.AuditLogRetentionDays,
+			AuthCaptchaRetentionHours:      value.Policy.AuthCaptchaRetentionHours,
+			AuthRiskStateRetentionDays:     value.Policy.AuthRiskStateRetentionDays,
+			UserSessionRetentionDays:       value.Policy.UserSessionRetentionDays,
+			DocumentRevisionRetentionCount: value.Policy.DocumentRevisionRetentionCount,
 		},
 		StartedAt:                    value.StartedAt,
 		FinishedAt:                   value.FinishedAt,
@@ -392,6 +396,7 @@ func mapRunDataRetentionCleanupResponse(
 		DeletedDocumentAttachments:   value.DeletedDocumentAttachments,
 		DeletedAttachmentBlobs:       value.DeletedAttachmentBlobs,
 		DeletedDocumentImageAssets:   value.DeletedDocumentImageAssets,
+		DeletedDocumentRevisions:     value.DeletedDocumentRevisions,
 		TotalDeleted:                 totalDeleted,
 	}
 }

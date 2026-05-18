@@ -21,6 +21,7 @@ const (
 	defaultAuthCaptchaRetentionHours            = 72
 	defaultAuthRiskStateRetentionDays           = 30
 	defaultUserSessionRetentionDays             = 30
+	defaultDocumentRevisionRetentionCount       = 30
 	defaultDataRetentionRetryIntervalWhenFailed = 10 * time.Minute
 )
 
@@ -31,6 +32,7 @@ const (
 	DataRetentionCleanupTableUserSessions          = "user_sessions"
 	DataRetentionCleanupTableDocumentAttachments   = "document_attachments"
 	DataRetentionCleanupTableDocumentImageAssets   = "document_image_assets"
+	DataRetentionCleanupTableDocumentRevisions     = "document_revisions"
 )
 
 var defaultDataRetentionCleanupTables = []string{
@@ -40,18 +42,20 @@ var defaultDataRetentionCleanupTables = []string{
 	DataRetentionCleanupTableUserSessions,
 	DataRetentionCleanupTableDocumentAttachments,
 	DataRetentionCleanupTableDocumentImageAssets,
+	DataRetentionCleanupTableDocumentRevisions,
 }
 
 // DataRetentionPolicy 描述数据清理策略。
 type DataRetentionPolicy struct {
-	Enabled                    bool
-	ScheduleMinutes            int
-	CleanupBatchSize           int
-	CleanupTables              []string
-	AuditLogRetentionDays      int
-	AuthCaptchaRetentionHours  int
-	AuthRiskStateRetentionDays int
-	UserSessionRetentionDays   int
+	Enabled                        bool
+	ScheduleMinutes                int
+	CleanupBatchSize               int
+	CleanupTables                  []string
+	AuditLogRetentionDays          int
+	AuthCaptchaRetentionHours      int
+	AuthRiskStateRetentionDays     int
+	UserSessionRetentionDays       int
+	DocumentRevisionRetentionCount int
 }
 
 // DataRetentionCleanupResult 描述一次清理执行结果。
@@ -66,17 +70,19 @@ type DataRetentionCleanupResult struct {
 	DeletedDocumentAttachments   int64
 	DeletedAttachmentBlobs       int64
 	DeletedDocumentImageAssets   int64
+	DeletedDocumentRevisions     int64
 }
 
 type dataRetentionPolicyPayload struct {
-	Enabled                    *bool    `json:"enabled"`
-	ScheduleMinutes            *int     `json:"scheduleMinutes"`
-	CleanupBatchSize           *int     `json:"cleanupBatchSize"`
-	CleanupTables              []string `json:"cleanupTables"`
-	AuditLogRetentionDays      *int     `json:"auditLogRetentionDays"`
-	AuthCaptchaRetentionHours  *int     `json:"authCaptchaRetentionHours"`
-	AuthRiskStateRetentionDays *int     `json:"authRiskStateRetentionDays"`
-	UserSessionRetentionDays   *int     `json:"userSessionRetentionDays"`
+	Enabled                        *bool    `json:"enabled"`
+	ScheduleMinutes                *int     `json:"scheduleMinutes"`
+	CleanupBatchSize               *int     `json:"cleanupBatchSize"`
+	CleanupTables                  []string `json:"cleanupTables"`
+	AuditLogRetentionDays          *int     `json:"auditLogRetentionDays"`
+	AuthCaptchaRetentionHours      *int     `json:"authCaptchaRetentionHours"`
+	AuthRiskStateRetentionDays     *int     `json:"authRiskStateRetentionDays"`
+	UserSessionRetentionDays       *int     `json:"userSessionRetentionDays"`
+	DocumentRevisionRetentionCount *int     `json:"documentRevisionRetentionCount"`
 }
 
 // DataRetentionCleanupService 负责按策略清理持续增长的审计和临时数据。
@@ -167,6 +173,16 @@ func (s *DataRetentionCleanupService) runOnce(
 			return result, err
 		}
 	}
+	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentRevisions) {
+		result.DeletedDocumentRevisions, err = s.cleanupDocumentRevisions(
+			ctx,
+			result.Policy.DocumentRevisionRetentionCount,
+			result.Policy.CleanupBatchSize,
+		)
+		if err != nil {
+			return result, err
+		}
+	}
 	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentAttachments) {
 		result.DeletedDocumentAttachments, result.DeletedAttachmentBlobs, err = s.cleanupDocumentAttachments(ctx, result.Policy.CleanupBatchSize)
 		if err != nil {
@@ -223,14 +239,15 @@ func ResolveCleanupRetryInterval() time.Duration {
 
 func defaultDataRetentionPolicy() DataRetentionPolicy {
 	return DataRetentionPolicy{
-		Enabled:                    defaultDataRetentionEnabled,
-		ScheduleMinutes:            defaultDataRetentionScheduleMinutes,
-		CleanupBatchSize:           defaultDataRetentionBatchSize,
-		CleanupTables:              append([]string(nil), defaultDataRetentionCleanupTables...),
-		AuditLogRetentionDays:      defaultAuditLogRetentionDays,
-		AuthCaptchaRetentionHours:  defaultAuthCaptchaRetentionHours,
-		AuthRiskStateRetentionDays: defaultAuthRiskStateRetentionDays,
-		UserSessionRetentionDays:   defaultUserSessionRetentionDays,
+		Enabled:                        defaultDataRetentionEnabled,
+		ScheduleMinutes:                defaultDataRetentionScheduleMinutes,
+		CleanupBatchSize:               defaultDataRetentionBatchSize,
+		CleanupTables:                  append([]string(nil), defaultDataRetentionCleanupTables...),
+		AuditLogRetentionDays:          defaultAuditLogRetentionDays,
+		AuthCaptchaRetentionHours:      defaultAuthCaptchaRetentionHours,
+		AuthRiskStateRetentionDays:     defaultAuthRiskStateRetentionDays,
+		UserSessionRetentionDays:       defaultUserSessionRetentionDays,
+		DocumentRevisionRetentionCount: defaultDocumentRevisionRetentionCount,
 	}
 }
 
@@ -261,6 +278,9 @@ func patchDataRetentionPolicy(policy *DataRetentionPolicy, patch dataRetentionPo
 	}
 	if patch.UserSessionRetentionDays != nil {
 		policy.UserSessionRetentionDays = *patch.UserSessionRetentionDays
+	}
+	if patch.DocumentRevisionRetentionCount != nil {
+		policy.DocumentRevisionRetentionCount = *patch.DocumentRevisionRetentionCount
 	}
 }
 
@@ -302,6 +322,11 @@ func normalizeDataRetentionPolicy(policy *DataRetentionPolicy) {
 		minUserSessionRetentionDays,
 		maxUserSessionRetentionDays,
 	)
+	policy.DocumentRevisionRetentionCount = clampRetentionInt(
+		policy.DocumentRevisionRetentionCount,
+		minDocumentRevisionRetentionCount,
+		maxDocumentRevisionRetentionCount,
+	)
 }
 
 func clampRetentionInt(value int, minValue int, maxValue int) int {
@@ -339,7 +364,8 @@ func isSupportedDataRetentionCleanupTable(table string) bool {
 		DataRetentionCleanupTableAuthRiskStates,
 		DataRetentionCleanupTableUserSessions,
 		DataRetentionCleanupTableDocumentAttachments,
-		DataRetentionCleanupTableDocumentImageAssets:
+		DataRetentionCleanupTableDocumentImageAssets,
+		DataRetentionCleanupTableDocumentRevisions:
 		return true
 	default:
 		return false
@@ -429,4 +455,19 @@ func (s *DataRetentionCleanupService) cleanupDocumentAttachments(
 		return result.DeletedAttachments, result.DeletedBlobs, fmt.Errorf("cleanup document_attachments failed: %w", err)
 	}
 	return result.DeletedAttachments, result.DeletedBlobs, nil
+}
+
+func (s *DataRetentionCleanupService) cleanupDocumentRevisions(
+	ctx context.Context,
+	keepCount int,
+	batchSize int,
+) (int64, error) {
+	if s == nil || s.dataRetentionRepo == nil {
+		return 0, errors.New("data retention cleanup repository is nil")
+	}
+	deleted, err := s.dataRetentionRepo.DeleteDocumentRevisionsExceedingKeepCount(ctx, keepCount, batchSize)
+	if err != nil {
+		return deleted, fmt.Errorf("cleanup document_revisions failed: %w", err)
+	}
+	return deleted, nil
 }

@@ -675,7 +675,7 @@ describe("AdminSpacesPage", () => {
     expect(screen.getByText("45%")).toBeInTheDocument();
   });
 
-  it("marks an export task as failed when the event stream errors", async () => {
+  it("keeps an export task running when the event stream errors", async () => {
     let exportSubscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
     const closeExport = vi.fn();
     const listSpaces = vi.fn().mockResolvedValue({
@@ -743,7 +743,8 @@ describe("AdminSpacesPage", () => {
 
     await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     expect(closeExport).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("失败")).toBeInTheDocument();
+    expect(screen.getByText("45%")).toBeInTheDocument();
+    expect(screen.queryByText("失败")).toBeNull();
   });
 
   it("refreshes the list after import completion and exposes editor and reader shortcuts", async () => {
@@ -940,7 +941,7 @@ describe("AdminSpacesPage", () => {
     expect(screen.getByText("42%")).toBeInTheDocument();
   });
 
-  it("marks an import task as failed when the event stream errors", async () => {
+  it("keeps an import task running when the event stream errors", async () => {
     let importSubscriptionInput: AdminSpaceTransferSubscribeInput | null = null;
     const closeImport = vi.fn();
     const listSpaces = vi.fn().mockResolvedValue({
@@ -1025,7 +1026,8 @@ describe("AdminSpacesPage", () => {
 
     await user.click(screen.getByRole("button", { name: "展开任务中心" }));
     expect(closeImport).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("失败")).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.queryByText("失败")).toBeNull();
   });
 
   it("inspects a selected PlainDoc package and shows the import preview", async () => {

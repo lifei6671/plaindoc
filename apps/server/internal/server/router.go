@@ -602,6 +602,7 @@ func newRouter(
 			service.WithAdminSpaceImportRepositories(spaceRepo, workspaceRepo, spaceCategoryRepo, documentAttachmentRepo),
 			service.WithAdminSpaceImportBlobStorage("uploads"),
 			service.WithAdminSpaceImportOfficeHTMLRenderer(officeHTMLRenderService),
+			service.WithAdminSpaceImportDocumentImageAssetSyncer(documentImageAssetService),
 			service.WithAdminSpaceImportAuditRecorder(adminAuditService),
 			service.WithAdminSpaceImportTransferJobRepository(adminSpaceTransferJobRepo),
 		)

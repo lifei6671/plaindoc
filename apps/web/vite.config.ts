@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
+import { createCodeMirrorResolve } from "./vite.codemirror-dedupe";
 
 export default defineConfig(({ mode }) => {
   const appEntryPath = resolve(__dirname, "index.html");
@@ -20,6 +21,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [tailwindcss(), react()],
+    resolve: createCodeMirrorResolve(),
     // 供 mathjax-full 在浏览器构建中读取版本号，避免触发 Node require 分支。
     define: {
       PACKAGE_VERSION: JSON.stringify("3.2.1")
