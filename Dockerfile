@@ -49,6 +49,11 @@ ENV APP_ENV=production \
     SSR_WORKER_EXEC=node \
     SSR_WORKER_ENTRY=/app/apps/web/dist-ssr/worker-entry.js
 
+# 运行时需要系统 CA 证书，供 Go 后端访问 Cloudflare R2 / HTTPS 图床时做 TLS 校验。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=go-builder /out/plaindoc-server /app/plaindoc-server
 COPY --from=web-builder /workspace/apps/web/dist /app/apps/web/dist
 COPY --from=web-builder /workspace/apps/web/dist-ssr /app/apps/web/dist-ssr
