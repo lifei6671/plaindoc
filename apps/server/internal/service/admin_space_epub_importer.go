@@ -1474,7 +1474,7 @@ func (p *adminSpaceEPUBTreePlanner) planItem(item adminSpaceEPUBNavItem, sibling
 	}
 }
 
-// planDocument 为正文 target 预分配 documentID / readerURL。
+// planDocument 为正文 target 预分配 documentID。
 // 多个目录项指向同一 target 时创建“参见”占位文档，避免复制正文导致后续链接目标不一致。
 func (p *adminSpaceEPUBTreePlanner) planDocument(title string, normalized adminSpaceEPUBNormalizedHref) adminSpaceEPUBPlannedNode {
 	if _, ok := p.targets[normalized.TargetKey]; ok {

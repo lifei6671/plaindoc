@@ -851,7 +851,7 @@ node --no-opt $(command -v npm) run build
 
 - [x] 新增 EPUB restore 流程。
 - [x] 创建新空间和目录树。
-- [x] 建立 `targetKey -> documentID/readerURL` 映射，并回写 EPUB 内部链接。
+- [x] 建立 `targetKey -> documentID` 与 `canonicalHref -> primary documentID` 映射，并在 commit 写库阶段结合真实 `spaceID` 回写 EPUB 内部链接。
 - [ ] 定义并实现 fragment 拆分与降级策略。
 - [x] XHTML 清洗并转换 Markdown。
 - [x] 图片资源本地化。
