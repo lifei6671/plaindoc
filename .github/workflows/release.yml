@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -32,6 +35,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
 
       - name: Resolve build metadata
         id: build_meta
