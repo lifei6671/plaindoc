@@ -336,18 +336,18 @@ EPUB 章节必须先从 XHTML/HTML 转 Markdown，再写入 PlainDoc。
 图片处理：
 
 1. EPUB 内部图片资源必须从 zip entry 读取，不发起网络请求。
-2. 支持 `image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/svg+xml`。
-3. XHTML 内联 `data:image/*` 视为合法图片来源，但不能原样写入 Markdown：
+2. 支持 `image/png`、`image/jpeg`、`image/gif`、`image/webp`；不支持 `image/svg+xml`。
+3. XHTML 内联非 SVG `data:image/*` 视为合法图片来源，但不能原样写入 Markdown：
    - 先按 MIME 和 base64 解析。
    - 解码前后都必须执行大小限制。
    - 解码成功后写入 PlainDoc blob/image hosting，并把 Markdown 图片 URL 改写为本地资源 URL。
    - 非 `data:image/*` 的 data URI 一律移除或降级为文本。
 4. 单张图片建议沿用 20MiB 上限，超限时替换为 alt 文本并记录 warning。
 5. 图片写入复用现有 blob/image hosting 能力，不绕过存储抽象。
-6. `image/svg+xml` 不能作为可信内联内容处理：
-   - 首期不把 SVG 内容内联进 Markdown。
-   - 如果以 `<img src>` 引用 SVG，只能按不透明 blob 存储并通过图片 URL 引用。
-   - 服务端必须拒绝或剥离 SVG 中的 `<script>`、`<foreignObject>`、事件属性和外部引用；如果没有可靠清洗实现，则降级为 alt 文本并记录 warning。
+6. `image/svg+xml` 不进入图片本地化写入流程：
+   - 文件型 SVG 和 `data:image/svg+xml` 均降级为 alt 文本并记录 warning。
+   - 不把 SVG 内容内联进 Markdown，也不作为不透明 blob 存储。
+   - 后续只有在引入可靠 SVG 白名单清洗和渲染隔离后，才能重新评估是否放开。
 
 ### 5.4 HTML 转 Markdown 实现策略
 
@@ -362,12 +362,12 @@ github.com/JohannesKaufmann/html-to-markdown/v2
 1. 避免每个章节启动 Node 进程，减少批量章节转换开销。
 2. 转换逻辑留在 Go service 层，避免 service 反向依赖 handler 或外部脚本。
 3. 支持自定义规则和 renderer 扩展，可针对 PlainDoc 的 Markdown 风格补充规则。
-4. 能和 EPUB 的链接重映射、图片本地化、SVG 降级等 Go 侧流程在同一内存模型内衔接。
+4. 能和 EPUB 的链接重映射、图片本地化、SVG 拒绝降级等 Go 侧流程在同一内存模型内衔接。
 
 安全边界：
 
 1. 该库只负责 HTML 到 Markdown 转换，不承担 HTML 安全清洗职责。
-2. 调用 converter 前必须已经完成 HTML 节点清洗、危险协议过滤、图片本地化和 SVG 降级。
+2. 调用 converter 前必须已经完成 HTML 节点清洗、危险协议过滤、图片本地化和 SVG 拒绝降级。
 3. 自定义 renderer 不得重新放行已被清洗阶段拒绝的原始 HTML。
 
 建议新增：
@@ -491,9 +491,9 @@ EPUB 处理必须满足：
 1. `zip slip` 防护：拒绝 `../`、绝对路径、空路径和重复 entry。
 2. 解压炸弹防护：EPUB 初始上限固定为 entry 数不超过 2000、总解压内容不超过 128MiB、单 entry 不超过 32MiB、目录深度不超过 16；该组数值与现有工作区 zip 导入限制保持一致，后续可根据真实样本单独调大。
 3. HTML 清洗：移除脚本、表单和事件属性。
-4. 协议过滤：拒绝 `javascript:`、`file:`、`data:text/html` 等危险链接；`data:image/*` 只能走图片解码、本地化和大小限制流程。
+4. 协议过滤：拒绝 `javascript:`、`file:`、`data:text/html` 等危险链接；非 SVG `data:image/*` 只能走图片解码、本地化和大小限制流程。
 5. 图片大小限制：单图最大 20MiB。
-6. SVG 只允许作为安全图片资源处理，禁止内联和未清洗渲染；无法清洗时降级为 alt 文本。
+6. SVG 不作为 EPUB 导入图片类型支持，文件型和 `data:image/svg+xml` 均降级为 alt 文本，避免持久化未清洗 SVG。
 7. 错误降级：单个图片失败不应导致整本 EPUB 导入失败；核心 OPF/spine/章节缺失才失败。
 
 ### 6.3 暂存 TTL 与清理
@@ -571,11 +571,12 @@ Markdown / Office revision 摘要分页、创建人关联、版本倒序稳定�
 跨文档 revision 防护。Phase 6 已完成恢复接口契约与 Markdown 历史版本恢复：
 前端新增 `restoreRevision` gateway，后端注册
 `POST /api/docs/:docId/revisions/:revisionId/restore`，恢复时要求调用方传当前
-`Document.version` 作为 `baseVersion`；Markdown 恢复会校验写权限、当前文档版本和目标
+Markdown 文档的 `Document.version` 或 Office 文档的 `Document.contentVersion` 作为 `baseVersion`；
+Markdown 恢复会校验写权限、当前文档版本和目标
 revision 格式，以目标 revision 正文覆盖当前正文，递增文档版本并新增一条
 `document_revisions`，同时复用阅读缓存清理和图片引用同步规则。Office 恢复也已完成：
-后端会读取目标 `document_file_revisions`，校验当前文档格式、`documents.version` 与
-`contentVersion`，用目标 file revision 的 `blobID/fileName/mimeType` 覆盖当前 source
+后端会读取目标 `document_file_revisions`，校验当前文档格式，并按 Office 当前
+`contentVersion` 做并发检查，用目标 file revision 的 `blobID/fileName/mimeType` 覆盖当前 source
 文件引用，不重复写入 `file_blobs`，递增版本并新增一条 `document_file_revisions`。恢复后
 `render_status` 会被标记为 `pending`，等待阅读 HTML 重新渲染。
 
@@ -585,8 +586,8 @@ revision 格式，以目标 revision 正文覆盖当前正文，递增文档版�
 export interface RestoreDocumentRevisionInput {
   docId: string;
   revisionId: string;
-  // 前端始终传当前 Document.version。
-  // 后端按文档格式决定实际校验字段。
+  // Markdown 恢复传当前 Document.version。
+  // Office 恢复传当前 Document.contentVersion。
   baseVersion: number;
 }
 ```
@@ -611,7 +612,7 @@ export interface RestoreDocumentRevisionResult {
 
 1. 后端读取目标历史版本。
 2. 校验当前文档格式与目标版本格式一致。
-3. 前端始终传当前 `Document.version` 作为 `baseVersion`。后端按当前文档格式决定实际冲突字段：Markdown 校验 `documents.version`；Office 校验与文件修订一致的 `documents.version`，并确保当前 `contentVersion` 未被其它 Office 写回推进；任一不一致都返回版本冲突，并带最新文档。
+3. 前端按当前文档格式传 `baseVersion`：Markdown 传 `Document.version`；Office 传 `Document.contentVersion`。后端按当前文档格式决定实际冲突字段：Markdown 校验 `documents.version`；Office 校验 `documents.content_version`；任一不一致都返回版本冲突，并带最新文档。
 4. Markdown：以目标 revision 的 `contentMd` 覆盖当前正文。
 5. Office：以目标 file revision 的 `blobID/fileName/mimeType` 覆盖当前 source 文件引用，不重复写入文件 blob。
 6. 将当前文档版本递增，写入新的 `document_revisions` 或 `document_file_revisions` 记录。
@@ -685,9 +686,9 @@ Office 恢复会切换当前源文件版本。
 
 Task 7.5 已完成恢复确认与成功状态刷新：点击“恢复到此版本”会在弹窗内打开二次确认区域，确认文案
 包含目标版本号、创建时间和创建人；当前文档存在未保存修改时恢复按钮禁用，并提示先保存或放弃当前
-编辑。确认恢复时前端调用 `DataGateway.document.restoreRevision`，传入当前 `Document.version`
-作为 `baseVersion`。恢复成功后弹窗关闭确认态、刷新版本列表第一页，并通过 `App` 同步当前
-`content`、`Document.version`、`lastSavedAt`、Office source 元数据和保存状态，避免恢复后的内容被
+编辑。确认恢复时前端调用 `DataGateway.document.restoreRevision`，Markdown 传入当前
+`Document.version`，Office 传入当前 `Document.contentVersion` 作为 `baseVersion`。恢复成功后弹窗关闭确认态、刷新版本列表第一页，并通过 `App` 同步当前
+`content`、`Document.version`、`Document.contentVersion`、`lastSavedAt`、Office source 元数据和保存状态，避免恢复后的内容被
 误判为本地未保存。Office 恢复成功后会显式重载 ONLYOFFICE 编辑配置，确保编辑器使用恢复后的
 source blob / document key。恢复失败时弹窗保持打开并展示错误；版本冲突会提示用户刷新或重新选择历史版本。
 
@@ -733,7 +734,7 @@ diff
 4. `apps/web/src/App.tsx`
    - 新增历史版本按钮。
    - 接入历史版本弹窗。
-   - 恢复成功后同步 `content`、`activeDocument.version`、`lastSavedAt` 和保存状态。
+   - 恢复成功后同步 `content`、`activeDocument.version`、`activeDocument.contentVersion`、`lastSavedAt` 和保存状态。
 5. 新增 `apps/web/src/components/DocumentRevisionHistoryDialog.tsx`
    - 负责版本列表、详情加载、diff 渲染、恢复确认和错误态。
    - 版本列表项展示版本号、创建时间和创建人。
@@ -787,8 +788,8 @@ diff
 6. XHTML 转 Markdown：标题、段落、列表、表格、代码块、链接。
 7. EPUB 内部链接重映射：同文件、跨文件、缺失目标都按规则处理。
 8. nav/toc fragment：同文件不同 fragment 可拆分，无法定位时记录 warning。
-9. 图片本地化：相对路径图片和 `data:image/*` 写入本地资源，Markdown 链接被改写。
-10. SVG 安全：危险 SVG 降级为 alt 文本或安全 blob，不允许内联脚本。
+9. 图片本地化：相对路径图片和非 SVG `data:image/*` 写入本地资源，Markdown 链接被改写。
+10. SVG 安全：文件型 SVG 与 `data:image/svg+xml` 均降级为 alt 文本，不写入本地 blob。
 11. 非法 EPUB：缺少 mimetype、container、OPF、spine。
 12. 安全场景：zip slip、重复 entry、超大 entry、超多 entry、危险协议。
 13. 权限场景：有创建空间权限可导入；无创建空间权限拒绝。
@@ -854,7 +855,7 @@ node --no-opt $(command -v npm) run build
 - [ ] 定义并实现 fragment 拆分与降级策略。
 - [x] XHTML 清洗并转换 Markdown。
 - [x] 图片资源本地化。
-- [x] 支持 `data:image/*` 本地化和 SVG 安全降级。
+- [x] 支持非 SVG `data:image/*` 本地化；SVG 图片统一降级为 alt 文本。
 - [x] 引入并封装 `github.com/JohannesKaufmann/html-to-markdown/v2`，补 PlainDoc 自定义转换规则。
 - [x] 完成 HTML 转 Markdown 批量性能基准，必要时优化规则、分段转换或保留 Node 脚本回退。
 - [x] 补齐 staging TTL 和清理策略。

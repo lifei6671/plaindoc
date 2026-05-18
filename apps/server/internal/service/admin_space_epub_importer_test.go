@@ -101,8 +101,36 @@ func TestNormalizeAdminSpaceEPUBHref(t *testing.T) {
 		t.Fatalf("unexpected normalized target: %#v", target)
 	}
 
+	encoded, ok := normalizeAdminSpaceEPUBHref("OPS", "chapters/chapter%201.xhtml#Intro%20A")
+	if !ok {
+		t.Fatal("expected encoded href to normalize")
+	}
+	if encoded.CanonicalHref != "OPS/chapters/chapter 1.xhtml" ||
+		encoded.Fragment != "Intro A" ||
+		encoded.TargetKey != "OPS/chapters/chapter 1.xhtml#Intro A" {
+		t.Fatalf("unexpected normalized encoded target: %#v", encoded)
+	}
+
 	if _, ok := normalizeAdminSpaceEPUBHref("OPS", "javascript:alert(1)"); ok {
 		t.Fatal("expected dangerous protocol to be rejected")
+	}
+}
+
+func TestReadAdminSpaceEPUBChapterHTMLDecodesEncodedHref(t *testing.T) {
+	t.Parallel()
+
+	entries := collectAdminSpaceEPUBEntriesForImageTest(t, map[string][]byte{
+		"OPS/chapter 1.xhtml": []byte("<html><body>正文</body></html>"),
+	})
+
+	chapters, err := readAdminSpaceEPUBChapterHTML(entries, "OPS", []adminSpaceEPUBOPFItem{
+		{ID: "chapter-1", Href: "chapter%201.xhtml", MediaType: "application/xhtml+xml"},
+	})
+	if err != nil {
+		t.Fatalf("read chapter html: %v", err)
+	}
+	if got, want := string(chapters["OPS/chapter 1.xhtml"]), "<html><body>正文</body></html>"; got != want {
+		t.Fatalf("expected decoded href chapter %q, got %q", want, got)
 	}
 }
 
@@ -222,7 +250,6 @@ func TestLocalizeAdminSpaceEPUBChapterImages_LocalizesRelativeAndDataImages(t *t
 
 	entries := collectAdminSpaceEPUBEntriesForImageTest(t, map[string][]byte{
 		"OPS/images/cover.png": []byte("png-payload"),
-		"OPS/images/icon.svg":  []byte(`<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>`),
 	})
 	var saved []adminSpaceEPUBImageAsset
 	rewritten, warnings, err := localizeAdminSpaceEPUBChapterImages(adminSpaceEPUBImageLocalizeInput{
@@ -230,7 +257,6 @@ func TestLocalizeAdminSpaceEPUBChapterImages_LocalizesRelativeAndDataImages(t *t
 		SourceCanonicalHref: "OPS/chapters/chapter1.xhtml",
 		HTML: []byte(`<body>
 			<img src="../images/cover.png" alt="封面">
-			<img src="../images/icon.svg" alt="图标">
 			<img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("inline-png")) + `" alt="内联图">
 		</body>`),
 		Entries: entries,
@@ -245,34 +271,30 @@ func TestLocalizeAdminSpaceEPUBChapterImages_LocalizesRelativeAndDataImages(t *t
 	if len(warnings) != 0 {
 		t.Fatalf("expected no warnings, got %#v", warnings)
 	}
-	if len(saved) != 3 {
+	if len(saved) != 2 {
 		t.Fatalf("expected two localized images, got %#v", saved)
 	}
 	if saved[0].CanonicalHref != "OPS/images/cover.png" || saved[0].ContentType != "image/png" {
 		t.Fatalf("unexpected relative image asset: %#v", saved[0])
 	}
-	if saved[1].CanonicalHref != "OPS/images/icon.svg" || saved[1].ContentType != "image/svg+xml" {
-		t.Fatalf("unexpected svg image asset: %#v", saved[1])
-	}
-	if saved[2].CanonicalHref != "" || saved[2].ContentType != "image/png" {
-		t.Fatalf("unexpected data image asset: %#v", saved[2])
+	if saved[1].CanonicalHref != "" || saved[1].ContentType != "image/png" {
+		t.Fatalf("unexpected data image asset: %#v", saved[1])
 	}
 	if strings.Contains(rewritten, "../images/cover.png") || strings.Contains(rewritten, "data:image/") {
 		t.Fatalf("expected image src to be localized, got %q", rewritten)
 	}
 	if !strings.Contains(rewritten, `src="/uploads/cover.png"`) ||
-		!strings.Contains(rewritten, `src="/uploads/icon.svg"`) ||
 		!strings.Contains(rewritten, `src="/uploads/inline.png"`) {
 		t.Fatalf("expected localized upload urls, got %q", rewritten)
 	}
 }
 
-func TestLocalizeAdminSpaceEPUBChapterImages_DegradesOversizedDangerousAndFailedImages(t *testing.T) {
+func TestLocalizeAdminSpaceEPUBChapterImages_DegradesOversizedSVGAndFailedImages(t *testing.T) {
 	t.Parallel()
 
 	entries := collectAdminSpaceEPUBEntriesForImageTest(t, map[string][]byte{
 		"OPS/images/huge.png":          bytes.Repeat([]byte("x"), int(maxAdminSpaceEPUBImageBytes)+1),
-		"OPS/images/dangerous.svg":     []byte(`<svg><script>alert(1)</script></svg>`),
+		"OPS/images/icon.svg":          []byte(`<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>`),
 		"OPS/images/storage-error.png": []byte("png-payload"),
 	})
 	rewritten, warnings, err := localizeAdminSpaceEPUBChapterImages(adminSpaceEPUBImageLocalizeInput{
@@ -280,7 +302,7 @@ func TestLocalizeAdminSpaceEPUBChapterImages_DegradesOversizedDangerousAndFailed
 		SourceCanonicalHref: "OPS/chapters/chapter1.xhtml",
 		HTML: []byte(`<body>
 			<img src="../images/huge.png" alt="超大图">
-			<img src="../images/dangerous.svg" alt="危险 SVG">
+			<img src="../images/icon.svg" alt="SVG 图标">
 			<img src="../images/storage-error.png" alt="存储失败图">
 		</body>`),
 		Entries: entries,
@@ -291,12 +313,12 @@ func TestLocalizeAdminSpaceEPUBChapterImages_DegradesOversizedDangerousAndFailed
 	if err != nil {
 		t.Fatalf("localizeAdminSpaceEPUBChapterImages returned error: %v", err)
 	}
-	for _, unexpected := range []string{"huge.png", "dangerous.svg", "storage-error.png", "<script"} {
+	for _, unexpected := range []string{"huge.png", "icon.svg", "storage-error.png", "<svg"} {
 		if strings.Contains(rewritten, unexpected) {
 			t.Fatalf("expected unsafe image source %q to be removed, got %q", unexpected, rewritten)
 		}
 	}
-	for _, want := range []string{"超大图", "危险 SVG", "存储失败图"} {
+	for _, want := range []string{"超大图", "SVG 图标", "存储失败图"} {
 		if !strings.Contains(rewritten, want) {
 			t.Fatalf("expected degraded alt text %q, got %q", want, rewritten)
 		}
@@ -320,7 +342,6 @@ func TestAdminSpaceEPUBImageContentTypeSupportsAllowedTypes(t *testing.T) {
 		"cover.jpeg": "image/jpeg",
 		"cover.gif":  "image/gif",
 		"cover.webp": "image/webp",
-		"cover.svg":  "image/svg+xml",
 	}
 	for fileName, want := range cases {
 		fileName := fileName
@@ -334,6 +355,14 @@ func TestAdminSpaceEPUBImageContentTypeSupportsAllowedTypes(t *testing.T) {
 	}
 }
 
+func TestIsAdminSpaceEPUBImageItemRejectsSVG(t *testing.T) {
+	t.Parallel()
+
+	if isAdminSpaceEPUBImageItem(adminSpaceEPUBOPFItem{Href: "images/icon.svg", MediaType: "image/svg+xml"}) {
+		t.Fatal("expected svg manifest image to be rejected")
+	}
+}
+
 func TestParseAdminSpaceEPUBDataImageAssetRejectsOversizedBeforeDecode(t *testing.T) {
 	t.Parallel()
 
@@ -341,6 +370,27 @@ func TestParseAdminSpaceEPUBDataImageAssetRejectsOversizedBeforeDecode(t *testin
 	_, err := parseAdminSpaceEPUBDataImageAsset("data:image/png;base64," + oversizedPayload)
 	if err == nil {
 		t.Fatal("expected oversized data image to fail before decode")
+	}
+}
+
+func TestParseAdminSpaceEPUBDataImageAssetPreservesPlusInPlainPayload(t *testing.T) {
+	t.Parallel()
+
+	asset, err := parseAdminSpaceEPUBDataImageAsset("data:image/png,A+B")
+	if err != nil {
+		t.Fatalf("parse data image asset: %v", err)
+	}
+	if got, want := string(asset.Payload), "A+B"; got != want {
+		t.Fatalf("expected payload %q, got %q", want, got)
+	}
+}
+
+func TestParseAdminSpaceEPUBDataImageAssetRejectsSVG(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseAdminSpaceEPUBDataImageAsset("data:image/svg+xml,%3Csvg%3E%3C/svg%3E")
+	if err == nil {
+		t.Fatal("expected svg data image to be rejected")
 	}
 }
 

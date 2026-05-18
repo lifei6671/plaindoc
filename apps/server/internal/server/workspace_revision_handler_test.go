@@ -611,7 +611,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 		Where("document_id = ?", documentID).
 		Updates(map[string]any{
 			"format":             "docx",
-			"version":            2,
+			"version":            5,
 			"content_version":    2,
 			"source_blob_id":     currentBlobID,
 			"source_file_name":   "current-v2.docx",
@@ -681,7 +681,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 			MimeType *string `json:"mimeType"`
 		} `json:"restoredFromRevision"`
 	}](t, rec.Body.Bytes())
-	if payload.Document.ID != documentID || payload.Document.Format != "docx" || payload.Document.Version != 3 || payload.Document.ContentVersion != 3 {
+	if payload.Document.ID != documentID || payload.Document.Format != "docx" || payload.Document.Version != 6 || payload.Document.ContentVersion != 3 {
 		t.Fatalf("unexpected restored office document payload: %+v body=%s", payload.Document, rec.Body.String())
 	}
 	if payload.Document.SourceBlobID == nil || *payload.Document.SourceBlobID != targetBlobID {
@@ -717,7 +717,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 		Take(&persistedDoc).Error; err != nil {
 		t.Fatalf("query restored office document failed: %v", err)
 	}
-	if persistedDoc.Version != 3 || persistedDoc.ContentVersion != 3 ||
+	if persistedDoc.Version != 6 || persistedDoc.ContentVersion != 3 ||
 		persistedDoc.SourceBlobID == nil || *persistedDoc.SourceBlobID != targetBlobID ||
 		persistedDoc.SourceFileName == nil || *persistedDoc.SourceFileName != "target-v1.docx" ||
 		persistedDoc.SourceMimeType == nil || *persistedDoc.SourceMimeType != officeMimeType {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -224,6 +224,67 @@ describe("DocumentRevisionHistoryDialog", () => {
     expect(screen.getAllByRole("button", { name: /版本 / })).toHaveLength(31);
     expect(listRevisions).toHaveBeenNthCalledWith(1, "doc-1", { page: 1, pageSize: 30 });
     expect(listRevisions).toHaveBeenNthCalledWith(2, "doc-1", { page: 2, pageSize: 30 });
+  });
+
+  it("ignores stale revision list responses after switching documents", async () => {
+    let resolveFirstList: (revisions: DocumentRevisionSummary[]) => void = () => undefined;
+    const firstListPromise = new Promise<DocumentRevisionSummary[]>((resolve) => {
+      resolveFirstList = resolve;
+    });
+    const listRevisions = vi.fn<DataGateway["document"]["listRevisions"]>((docId) => {
+      if (docId === "doc-1") {
+        return firstListPromise;
+      }
+      return Promise.resolve([
+        createRevision({ id: "revision-doc-2", documentId: "doc-2", version: 2 })
+      ]);
+    });
+
+    const { rerender } = render(
+      <DocumentRevisionHistoryDialog
+        open
+        documentId="doc-1"
+        documentTitle="产品说明"
+        currentContent="# 当前正文"
+        currentDocumentVersion={6}
+        hasUnsavedChanges={false}
+        dataGateway={createGateway({ listRevisions })}
+        onOpenChange={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(listRevisions).toHaveBeenCalledWith("doc-1", { page: 1, pageSize: 30 });
+    });
+
+    rerender(
+      <DocumentRevisionHistoryDialog
+        open
+        documentId="doc-2"
+        documentTitle="产品说明"
+        currentContent="# 当前正文"
+        currentDocumentVersion={6}
+        hasUnsavedChanges={false}
+        dataGateway={createGateway({ listRevisions })}
+        onOpenChange={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole("button", { name: "版本 2，作者甲" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFirstList([
+        createRevision({ id: "revision-doc-1", documentId: "doc-1", version: 1 })
+      ]);
+      await firstListPromise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "版本 1，作者甲" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "版本 2，作者甲" })).toBeInTheDocument();
   });
 
   it("renders empty state and retries after a loading error", async () => {

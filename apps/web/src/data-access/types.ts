@@ -294,7 +294,7 @@ export interface SaveDocumentResult {
 export interface RestoreDocumentRevisionInput {
   docId: string;
   revisionId: string;
-  // 前端调用方应始终传当前 Document.version，后端据此做并发版本校验。
+  // Markdown 恢复传当前 Document.version；Office 恢复传当前 Document.contentVersion。
   baseVersion: number;
 }
 

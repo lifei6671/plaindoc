@@ -270,14 +270,14 @@ func inspectAdminSpaceImportEPUB(payload []byte) (adminSpaceEPUBPreview, []strin
 	}
 	maxDepth := 1
 	if strings.TrimSpace(navItem.Href) != "" {
-		navPath := cleanAdminSpaceImportZipEntry(path.Join(opfRoot, strings.TrimSpace(navItem.Href)))
+		navPath := cleanAdminSpaceEPUBZipHref(opfRoot, navItem.Href)
 		if navPath != "" {
 			if navPayload, readErr := readAdminSpaceEPUBMetadataFile(entries[navPath]); readErr == nil {
 				maxDepth = max(maxDepth, inspectAdminSpaceEPUBNavDepth(navPayload))
 			}
 		}
 	} else if strings.TrimSpace(tocItem.Href) != "" {
-		tocPath := cleanAdminSpaceImportZipEntry(path.Join(opfRoot, strings.TrimSpace(tocItem.Href)))
+		tocPath := cleanAdminSpaceEPUBZipHref(opfRoot, tocItem.Href)
 		if tocPath != "" {
 			if tocPayload, readErr := readAdminSpaceEPUBMetadataFile(entries[tocPath]); readErr == nil {
 				maxDepth = max(maxDepth, inspectAdminSpaceEPUBTOCDepth(tocPayload))
@@ -401,7 +401,7 @@ func resolveAdminSpaceEPUBCoverPath(opfRoot string, opf adminSpaceEPUBOPFPackage
 		if !isAdminSpaceEPUBImageItem(item) || !hasAdminSpaceEPUBManifestProperty(item, "cover-image") {
 			continue
 		}
-		if coverPath := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(item.Href))); coverPath != "" {
+		if coverPath := cleanAdminSpaceEPUBZipHref(opfRoot, item.Href); coverPath != "" {
 			return coverPath
 		}
 	}
@@ -417,7 +417,7 @@ func resolveAdminSpaceEPUBCoverPath(opfRoot string, opf adminSpaceEPUBOPFPackage
 		if !ok || !isAdminSpaceEPUBImageItem(item) {
 			continue
 		}
-		if coverPath := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(item.Href))); coverPath != "" {
+		if coverPath := cleanAdminSpaceEPUBZipHref(opfRoot, item.Href); coverPath != "" {
 			return coverPath
 		}
 	}
@@ -449,10 +449,10 @@ func isAdminSpaceEPUBDocumentItem(item adminSpaceEPUBOPFItem) bool {
 func isAdminSpaceEPUBImageItem(item adminSpaceEPUBOPFItem) bool {
 	mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
 	if strings.HasPrefix(mediaType, "image/") {
-		return true
+		return isSupportedAdminSpaceEPUBImageContentType(mediaType)
 	}
 	switch strings.ToLower(filepath.Ext(strings.TrimSpace(item.Href))) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
 		return true
 	default:
 		return false
@@ -488,7 +488,7 @@ func isAdminSpaceEPUBDocumentExtension(item adminSpaceEPUBOPFItem) bool {
 
 func isAdminSpaceEPUBImageExtension(item adminSpaceEPUBOPFItem) bool {
 	switch strings.ToLower(filepath.Ext(strings.TrimSpace(item.Href))) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
 		return true
 	default:
 		return false
@@ -1031,21 +1031,16 @@ func normalizeAdminSpaceEPUBContentHref(sourceCanonicalHref string, rawHref stri
 		strings.HasPrefix(lowerHref, "data:") {
 		return adminSpaceEPUBNormalizedHref{}, false
 	}
-	hrefWithoutQuery := trimmed
-	if queryIndex := strings.Index(hrefWithoutQuery, "?"); queryIndex >= 0 {
-		hrefWithoutQuery = hrefWithoutQuery[:queryIndex]
-	}
-	fragment := ""
-	if hashIndex := strings.Index(hrefWithoutQuery, "#"); hashIndex >= 0 {
-		fragment = strings.TrimSpace(hrefWithoutQuery[hashIndex+1:])
-		hrefWithoutQuery = hrefWithoutQuery[:hashIndex]
+	hrefPath, fragment, ok := splitAdminSpaceEPUBHrefPath(trimmed)
+	if !ok {
+		return adminSpaceEPUBNormalizedHref{}, false
 	}
 
 	var canonicalHref string
-	if strings.TrimSpace(hrefWithoutQuery) == "" {
+	if strings.TrimSpace(hrefPath) == "" {
 		canonicalHref = cleanAdminSpaceImportZipEntry(strings.TrimSpace(sourceCanonicalHref))
 	} else {
-		canonicalHref = cleanAdminSpaceImportZipEntry(path.Join(path.Dir(strings.TrimSpace(sourceCanonicalHref)), strings.TrimSpace(hrefWithoutQuery)))
+		canonicalHref = cleanAdminSpaceImportZipEntry(path.Join(path.Dir(strings.TrimSpace(sourceCanonicalHref)), strings.TrimSpace(hrefPath)))
 	}
 	if canonicalHref == "" {
 		return adminSpaceEPUBNormalizedHref{}, false
@@ -1187,9 +1182,6 @@ func loadAdminSpaceEPUBImageAsset(input adminSpaceEPUBImageLocalizeInput, rawSrc
 	if contentType == "" {
 		return adminSpaceEPUBImageAsset{}, fmt.Errorf("不支持的图片类型")
 	}
-	if contentType == "image/svg+xml" && isDangerousAdminSpaceEPUBSVG(payload) {
-		return adminSpaceEPUBImageAsset{}, fmt.Errorf("SVG 包含危险内容")
-	}
 	return adminSpaceEPUBImageAsset{
 		Source:        rawSrc,
 		CanonicalHref: normalized.CanonicalHref,
@@ -1225,7 +1217,7 @@ func parseAdminSpaceEPUBDataImageAsset(rawSrc string) (adminSpaceEPUBImageAsset,
 		if err := validateAdminSpaceEPUBImageSize(int64(len(rawPayload))); err != nil {
 			return adminSpaceEPUBImageAsset{}, err
 		}
-		decoded, decodeErr := url.QueryUnescape(rawPayload)
+		decoded, decodeErr := url.PathUnescape(rawPayload)
 		if decodeErr != nil {
 			return adminSpaceEPUBImageAsset{}, decodeErr
 		}
@@ -1239,9 +1231,6 @@ func parseAdminSpaceEPUBDataImageAsset(rawSrc string) (adminSpaceEPUBImageAsset,
 	}
 	if err := validateAdminSpaceEPUBImageSize(int64(len(payload))); err != nil {
 		return adminSpaceEPUBImageAsset{}, err
-	}
-	if contentType == "image/svg+xml" && isDangerousAdminSpaceEPUBSVG(payload) {
-		return adminSpaceEPUBImageAsset{}, fmt.Errorf("SVG 包含危险内容")
 	}
 	return adminSpaceEPUBImageAsset{
 		Source:      rawSrc,
@@ -1286,8 +1275,6 @@ func adminSpaceEPUBImageContentType(canonicalHref string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
-	case ".svg":
-		return "image/svg+xml"
 	default:
 		return ""
 	}
@@ -1295,7 +1282,7 @@ func adminSpaceEPUBImageContentType(canonicalHref string) string {
 
 func isSupportedAdminSpaceEPUBImageContentType(contentType string) bool {
 	switch strings.ToLower(strings.TrimSpace(contentType)) {
-	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/svg+xml":
+	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp":
 		return true
 	default:
 		return false
@@ -1310,28 +1297,9 @@ func adminSpaceEPUBImageExtensionForContentType(contentType string) string {
 		return ".gif"
 	case "image/webp":
 		return ".webp"
-	case "image/svg+xml":
-		return ".svg"
 	default:
 		return ".png"
 	}
-}
-
-func isDangerousAdminSpaceEPUBSVG(payload []byte) bool {
-	lowerPayload := strings.ToLower(string(payload))
-	return strings.Contains(lowerPayload, "<script") ||
-		strings.Contains(lowerPayload, "<foreignobject") ||
-		strings.Contains(lowerPayload, " onload=") ||
-		strings.Contains(lowerPayload, " onclick=") ||
-		strings.Contains(lowerPayload, " onerror=") ||
-		strings.Contains(lowerPayload, `href="http://`) ||
-		strings.Contains(lowerPayload, `href="https://`) ||
-		strings.Contains(lowerPayload, `href='http://`) ||
-		strings.Contains(lowerPayload, `href='https://`) ||
-		strings.Contains(lowerPayload, `xlink:href="http://`) ||
-		strings.Contains(lowerPayload, `xlink:href="https://`) ||
-		strings.Contains(lowerPayload, `xlink:href='http://`) ||
-		strings.Contains(lowerPayload, `xlink:href='https://`)
 }
 
 func degradeAdminSpaceEPUBImportImageNode(node *html.Node, input adminSpaceEPUBImageLocalizeInput, warnings *[]string, detail string) {
@@ -1371,16 +1339,11 @@ func normalizeAdminSpaceEPUBHref(opfRoot string, rawHref string) (adminSpaceEPUB
 		strings.HasPrefix(lowerHref, "https://") {
 		return adminSpaceEPUBNormalizedHref{}, false
 	}
-	hrefWithoutQuery := trimmed
-	if queryIndex := strings.Index(hrefWithoutQuery, "?"); queryIndex >= 0 {
-		hrefWithoutQuery = hrefWithoutQuery[:queryIndex]
+	hrefPath, fragment, ok := splitAdminSpaceEPUBHrefPath(trimmed)
+	if !ok {
+		return adminSpaceEPUBNormalizedHref{}, false
 	}
-	fragment := ""
-	if hashIndex := strings.Index(hrefWithoutQuery, "#"); hashIndex >= 0 {
-		fragment = strings.TrimSpace(hrefWithoutQuery[hashIndex+1:])
-		hrefWithoutQuery = hrefWithoutQuery[:hashIndex]
-	}
-	canonicalHref := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(hrefWithoutQuery)))
+	canonicalHref := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(hrefPath)))
 	if canonicalHref == "" {
 		return adminSpaceEPUBNormalizedHref{}, false
 	}
@@ -1393,6 +1356,42 @@ func normalizeAdminSpaceEPUBHref(opfRoot string, rawHref string) (adminSpaceEPUB
 		Fragment:      fragment,
 		TargetKey:     targetKey,
 	}, true
+}
+
+func cleanAdminSpaceEPUBZipHref(basePath string, rawHref string) string {
+	hrefPath, _, ok := splitAdminSpaceEPUBHrefPath(rawHref)
+	if !ok || strings.TrimSpace(hrefPath) == "" {
+		return ""
+	}
+	return cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(basePath), strings.TrimSpace(hrefPath)))
+}
+
+func splitAdminSpaceEPUBHrefPath(rawHref string) (string, string, bool) {
+	trimmed := strings.TrimSpace(rawHref)
+	if trimmed == "" || strings.Contains(trimmed, "\\") {
+		return "", "", false
+	}
+	hrefWithoutFragment := trimmed
+	fragment := ""
+	if hashIndex := strings.Index(hrefWithoutFragment, "#"); hashIndex >= 0 {
+		fragment = strings.TrimSpace(hrefWithoutFragment[hashIndex+1:])
+		hrefWithoutFragment = hrefWithoutFragment[:hashIndex]
+	}
+	if queryIndex := strings.Index(hrefWithoutFragment, "?"); queryIndex >= 0 {
+		hrefWithoutFragment = hrefWithoutFragment[:queryIndex]
+	}
+	decodedPath, err := url.PathUnescape(strings.TrimSpace(hrefWithoutFragment))
+	if err != nil {
+		return "", "", false
+	}
+	if fragment != "" {
+		decodedFragment, err := url.PathUnescape(fragment)
+		if err != nil {
+			return "", "", false
+		}
+		fragment = strings.TrimSpace(decodedFragment)
+	}
+	return strings.TrimSpace(decodedPath), fragment, true
 }
 
 // planAdminSpaceEPUBImportTree 执行第一段目录规划：只分配节点、文档和 target 映射。

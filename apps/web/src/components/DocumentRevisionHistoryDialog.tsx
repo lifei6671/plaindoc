@@ -264,6 +264,8 @@ export function DocumentRevisionHistoryDialog({
   const [restoreErrorMessage, setRestoreErrorMessage] = useState<string | null>(null);
   const [restoreSuccessMessage, setRestoreSuccessMessage] = useState<string | null>(null);
   const detailRequestIDRef = useRef(0);
+  const listRequestIDRef = useRef(0);
+  const activeListDocumentIDRef = useRef("");
 
   const selectedRevision = useMemo(() => {
     if (selectedRevisionID) {
@@ -276,6 +278,9 @@ export function DocumentRevisionHistoryDialog({
     if (!normalizedDocumentID) {
       return;
     }
+    const requestID = listRequestIDRef.current + 1;
+    listRequestIDRef.current = requestID;
+    const requestDocumentID = normalizedDocumentID;
     if (mode === "reset") {
       setIsInitialLoading(true);
       setSelectedRevisionID(null);
@@ -289,6 +294,9 @@ export function DocumentRevisionHistoryDialog({
         page: targetPage,
         pageSize: REVISION_PAGE_SIZE
       });
+      if (requestID !== listRequestIDRef.current || requestDocumentID !== activeListDocumentIDRef.current) {
+        return;
+      }
       setRevisions((currentRevisions) => {
         if (mode === "reset") {
           return mergeRevisionSummaries([], nextRevisions);
@@ -304,6 +312,9 @@ export function DocumentRevisionHistoryDialog({
         count: nextRevisions.length
       });
     } catch (error) {
+      if (requestID !== listRequestIDRef.current || requestDocumentID !== activeListDocumentIDRef.current) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "历史版本加载失败";
       setLoadErrorMessage(message);
       console.error("[历史版本] 历史版本列表加载失败", {
@@ -312,6 +323,9 @@ export function DocumentRevisionHistoryDialog({
         error
       });
     } finally {
+      if (requestID !== listRequestIDRef.current || requestDocumentID !== activeListDocumentIDRef.current) {
+        return;
+      }
       if (mode === "reset") {
         setIsInitialLoading(false);
       } else {
@@ -341,9 +355,13 @@ export function DocumentRevisionHistoryDialog({
 
   useEffect(() => {
     if (!open || !normalizedDocumentID) {
+      activeListDocumentIDRef.current = "";
+      listRequestIDRef.current += 1;
       setRevisions([]);
       setSelectedRevisionID(null);
       setLoadErrorMessage(null);
+      setIsInitialLoading(false);
+      setIsLoadingMore(false);
       setRevisionDetail(null);
       setDetailErrorMessage(null);
       setRestoreConfirmationRevisionID(null);
@@ -352,6 +370,7 @@ export function DocumentRevisionHistoryDialog({
       setIsRestoring(false);
       return;
     }
+    activeListDocumentIDRef.current = normalizedDocumentID;
     // 弹窗每次打开都从第一页重新加载，避免不同文档之间复用旧分页状态。
     void loadRevisionPage(1, "reset");
   }, [loadRevisionPage, normalizedDocumentID, open]);

@@ -3722,7 +3722,7 @@ export default function App() {
         documentId={activeDocId}
         documentTitle={activeDocumentTitle}
         currentContent={content}
-        currentDocumentVersion={baseVersion}
+        currentDocumentVersion={isActiveOfficeDocument ? activeDocumentContentVersion : baseVersion}
         hasUnsavedChanges={hasRevisionHistoryUnsavedChanges}
         dataGateway={dataGateway}
         onOpenChange={setIsRevisionHistoryDialogOpen}

@@ -2049,7 +2049,7 @@ func readAdminSpaceEPUBChapterHTML(
 		if !isAdminSpaceEPUBDocumentItem(item) {
 			continue
 		}
-		canonicalHref := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(item.Href)))
+		canonicalHref := cleanAdminSpaceEPUBZipHref(opfRoot, item.Href)
 		if canonicalHref == "" {
 			return nil, errcode.ErrAdminSpaceImportPackageNotImportable
 		}
@@ -2105,7 +2105,7 @@ func readAdminSpaceEPUBNavItems(
 		}
 	}
 	if strings.TrimSpace(navItem.Href) != "" {
-		navPath := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(navItem.Href)))
+		navPath := cleanAdminSpaceEPUBZipHref(opfRoot, navItem.Href)
 		if navPath != "" {
 			payload, err := readAdminSpaceEPUBMetadataFile(entries[navPath])
 			if err == nil {
@@ -2117,7 +2117,7 @@ func readAdminSpaceEPUBNavItems(
 		}
 	}
 	if strings.TrimSpace(tocItem.Href) != "" {
-		tocPath := cleanAdminSpaceImportZipEntry(path.Join(strings.TrimSpace(opfRoot), strings.TrimSpace(tocItem.Href)))
+		tocPath := cleanAdminSpaceEPUBZipHref(opfRoot, tocItem.Href)
 		if tocPath != "" {
 			payload, err := readAdminSpaceEPUBMetadataFile(entries[tocPath])
 			if err == nil {

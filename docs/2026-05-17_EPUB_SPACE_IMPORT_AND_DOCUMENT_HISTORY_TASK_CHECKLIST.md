@@ -660,7 +660,7 @@ Phase 0 基线确认与方案锁定
 - [x] 新增 `RestoreDocumentRevisionInput`。
 - [x] 新增 `RestoreDocumentRevisionResult`。
 - [x] 注册 `POST /api/docs/:docId/revisions/:revisionId/restore`。
-- [x] 前端始终传当前 `Document.version` 作为 `baseVersion`。
+- [x] 前端按文档格式传当前版本：Markdown 传 `Document.version`，Office 传 `Document.contentVersion` 作为 `baseVersion`。
 - [x] 响应沿用保存文档结果语义，返回最新 document 和 restoredFromRevision。
 
 **验收**
@@ -710,7 +710,7 @@ Phase 0 基线确认与方案锁定
 - [x] 读取目标 file revision。
 - [x] 校验当前文档格式为 `docx` 或 `xlsx`。
 - [x] 校验当前文档格式与目标 file revision 格式一致。
-- [x] 校验 `documents.version == baseVersion`。
+- [x] 校验 `documents.content_version == baseVersion`。
 - [x] 确保当前 `contentVersion` 未被其它 Office 写回推进。
 - [x] 以目标 file revision 的 `blobID/fileName/mimeType` 覆盖当前 source 文件引用。
 - [x] 不重复写入文件 blob。
@@ -856,9 +856,9 @@ Phase 0 基线确认与方案锁定
 - [x] 点击“恢复到此版本”弹出二次确认。
 - [x] 确认文案包含目标版本号、创建时间和创建人。
 - [x] 当前文档有未保存内容时禁用恢复按钮，并提示先保存或放弃当前编辑。
-- [x] 调用 restore API 时传当前 `activeDocument.version`。
+- [x] 调用 restore API 时按文档格式传当前版本：Markdown 传 `activeDocument.version`，Office 传 `activeDocument.contentVersion`。
 - [x] 恢复成功后刷新版本列表。
-- [x] 恢复成功后同步 `content`、`activeDocument.version`、`lastSavedAt` 和保存状态。
+- [x] 恢复成功后同步 `content`、`activeDocument.version`、`activeDocument.contentVersion`、`lastSavedAt` 和保存状态。
 - [x] 恢复失败时保留弹窗并展示错误。
 
 **验收**
@@ -1074,7 +1074,7 @@ node --no-opt $(command -v npm) run build
 ### Phase 6 Review
 
 - 状态：已完成
-- 结论：Task 6.1 已完成恢复接口前后端契约、HTTP gateway、后端路由、`baseVersion` 校验和 revision not found 语义；Task 6.2 已完成 Markdown 历史版本恢复，恢复时校验写权限与当前版本，以目标 revision 正文覆盖当前文档，递增版本并新增一条 `document_revisions`，同时复用阅读缓存清理与图片引用同步规则。Task 6.3 已完成 Office 历史版本恢复，恢复时校验 `documents.version` 与 `contentVersion`，复用目标 file revision 的 `blobID/fileName/mimeType` 覆盖当前 source 引用，不重复写 blob，递增版本并新增 `document_file_revisions`，并将阅读渲染状态标记为 pending。Task 6.4 已完成恢复权限与可观测性边界，列表/详情继续复用读权限，恢复接口复用空间写权限，reader 被拒绝、collaborator 可恢复、owner Markdown/Office 恢复均已覆盖，错误响应保留 requestID，成功恢复写结构化日志。
+- 结论：Task 6.1 已完成恢复接口前后端契约、HTTP gateway、后端路由、`baseVersion` 校验和 revision not found 语义；Task 6.2 已完成 Markdown 历史版本恢复，恢复时校验写权限与当前版本，以目标 revision 正文覆盖当前文档，递增版本并新增一条 `document_revisions`，同时复用阅读缓存清理与图片引用同步规则。Task 6.3 已完成 Office 历史版本恢复，恢复时校验 `documents.content_version` 与当前 `contentVersion`，复用目标 file revision 的 `blobID/fileName/mimeType` 覆盖当前 source 引用，不重复写 blob，递增版本并新增 `document_file_revisions`，并将阅读渲染状态标记为 pending。Task 6.4 已完成恢复权限与可观测性边界，列表/详情继续复用读权限，恢复接口复用空间写权限，reader 被拒绝、collaborator 可恢复、owner Markdown/Office 恢复均已覆盖，错误响应保留 requestID，成功恢复写结构化日志。
 - 遗留问题：Phase 6 恢复接口后端任务已完成；前端历史版本弹窗与 diff 接入从 Phase 7 继续推进。
 
 ### Phase 7 Review

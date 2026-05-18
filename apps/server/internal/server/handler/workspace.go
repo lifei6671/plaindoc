@@ -1513,14 +1513,13 @@ func (h *workspaceHandler) RestoreRevision(c *gin.Context) {
 		response.InternalError(c)
 		return
 	}
-	if current.Version != req.BaseVersion {
-		h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(current))
-		return
-	}
-
 	currentFormat := models.NormalizeDocumentFormat(current.Format)
 	targetFormat := models.NormalizeDocumentFormat(targetRevision.Format)
 	if currentFormat == models.DocumentFormatMarkdown {
+		if current.Version != req.BaseVersion {
+			h.writeDocumentVersionConflict(c, mapWorkspaceDocumentResponse(current))
+			return
+		}
 		if targetFormat != models.DocumentFormatMarkdown || targetRevision.ContentMD == nil {
 			response.WorkspaceErrMarkdownOnlyOperation.Write(c)
 			return
