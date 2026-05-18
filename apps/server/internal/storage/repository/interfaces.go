@@ -461,7 +461,17 @@ type DataRetentionRepository interface {
 	DeleteAuthCaptchaChallengesBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
 	DeleteAuthRiskStatesBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
 	DeleteUserSessionsBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
-	DeleteDocumentRevisionsExceedingKeepCount(ctx context.Context, keepCount int, batchSize int) (int64, error)
+	DeleteDocumentRevisionsExceedingKeepCount(
+		ctx context.Context,
+		keepCount int,
+		batchSize int,
+	) (DeleteDocumentRevisionsResult, error)
+}
+
+// DeleteDocumentRevisionsResult 描述文档历史裁剪结果。
+type DeleteDocumentRevisionsResult struct {
+	DeletedRows     int64
+	ReleasedBlobIDs []string
 }
 
 // EnqueueSearchIndexJobParams 新增/合并检索索引任务参数。

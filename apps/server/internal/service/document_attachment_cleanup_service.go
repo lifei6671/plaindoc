@@ -94,28 +94,42 @@ func (s *DocumentAttachmentCleanupService) CleanupDeletedDocumentAttachments(
 		}
 	}
 
-	orphanBlobs, err := s.documentAttachmentRepo.ListOrphanBlobs(ctx, normalizedBatchSize)
+	deletedOrphanBlobs, err := s.cleanupOrphanBlobs(ctx, normalizedBatchSize, blobIDsToCleanup)
 	if err != nil {
 		return result, err
 	}
+	result.DeletedBlobs += deletedOrphanBlobs
+
+	return result, nil
+}
+
+func (s *DocumentAttachmentCleanupService) cleanupOrphanBlobs(
+	ctx context.Context,
+	batchSize int,
+	skipBlobIDs map[string]struct{},
+) (int64, error) {
+	orphanBlobs, err := s.documentAttachmentRepo.ListOrphanBlobs(ctx, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	var deletedCount int64
 	for _, blob := range orphanBlobs {
 		blobID := strings.TrimSpace(blob.BlobID)
 		if blobID == "" {
 			continue
 		}
-		if _, exists := blobIDsToCleanup[blobID]; exists {
+		if _, exists := skipBlobIDs[blobID]; exists {
 			continue
 		}
 		deletedBlob, cleanupErr := s.cleanupBlobIfUnreferenced(ctx, blobID)
 		if cleanupErr != nil {
-			return result, cleanupErr
+			return deletedCount, cleanupErr
 		}
 		if deletedBlob {
-			result.DeletedBlobs++
+			deletedCount++
 		}
 	}
-
-	return result, nil
+	return deletedCount, nil
 }
 
 func (s *DocumentAttachmentCleanupService) cleanupBlobIfUnreferenced(

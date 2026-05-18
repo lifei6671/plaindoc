@@ -172,41 +172,54 @@ func NewOfficeHTMLRenderService(
 	}
 }
 
+// ValidateTask 校验 Office 渲染任务是否具备入队条件，不产生副作用。
+func (s *OfficeHTMLRenderService) ValidateTask(task OfficeHTMLRenderTask) error {
+	_, err := s.prepareTask(task)
+	return err
+}
+
 // Enqueue 提交 Office 渲染任务。
 func (s *OfficeHTMLRenderService) Enqueue(_ context.Context, task OfficeHTMLRenderTask) error {
-	if s == nil || s.db == nil || s.officeRenderingConfig == nil {
-		return errors.New("office html render service dependencies are nil")
+	normalizedTask, err := s.prepareTask(task)
+	if err != nil {
+		return err
 	}
-
-	documentID := strings.TrimSpace(task.DocumentID)
-	spaceID := strings.TrimSpace(task.SpaceID)
-	sourceBlobID := strings.TrimSpace(task.SourceBlobID)
-	if documentID == "" || spaceID == "" || sourceBlobID == "" || task.ContentVersion <= 0 {
-		return errors.New("office html render task is invalid")
-	}
-	if !models.IsOfficeDocumentFormat(task.Format) {
+	if !models.IsOfficeDocumentFormat(normalizedTask.Format) {
 		return nil
 	}
-	if len(task.SourceContent) == 0 {
-		return errors.New("office html render source content is empty")
-	}
-
-	task.DocumentID = documentID
-	task.SpaceID = spaceID
-	task.SourceBlobID = sourceBlobID
-	task.SourceContent = bytes.Clone(task.SourceContent)
+	normalizedTask.SourceContent = bytes.Clone(normalizedTask.SourceContent)
 
 	s.workerOnce.Do(func() {
 		go s.runWorker()
 	})
 
 	select {
-	case s.tasks <- task:
+	case s.tasks <- normalizedTask:
 		return nil
 	default:
-		go s.processTask(task)
+		go s.processTask(normalizedTask)
 		return nil
 	}
+}
+
+func (s *OfficeHTMLRenderService) prepareTask(task OfficeHTMLRenderTask) (OfficeHTMLRenderTask, error) {
+	if s == nil || s.db == nil || s.officeRenderingConfig == nil {
+		return OfficeHTMLRenderTask{}, errors.New("office html render service dependencies are nil")
+	}
+
+	task.DocumentID = strings.TrimSpace(task.DocumentID)
+	task.SpaceID = strings.TrimSpace(task.SpaceID)
+	task.SourceBlobID = strings.TrimSpace(task.SourceBlobID)
+	if task.DocumentID == "" || task.SpaceID == "" || task.SourceBlobID == "" || task.ContentVersion <= 0 {
+		return OfficeHTMLRenderTask{}, errors.New("office html render task is invalid")
+	}
+	if !models.IsOfficeDocumentFormat(task.Format) {
+		return task, nil
+	}
+	if len(task.SourceContent) == 0 {
+		return OfficeHTMLRenderTask{}, errors.New("office html render source content is empty")
+	}
+	return task, nil
 }
 
 func (s *OfficeHTMLRenderService) runWorker() {

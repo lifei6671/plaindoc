@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -56,7 +59,7 @@ func TestPlanAdminSpaceEPUBImportTree_BuildsFoldersDocsFragmentsAndReferences(t 
 		t.Fatalf("unexpected chapter plan: %#v", chapter)
 	}
 	reference := part1.Children[1]
-	if !reference.Reference || !strings.Contains(reference.ContentMD, "> 本章节内容见：") {
+	if !reference.Reference {
 		t.Fatalf("expected duplicate target to become reference doc, got %#v", reference)
 	}
 	if reference.ReferenceTargetKey != chapter.TargetKey {
@@ -82,10 +85,10 @@ func TestPlanAdminSpaceEPUBImportTree_BuildsFoldersDocsFragmentsAndReferences(t 
 		t.Fatal("expected warning for missing fragment fallback")
 	}
 	if plan.Targets["OPS/chapters/chapter1.xhtml#intro"].DocumentID == "" ||
-		plan.Targets["OPS/chapters/chapter2.xhtml"].ReaderURL == "" {
+		plan.Targets["OPS/chapters/chapter2.xhtml"].DocumentID == "" {
 		t.Fatalf("expected target mappings with document id and reader url, got %#v", plan.Targets)
 	}
-	if plan.CanonicalTargets["OPS/chapters/chapter1.xhtml"].ReaderURL != chapter.ReaderURL {
+	if plan.CanonicalTargets["OPS/chapters/chapter1.xhtml"].DocumentID != chapter.DocumentID {
 		t.Fatalf("expected canonical target to point at primary chapter, got %#v", plan.CanonicalTargets)
 	}
 }
@@ -152,6 +155,7 @@ func TestRewriteAdminSpaceEPUBInternalLinks_RewritesAndDegradesTargets(t *testin
 	rewritten, warnings, err := rewriteAdminSpaceEPUBInternalLinks(adminSpaceEPUBLinkRewriteInput{
 		SourceKey:           "OPS/chapters/chapter1.xhtml",
 		SourceCanonicalHref: "OPS/chapters/chapter1.xhtml",
+		SpaceID:             "space-001",
 		HTML: []byte(`<body>
 			<a href="#intro">同文件 fragment</a>
 			<a href="chapter2.xhtml">跨文件</a>
@@ -165,13 +169,13 @@ func TestRewriteAdminSpaceEPUBInternalLinks_RewritesAndDegradesTargets(t *testin
 		t.Fatalf("rewriteAdminSpaceEPUBInternalLinks returned error: %v", err)
 	}
 
-	if !strings.Contains(rewritten, `<a href="/read/doc-001">同文件 fragment</a>`) {
+	if !strings.Contains(rewritten, `<a href="/r/space-001/doc-001">同文件 fragment</a>`) {
 		t.Fatalf("expected same-file fragment to rewrite to first reader url, got %q", rewritten)
 	}
-	if !strings.Contains(rewritten, `<a href="/read/doc-002">跨文件</a>`) {
+	if !strings.Contains(rewritten, `<a href="/r/space-001/doc-002">跨文件</a>`) {
 		t.Fatalf("expected cross-file link to rewrite to chapter 2, got %q", rewritten)
 	}
-	if !strings.Contains(rewritten, `<a href="/read/doc-002">fragment 降级</a>`) {
+	if !strings.Contains(rewritten, `<a href="/r/space-001/doc-002">fragment 降级</a>`) {
 		t.Fatalf("expected missing fragment to degrade to canonical target, got %q", rewritten)
 	}
 	if strings.Contains(rewritten, "missing.xhtml") {
@@ -196,8 +200,8 @@ func TestRewriteAdminSpaceEPUBInternalLinks_RewritesAndDegradesTargets(t *testin
 func TestBuildAdminSpaceEPUBReferenceMarkdown(t *testing.T) {
 	t.Parallel()
 
-	markdown := buildAdminSpaceEPUBReferenceMarkdown("第一章", "/read/doc-001")
-	if markdown != "> 本章节内容见：[第一章](/read/doc-001)" {
+	markdown := buildAdminSpaceEPUBReferenceMarkdown("第一章", "/r/space-001/doc-001")
+	if markdown != "> 本章节内容见：[第一章](/r/space-001/doc-001)" {
 		t.Fatalf("unexpected reference markdown: %q", markdown)
 	}
 }
@@ -219,6 +223,7 @@ func TestRewriteAdminSpaceEPUBInternalLinks_ConvertedMarkdownHasNoEPUBRelativeLi
 	rewritten, warnings, err := rewriteAdminSpaceEPUBInternalLinks(adminSpaceEPUBLinkRewriteInput{
 		SourceKey:           "OPS/chapter1.xhtml",
 		SourceCanonicalHref: "OPS/chapter1.xhtml",
+		SpaceID:             "space-001",
 		HTML:                []byte(`<body><p><a href="chapter2.xhtml">下一章</a> <a href="missing.xhtml">缺失章</a></p></body>`),
 		Plan:                plan,
 	})
@@ -240,9 +245,37 @@ func TestRewriteAdminSpaceEPUBInternalLinks_ConvertedMarkdownHasNoEPUBRelativeLi
 	if strings.Contains(result.Markdown, "chapter2.xhtml") || strings.Contains(result.Markdown, "missing.xhtml") {
 		t.Fatalf("expected markdown without epub relative links, got %q", result.Markdown)
 	}
-	if !strings.Contains(result.Markdown, "[下一章](/read/doc-002)") || !strings.Contains(result.Markdown, "缺失章") {
+	if !strings.Contains(result.Markdown, "[下一章](/r/space-001/doc-002)") || !strings.Contains(result.Markdown, "缺失章") {
 		t.Fatalf("expected rewritten link and retained missing text, got %q", result.Markdown)
 	}
+}
+
+func TestInspectAdminSpaceImportEPUB_UserProvidedSample(t *testing.T) {
+	t.Parallel()
+
+	samplePath := filepath.Join("..", "..", "data", "延迟满足：如何在等待中获得更多.epub")
+	payload, err := os.ReadFile(samplePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skipf("sample epub not found: %s", samplePath)
+		}
+		t.Fatalf("read sample epub failed: %v", err)
+	}
+
+	preview, warnings, err := inspectAdminSpaceImportEPUB(payload)
+	if err != nil {
+		t.Fatalf("inspect sample epub failed: %v", err)
+	}
+	if !preview.Space.HasCover {
+		t.Fatalf("expected sample epub to expose cover metadata, got %#v", preview.Space)
+	}
+	if strings.TrimSpace(preview.Space.Name) == "" {
+		t.Fatalf("expected sample epub name, got %#v", preview.Space)
+	}
+	if preview.Summary.DocumentCount <= 0 || preview.Summary.MaxDepth <= 0 {
+		t.Fatalf("expected sample epub summary to include document count/depth, got %#v", preview.Summary)
+	}
+	t.Logf("sample epub preview: name=%q docs=%d depth=%d warnings=%d", preview.Space.Name, preview.Summary.DocumentCount, preview.Summary.MaxDepth, len(warnings))
 }
 
 func TestLocalizeAdminSpaceEPUBChapterImages_LocalizesRelativeAndDataImages(t *testing.T) {

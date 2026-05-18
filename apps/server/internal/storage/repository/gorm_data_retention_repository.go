@@ -132,11 +132,11 @@ func (r *gormDataRetentionRepository) DeleteDocumentRevisionsExceedingKeepCount(
 	ctx context.Context,
 	keepCount int,
 	batchSize int,
-) (int64, error) {
+) (DeleteDocumentRevisionsResult, error) {
 	if keepCount <= 0 {
 		keepCount = 1
 	}
-	markdownDeleted, err := r.deleteRevisionRowsExceedingKeepCount(
+	markdownResult, err := r.deleteRevisionRowsExceedingKeepCount(
 		ctx,
 		dataRetentionRevisionTableMeta{
 			tableName:        (models.DocumentRevision{}).TableName(),
@@ -149,9 +149,9 @@ func (r *gormDataRetentionRepository) DeleteDocumentRevisionsExceedingKeepCount(
 		batchSize,
 	)
 	if err != nil {
-		return markdownDeleted, fmt.Errorf("cleanup document_revisions failed: %w", err)
+		return markdownResult, fmt.Errorf("cleanup document_revisions failed: %w", err)
 	}
-	fileDeleted, err := r.deleteRevisionRowsExceedingKeepCount(
+	fileResult, err := r.deleteRevisionRowsExceedingKeepCount(
 		ctx,
 		dataRetentionRevisionTableMeta{
 			tableName:        (models.DocumentFileRevision{}).TableName(),
@@ -159,14 +159,21 @@ func (r *gormDataRetentionRepository) DeleteDocumentRevisionsExceedingKeepCount(
 			documentIDColumn: models.DocumentFileRevisionColumns.DocumentID,
 			versionColumn:    models.DocumentFileRevisionColumns.Version,
 			createdAtColumn:  models.DocumentFileRevisionColumns.CreatedAt,
+			blobIDColumn:     models.DocumentFileRevisionColumns.BlobID,
 		},
 		keepCount,
 		batchSize,
 	)
 	if err != nil {
-		return markdownDeleted + fileDeleted, fmt.Errorf("cleanup document_file_revisions failed: %w", err)
+		return DeleteDocumentRevisionsResult{
+			DeletedRows:     markdownResult.DeletedRows + fileResult.DeletedRows,
+			ReleasedBlobIDs: append(markdownResult.ReleasedBlobIDs, fileResult.ReleasedBlobIDs...),
+		}, fmt.Errorf("cleanup document_file_revisions failed: %w", err)
 	}
-	return markdownDeleted + fileDeleted, nil
+	return DeleteDocumentRevisionsResult{
+		DeletedRows:     markdownResult.DeletedRows + fileResult.DeletedRows,
+		ReleasedBlobIDs: append(markdownResult.ReleasedBlobIDs, fileResult.ReleasedBlobIDs...),
+	}, nil
 }
 
 type dataRetentionRevisionTableMeta struct {
@@ -175,6 +182,7 @@ type dataRetentionRevisionTableMeta struct {
 	documentIDColumn string
 	versionColumn    string
 	createdAtColumn  string
+	blobIDColumn     string
 }
 
 func (r *gormDataRetentionRepository) deleteRevisionRowsExceedingKeepCount(
@@ -182,22 +190,27 @@ func (r *gormDataRetentionRepository) deleteRevisionRowsExceedingKeepCount(
 	tableMeta dataRetentionRevisionTableMeta,
 	keepCount int,
 	batchSize int,
-) (int64, error) {
+) (DeleteDocumentRevisionsResult, error) {
 	if r == nil || r.db == nil {
-		return 0, fmt.Errorf("data retention repository db is nil")
+		return DeleteDocumentRevisionsResult{}, fmt.Errorf("data retention repository db is nil")
 	}
 	if batchSize <= 0 {
 		batchSize = defaultDataRetentionDeleteBatchSize
 	}
 
-	var totalDeleted int64
+	result := DeleteDocumentRevisionsResult{}
+	releasedBlobIDs := make(map[string]struct{})
 	for {
-		ids, err := r.listRevisionRowIDsExceedingKeepCount(ctx, tableMeta, keepCount, batchSize)
+		rows, err := r.listRevisionRowsExceedingKeepCount(ctx, tableMeta, keepCount, batchSize)
 		if err != nil {
-			return totalDeleted, err
+			return result, err
 		}
-		if len(ids) == 0 {
+		if len(rows) == 0 {
 			break
+		}
+		ids := make([]int64, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
 		}
 
 		deleteTx := r.db.WithContext(ctx).
@@ -205,22 +218,39 @@ func (r *gormDataRetentionRepository) deleteRevisionRowsExceedingKeepCount(
 			Where(tableMeta.idColumn+" IN ?", ids).
 			Delete(nil)
 		if deleteTx.Error != nil {
-			return totalDeleted, deleteTx.Error
+			return result, deleteTx.Error
 		}
-		totalDeleted += deleteTx.RowsAffected
-		if len(ids) < batchSize {
+		result.DeletedRows += deleteTx.RowsAffected
+		for _, row := range rows {
+			if row.BlobID == "" {
+				continue
+			}
+			releasedBlobIDs[row.BlobID] = struct{}{}
+		}
+		if len(rows) < batchSize {
 			break
 		}
 	}
-	return totalDeleted, nil
+	if len(releasedBlobIDs) > 0 {
+		result.ReleasedBlobIDs = make([]string, 0, len(releasedBlobIDs))
+		for blobID := range releasedBlobIDs {
+			result.ReleasedBlobIDs = append(result.ReleasedBlobIDs, blobID)
+		}
+	}
+	return result, nil
 }
 
-func (r *gormDataRetentionRepository) listRevisionRowIDsExceedingKeepCount(
+type dataRetentionRevisionRow struct {
+	ID     int64
+	BlobID string
+}
+
+func (r *gormDataRetentionRepository) listRevisionRowsExceedingKeepCount(
 	ctx context.Context,
 	tableMeta dataRetentionRevisionTableMeta,
 	keepCount int,
 	batchSize int,
-) ([]int64, error) {
+) ([]dataRetentionRevisionRow, error) {
 	documentIDs := make([]string, 0)
 	if err := r.db.WithContext(ctx).
 		Table(tableMeta.tableName).
@@ -230,26 +260,29 @@ func (r *gormDataRetentionRepository) listRevisionRowIDsExceedingKeepCount(
 		return nil, err
 	}
 
-	ids := make([]int64, 0, batchSize)
+	rows := make([]dataRetentionRevisionRow, 0, batchSize)
 	for _, documentID := range documentIDs {
-		remaining := batchSize - len(ids)
+		remaining := batchSize - len(rows)
 		if remaining <= 0 {
 			break
 		}
-		var documentRevisionIDs []int64
-		if err := r.db.WithContext(ctx).
+		query := r.db.WithContext(ctx).
 			Table(tableMeta.tableName).
-			Select(tableMeta.idColumn).
+			Select(tableMeta.idColumn+" AS id").
 			Where(tableMeta.documentIDColumn+" = ?", documentID).
-			Order(tableMeta.versionColumn+" DESC, "+tableMeta.createdAtColumn+" DESC, "+tableMeta.idColumn+" DESC").
+			Order(tableMeta.versionColumn + " DESC, " + tableMeta.createdAtColumn + " DESC, " + tableMeta.idColumn + " DESC").
 			Offset(keepCount).
-			Limit(remaining).
-			Pluck(tableMeta.idColumn, &documentRevisionIDs).Error; err != nil {
+			Limit(remaining)
+		if tableMeta.blobIDColumn != "" {
+			query = query.Select(tableMeta.idColumn + " AS id, " + tableMeta.blobIDColumn + " AS blob_id")
+		}
+		var documentRevisionRows []dataRetentionRevisionRow
+		if err := query.Scan(&documentRevisionRows).Error; err != nil {
 			return nil, err
 		}
-		ids = append(ids, documentRevisionIDs...)
+		rows = append(rows, documentRevisionRows...)
 	}
-	return ids, nil
+	return rows, nil
 }
 
 func (r *gormDataRetentionRepository) deleteRowsByID(

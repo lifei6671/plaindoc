@@ -174,7 +174,8 @@ func (s *DataRetentionCleanupService) runOnce(
 		}
 	}
 	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentRevisions) {
-		result.DeletedDocumentRevisions, err = s.cleanupDocumentRevisions(
+		var deletedRevisionBlobs int64
+		result.DeletedDocumentRevisions, deletedRevisionBlobs, err = s.cleanupDocumentRevisions(
 			ctx,
 			result.Policy.DocumentRevisionRetentionCount,
 			result.Policy.CleanupBatchSize,
@@ -182,12 +183,15 @@ func (s *DataRetentionCleanupService) runOnce(
 		if err != nil {
 			return result, err
 		}
+		result.DeletedAttachmentBlobs += deletedRevisionBlobs
 	}
 	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentAttachments) {
-		result.DeletedDocumentAttachments, result.DeletedAttachmentBlobs, err = s.cleanupDocumentAttachments(ctx, result.Policy.CleanupBatchSize)
+		var deletedAttachmentBlobs int64
+		result.DeletedDocumentAttachments, deletedAttachmentBlobs, err = s.cleanupDocumentAttachments(ctx, result.Policy.CleanupBatchSize)
 		if err != nil {
 			return result, err
 		}
+		result.DeletedAttachmentBlobs += deletedAttachmentBlobs
 	}
 	if hasDataRetentionCleanupTable(result.Policy.CleanupTables, DataRetentionCleanupTableDocumentImageAssets) {
 		result.DeletedDocumentImageAssets, err = s.cleanupDocumentImageAssets(ctx, result.Policy.CleanupBatchSize)
@@ -461,13 +465,30 @@ func (s *DataRetentionCleanupService) cleanupDocumentRevisions(
 	ctx context.Context,
 	keepCount int,
 	batchSize int,
-) (int64, error) {
+) (int64, int64, error) {
 	if s == nil || s.dataRetentionRepo == nil {
-		return 0, errors.New("data retention cleanup repository is nil")
+		return 0, 0, errors.New("data retention cleanup repository is nil")
 	}
-	deleted, err := s.dataRetentionRepo.DeleteDocumentRevisionsExceedingKeepCount(ctx, keepCount, batchSize)
+	deleteResult, err := s.dataRetentionRepo.DeleteDocumentRevisionsExceedingKeepCount(ctx, keepCount, batchSize)
 	if err != nil {
-		return deleted, fmt.Errorf("cleanup document_revisions failed: %w", err)
+		return deleteResult.DeletedRows, 0, fmt.Errorf("cleanup document_revisions failed: %w", err)
 	}
-	return deleted, nil
+	if s.documentAttachmentCleanupService == nil {
+		return deleteResult.DeletedRows, 0, nil
+	}
+	var deletedBlobs int64
+	for _, blobID := range deleteResult.ReleasedBlobIDs {
+		deletedBlob, cleanupErr := s.documentAttachmentCleanupService.cleanupBlobIfUnreferenced(ctx, blobID)
+		if cleanupErr != nil {
+			return deleteResult.DeletedRows, deletedBlobs, fmt.Errorf(
+				"cleanup released revision blob %s failed: %w",
+				blobID,
+				cleanupErr,
+			)
+		}
+		if deletedBlob {
+			deletedBlobs++
+		}
+	}
+	return deleteResult.DeletedRows, deletedBlobs, nil
 }

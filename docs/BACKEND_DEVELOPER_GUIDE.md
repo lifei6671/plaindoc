@@ -213,8 +213,9 @@
 1. 默认启用自动清理，默认每 60 分钟执行一次。
 2. `cleanupTables` 支持 `document_revisions`；启用后会清理 Markdown 历史表 `document_revisions` 和 Office 文件历史表 `document_file_revisions`。
 3. `documentRevisionRetentionCount` 默认 `30`，表示每个文档保留最近 30 份历史记录，超过部分按 `version DESC, created_at DESC, id DESC` 保留最新、删除更旧记录。
-4. 默认清理顺序会先裁剪文档历史，再执行 `document_attachments` 的无引用 `file_blobs` 补偿清理，避免 Office 旧历史版本源文件长期残留。
-5. 手动清理入口仍为 `POST /api/admin/system-configs/data-retention/cleanup/run`，必须使用 operation token。
+4. `document_revisions` 清理完成后必须立即补偿回收因此变成无引用的 `file_blobs`，即使未启用 `document_attachments` 也不能让 Office 旧历史版本源文件残留。
+5. `document_attachments` 仍负责“已删除文档”的附件引用清理，以及剩余 orphan `file_blobs` 的补偿回收。
+6. 手动清理入口仍为 `POST /api/admin/system-configs/data-retention/cleanup/run`，必须使用 operation token。
 
 ---
 
@@ -379,7 +380,7 @@ ONLYOFFICE 一等文档规则：
 12. 导入 Office 源文件时不能依赖内容嗅探决定 MIME；`docx` 固定写入 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`，`xlsx` 固定写入 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，避免 ZIP 容器被误存为 `application/zip`。
 13. 服务端必须兜底规范化导出选项：`source_zip` 强制包含附件和 Office 源文件，`epub` 强制包含 Office 源文件用于渲染但不导出普通附件。
 14. `.plaindoc` 交换包如果包含空间封面，导入时必须校验封面文件存在、`source` 只能是空值/`user_upload`/`system_generated`，恢复封面资产并绑定新空间；没有封面时由前端导入完成后复用创建空间的浏览器默认封面生成逻辑补齐。
-15. 导入封面对象写入本地 `uploads/space-covers` 后，如果封面资产持久化或新空间创建失败，必须清理已写入的封面对象；若封面资产已落库但新空间创建失败，还必须删除该封面资产记录，避免孤儿文件和孤儿元数据。
+15. 导入封面对象写入本地 `uploads/space-covers` 后，如果封面资产持久化或新空间创建失败，必须清理已写入的封面对象；若封面资产已落库但新空间创建失败，还必须删除该封面资产记录，避免孤儿文件和孤儿元数据。EPUB `cover-image` 导入必须复用现有空间封面处理链路，统一归一化为 WebP 资产，不能把 PNG/JPEG/GIF 原样写入 `space_cover_assets`。
 16. `POST /api/admin/space-imports/inspect` 必须在 `FormFile` 或 `ParseMultipartForm` 前用 `http.MaxBytesReader` 限制请求体，避免超大 multipart 在进入 service 体积校验前消耗临时磁盘或 IO；handler 上限要与 `service.MaxAdminSpaceImportUploadBytes` 保持一致，并预留 multipart 元数据开销。
 17. EPUB 导入永远创建新空间，权限按 `space_create` 能力校验，不要求用户已管理某个空间；inspect 结果需要返回 `packageType=epub`、作者、出版日期、章节数、目录层级、图片数和 warnings。
 18. EPUB 解析必须限制 entry 数、单 entry、总解压量和目录深度；OPF/spine/章节缺失才失败，单个图片本地化失败应降级为 warning 或 alt 文本，不中断整本导入。

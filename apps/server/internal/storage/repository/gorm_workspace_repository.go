@@ -1036,6 +1036,7 @@ func (r *gormWorkspaceRepository) SaveOfficeDocument(
 			Updates(map[string]any{
 				models.DocumentColumns.Version:         nextVersion,
 				models.DocumentColumns.ContentVersion:  nextContentVersion,
+				models.DocumentColumns.ContentMD:       "",
 				models.DocumentColumns.SourceBlobID:    sourceBlobID,
 				models.DocumentColumns.SourceFileName:  trimOptionalString(pointerString(params.SourceFileName)),
 				models.DocumentColumns.SourceMimeType:  trimOptionalString(pointerString(params.SourceMimeType)),

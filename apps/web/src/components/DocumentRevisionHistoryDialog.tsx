@@ -8,6 +8,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent }
 import {
   ConflictError,
   type DataGateway,
+  type Document,
   type DocumentRevisionDetail,
   type DocumentRevisionSummary,
   type RestoreDocumentRevisionResult
@@ -87,9 +88,16 @@ function getOfficeRevisionMimeType(revision: DocumentRevisionDetail): string {
   return revision.file?.mimeType?.trim() || revision.mimeType?.trim() || "未记录 MIME";
 }
 
+function getConflictDocumentVersion(document: Document): number {
+  if ((document.format === "docx" || document.format === "xlsx") && typeof document.contentVersion === "number" && document.contentVersion > 0) {
+    return document.contentVersion;
+  }
+  return document.version;
+}
+
 function formatRestoreError(error: unknown): string {
   if (error instanceof ConflictError) {
-    return `版本冲突：当前文档已更新到 v${error.latestDocument.version}，请刷新或重新选择历史版本后再试。`;
+    return `版本冲突：当前文档已更新到 v${getConflictDocumentVersion(error.latestDocument)}，请刷新或重新选择历史版本后再试。`;
   }
   if (error instanceof Error && error.message.trim()) {
     return error.message;

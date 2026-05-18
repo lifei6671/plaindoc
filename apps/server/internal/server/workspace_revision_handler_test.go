@@ -670,6 +670,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 			Format         string  `json:"format"`
 			Version        int     `json:"version"`
 			ContentVersion int     `json:"contentVersion"`
+			ContentMD      string  `json:"contentMd"`
 			SourceBlobID   *string `json:"sourceBlobId"`
 			SourceFileName *string `json:"sourceFileName"`
 			SourceMimeType *string `json:"sourceMimeType"`
@@ -683,6 +684,9 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 	}](t, rec.Body.Bytes())
 	if payload.Document.ID != documentID || payload.Document.Format != "docx" || payload.Document.Version != 6 || payload.Document.ContentVersion != 3 {
 		t.Fatalf("unexpected restored office document payload: %+v body=%s", payload.Document, rec.Body.String())
+	}
+	if payload.Document.ContentMD != "" {
+		t.Fatalf("expected restored office response to avoid stale contentMd, got %q body=%s", payload.Document.ContentMD, rec.Body.String())
 	}
 	if payload.Document.SourceBlobID == nil || *payload.Document.SourceBlobID != targetBlobID {
 		t.Fatalf("expected restored source blob %q, got %+v", targetBlobID, payload.Document.SourceBlobID)
@@ -705,6 +709,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 	var persistedDoc struct {
 		Version        int     `gorm:"column:version"`
 		ContentVersion int     `gorm:"column:content_version"`
+		ContentMD      string  `gorm:"column:content_md"`
 		SourceBlobID   *string `gorm:"column:source_blob_id"`
 		SourceFileName *string `gorm:"column:source_file_name"`
 		SourceMimeType *string `gorm:"column:source_mime_type"`
@@ -712,7 +717,7 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 		RenderedAt     *string `gorm:"column:rendered_at"`
 	}
 	if err := database.ORM.Table("documents").
-		Select("version", "content_version", "source_blob_id", "source_file_name", "source_mime_type", "render_status", "rendered_at").
+		Select("version", "content_version", "content_md", "source_blob_id", "source_file_name", "source_mime_type", "render_status", "rendered_at").
 		Where("document_id = ?", documentID).
 		Take(&persistedDoc).Error; err != nil {
 		t.Fatalf("query restored office document failed: %v", err)
@@ -722,6 +727,9 @@ func TestRouter_RestoreOfficeDocumentRevisionCreatesNewFileRevision(t *testing.T
 		persistedDoc.SourceFileName == nil || *persistedDoc.SourceFileName != "target-v1.docx" ||
 		persistedDoc.SourceMimeType == nil || *persistedDoc.SourceMimeType != officeMimeType {
 		t.Fatalf("unexpected restored office document row: %+v", persistedDoc)
+	}
+	if persistedDoc.ContentMD != "" {
+		t.Fatalf("expected restored office document row to clear stale content_md, got %q", persistedDoc.ContentMD)
 	}
 	waitForOfficeRenderStatus(t, database, documentID, "idle")
 

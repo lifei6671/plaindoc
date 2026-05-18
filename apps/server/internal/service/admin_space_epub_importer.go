@@ -110,22 +110,19 @@ type adminSpaceEPUBPlannedNode struct {
 	Title              string
 	NodeID             string
 	DocumentID         string
-	ReaderURL          string
 	CanonicalHref      string
 	Fragment           string
 	TargetKey          string
 	Reference          bool
 	ReferenceTargetKey string
-	ContentMD          string
 	Children           []adminSpaceEPUBPlannedNode
 }
 
 // adminSpaceEPUBPlannedTarget 是内部链接重写需要的最小目标信息。
-// 预分配阶段先生成稳定 documentID / readerURL，避免后续正文转换时再依赖写库顺序。
+// 预分配阶段先生成稳定 documentID，避免后续正文转换时再依赖写库顺序。
 type adminSpaceEPUBPlannedTarget struct {
 	Title      string
 	DocumentID string
-	ReaderURL  string
 }
 
 // adminSpaceEPUBImportPackage 是 commit 阶段使用的 EPUB 解析结果。
@@ -165,6 +162,7 @@ type adminSpaceEPUBHTMLSanitizeInput struct {
 type adminSpaceEPUBLinkRewriteInput struct {
 	SourceKey           string
 	SourceCanonicalHref string
+	SpaceID             string
 	HTML                []byte
 	Plan                adminSpaceEPUBPlan
 }
@@ -1008,11 +1006,11 @@ func rewriteAdminSpaceEPUBAnchor(node *html.Node, input adminSpaceEPUBLinkRewrit
 		return
 	}
 	if target, exists := input.Plan.Targets[normalized.TargetKey]; exists {
-		setAdminSpaceEPUBHTMLAttribute(node, "href", target.ReaderURL)
+		setAdminSpaceEPUBHTMLAttribute(node, "href", buildAdminSpaceEPUBImportedReaderURL(input.SpaceID, target.DocumentID))
 		return
 	}
 	if target, exists := input.Plan.CanonicalTargets[normalized.CanonicalHref]; exists {
-		setAdminSpaceEPUBHTMLAttribute(node, "href", target.ReaderURL)
+		setAdminSpaceEPUBHTMLAttribute(node, "href", buildAdminSpaceEPUBImportedReaderURL(input.SpaceID, target.DocumentID))
 		*warnings = append(*warnings, adminSpaceEPUBLinkRewriteWarning(input, "链接 "+href+" 未命中 fragment，已降级到整章文档"))
 		return
 	}
@@ -1479,31 +1477,26 @@ func (p *adminSpaceEPUBTreePlanner) planItem(item adminSpaceEPUBNavItem, sibling
 // planDocument 为正文 target 预分配 documentID / readerURL。
 // 多个目录项指向同一 target 时创建“参见”占位文档，避免复制正文导致后续链接目标不一致。
 func (p *adminSpaceEPUBTreePlanner) planDocument(title string, normalized adminSpaceEPUBNormalizedHref) adminSpaceEPUBPlannedNode {
-	if existing, ok := p.targets[normalized.TargetKey]; ok {
+	if _, ok := p.targets[normalized.TargetKey]; ok {
 		documentID := p.nextDocumentID()
-		readerURL := buildAdminSpaceEPUBReaderURL(documentID)
 		p.warnings = append(p.warnings, "目录项 "+title+" 重复指向 "+normalized.TargetKey+"，已创建参见占位文档")
 		return adminSpaceEPUBPlannedNode{
 			Type:               adminSpaceEPUBPlannedNodeTypeDoc,
 			Title:              title,
 			NodeID:             p.nextNodeID(),
 			DocumentID:         documentID,
-			ReaderURL:          readerURL,
 			CanonicalHref:      normalized.CanonicalHref,
 			Fragment:           normalized.Fragment,
 			TargetKey:          normalized.TargetKey,
 			Reference:          true,
 			ReferenceTargetKey: normalized.TargetKey,
-			ContentMD:          buildAdminSpaceEPUBReferenceMarkdown(existing.Title, existing.ReaderURL),
 		}
 	}
 
 	documentID := p.nextDocumentID()
-	readerURL := buildAdminSpaceEPUBReaderURL(documentID)
 	p.targets[normalized.TargetKey] = adminSpaceEPUBPlannedTarget{
 		Title:      title,
 		DocumentID: documentID,
-		ReaderURL:  readerURL,
 	}
 	if _, exists := p.canonicalTargets[normalized.CanonicalHref]; !exists {
 		p.canonicalTargets[normalized.CanonicalHref] = normalized.TargetKey
@@ -1513,7 +1506,6 @@ func (p *adminSpaceEPUBTreePlanner) planDocument(title string, normalized adminS
 		Title:         title,
 		NodeID:        p.nextNodeID(),
 		DocumentID:    documentID,
-		ReaderURL:     readerURL,
 		CanonicalHref: normalized.CanonicalHref,
 		Fragment:      normalized.Fragment,
 		TargetKey:     normalized.TargetKey,
@@ -1608,8 +1600,13 @@ func resolveAdminSpaceEPUBTitle(title string, fallbackIndex int) string {
 	return fmt.Sprintf("章节 %03d", fallbackIndex)
 }
 
-func buildAdminSpaceEPUBReaderURL(documentID string) string {
-	return "/read/" + strings.TrimSpace(documentID)
+func buildAdminSpaceEPUBImportedReaderURL(spaceID string, documentID string) string {
+	normalizedSpaceID := strings.TrimSpace(spaceID)
+	normalizedDocumentID := strings.TrimSpace(documentID)
+	if normalizedSpaceID == "" || normalizedDocumentID == "" {
+		return ""
+	}
+	return "/r/" + normalizedSpaceID + "/" + normalizedDocumentID
 }
 
 func buildAdminSpaceEPUBReferenceMarkdown(title string, readerURL string) string {

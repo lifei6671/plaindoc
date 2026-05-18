@@ -228,7 +228,7 @@ func isSafePlainDocMarkdownImageURL(rawURL string) bool {
 func isSafePlainDocMarkdownLinkURL(rawURL string) bool {
 	trimmed := strings.TrimSpace(rawURL)
 	lowerURL := strings.ToLower(trimmed)
-	return strings.HasPrefix(trimmed, "/read/") ||
+	return strings.HasPrefix(trimmed, "/r/") ||
 		strings.HasPrefix(trimmed, "/share/") ||
 		strings.HasPrefix(trimmed, "#") ||
 		strings.HasPrefix(lowerURL, "http://") ||

@@ -2111,7 +2111,7 @@ func readAdminSpaceEPUBNavItems(
 			if err == nil {
 				items, parseErr := parseAdminSpaceEPUBNavDocument(payload)
 				if parseErr == nil && len(items) > 0 {
-					return items
+					return rebaseAdminSpaceEPUBNavItems(items, opfRoot, navPath)
 				}
 			}
 		}
@@ -2123,12 +2123,52 @@ func readAdminSpaceEPUBNavItems(
 			if err == nil {
 				items, parseErr := parseAdminSpaceEPUBTOCDocument(payload)
 				if parseErr == nil && len(items) > 0 {
-					return items
+					return rebaseAdminSpaceEPUBNavItems(items, opfRoot, tocPath)
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func rebaseAdminSpaceEPUBNavItems(items []adminSpaceEPUBNavItem, opfRoot string, navPath string) []adminSpaceEPUBNavItem {
+	if len(items) == 0 {
+		return nil
+	}
+	baseDir := path.Dir(strings.TrimSpace(navPath))
+	if baseDir == "." {
+		baseDir = ""
+	}
+	rebased := make([]adminSpaceEPUBNavItem, 0, len(items))
+	for _, item := range items {
+		rebased = append(rebased, rebaseAdminSpaceEPUBNavItem(item, strings.TrimSpace(opfRoot), baseDir))
+	}
+	return rebased
+}
+
+func rebaseAdminSpaceEPUBNavItem(item adminSpaceEPUBNavItem, opfRoot string, baseDir string) adminSpaceEPUBNavItem {
+	trimmedHref := strings.TrimSpace(item.Href)
+	if trimmedHref != "" {
+		if normalized, ok := normalizeAdminSpaceEPUBHref(baseDir, trimmedHref); ok {
+			relativeHref := strings.TrimSpace(normalized.CanonicalHref)
+			if opfRoot != "" && strings.HasPrefix(relativeHref, opfRoot+"/") {
+				relativeHref = strings.TrimPrefix(relativeHref, opfRoot+"/")
+			}
+			if normalized.Fragment != "" {
+				relativeHref += "#" + normalized.Fragment
+			}
+			item.Href = relativeHref
+		}
+	}
+	if len(item.Children) == 0 {
+		return item
+	}
+	rebasedChildren := make([]adminSpaceEPUBNavItem, 0, len(item.Children))
+	for _, child := range item.Children {
+		rebasedChildren = append(rebasedChildren, rebaseAdminSpaceEPUBNavItem(child, opfRoot, baseDir))
+	}
+	item.Children = rebasedChildren
+	return item
 }
 
 func buildAdminSpaceEPUBSpineNavItems(
@@ -2300,7 +2340,16 @@ func (i *adminSpaceEPUBPackageImporter) buildDocumentMarkdown(
 	documentID string,
 ) (string, []string, []models.DocumentAttachmentBlob, error) {
 	if planned.Reference {
-		return strings.TrimSpace(planned.ContentMD), nil, nil, nil
+		targetKey := strings.TrimSpace(planned.ReferenceTargetKey)
+		target, exists := i.plan.Targets[targetKey]
+		if !exists {
+			return "", nil, nil, errcode.ErrAdminSpaceImportPackageNotImportable
+		}
+		readerURL := buildAdminSpaceEPUBImportedReaderURL(i.newSpaceID, target.DocumentID)
+		if readerURL == "" {
+			return "", nil, nil, errcode.ErrAdminSpaceImportPackageNotImportable
+		}
+		return buildAdminSpaceEPUBReferenceMarkdown(target.Title, readerURL), nil, nil, nil
 	}
 	sourceKey := strings.TrimSpace(planned.TargetKey)
 	if sourceKey == "" {
@@ -2321,6 +2370,7 @@ func (i *adminSpaceEPUBPackageImporter) buildDocumentMarkdown(
 	rewrittenHTML, linkWarnings, err := rewriteAdminSpaceEPUBInternalLinks(adminSpaceEPUBLinkRewriteInput{
 		SourceKey:           sourceKey,
 		SourceCanonicalHref: planned.CanonicalHref,
+		SpaceID:             i.newSpaceID,
 		HTML:                []byte(sanitizedHTML),
 		Plan:                i.plan,
 	})
@@ -2512,7 +2562,12 @@ func (s *AdminSpaceImportService) createImportedEPUBSpaceCoverAsset(
 		)
 		return nil, nil
 	}
-	mimeType, coverWidth, coverHeight, err := validateAdminSpaceEPUBCoverPayload(coverPath, payload)
+	processed, err := processAdminSpaceUserUploadCover(processAdminSpaceUserUploadCoverInput{
+		FileName:        path.Base(coverPath),
+		FileContentType: adminSpaceEPUBImageContentType(coverPath),
+		FileBytes:       payload,
+		Quality:         adminSpaceCoverDefaultQuality,
+	})
 	if err != nil {
 		slog.WarnContext(ctx, "EPUB 封面格式不支持，已跳过空间封面导入",
 			"jobID", strings.TrimSpace(job.JobID),
@@ -2522,11 +2577,11 @@ func (s *AdminSpaceImportService) createImportedEPUBSpaceCoverAsset(
 		)
 		return nil, nil
 	}
-	objectKey, err := buildAdminSpaceEPUBCoverObjectKey(now, mimeType)
+	objectKey, err := buildAdminSpaceCoverObjectKey(now)
 	if err != nil {
 		return nil, err
 	}
-	if err := saveAdminSpaceCoverObject(objectKey, payload); err != nil {
+	if err := saveAdminSpaceCoverObject(objectKey, processed.WebPBytes); err != nil {
 		return nil, err
 	}
 	asset := &models.SpaceCoverAsset{
@@ -2534,11 +2589,11 @@ func (s *AdminSpaceImportService) createImportedEPUBSpaceCoverAsset(
 		Source:          string(AdminSpaceCoverSourceUserUpload),
 		ObjectKey:       objectKey,
 		ObjectURL:       resolveAdminSpaceCoverPublicURL(objectKey),
-		MimeType:        mimeType,
-		Width:           coverWidth,
-		Height:          coverHeight,
-		SizeBytes:       int64(len(payload)),
-		Normalized:      false,
+		MimeType:        "image/webp",
+		Width:           processed.Width,
+		Height:          processed.Height,
+		SizeBytes:       int64(len(processed.WebPBytes)),
+		Normalized:      processed.Normalized,
 		CreatedByUserID: strings.TrimSpace(job.ActorUserID),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -2550,79 +2605,6 @@ func (s *AdminSpaceImportService) createImportedEPUBSpaceCoverAsset(
 		return nil, err
 	}
 	return asset, nil
-}
-
-func validateAdminSpaceEPUBCoverPayload(coverPath string, payload []byte) (string, int, int, error) {
-	if len(payload) == 0 {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	declaredMimeType := strings.TrimSpace(strings.ToLower(adminSpaceEPUBImageContentType(coverPath)))
-	detectedMimeType := strings.TrimSpace(strings.ToLower(detectAdminSpaceCoverContentType(payload, declaredMimeType)))
-	if detectedMimeType == "image/jpg" {
-		detectedMimeType = "image/jpeg"
-	}
-	if detectedMimeType == "" || !isSupportedAdminSpaceEPUBCoverContentType(detectedMimeType) {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(payload))
-	if err != nil {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	decodedMimeType := adminSpaceEPUBCoverContentTypeForImageFormat(format)
-	if decodedMimeType == "" || decodedMimeType != detectedMimeType {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	if config.Width <= 0 || config.Height <= 0 {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	if config.Width > adminSpaceCoverMaxImageDimension || config.Height > adminSpaceCoverMaxImageDimension {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	if int64(config.Width)*int64(config.Height) > adminSpaceCoverMaxPixelCount {
-		return "", 0, 0, errcode.ErrAdminSpaceImportPackageNotImportable
-	}
-	return decodedMimeType, config.Width, config.Height, nil
-}
-
-func isSupportedAdminSpaceEPUBCoverContentType(contentType string) bool {
-	switch strings.ToLower(strings.TrimSpace(contentType)) {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-		return true
-	default:
-		return false
-	}
-}
-
-func adminSpaceEPUBCoverContentTypeForImageFormat(format string) string {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "png":
-		return "image/png"
-	case "jpeg":
-		return "image/jpeg"
-	case "gif":
-		return "image/gif"
-	case "webp":
-		return "image/webp"
-	default:
-		return ""
-	}
-}
-
-func buildAdminSpaceEPUBCoverObjectKey(now time.Time, contentType string) (string, error) {
-	randomSuffix, err := randomAdminSpaceCoverHex(4)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf(
-		"%s/%04d/%02d/%02d/%d-%s%s",
-		adminSpaceCoverObjectPrefix,
-		now.Year(),
-		int(now.Month()),
-		now.Day(),
-		now.UnixMilli(),
-		randomSuffix,
-		adminSpaceEPUBImageExtensionForContentType(contentType),
-	), nil
 }
 
 func collectAdminSpaceEPUBNodeIDMappings(nodes []adminSpaceEPUBPlannedNode) map[string]string {

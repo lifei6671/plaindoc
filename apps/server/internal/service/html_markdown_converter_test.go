@@ -24,7 +24,7 @@ func TestHTMLMarkdownConverter_ConvertsPlainDocEditableMarkdown(t *testing.T) {
 </code></pre>
 <table><tr><th>名称</th><th>数量</th></tr><tr><td>苹果</td><td>3</td></tr></table>
 <p>H<sub>2</sub>O E=mc<sup>2</sup><span> span 文本</span></p>
-<p><a href="https://example.com/ref">外链</a> <a href="/read/doc-001">内链</a></p>
+<p><a href="https://example.com/ref">外链</a> <a href="/r/space-001/doc-001">内链</a></p>
 <p><img src="/uploads/space/doc/image.png" alt="封面"></p>`,
 	})
 	if err != nil {
@@ -40,7 +40,7 @@ func TestHTMLMarkdownConverter_ConvertsPlainDocEditableMarkdown(t *testing.T) {
 		"| 名称",
 		"H~2~O E=mc^2^",
 		"[外链](https://example.com/ref)",
-		"[内链](/read/doc-001)",
+		"[内链](/r/space-001/doc-001)",
 		"![封面](/uploads/space/doc/image.png)",
 	} {
 		if !strings.Contains(markdown, want) {
@@ -174,7 +174,7 @@ func buildBenchmarkHTMLMarkdownChapters(chapterCount int, targetSize int) []stri
 }
 
 func buildBenchmarkHTMLMarkdownChapter(chapterIndex int, targetSize int) string {
-	paragraph := `<p>这是用于 EPUB HTML 转 Markdown 性能基准的段落，包含 <strong>加粗</strong>、<em>强调</em>、<a href="/read/doc-001">安全内链</a>、<a href="chapter.xhtml#raw">未重写链接</a>、<img src="/uploads/space/doc/image.png" alt="图片"> 和 <img src="data:image/png;base64,AAAA" alt="未本地化图片">。</p>`
+	paragraph := `<p>这是用于 EPUB HTML 转 Markdown 性能基准的段落，包含 <strong>加粗</strong>、<em>强调</em>、<a href="/r/space-001/doc-001">安全内链</a>、<a href="chapter.xhtml#raw">未重写链接</a>、<img src="/uploads/space/doc/image.png" alt="图片"> 和 <img src="data:image/png;base64,AAAA" alt="未本地化图片">。</p>`
 	tableHTML := `<table><tr><th>名称</th><th>数量</th></tr><tr><td>苹果</td><td>3</td></tr><tr><td>香蕉</td><td>5</td></tr></table>`
 	codeHTML := `<pre><code class="language-go">fmt.Println("hello")
 </code></pre>`

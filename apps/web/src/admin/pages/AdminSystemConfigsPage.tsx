@@ -616,7 +616,7 @@ const DATA_RETENTION_CLEANUP_TABLE_OPTIONS: Array<{
     {
       value: "document_revisions",
       label: "document_revisions",
-      description: "文档历史版本，按每个文档保留最近 N 份"
+      description: "文档历史版本，以及因此无引用的 Office 历史文件实体"
     }
   ];
 
@@ -1924,7 +1924,7 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
       const result = await dataGateway.admin.runDataRetentionCleanup();
       if (result.totalDeleted > 0) {
         openToast(
-          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、附件引用 ${result.deletedDocumentAttachments}、附件文件 ${result.deletedAttachmentBlobs}、图片 ${result.deletedDocumentImageAssets}、历史版本 ${result.deletedDocumentRevisions}）`,
+          `清理完成：共删除 ${result.totalDeleted} 条（审计 ${result.deletedAuditLogs}、验证码 ${result.deletedAuthCaptchaChallenges}、风控 ${result.deletedAuthRiskStates}、会话 ${result.deletedUserSessions}、附件引用 ${result.deletedDocumentAttachments}、文件实体 ${result.deletedAttachmentBlobs}、图片 ${result.deletedDocumentImageAssets}、历史版本 ${result.deletedDocumentRevisions}）`,
           "success"
         );
       } else {
@@ -3162,7 +3162,7 @@ export function AdminSystemConfigsPage({ dataGateway, scope = "system" }: AdminS
                           disabled={saving}
                         />
                         <p className="text-xs text-slate-500">
-                          仅在选择 `document_revisions` 时生效；默认每个文档保留最近 30 份历史记录。
+                          仅在选择 `document_revisions` 时生效；默认每个文档保留最近 30 份历史记录，并回收因此无引用的 Office 历史文件实体。
                         </p>
                       </label>
                     </div>

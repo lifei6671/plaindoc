@@ -88,6 +88,22 @@ func (h *workspaceHandler) enqueueOfficeRevisionRestoreRender(
 	})
 }
 
+func (h *workspaceHandler) validateOfficeRevisionRestoreRender(
+	input officeRevisionRestoreRenderInput,
+) error {
+	if h == nil || h.officeHTMLRenderService == nil {
+		return nil
+	}
+	return h.officeHTMLRenderService.ValidateTask(service.OfficeHTMLRenderTask{
+		DocumentID:     input.DocumentID,
+		SpaceID:        input.SpaceID,
+		Format:         input.Format,
+		ContentVersion: input.ContentVersion,
+		SourceBlobID:   input.SourceBlobID,
+		SourceContent:  input.SourceContent,
+	})
+}
+
 func (h *workspaceHandler) readLocalOfficeSourceBlobContent(blob models.DocumentAttachmentBlob) ([]byte, error) {
 	if service.ImageHostingProvider(strings.TrimSpace(blob.StorageProvider)) != service.ImageHostingProviderLocal {
 		return nil, fmt.Errorf("Office 源文件 blob 存储类型 %q 暂不支持本地读取", blob.StorageProvider)

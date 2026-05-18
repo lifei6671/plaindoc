@@ -176,8 +176,8 @@
 后台系统配置页约定：
 
 1. `data-retention` 的前端草稿结构在 `AdminSystemConfigsPage.tsx` 中维护，保存字段必须与后端 `validateDataRetentionConfig` 保持一致。
-2. 文档历史版本清理使用 `cleanupTables` 中的 `document_revisions` 开关，以及 `documentRevisionRetentionCount` 数值；默认每个文档保留最近 30 份历史记录。
-3. 立即清理按钮调用 `DataGateway.admin.runDataRetentionCleanup()`，结果提示需展示 `deletedDocumentRevisions`，避免管理员误判历史版本清理未执行。
+2. 文档历史版本清理使用 `cleanupTables` 中的 `document_revisions` 开关，以及 `documentRevisionRetentionCount` 数值；默认每个文档保留最近 30 份历史记录，并回收因此无引用的 Office 历史文件实体。
+3. 立即清理按钮调用 `DataGateway.admin.runDataRetentionCleanup()`，结果提示需展示 `deletedDocumentRevisions` 和 `deletedAttachmentBlobs`，避免管理员误判历史版本或其关联文件实体未清理。
 
 后台壳页能力模型约定：
 

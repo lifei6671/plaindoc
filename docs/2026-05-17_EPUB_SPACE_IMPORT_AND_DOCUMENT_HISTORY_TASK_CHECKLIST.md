@@ -350,7 +350,7 @@ Phase 0 基线确认与方案锁定
 
 - [x] 嵌套目录导入模型能区分 folder/doc。
 - [x] fragment 可拆分、不可定位降级和重复 target 都有测试。
-- [x] 预分配结果能产出 `targetKey -> documentID/readerURL` 映射所需数据。
+- [x] 预分配结果能产出 `targetKey -> documentID` 映射所需数据。
 
 ---
 
@@ -470,10 +470,10 @@ Phase 0 基线确认与方案锁定
 
 **步骤**
 
-- [x] 第一段预分配待创建的 `nodeID`、`documentID`、`readerSlug`。
-- [x] 建立 `targetKey -> documentID/readerURL` 映射。
-- [x] 建立 `canonicalHref -> primary documentID/readerURL` 映射。
-- [x] 第二段转换章节 HTML 时重写内部 `<a href>`。
+- [x] 第一段预分配待创建的 `nodeID`、`documentID`。
+- [x] 建立 `targetKey -> documentID` 映射。
+- [x] 建立 `canonicalHref -> primary documentID` 映射。
+- [x] 第二段转换章节 HTML 时结合新空间 `spaceID` 重写内部 `<a href>`。
 - [x] target 命中时改写为目标 PlainDoc 阅读链接。
 - [x] 仅 canonicalHref 命中时改写到主文档并记录 fragment 降级 warning。
 - [x] 完全未命中时保留链接文本、移除 href 并记录 warning。
@@ -941,15 +941,16 @@ Phase 0 基线确认与方案锁定
 
 **当前状态**
 
-- Blocked：当前仓库、`/tmp` 和本地 `src` 工作区未找到可用 `.epub` 样本；为避免引入版权不明确文件，需等待用户提供样本或明确确认临时下载公版/测试 EPUB 后继续。
+- In Progress：已使用用户提供样本 `apps/server/data/延迟满足：如何在等待中获得更多.epub` 完成 inspect 验证；其余 EPUB2 / Calibre / 非标准 `media-type` 样本仍待补。
 
 **步骤**
 
 - [ ] 收集至少 1 本 EPUB2 样本。
-- [ ] 收集至少 1 本 EPUB3 样本。
+- [x] 收集至少 1 本 EPUB3 样本。
 - [ ] 收集至少 1 本 Calibre 转换样本。
 - [ ] 收集至少 1 本非标准 `media-type` 但扩展名明确的样本。
-- [ ] 记录 inspect 摘要、warnings、导入耗时和导入后目录树。
+- [x] 记录 inspect 摘要、warnings。
+- [ ] 记录导入耗时和导入后目录树。
 - [ ] 记录 Markdown 转换质量和图片本地化结果。
 - [ ] 如 20 本主流 EPUB 样本中解析失败超过 3 本，回写第三方 EPUB 解析库评估任务。
 
@@ -1183,6 +1184,7 @@ node --no-opt $(command -v npm) run build
 | 2026-05-17 | `npm run test:run -- AdminSpaceTransferTaskProvider.test.tsx` | 通过 | Task 8.2 前端任务中心回归：导入任务恢复、进度和完成事件路径保持可用 |
 | 2026-05-17 | `npm run check:dropdown-menu -w @plaindoc/web` | 通过 | Task 8.2 前端规则回归，未发现 DropdownMenu 违规用法 |
 | 2026-05-17 | `rg --files \| rg '\.epub$'` / `find /tmp -maxdepth 3 -type f -name '*.epub'` / `find /home/lifei6671/src -maxdepth 4 -type f -name '*.epub'` | 阻塞 | Task 8.3 样本查找未发现可用 EPUB，已新增 `docs/epub-import-sample-validation.md` 记录待补样本矩阵 |
+| 2026-05-18 | `go test -timeout 120s ./internal/service -run TestInspectAdminSpaceImportEPUB_UserProvidedSample -count=1 -v` | 通过 | Task 8.3 使用用户提供样本 `apps/server/data/延迟满足：如何在等待中获得更多.epub` 完成 inspect 验证：书名非空、36 个文档、最大深度 2、warnings 0 |
 | 2026-05-17 | `gofmt -w .` | 通过 | Task 8.4 在 `apps/server` 执行 Go 格式化 |
 | 2026-05-17 | `go build ./...` | 通过 | Task 8.4 在 `apps/server` 执行后端全量编译检查 |
 | 2026-05-17 | `go test -timeout 60s ./...` | 通过 | Task 8.4 在 `apps/server` 执行后端全量单测回归 |

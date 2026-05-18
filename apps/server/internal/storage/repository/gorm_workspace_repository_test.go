@@ -231,6 +231,7 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentPersistsRevision(t *testing.T
 	var document struct {
 		Version         int     `gorm:"column:version"`
 		ContentVersion  int     `gorm:"column:content_version"`
+		ContentMD       string  `gorm:"column:content_md"`
 		SourceBlobID    string  `gorm:"column:source_blob_id"`
 		SourceFileName  string  `gorm:"column:source_file_name"`
 		SourceMimeType  string  `gorm:"column:source_mime_type"`
@@ -238,13 +239,16 @@ func TestGormWorkspaceRepository_SaveOfficeDocumentPersistsRevision(t *testing.T
 	}
 	if err := database.ORM.WithContext(ctx).
 		Model(&models.Document{}).
-		Select("version", "content_version", "source_blob_id", "source_file_name", "source_mime_type", "updated_by_user_id", "updated_at").
+		Select("version", "content_version", "content_md", "source_blob_id", "source_file_name", "source_mime_type", "updated_by_user_id", "updated_at").
 		Where("document_id = ?", fixture.DocumentID).
 		Take(&document).Error; err != nil {
 		t.Fatalf("query saved document failed: %v", err)
 	}
 	if document.Version != 2 || document.ContentVersion != 2 {
 		t.Fatalf("expected version/contentVersion 2/2, got %d/%d", document.Version, document.ContentVersion)
+	}
+	if document.ContentMD != "" {
+		t.Fatalf("expected office save to clear stale content_md, got %q", document.ContentMD)
 	}
 	if document.SourceBlobID != nextBlobID || document.SourceFileName != "workspace-office-v2.docx" || document.SourceMimeType != fixture.MimeType {
 		t.Fatalf("unexpected source payload after save: %+v", document)

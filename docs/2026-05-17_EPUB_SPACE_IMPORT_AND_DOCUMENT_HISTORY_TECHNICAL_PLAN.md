@@ -17,7 +17,7 @@
    - EPUB 导入永远创建新空间，不覆盖已有空间。
    - 只要用户具备创建空间权限，就可以导入 EPUB。
    - EPUB 的目录结构导入为空间目录结构，章节正文转换为 Markdown 文档。
-   - EPUB OPF 的 `dc:description` 写入空间简介；EPUB3 `cover-image` / EPUB2 `meta name="cover"` 写入空间封面资产。
+   - EPUB OPF 的 `dc:description` 写入空间简介；EPUB3 `cover-image` / EPUB2 `meta name="cover"` 复用现有空间封面处理链路，归一化为 WebP 空间封面资产。
 
 2. 文档历史版本
    - 在编辑器右侧操作区增加历史版本 icon 按钮。
@@ -32,7 +32,7 @@ HTML 转 Markdown 建议引入 Go 依赖 `github.com/JohannesKaufmann/html-to-ma
 
 历史版本差异视图建议引入前端依赖 `@codemirror/merge`。项目已经使用 CodeMirror 6，使用同生态 diff 组件能复用编辑器样式、只读视图、行号和长文本渲染能力。该依赖变更需要在实施前单独确认。
 
-当前实现已完成 EPUB inspect/commit、OPF 简介与封面导入、EPUB 导出空间封面、HTML 清洗与 Markdown 转换、图片本地化、内部链接重写、导入任务进度、SSE 自动重连与断线快照恢复、SSR Worker Node `--no-opt` 启动兜底、文档历史版本摘要/详情/恢复接口，以及前端历史版本弹窗。仍未完成真实 EPUB 样本手工验证；`go test -race -timeout 60s ./...` 与 `golangci-lint run ./...` 仍有已记录的收尾阻塞项。
+当前实现已完成 EPUB inspect/commit、OPF 简介与封面导入、EPUB 导出空间封面、HTML 清洗与 Markdown 转换、图片本地化、内部链接重写、导入任务进度、SSE 自动重连与断线快照恢复、SSR Worker Node `--no-opt` 启动兜底、文档历史版本摘要/详情/恢复接口，以及前端历史版本弹窗。当前已完成 1 本真实 EPUB 样本的 inspect 验证；`go test -race -timeout 60s ./...` 与 `golangci-lint run ./...` 仍有已记录的收尾阻塞项。
 
 ---
 
@@ -44,7 +44,7 @@ HTML 转 Markdown 建议引入 Go 依赖 `github.com/JohannesKaufmann/html-to-ma
 2. `inspect` 阶段识别 EPUB，解析书名、作者、目录层级、章节数和图片资源数。
 3. `commit` 阶段创建一个新空间，并按 EPUB 目录创建 `folder/doc` 节点。
 4. EPUB XHTML/HTML 章节必须转换为 Markdown，写入 `documents.content_md` 和首版 `document_revisions.content_md`。
-5. EPUB 内图片资源需要本地化为 PlainDoc 可访问资源，Markdown 链接指向本地资源 URL；OPF 声明的封面图片写入空间封面资产。
+5. EPUB 内图片资源需要本地化为 PlainDoc 可访问资源，Markdown 链接指向本地资源 URL；OPF 声明的封面图片复用现有封面处理链路，归一化为 WebP 空间封面资产。
 6. 权限按“是否可创建空间”判断，不能要求用户已有空间管理权限。
 7. EPUB OPF `dc:description` 写入空间简介；缺失时再使用导入来源兜底描述。
 8. 导入过程复用现有导入任务持久化、SSE 进度和右下角全局任务浮层；SSE 连接异常只代表事件通道中断，不能覆盖后端任务真实状态为失败；前端先允许 `EventSource` 在 30 秒窗口内自动重连，持续失败后再刷新后端任务快照，运行中任务重新订阅，已完成任务直接触发完成流程；EPUB 文档写入阶段按“已导入文档数 / 总文档数”推进进度。
@@ -300,7 +300,7 @@ PlainDoc 空间
 > 本章节内容见：[{{canonicalTitle}}]({{readerURL}})
 ```
 
-其中 `canonicalTitle` 为规范文档标题，`readerURL` 为规范文档阅读链接。占位文档不复制正文，不参与 fragment 拆分。
+其中 `canonicalTitle` 为规范文档标题，`readerURL` 为规范文档阅读链接。该链接不能在预分配阶段写死为占位路径，必须在 commit 写库阶段结合新空间 `spaceID` 生成真实 `/r/{spaceID}/{documentID}` 阅读地址。占位文档不复制正文，不参与 fragment 拆分。
 
 ### 5.3 XHTML 清洗与 Markdown 转换
 
@@ -322,8 +322,8 @@ EPUB 章节必须先从 XHTML/HTML 转 Markdown，再写入 PlainDoc。
 链接处理：
 
 1. commit 阶段必须两段式处理：
-   - 第一段：解析 nav/toc/spine，预分配待创建的 `nodeID/documentID/readerSlug`，建立 `targetKey -> documentID/readerURL` 和 `canonicalHref -> primary documentID/readerURL` 映射表。
-   - 第二段：转换章节 HTML 时根据映射表回写 `<a href>`，再执行 HTML 转 Markdown。
+   - 第一段：解析 nav/toc/spine，预分配待创建的 `nodeID/documentID`，建立 `targetKey -> documentID` 和 `canonicalHref -> primary documentID` 映射表。
+   - 第二段：转换章节 HTML 时结合新空间 `spaceID` 生成真实 `/r/{spaceID}/{documentID}` 阅读链接并回写 `<a href>`，再执行 HTML 转 Markdown。
 2. 指向 EPUB 内部章节的 `href`：
    - 先按当前章节路径解析为 `targetKey`。
    - 如果 `targetKey` 命中映射，改写为目标 PlainDoc 文档阅读链接。

@@ -416,9 +416,10 @@ func TestAdminSpaceImportService_RestoreEPUBPackageUsesCoverAndDescription(t *te
 	}
 	coverAsset := spaceRepo.coverAssets[0]
 	if coverAsset.AssetID != *space.CoverAssetID ||
-		coverAsset.MimeType != "image/png" ||
+		coverAsset.MimeType != "image/webp" ||
 		coverAsset.Width != 2 ||
 		coverAsset.Height != 3 ||
+		!coverAsset.Normalized ||
 		coverAsset.Source != string(AdminSpaceCoverSourceUserUpload) {
 		t.Fatalf("unexpected persisted EPUB cover asset: %#v", coverAsset)
 	}
@@ -971,6 +972,92 @@ func TestAdminSpaceImportService_Inspect_FallsBackToFlatSpineWithoutNavOrTOC(t *
 	}
 	if result.Summary.MaxDepth != 1 {
 		t.Fatalf("expected flat depth 1, got %d", result.Summary.MaxDepth)
+	}
+}
+
+func TestReadAdminSpaceEPUBNavItems_RebasesSubdirNavHrefToOPFRoot(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/Text/nav.xhtml", []byte(`<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <nav epub:type="toc"><ol><li><a href="chapter1.xhtml#intro">第一章</a></li></ol></nav>
+  </body>
+</html>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/Text/chapter1.xhtml", []byte(`<html><body><h1 id="intro">第一章</h1></body></html>`))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close epub failed: %v", err)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	if err != nil {
+		t.Fatalf("open zip reader failed: %v", err)
+	}
+	entries, err := collectAdminSpaceEPUBEntries(reader)
+	if err != nil {
+		t.Fatalf("collect epub entries failed: %v", err)
+	}
+
+	items := readAdminSpaceEPUBNavItems(entries, "OPS", adminSpaceEPUBOPFPackage{
+		Manifest: []adminSpaceEPUBOPFItem{
+			{ID: "nav", Href: "Text/nav.xhtml", MediaType: "application/xhtml+xml", Properties: "nav"},
+			{ID: "chapter-1", Href: "Text/chapter1.xhtml", MediaType: "application/xhtml+xml"},
+		},
+	}, map[string]adminSpaceEPUBOPFItem{
+		"nav":       {ID: "nav", Href: "Text/nav.xhtml", MediaType: "application/xhtml+xml", Properties: "nav"},
+		"chapter-1": {ID: "chapter-1", Href: "Text/chapter1.xhtml", MediaType: "application/xhtml+xml"},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("expected one nav item, got %#v", items)
+	}
+	if got, want := items[0].Href, "Text/chapter1.xhtml#intro"; got != want {
+		t.Fatalf("expected rebased nav href %q, got %q", want, got)
+	}
+}
+
+func TestReadAdminSpaceEPUBNavItems_RebasesSubdirTOCHrefToOPFRoot(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/Text/toc.ncx", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint><navLabel><text>第一章</text></navLabel><content src="chapter1.xhtml#intro"/></navPoint>
+  </navMap>
+</ncx>`))
+	writeAdminSpaceImportTestFile(t, zipWriter, "OPS/Text/chapter1.xhtml", []byte(`<html><body><h1 id="intro">第一章</h1></body></html>`))
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close epub failed: %v", err)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	if err != nil {
+		t.Fatalf("open zip reader failed: %v", err)
+	}
+	entries, err := collectAdminSpaceEPUBEntries(reader)
+	if err != nil {
+		t.Fatalf("collect epub entries failed: %v", err)
+	}
+
+	items := readAdminSpaceEPUBNavItems(entries, "OPS", adminSpaceEPUBOPFPackage{
+		Manifest: []adminSpaceEPUBOPFItem{
+			{ID: "toc", Href: "Text/toc.ncx", MediaType: "application/x-dtbncx+xml"},
+			{ID: "chapter-1", Href: "Text/chapter1.xhtml", MediaType: "application/xhtml+xml"},
+		},
+	}, map[string]adminSpaceEPUBOPFItem{
+		"toc":       {ID: "toc", Href: "Text/toc.ncx", MediaType: "application/x-dtbncx+xml"},
+		"chapter-1": {ID: "chapter-1", Href: "Text/chapter1.xhtml", MediaType: "application/xhtml+xml"},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("expected one toc item, got %#v", items)
+	}
+	if got, want := items[0].Href, "Text/chapter1.xhtml#intro"; got != want {
+		t.Fatalf("expected rebased toc href %q, got %q", want, got)
 	}
 }
 

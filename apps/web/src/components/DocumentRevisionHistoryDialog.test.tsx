@@ -582,4 +582,52 @@ describe("DocumentRevisionHistoryDialog", () => {
     expect(screen.getByText(/请刷新或重新选择历史版本后再试/)).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "历史版本" })).toBeInTheDocument();
   });
+
+  it("shows contentVersion in office revision conflict errors", async () => {
+    const user = userEvent.setup();
+    const listRevisions = vi.fn(async () => [
+      createRevision({ id: "revision-office-1", version: 1, format: "docx" })
+    ]);
+    const getRevisionDetail = vi.fn(async () => createRevisionDetail({
+      id: "revision-office-1",
+      version: 1,
+      format: "docx",
+      contentMd: undefined,
+      fileName: "历史版本.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      file: {
+        fileName: "历史版本.docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        blobId: "blob-1"
+      }
+    }));
+    const restoreRevision = vi.fn(async () => {
+      throw new ConflictError(createDocument({
+        format: "docx",
+        version: 9,
+        contentVersion: 4
+      }));
+    });
+
+    render(
+      <DocumentRevisionHistoryDialog
+        open
+        documentId="doc-1"
+        documentTitle="产品说明"
+        currentContent="# 当前正文"
+        currentDocumentVersion={3}
+        hasUnsavedChanges={false}
+        dataGateway={createGateway({ listRevisions, getRevisionDetail, restoreRevision })}
+        onOpenChange={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+      />
+    );
+
+    await screen.findByRole("region", { name: "Office 历史版本元数据" });
+    await user.click(screen.getByRole("button", { name: "恢复到此版本" }));
+    await user.click(screen.getByRole("button", { name: "确认恢复" }));
+
+    expect(await screen.findByText(/当前文档已更新到 v4/)).toBeInTheDocument();
+    expect(screen.queryByText(/当前文档已更新到 v9/)).not.toBeInTheDocument();
+  });
 });

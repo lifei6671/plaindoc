@@ -1652,6 +1652,19 @@ func (h *workspaceHandler) RestoreRevision(c *gin.Context) {
 	now := time.Now().UTC()
 	nextVersion := current.Version + 1
 	nextContentVersion := currentContentVersion + 1
+	renderInput := officeRevisionRestoreRenderInput{
+		DocumentID:     documentID,
+		SpaceID:        spaceID,
+		Format:         currentFormat,
+		ContentVersion: nextContentVersion,
+		SourceBlobID:   sourceBlobID,
+		SourceContent:  sourceContent,
+	}
+	if renderErr := h.validateOfficeRevisionRestoreRender(renderInput); renderErr != nil {
+		setRequestErrmsg(c, renderErr, "恢复 Office 历史版本前校验 HTML 渲染任务失败")
+		response.InternalError(c)
+		return
+	}
 	fileRevision := &models.DocumentFileRevision{
 		DocumentFileRevisionID: strings.ToLower(ulid.Make().String()),
 		DocumentID:             documentID,
@@ -1710,18 +1723,17 @@ func (h *workspaceHandler) RestoreRevision(c *gin.Context) {
 		// Office 恢复切换了源文件版本，必须失效阅读缓存并等待 HTML 重新渲染。
 		h.renderCache.PurgeDoc(documentID)
 	}
-	if renderErr := h.enqueueOfficeRevisionRestoreRender(c.Request.Context(), officeRevisionRestoreRenderInput{
-		DocumentID:     documentID,
-		SpaceID:        spaceID,
-		Format:         currentFormat,
-		ContentVersion: nextContentVersion,
-		SourceBlobID:   sourceBlobID,
-		SourceContent:  sourceContent,
-	}); renderErr != nil {
-		setRequestErrmsg(c, renderErr, "恢复 Office 历史版本后提交 HTML 渲染任务失败")
-		response.InternalError(c)
-		return
+	if renderErr := h.enqueueOfficeRevisionRestoreRender(c.Request.Context(), renderInput); renderErr != nil {
+		slog.WarnContext(c.Request.Context(), "恢复 Office 历史版本后提交 HTML 渲染任务失败，文档已切换到新版本但需等待补偿处理",
+			"documentID", documentID,
+			"revisionID", revisionID,
+			"contentVersion", nextContentVersion,
+			"sourceBlobID", sourceBlobID,
+			"error", renderErr,
+		)
 	}
+	// Office 恢复成功时新的 HTML 仍需异步重渲染；返回旧 content_md 会把前端错误地回写到恢复前快照。
+	current.ContentMD = ""
 	current.Version = nextVersion
 	current.ContentVersion = nextContentVersion
 	current.SourceBlobID = &sourceBlobID

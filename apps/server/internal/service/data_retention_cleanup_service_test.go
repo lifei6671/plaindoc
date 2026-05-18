@@ -442,6 +442,18 @@ func TestDataRetentionCleanupService_RunOnce_CleansDocumentRevisionsByKeepCount(
 			"created_at":                now.Add(time.Duration(version) * time.Minute),
 		})
 	}
+	fileBlobs = append(fileBlobs, map[string]any{
+		"blob_id":           "01hretentionrevisionorphan001",
+		"storage_provider":  "local",
+		"object_key":        "revisions/orphan-unrelated.docx",
+		"object_url":        "/uploads/revisions/orphan-unrelated.docx",
+		"mime_type":         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"size_bytes":        int64(2048),
+		"content_hash_algo": "sha256",
+		"content_hash":      "retention-revision-hash-orphan-unrelated",
+		"created_at":        now.Add(40 * time.Minute),
+		"updated_at":        now.Add(40 * time.Minute),
+	})
 	if err := database.ORM.WithContext(ctx).Table("file_blobs").Create(fileBlobs).Error; err != nil {
 		t.Fatalf("seed file blobs failed: %v", err)
 	}
@@ -481,6 +493,9 @@ func TestDataRetentionCleanupService_RunOnce_CleansDocumentRevisionsByKeepCount(
 	}
 	if result.DeletedDocumentRevisions != 8 {
 		t.Fatalf("expected deleted document revisions 8, got %d", result.DeletedDocumentRevisions)
+	}
+	if result.DeletedAttachmentBlobs != 3 {
+		t.Fatalf("expected deleted attachment blobs 3 after office revision cleanup, got %d", result.DeletedAttachmentBlobs)
 	}
 
 	assertRevisionCount := func(tableName string, documentID string, expectedCount int64) {
@@ -525,6 +540,33 @@ func TestDataRetentionCleanupService_RunOnce_CleansDocumentRevisionsByKeepCount(
 	}
 	if oldestOfficeCount != 0 {
 		t.Fatalf("expected oldest office revision deleted, got count=%d", oldestOfficeCount)
+	}
+	var oldestOfficeBlobCount int64
+	if err := database.ORM.WithContext(ctx).Table("file_blobs").
+		Where("blob_id = ?", "01hretentionrevisionblob001").
+		Count(&oldestOfficeBlobCount).Error; err != nil {
+		t.Fatalf("count oldest office blob failed: %v", err)
+	}
+	if oldestOfficeBlobCount != 0 {
+		t.Fatalf("expected oldest office blob deleted with revision cleanup, got count=%d", oldestOfficeBlobCount)
+	}
+	var latestOfficeBlobCount int64
+	if err := database.ORM.WithContext(ctx).Table("file_blobs").
+		Where("blob_id = ?", "01hretentionrevisionblob033").
+		Count(&latestOfficeBlobCount).Error; err != nil {
+		t.Fatalf("count latest office blob failed: %v", err)
+	}
+	if latestOfficeBlobCount != 1 {
+		t.Fatalf("expected latest office blob kept, got count=%d", latestOfficeBlobCount)
+	}
+	var unrelatedOrphanBlobCount int64
+	if err := database.ORM.WithContext(ctx).Table("file_blobs").
+		Where("blob_id = ?", "01hretentionrevisionorphan001").
+		Count(&unrelatedOrphanBlobCount).Error; err != nil {
+		t.Fatalf("count unrelated orphan blob failed: %v", err)
+	}
+	if unrelatedOrphanBlobCount != 1 {
+		t.Fatalf("expected unrelated orphan blob untouched by revision cleanup, got count=%d", unrelatedOrphanBlobCount)
 	}
 }
 
