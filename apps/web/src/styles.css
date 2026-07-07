@@ -3216,6 +3216,13 @@ input[type="reset"]:not(:disabled) {
   #plaindoc-preview-body .code-block-copy-button {
     display: none !important;
   }
+
+  /* 打印时还原表格默认布局，避免被滚动容器裁剪；同时去掉滚动条占位。 */
+  #plaindoc-preview-body table {
+    display: table;
+    overflow: visible;
+    width: 100%;
+  }
 }
 
 #plaindoc-preview-body .mermaid-block {
@@ -3288,20 +3295,50 @@ input[type="reset"]:not(:disabled) {
   margin: 8px auto;
 }
 
-/* Markdown 表格基础排版。 */
+/* Markdown 表格基础排版：列数过多时整体出现水平滚动条，避免单元格被裁剪或撑破页面。 */
 #plaindoc-preview-body table {
+  display: block;
   width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-collapse: separate;
   border-spacing: 0;
   margin: 16px 0;
   border: 1px solid var(--pd-preview-table-border-color);
   border-radius: 10px;
-  overflow: hidden;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   font-size: var(--pd-preview-table-font-size);
   line-height: 1.6;
   color: #1f2937;
+}
+
+/* 表格水平滚动条统一收窄，增强滚动反馈可见性。 */
+#plaindoc-preview-body table::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+#plaindoc-preview-body table::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#plaindoc-preview-body table::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background: #94a3b8;
+  background-clip: content-box;
+}
+
+#plaindoc-preview-body table::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+  background-clip: content-box;
+}
+
+#plaindoc-preview-body table {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
 }
 
 /* Markdown 表头样式。 */
